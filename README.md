@@ -42,11 +42,11 @@ Ensure you have the following installed on your machine:
 ### Using `tobin.py`
 
  1. **Run the Tobin Script**
-        ```sh
-        python tobin.py path to safetensors path to desired model.bin    note use same folder
-        ```
-
-2. **Functionality**
+    ```sh  
+    python tobin.py path_to_safetensors path_to_desired model.bin
+    ```  
+    note use same folder(Fine Tuned Model)
+3. **Functionality**
         The `tobin.py` script provides additional utilities for data preprocessing and analysis. It can be used to transform raw data into a format suitable for training and to perform exploratory data analysis.
 
 ### Running the Chatbot
@@ -64,3 +64,10 @@ Ensure you have the following installed on your machine:
 - **Hyperparameter Tuning**: You can adjust the hyperparameters in `hyperparameter_tuning.py` to optimize the model performance.
 - **Model Checkpoints**: The trained model and tokenizer configurations are saved in the `fine_tuned_model_checkpoint` directory.
 - **Fine-Tuning**: You can further fine-tune the model by modifying the training scripts and re-running the training process.
+
+- ## Contact
+
+- **GitHub**: Rayyan9477 (https://github.com/Rayyan9477)
+- **LinkedIn**: Rayyan Ahmed (https://www.linkedin.com/in/rayyan-ahmed9477/)
+- **Email**: rayyanahmed265@yahoo.com
+
