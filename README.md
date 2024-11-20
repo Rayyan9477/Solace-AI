@@ -4,6 +4,82 @@
 
 This project presents an advanced implementation of a contextual chatbot using PyTorch. The chatbot leverages deep learning techniques to understand and respond to user inputs in a conversational manner. The project is designed to be beginner-friendly while providing a comprehensive understanding of chatbot development. It includes a straightforward Feed Forward Neural Network with two hidden layers and allows for easy customization to fit various use cases.
 
+## Sample Outputs
+
+```text
+Question: Can you help me with something?
+Response: Sure. Tell me how can i assist you
+--------------------------------------------------
+Question: Can you help me with something?
+Response: Tell me your problem so that i can assist you
+--------------------------------------------------
+Question: Can you help me with something?
+Response: Yes, sure. How can I help you?
+--------------------------------------------------
+Question: I am feeling lonely
+Response: Why do you think you feel this way?
+--------------------------------------------------
+Question: I feel so worthless.
+Response: I'm trying my best to help you. So please talk to me
+--------------------------------------------------
+Question: I feel so worthless.
+Response: I'm sorry to hear that. I'm doing my best to help
+--------------------------------------------------
+Question: I feel so anxius.
+Response: Did something happen which made you feel this way?
+--------------------------------------------------
+Question: I can't take it anymore
+Response: I'm trying my best to help you. So please talk to me
+--------------------------------------------------
+Question: I am so stressed out
+Response: Give yourself a break. Go easy on yourself.
+--------------------------------------------------
+Question: I am so stressed out
+Response: What do you think is causing this?
+--------------------------------------------------
+Question: I am so stressed out
+Response: Give yourself a break. Go easy on yourself.
+--------------------------------------------------
+Question: I have insominia
+Response: That seem awful. What do you think is behind this?
+--------------------------------------------------
+Question: I'm scared
+Response: That's geat to hear. I'm glad you're feeling this way.
+--------------------------------------------------
+Question: I'm scared
+Response: Oh i see. That's great.
+--------------------------------------------------
+Question: I'm scared
+Response: That's geat to hear. I'm glad you're feeling this way.
+--------------------------------------------------
+Question: My mom died
+Response: I'm sorry to hear that. If you want to talk about it. I'm here.
+--------------------------------------------------
+Question: My mom died
+Response: I am really sorry to hear that. I am here to help you with grief, anxiety and anything else you may feel at this time.
+--------------------------------------------------
+Question: My mom died
+Response: My condolences. I'm here if you need to talk.
+--------------------------------------------------
+Question: You don't understand me.
+Response: I'm sorry to hear that. I'm doing my best to help
+--------------------------------------------------
+Question: You don't understand me.
+Response: I'm sorry to hear that. I'm doing my best to help
+--------------------------------------------------
+Question: You don't understand me.
+Response: It sound like i'm not being very helpful right now.
+--------------------------------------------------
+Question: That's all.
+Response: I'm listening. Please go on.
+--------------------------------------------------
+Question: That's all.
+Response: Come elucidate your thoughts
+--------------------------------------------------
+Question: That's all.
+Response: Let's discuss further why you're feeling this way.
+--------------------------------------------------
+```
 ### Technologies and Techniques Used
 
 - **Programming Language**: Python
