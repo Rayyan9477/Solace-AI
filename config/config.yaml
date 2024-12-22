@@ -1,0 +1,16 @@
+model:
+  path: "sujal011/llama3.2-3b-mental-health-chatbot"
+  max_length: 512
+  temperature: 0.7
+  top_p: 0.9
+  top_k: 50
+  repetition_penalty: 1.2
+
+vector_store:
+  dimension: 768
+  index_file: "faiss_index.pkl"
+
+chat:
+  max_context_length: 5
+  max_tokens: 1000
+  system_prompt: "You are a helpful healthcare assistant. Provide accurate and helpful information about health-related questions."

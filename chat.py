@@ -1,33 +1,59 @@
 import random
 import json
 import torch
-from transformers import AutoModelForSequenceClassification, AutoTokenizer, logging as transformers_logging
+from transformers import AutoModel, AutoTokenizer, AutoConfig
 from context_manager import ContextManager
 import logging
 import streamlit as st
+from safetensors import safe_open
 import os
 
-from train import train_model  # Import the train_model function
+# Setup logging and device
+logging.basicConfig(level=logging.DEBUG, filename='chatbot.log', filemode='a',
+                   format='%(asctime)s - %(levelname)s - %(message)s')
+device = torch.device('cpu')
+logging.info("Using CPU")
 
-# Suppress transformers warnings
-transformers_logging.set_verbosity_error()
-
-# Train the model before starting the chatbot
-if not os.path.exists('fine_tuned_model'):
-    train_model()
-
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-if torch.cuda.is_available():
-    logging.info(f"Using CUDA GPU: {torch.cuda.get_device_name(0)}")
-else:
-    logging.info("Using CPU")
-
+# Load intents
 with open('data.json', 'r') as json_data:
     intents = json.load(json_data)
 
-model_name = 'fine_tuned_model'
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForSequenceClassification.from_pretrained(model_name).to(device)
+try:
+    # Model configuration
+    model_name = "RayyanAhmed9477/Health-Chatbot"
+    
+    # Load tokenizer and configuration
+    tokenizer = AutoTokenizer.from_pretrained(model_name, 
+                                            local_files_only=False,
+                                            trust_remote_code=True)
+    
+    config = AutoConfig.from_pretrained(model_name)
+    
+    # Initialize model with configuration
+    model = AutoModel.from_pretrained(
+        model_name,
+        config=config,
+        local_files_only=False,
+        trust_remote_code=True
+    )
+    
+    # Load adapter weights if available
+    adapter_path = os.path.join(model_name, "adapter_model.safetensors")
+    if os.path.exists(adapter_path):
+        with safe_open(adapter_path, framework="pt", device="cpu") as f:
+            adapter_state_dict = {key: f.get_tensor(key) for key in f.keys()}
+            model.load_state_dict(adapter_state_dict, strict=False)
+    
+    model.to(device)
+    model.eval()
+
+except Exception as e:
+    logging.error(f"Error loading model: {str(e)}")
+    st.error("Failed to load the Health-Chatbot model. Please check your internet connection.")
+    raise
+
+# Rest of the chat.py code remains the same
+...
 
 bot_name = "Roy"
 context_manager = ContextManager()
@@ -44,10 +70,23 @@ def log_interaction(user_id, user_input, bot_response):
     )
 
 def get_response(sentence, user_id):
-    inputs = tokenizer(sentence, return_tensors='pt').to(device)
-    outputs = model(**inputs)
-    logits = outputs.logits
-    predicted_class_id = logits.argmax().item()
+    # Tokenize and encode the input
+    inputs = tokenizer(sentence, return_tensors='pt', padding=True, truncation=True)
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+
+    # Get model outputs
+    with torch.no_grad():
+        outputs = model(**inputs)
+    
+    # Get embeddings from the last hidden state
+    embeddings = outputs.last_hidden_state[:, 0, :]  # Use [CLS] token embedding
+    
+    # Simple classification layer
+    num_labels = len(intents['intents'])
+    classifier = torch.nn.Linear(model.config.hidden_size, num_labels).to(device)
+    logits = classifier(embeddings)
+    
+    predicted_class_id = logits.argmax(dim=-1).item()
     tag = intents['intents'][predicted_class_id]['tag']
     probs = torch.softmax(logits, dim=1)
     prob = probs[0][predicted_class_id]
@@ -68,9 +107,9 @@ def get_response(sentence, user_id):
                     logging.debug(f"Response: {response}")
                     return response
 
-    logging.debug("No matching intent found or probability too low.")
     return "I'm not sure how to respond to that. Can you please rephrase or ask something else?"
 
+# Streamlit UI
 st.set_page_config(page_title="Chatbot", page_icon=":speech_balloon:")
 
 with open("style.css") as f:

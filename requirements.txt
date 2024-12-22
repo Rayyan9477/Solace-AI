@@ -8,3 +8,8 @@ optuna
 torch
 safetensors
 streamlit
+faiss-cpu
+sentence-transformers
+pyyaml
+numpy
+python-dotenv
