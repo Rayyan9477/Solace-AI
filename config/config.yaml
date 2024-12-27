@@ -1,5 +1,5 @@
 model:
-  path: "sujal011/llama3.2-3b-mental-health-chatbot"
+  path: "RayyanAhmed9477/Health-Chatbot"
   max_length: 512
   temperature: 0.7
   top_p: 0.9

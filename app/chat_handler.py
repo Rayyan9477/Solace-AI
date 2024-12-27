@@ -4,7 +4,7 @@ from app.vector_store import VectorStore
 from transformers import AutoModel, AutoTokenizer
 
 class ChatHandler:
-    def __init__(self, model_name="sujal011/llama3.2-3b-mental-health-chatbot", config=None):
+    def __init__(self, model_name="RayyanAhmed9477/Health-Chatbot", config=None):
         # Initialize model and tokenizer
         try:
             self.model = AutoModel.from_pretrained(model_name, trust_remote_code=True)

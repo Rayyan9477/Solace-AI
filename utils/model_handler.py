@@ -2,7 +2,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 import torch
 
 class ModelHandler:
-    def __init__(self, model_name="sujal011/llama3.2-3b-mental-health-chatbot"):
+    def __init__(self, model_name="RayyanAhmed9477/Health-Chatbot"):
         self.model_name = model_name
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         
