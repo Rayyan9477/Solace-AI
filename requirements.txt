@@ -15,3 +15,6 @@ numpy
 python-dotenv
 sentencepiece
 langchain
+memory_profiler
+langchain-community
+accelerate
