@@ -1,5 +1,6 @@
 import sys
 import os
+import logging
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import streamlit as st
 from model import HealthChatModel
@@ -7,6 +8,10 @@ from vector_store import VectorStore
 from config.config import Config
 import torch
 import time
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Custom CSS for modern chat interface
 def apply_custom_css():
@@ -61,10 +66,22 @@ def init_session_state():
     if 'chat_history' not in st.session_state:
         st.session_state.chat_history = []
     if 'model' not in st.session_state:
-        st.session_state.model = HealthChatModel()
-        st.session_state.model.load_model()
+        try:
+            st.session_state.model = HealthChatModel()
+            st.session_state.model.load_model()
+            logger.info("Model loaded successfully.")
+        except Exception as e:
+            st.error(f"Failed to load the model: {e}")
+            logger.error(f"Model loading failed: {e}")
+            st.stop()
     if 'vector_store' not in st.session_state:
-        st.session_state.vector_store = VectorStore(dimension=384)
+        try:
+            st.session_state.vector_store = VectorStore(dimension=384)
+            logger.info("Vector store initialized successfully.")
+        except Exception as e:
+            st.error(f"Failed to initialize vector store: {e}")
+            logger.error(f"Vector store initialization failed: {e}")
+            st.stop()
 
 def display_message(role, content):
     with st.chat_message(role):
@@ -96,7 +113,7 @@ def main():
         
         Please note: This is not a replacement for professional medical advice.
         """)
-
+    
     # Main chat interface
     st.title("Healthcare Assistant 🏥")
     
@@ -114,7 +131,7 @@ def main():
     # Add padding to prevent messages from being hidden behind input
     with padding_container:
         st.markdown("<div style='padding-bottom: 100px;'></div>", unsafe_allow_html=True)
-
+    
     # Chat input
     prompt = st.chat_input("Type your message here...")
     if prompt:
@@ -145,7 +162,7 @@ def main():
                     
                 except Exception as e:
                     st.error("I apologize, but I'm having trouble generating a response. Please try again.")
-                    print(f"Error details: {str(e)}")  # For debugging
+                    logger.error(f"Response generation failed: {e}")  # For debugging
 
 if __name__ == "__main__":
-    main()
+        main()

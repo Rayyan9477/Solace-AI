@@ -13,3 +13,5 @@ sentence-transformers
 pyyaml
 numpy
 python-dotenv
+sentencepiece
+langchain

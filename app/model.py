@@ -1,4 +1,4 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM, LlamaTokenizer, LlamaForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 from pathlib import Path
 import numpy as np
@@ -14,8 +14,8 @@ class HealthChatModel:
 
     def load_model(self):
         try:
-            # First try loading the tokenizer
-            self.tokenizer = LlamaTokenizer.from_pretrained(
+            # Load tokenizer
+            self.tokenizer = AutoTokenizer.from_pretrained(
                 self.model_name,
                 padding_side='left'
             )
@@ -29,18 +29,18 @@ class HealthChatModel:
             }
             self.tokenizer.add_special_tokens(special_tokens_dict)
 
-            # Load the base model
-            self.model = LlamaForCausalLM.from_pretrained(
+            # Load model
+            self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_name,
                 torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
                 device_map="auto" if torch.cuda.is_available() else None,
-                low_cpu_mem_usage=True
+                low_cpu_mem_usage=False
             )
 
-            # Resize token embeddings using the averaging method
+            # Resize token embeddings
             self.model.resize_token_embeddings(len(self.tokenizer))
             
-            # Initialize new embeddings using the averaging method
+            # Initialize new embeddings if necessary
             self._initialize_new_embeddings()
             
             # Move model to device

@@ -1,7 +1,8 @@
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.vectorstores import FAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings  # Updated import
+from langchain_community.vectorstores import FAISS  # Updated import
 import os
 from pathlib import Path
+import numpy as np
 
 class VectorStore:
     def __init__(self, dimension=384):  # default dimension for all-MiniLM-L6-v2
@@ -29,12 +30,11 @@ class VectorStore:
 
     def _create_empty_store(self):
         """Create an empty FAISS vector store"""
-        import numpy as np
         empty_vector = np.zeros((1, self.dimension))
         empty_texts = ["initialization_text"]
         
         self.vector_store = FAISS.from_embeddings(
-            text_embeddings=list(zip(empty_texts, empty_vector)), 
+            texts=empty_texts, 
             embedding=self.embeddings
         )
         self.vector_store.save_local(str(self.vector_store_path))
