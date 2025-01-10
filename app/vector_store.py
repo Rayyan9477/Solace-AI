@@ -33,7 +33,7 @@ class VectorStore:
         empty_vector = np.zeros((1, self.dimension))
         empty_texts = ["initialization_text"]
         
-        self.vector_store = FAISS.from_embeddings(
+        self.vector_store = FAISS.from_texts(
             texts=empty_texts, 
             embedding=self.embeddings
         )
