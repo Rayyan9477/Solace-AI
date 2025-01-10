@@ -1,5 +1,5 @@
 model:
-  path: "RayyanAhmed9477/Health-Chatbot"
+  path: "RayyanAhmed9477/CPU-Compatible-Mental-Health-Model"
   max_length: 512
   temperature: 0.7
   top_p: 0.9

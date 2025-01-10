@@ -7,7 +7,7 @@ import numpy as np
 class HealthChatModel:
     def __init__(self):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model_name = "RayyanAhmed9477/Health-Chatbot"
+        self.model_name = "RayyanAhmed9477/CPU-Compatible-Mental-Health-Model"
         self.local_model_path = Path("fine_tuned_model")
         self.tokenizer = None
         self.model = None

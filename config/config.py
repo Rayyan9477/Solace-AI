@@ -8,7 +8,7 @@ class Config:
     VECTOR_STORE_DIR = BASE_DIR / "vector_store"
 
     # Model configurations
-    MODEL_NAME = "RayyanAhmed9477/Health-Chatbot"
+    MODEL_NAME = "RayyanAhmed9477/CPU-Compatible-Mental-Health-Model"
     MAX_LENGTH = 100
     TEMPERATURE = 0.7
     
