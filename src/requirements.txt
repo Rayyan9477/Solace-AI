@@ -1,6 +1,7 @@
 torch>=1.13.1
 transformers>=4.30.2
-chromadb>=0.3.21
+chromadb>=0.4.0  # Ensure you have the latest version
 requests>=2.31.0
 streamlit>=1.24.1
 blinker>=1.6.2
+sentence-transformers>=2.2.2

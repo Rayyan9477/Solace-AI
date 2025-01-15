@@ -1,6 +1,7 @@
+# filepath: /workspaces/Contextual-Chatbot/src/database/vector_store.py
+
 from typing import List, Any
 import chromadb
-from chromadb.config import Settings
 from chromadb import Client
 
 class VectorStore:
@@ -44,15 +45,19 @@ class ChromaVectorStore(VectorStore):
         Instantiates a local ChromaDB client and gets/creates a collection.
         Configured to persist data to disk.
         """
-        self.client = chromadb.Client(Settings(
+        self.client = chromadb.Client(
             chroma_db_impl="duckdb+parquet",
             persist_directory="./chroma_db"  # Directory to store embeddings
-        ))
+        )
         self.collection = self.client.get_or_create_collection(name=self.collection_name)
 
     def upsert(self, embedding: List[float], data: Any):
+        """
+        Inserts or updates a record in the ChromaDB collection.
+        """
         if not self.collection:
             raise RuntimeError("Chroma collection not connected.")
+        
         doc_id = f"doc_{hash(str(data))}"
         self.collection.add(
             embeddings=[embedding],
@@ -62,10 +67,15 @@ class ChromaVectorStore(VectorStore):
         self.client.persist()  # Ensure data is written to disk
 
     def search(self, embedding: List[float], top_k: int = 5) -> List[Any]:
+        """
+        Searches for the top K most similar documents based on the embedding.
+        """
         if not self.collection:
             raise RuntimeError("Chroma collection not connected.")
+        
         results = self.collection.query(
             query_embeddings=[embedding],
             n_results=top_k
         )
+        # Returns only documents from the query result
         return results.get("documents", [[]])[0]

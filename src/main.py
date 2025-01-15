@@ -1,9 +1,10 @@
+# filepath: /workspaces/Contextual-Chatbot/src/main.py
 import streamlit as st
 from config.settings import AppConfig
 from database.vector_store import ChromaVectorStore
 from agents.search_agent import SearchAgent
 from agents.chat_agent import ChatAgent
-from utils.helpers import sanitize_input, get_basic_embedding
+from utils.helpers import sanitize_input, get_embedding  # Updated import
 
 # Initialize Streamlit app
 st.set_page_config(page_title="Mental Health Chatbot", page_icon="🤖", layout="wide")
@@ -104,7 +105,7 @@ def main():
                 st.session_state.chat_history.append({"role": "user", "content": sanitized_input})
 
                 # Retrieve context using RAG
-                embedding = get_basic_embedding(sanitized_input)
+                embedding = get_embedding(sanitized_input)  # Updated function
                 context = search_agent.retrieve_context(sanitized_input)
 
                 # Generate response with context
@@ -124,10 +125,7 @@ def main():
                 st.experimental_rerun()
 
 def collect_symptoms_responses(responses: dict) -> list:
-    """
-    Collects user symptoms based on their responses.
-    Returns a list of symptoms reported by the user.
-    """
+    """ Collects user symptoms based on their responses. Returns a list of symptoms reported by the user. """
     symptoms = []
     for question, answer in responses.items():
         if answer.lower() == "yes":
@@ -136,9 +134,7 @@ def collect_symptoms_responses(responses: dict) -> list:
     return symptoms
 
 def extract_symptom_from_question(question: str) -> str:
-    """
-    Extracts a key symptom from a question string.
-    """
+    """ Extracts a key symptom from a question string. """
     if "sad or down" in question.lower():
         return "sadness"
     elif "lost interest" in question.lower():
