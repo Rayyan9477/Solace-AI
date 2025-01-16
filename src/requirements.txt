@@ -16,4 +16,4 @@ langchain
 memory_profiler
 langchain-community
 accelerate
-chromadb
+chromadb>=0.3.21

@@ -20,11 +20,9 @@ def load_vector_store(collection_name: str):
     return vector_store
 
 @st.cache_resource
-def load_search_agent(vector_store):
+def load_search_agent(_vector_store):
     search_agent = SearchAgent(
-        vector_store=vector_store,
-        search_api_key="",  # Provide if necessary
-        fallback_engine=""   # Provide if necessary
+        vector_store=_vector_store
     )
     return search_agent
 
@@ -44,7 +42,7 @@ def main():
     vector_store = load_vector_store(collection_name=config.VECTOR_DB_COLLECTION)
 
     # Initialize search agent with caching
-    search_agent = load_search_agent(vector_store=vector_store)
+    search_agent = load_search_agent(_vector_store=vector_store)
 
     # Initialize chat agent with caching
     chat_agent = load_chat_agent(

@@ -1,8 +1,9 @@
+
 from typing import List, Any
 import chromadb
-from chromadb import Client
-from langchain.vectorstores import Chroma
-from langchain.embeddings import HuggingFaceEmbeddings
+from chromadb.config import Settings
+from langchain_community.vectorstores import Chroma
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
 class VectorStore:
     """
@@ -37,7 +38,7 @@ class ChromaVectorStore(VectorStore):
 
     def __init__(self, collection_name: str = "mental_health_collection"):
         self.collection_name = collection_name
-        self.client: Client = None
+        self.client: chromadb.Client = None
         self.collection = None
 
     def connect(self):
@@ -46,8 +47,9 @@ class ChromaVectorStore(VectorStore):
         Configured to persist data to disk.
         """
         self.client = chromadb.Client(
-            chroma_db_impl="duckdb+parquet",
-            persist_directory="./chroma_db"  # Directory to store embeddings
+            Settings(
+                persist_directory="./chroma_db"  # Directory to store embeddings
+            )
         )
         self.collection = self.client.get_or_create_collection(name=self.collection_name)
 
@@ -57,7 +59,8 @@ class ChromaVectorStore(VectorStore):
         """
         if not self.collection:
             raise RuntimeError("Chroma collection not connected.")
-        
+
+        # Generate a unique document ID based on the data's hash
         doc_id = f"doc_{hash(str(data))}"
         self.collection.add(
             embeddings=[embedding],
@@ -72,14 +75,14 @@ class ChromaVectorStore(VectorStore):
         """
         if not self.collection:
             raise RuntimeError("Chroma collection not connected.")
-        
+
         results = self.collection.query(
             query_embeddings=[embedding],
             n_results=top_k
         )
         # Returns only documents from the query result
         return results.get("documents", [[]])[0]
-    
+
     def as_retriever(self):
         """
         Converts the Chroma vector store to a LangChain retriever.
