@@ -1,8 +1,8 @@
-# filepath: /workspaces/Contextual-Chatbot/src/database/vector_store.py
-
 from typing import List, Any
 import chromadb
 from chromadb import Client
+from langchain.vectorstores import Chroma
+from langchain.embeddings import HuggingFaceEmbeddings
 
 class VectorStore:
     """
@@ -24,7 +24,7 @@ class VectorStore:
 
     def search(self, embedding: List[float], top_k: int = 5) -> List[Any]:
         """
-        Perform a similarity search and return the top K results.
+        Perform similarity search
         """
         raise NotImplementedError
 
@@ -79,3 +79,13 @@ class ChromaVectorStore(VectorStore):
         )
         # Returns only documents from the query result
         return results.get("documents", [[]])[0]
+    
+    def as_retriever(self):
+        """
+        Converts the Chroma vector store to a LangChain retriever.
+        """
+        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        return Chroma.from_existing_collection(
+            collection=self.collection,
+            embedding_function=embeddings
+        ).as_retriever()

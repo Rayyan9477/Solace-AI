@@ -1,5 +1,3 @@
-# filepath: /workspaces/Contextual-Chatbot/src/utils/helpers.py
-
 from typing import List
 from sentence_transformers import SentenceTransformer
 

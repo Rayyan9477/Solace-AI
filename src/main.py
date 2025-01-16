@@ -1,10 +1,14 @@
-# filepath: /workspaces/Contextual-Chatbot/src/main.py
 import streamlit as st
 from config.settings import AppConfig
 from database.vector_store import ChromaVectorStore
 from agents.search_agent import SearchAgent
 from agents.chat_agent import ChatAgent
 from utils.helpers import sanitize_input, get_embedding  # Updated import
+
+from langchain.chains import RetrievalQA
+from langchain.llms import HuggingFacePipeline
+from langchain.memory import ConversationBufferMemory
+from transformers import pipeline
 
 # Initialize Streamlit app
 st.set_page_config(page_title="Mental Health Chatbot", page_icon="🤖", layout="wide")
@@ -28,6 +32,17 @@ def main():
     chat_agent = ChatAgent(
         model_name=config.MODEL_NAME,
         use_cpu=config.USE_CPU
+    )
+
+    # Initialize LangChain memory
+    memory = ConversationBufferMemory(memory_key="chat_history")
+
+    # Initialize RetrievalQA chain with LangChain
+    qa_chain = RetrievalQA.from_chain_type(
+        llm=HuggingFacePipeline(pipeline=chat_agent.llm_pipeline),
+        chain_type="stuff",
+        retriever=vector_store.as_retriever(),
+        memory=memory
     )
 
     st.title("🤖 Mental Health Chatbot")
@@ -87,8 +102,8 @@ def main():
 
         st.write("Type your messages below and the chatbot will respond with empathy and support.")
 
-        # Display chat history
-        for chat in st.session_state.chat_history:
+        # Display chat history from memory
+        for chat in memory.buffer:
             if chat["role"] == "user":
                 st.markdown(f"**You:** {chat['content']}")
             else:
@@ -102,15 +117,14 @@ def main():
                 st.warning("Please enter a message.")
             else:
                 sanitized_input = sanitize_input(user_input)
-                st.session_state.chat_history.append({"role": "user", "content": sanitized_input})
+                memory.save_context({"role": "user", "content": sanitized_input}, {"role": "user", "content": sanitized_input})
 
-                # Retrieve context using RAG
-                embedding = get_embedding(sanitized_input)  # Updated function
-                context = search_agent.retrieve_context(sanitized_input)
+                # Retrieve context using RAG and generate response
+                response = qa_chain.run(sanitized_input)
 
-                # Generate response with context
-                response = chat_agent.generate_response(sanitized_input, context)
-                st.session_state.chat_history.append({"role": "chatbot", "content": response})
+                # Display and save assistant response
+                st.session_state.chat_history.append({"role": "assistant", "content": response})
+                memory.save_context({"role": "assistant", "content": response}, {"role": "assistant", "content": response})
 
                 # Clear the input box and rerun to update chat history
                 st.experimental_rerun()
@@ -122,6 +136,7 @@ def main():
                 st.session_state.symptoms = []
                 st.session_state.diagnosis = ""
                 st.session_state.chat_history = []
+                memory.clear()
                 st.experimental_rerun()
 
 def collect_symptoms_responses(responses: dict) -> list:

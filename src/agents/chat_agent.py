@@ -1,6 +1,7 @@
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 from typing import List, Optional
+from langchain.llms import HuggingFacePipeline
 
 class ChatAgent:
     """
@@ -20,6 +21,15 @@ class ChatAgent:
         self.model = AutoModelForCausalLM.from_pretrained(self.model_name)
         if self.use_cpu:
             self.model = self.model.cpu()
+        
+        # Initialize HuggingFace pipeline for LangChain
+        self.llm_pipeline = pipeline(
+            "text-generation",
+            model=self.model,
+            tokenizer=self.tokenizer,
+            device=-1 if self.use_cpu else 0
+        )
+        self.llm = HuggingFacePipeline(pipeline=self.llm_pipeline)
 
     def generate_response(self, prompt: str, context: Optional[str] = None) -> str:
         """
@@ -62,6 +72,6 @@ class ChatAgent:
         # Example logic: match certain keywords for a basic classification
         if any(keyword in symptoms for keyword in ["sadness", "loss of interest", "hopeless"]):
             return "User might be showing signs of depression."
-        elif any(keyword in symptoms for keyword in ["fear", "worry", "panic"]):
+        elif any(keyword in symptoms for keyword in ["worry", "panic", "fear"]):
             return "User might be showing signs of anxiety."
         return "No clear diagnosis based on the provided symptoms."

@@ -1,6 +1,8 @@
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from langchain.llms import HuggingFacePipeline
 from typing import Optional
+from transformers import pipeline
 
 class LocalLLM:
     """
@@ -19,6 +21,15 @@ class LocalLLM:
         self.model = AutoModelForCausalLM.from_pretrained(self.model_name)
         if self.use_cpu:
             self.model = self.model.cpu()
+        
+        # Initialize HuggingFace pipeline for LangChain
+        self.llm_pipeline = pipeline(
+            "text-generation",
+            model=self.model,
+            tokenizer=self.tokenizer,
+            device=-1 if self.use_cpu else 0
+        )
+        self.llm = HuggingFacePipeline(pipeline=self.llm_pipeline)
 
     def generate_text(
         self,
@@ -44,13 +55,28 @@ class LocalLLM:
         with torch.no_grad():
             output_ids = self.model.generate(
                 inputs,
-                max_length=max_length,
-                num_beams=num_beams,
-                do_sample=True,
+                max_length=max_length + inputs['input_ids'].shape[1],
+                num_return_sequences=1,
                 temperature=temperature,
+                do_sample=True,
+                top_p=0.95,
+                top_k=50,
+                repetition_penalty=1.2,
+                pad_token_id=self.tokenizer.pad_token_id,
+                eos_token_id=self.tokenizer.eos_token_id,
             )
-        result = self.tokenizer.decode(output_ids[0], skip_special_tokens=True)
-        # Trim prompt from final output if "Response:" is present
-        if "Response:" in result:
-            result = result.split("Response:")[-1].strip()
-        return result
+
+        response = self.tokenizer.decode(
+            output_ids[0], 
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=True
+        )
+
+        # Extract assistant's response
+        response_parts = response.split("Response:")
+        if len(response_parts) > 1:
+            response = response_parts[1].strip()
+        else:
+            response = response_parts[0].replace(prompt, "").strip()
+
+        return response
