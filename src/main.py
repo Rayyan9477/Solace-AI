@@ -3,7 +3,7 @@ from config.settings import AppConfig
 from database.vector_store import ChromaVectorStore
 from agents.search_agent import SearchAgent
 from agents.chat_agent import ChatAgent
-from utils.helpers import sanitize_input, get_embedding  # Updated import
+from utils.helpers import sanitize_input, get_embedding
 
 from langchain.chains import RetrievalQA
 from langchain.llms import HuggingFacePipeline
@@ -13,23 +13,41 @@ from transformers import pipeline
 # Initialize Streamlit app
 st.set_page_config(page_title="Mental Health Chatbot", page_icon="🤖", layout="wide")
 
+@st.cache_resource
+def load_vector_store(collection_name: str):
+    vector_store = ChromaVectorStore(collection_name=collection_name)
+    vector_store.connect()
+    return vector_store
+
+@st.cache_resource
+def load_search_agent(vector_store):
+    search_agent = SearchAgent(
+        vector_store=vector_store,
+        search_api_key="",  # Provide if necessary
+        fallback_engine=""   # Provide if necessary
+    )
+    return search_agent
+
+@st.cache_resource
+def load_chat_agent(model_name: str, use_cpu: bool):
+    chat_agent = ChatAgent(
+        model_name=model_name,
+        use_cpu=use_cpu
+    )
+    return chat_agent
+
 def main():
     # Load configuration
     config = AppConfig()
 
-    # Initialize vector store
-    vector_store = ChromaVectorStore(collection_name=config.VECTOR_DB_COLLECTION)
-    vector_store.connect()
+    # Initialize vector store with caching
+    vector_store = load_vector_store(collection_name=config.VECTOR_DB_COLLECTION)
 
-    # Initialize search agent with ChromaDB vector store
-    search_agent = SearchAgent(
-        vector_store=vector_store,
-        search_api_key="",  # No API key needed for local ChromaDB
-        fallback_engine=""   # Not used since we're using ChromaDB
-    )
+    # Initialize search agent with caching
+    search_agent = load_search_agent(vector_store=vector_store)
 
-    # Initialize chat agent
-    chat_agent = ChatAgent(
+    # Initialize chat agent with caching
+    chat_agent = load_chat_agent(
         model_name=config.MODEL_NAME,
         use_cpu=config.USE_CPU
     )

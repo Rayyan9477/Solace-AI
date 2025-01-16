@@ -24,7 +24,7 @@ class VectorStore:
 
     def search(self, embedding: List[float], top_k: int = 5) -> List[Any]:
         """
-        Perform similarity search
+        Perform a similarity search and return the top K results.
         """
         raise NotImplementedError
 
