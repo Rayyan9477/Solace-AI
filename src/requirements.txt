@@ -16,4 +16,5 @@ langchain
 memory_profiler
 langchain-community
 accelerate
-chromadb>=0.3.21
+chromadb
+pysqlite3-binary

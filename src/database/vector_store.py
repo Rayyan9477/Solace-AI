@@ -1,3 +1,6 @@
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 from typing import List, Any
 import chromadb
@@ -88,7 +91,7 @@ class ChromaVectorStore(VectorStore):
         Converts the Chroma vector store to a LangChain retriever.
         """
         embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-        return Chroma.from_existing_collection(
+        return Chroma(
             collection=self.collection,
             embedding_function=embeddings
         ).as_retriever()
