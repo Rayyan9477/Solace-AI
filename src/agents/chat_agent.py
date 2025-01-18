@@ -12,7 +12,7 @@ class ChatAgent:
 
     def __init__(
         self,
-        model_name: str = "meta-llama/Llama-3.2-3B-Instruct",
+        model_name: str = "meta-llama/Llama-3.2-1B-Instruct",
         use_cpu: bool = True
     ):
         self.model_name = model_name

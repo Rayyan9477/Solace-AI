@@ -8,7 +8,7 @@ class AppConfig:
     """
 
     # LLM model settings
-    MODEL_NAME: str = os.getenv("MODEL_NAME", "meta-llama/Llama-3.2-3B-Instruct")
+    MODEL_NAME: str = os.getenv("MODEL_NAME", "meta-llama/Llama-3.2-1B-Instruct")
     USE_CPU: bool = os.getenv("USE_CPU", "True").lower() == "true"
 
     # Vector store or database settings

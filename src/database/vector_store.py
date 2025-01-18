@@ -86,12 +86,17 @@ class ChromaVectorStore(VectorStore):
         # Returns only documents from the query result
         return results.get("documents", [[]])[0]
 
+# ...existing code...
     def as_retriever(self):
         """
         Converts the Chroma vector store to a LangChain retriever.
         """
+        if not self.collection:
+            raise RuntimeError("Chroma collection not connected.")
+        
         embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
         return Chroma(
-            collection=self.collection,
+            client=self.client,
+            collection_name=self.collection_name,
             embedding_function=embeddings
         ).as_retriever()
