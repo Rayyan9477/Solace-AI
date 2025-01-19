@@ -9,3 +9,4 @@ langchain-community
 accelerate
 chromadb
 pysqlite3-binary
+chromadb-client
