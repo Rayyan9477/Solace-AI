@@ -4,7 +4,7 @@ sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 import streamlit as st
 from config.settings import AppConfig
-from database.vector_store import ChromaVectorStore
+from database.vector_store import HybridVectorStore  # Updated import
 from agents.search_agent import SearchAgent
 from agents.chat_agent import ChatAgent
 from utils.helpers import sanitize_input, get_embedding
@@ -19,7 +19,7 @@ st.set_page_config(page_title="Mental Health Chatbot", page_icon="🤖", layout=
 
 @st.cache_resource
 def load_vector_store(collection_name: str):
-    vector_store = ChromaVectorStore(collection_name=collection_name)
+    vector_store = HybridVectorStore(collection_name=collection_name)  # Updated usage
     vector_store.connect()
     return vector_store
 

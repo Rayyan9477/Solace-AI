@@ -67,7 +67,6 @@ class HybridVectorStore(VectorStore):
         Initializes an empty FAISS index or loads from local if you prefer.
         """
         # Simple approach: just create a new FAISS store with an initialization text
-        # If you want to load from an existing local index, call FAISS.load_local(...) instead
         self.faiss_index = FAISS.from_texts(["initialization_text"], self.embeddings)
 
     def upsert(self, embedding: List[float], data: Any):
@@ -120,11 +119,9 @@ class HybridVectorStore(VectorStore):
         """
         import torch
 
-        # Convert to correct shape if needed
         vec = np.array(embedding, dtype=np.float32)
         if vec.ndim == 1:
             vec = np.expand_dims(vec, axis=0)
-        # The FAISS library in langchain_community can handle the search directly
         retrieved_docs = self.faiss_index.similarity_search_by_vector(vec[0], k=top_k)
         return [doc.page_content for doc in retrieved_docs]
 
