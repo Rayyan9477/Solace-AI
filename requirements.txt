@@ -83,7 +83,6 @@ optuna==4.1.0
 orjson==3.10.14
 pandas==2.2.3
 pillow==11.1.0
-pickle
 posthog==3.8.3
 propcache==0.2.1
 protobuf==5.29.3

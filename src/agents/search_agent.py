@@ -1,24 +1,13 @@
-from typing import List
-from database.vector_store import VectorStore
+from langchain.vectorstores import FAISS
 from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.vectorstores import Chroma
+from config.settings import AppConfig
 
 class SearchAgent:
-    """
-    SearchAgent integrates with a vector store for retrieval in RAG solutions.
-    """
-    def __init__(
-        self,
-        vector_store: VectorStore
-    ):
+    def __init__(self, vector_store: FAISS):
         self.vector_store = vector_store
+        self.embeddings = HuggingFaceEmbeddings(model_name=AppConfig.EMBEDDING_MODEL)
 
     def retrieve_context(self, query: str) -> str:
-        """
-        Retrieves relevant context from the vector store based on the query.
-        """
-        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-        query_embedding = embeddings.encode(query).tolist()
-        results = self.vector_store.search(query_embedding, top_k=3)
-        context = " ".join(results)
-        return context
+        results = self.vector_store.similarity_search(query, k=AppConfig.RAG_TOP_K)
+        return " ".join([doc.page_content for doc in results])
+
