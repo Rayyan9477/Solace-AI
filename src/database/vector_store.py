@@ -32,7 +32,7 @@ class FAISSVectorStore:
         if self.index is None:
             raise RuntimeError("FAISS index not initialized. Call connect() first.")
         index_path = os.path.join(self.path, self.collection)
-        self.index.save_local(index_path, safe_serialize=True)
+        self.index.save_local(index_path)
 
     def upsert(self, texts: List[str], metadatas: Optional[List[dict]] = None):
         if self.index is None:

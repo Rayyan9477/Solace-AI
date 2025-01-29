@@ -43,8 +43,8 @@ def load_crawler_agent():
     return CrawlerAgent(config=AppConfig.get_crawler_config())
 
 @st.cache_resource
-def load_diagnosis_agent(llm):
-    return DiagnosisAgent(llm)
+def load_diagnosis_agent(_llm):
+    return DiagnosisAgent(_llm)
 
 def load_agents(vector_store):
     chat_agent = load_chat_agent()
