@@ -111,7 +111,7 @@ def handle_self_assessment(diagnosis_agent):
         diagnosis = diagnosis_agent.diagnose(symptoms)
         st.session_state.diagnosis = diagnosis
         st.session_state.step = 2
-        st.experimental_rerun()
+        st.rerun()
 
 def handle_diagnosis():
     st.header("Step 2: Diagnosis")
@@ -121,12 +121,12 @@ def handle_diagnosis():
         st.info("I'm here to help you. Let's discuss how you're feeling.")
         if st.button("Continue to Chat"):
             st.session_state.step = 3
-            st.experimental_rerun()
+            st.rerun()
     else:
         st.success("It's good to hear that you're doing well. If you ever need someone to talk to, I'm here.")
         if st.button("Restart"):
             reset_session()
-            st.experimental_rerun()
+            st.rerun()
 
 def handle_chat(qa_chain, crawler_agent):
     st.header("Step 3: Chat with the Bot")
@@ -155,13 +155,13 @@ def handle_chat(qa_chain, crawler_agent):
             st.session_state.chat_history.append({"role": "human", "content": sanitized_input})
             st.session_state.chat_history.append({"role": "ai", "content": response['answer']})
 
-            st.experimental_rerun()
+            st.rerun()
 
     if st.button("End Chat"):
         st.success("Chatbot: Take care. Remember, seeking professional help is important.")
         if st.button("Restart"):
             reset_session()
-            st.experimental_rerun()
+            st.rerun()
 
 def collect_symptoms_responses(responses: dict) -> list:
     return [extract_symptom_from_question(question) for question, answer in responses.items() if answer.lower() == "yes"]
