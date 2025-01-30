@@ -78,11 +78,13 @@ def main():
         st.session_state.symptoms = []
         st.session_state.diagnosis = ""
         st.session_state.chat_history = []
+        st.session_state.empathy = ""
+        st.session_state.guidance = ""
 
     if st.session_state.step == 1:
         handle_self_assessment(diagnosis_agent)
     elif st.session_state.step == 2:
-        handle_diagnosis()
+        handle_diagnosis(crawler_agent)
     elif st.session_state.step == 3:
         handle_chat(qa_chain, crawler_agent)
 
@@ -113,20 +115,26 @@ def handle_self_assessment(diagnosis_agent):
         st.session_state.step = 2
         st.rerun()
 
-def handle_diagnosis():
-    st.header("Step 2: Diagnosis")
+def handle_diagnosis(crawler_agent):
+    st.header("Step 2: Diagnosis & Empathy")
     st.write(f"**Diagnosis:** {st.session_state.diagnosis}")
 
-    if any(condition in st.session_state.diagnosis.lower() for condition in ["depression", "anxiety"]):
-        st.info("I'm here to help you. Let's discuss how you're feeling.")
-        if st.button("Continue to Chat"):
-            st.session_state.step = 3
-            st.rerun()
-    else:
-        st.success("It's good to hear that you're doing well. If you ever need someone to talk to, I'm here.")
-        if st.button("Restart"):
-            reset_session()
-            st.rerun()
+    # Generate empathy and guidance
+    st.session_state.empathy = generate_empathy(st.session_state.diagnosis)
+    st.session_state.guidance = generate_guidance(st.session_state.diagnosis, crawler_agent)
+
+    st.subheader("Our Empathetic Message:")
+    st.write(st.session_state.empathy)
+    st.subheader("Suggested Steps to Overcome:")
+    st.write(st.session_state.guidance)
+
+    if st.button("Continue to Chat"):
+        st.session_state.step = 3
+        st.rerun()
+
+    if st.button("Restart"):
+        reset_session()
+        st.rerun()
 
 def handle_chat(qa_chain, crawler_agent):
     st.header("Step 3: Chat with the Bot")
@@ -142,12 +150,12 @@ def handle_chat(qa_chain, crawler_agent):
             st.warning("Please enter a message.")
         else:
             sanitized_input = sanitize_input(user_input)
-            
             st_callback = StreamlitCallbackHandler(st.container())
-            
+
             with st.spinner("Generating response..."):
                 response = qa_chain({"question": sanitized_input}, callbacks=[st_callback])
-            
+
+            # If crawled info is needed
             if "I don't have enough information" in response['answer']:
                 crawled_info = crawler_agent.crawl(sanitized_input)
                 response['answer'] += f"\n\nAdditional information:\n{crawled_info}"
@@ -163,6 +171,26 @@ def handle_chat(qa_chain, crawler_agent):
             reset_session()
             st.rerun()
 
+def generate_empathy(diagnosis_text: str) -> str:
+    if not diagnosis_text:
+        return "I'm here to listen. Tell me more about what's on your mind."
+    return (
+        f"I'm really sorry to hear you're dealing with {diagnosis_text.lower()}. "
+        "You’re not alone. Your feelings are valid and I’m here to support you."
+    )
+
+def generate_guidance(diagnosis_text: str, crawler_agent: CrawlerAgent) -> str:
+    if not diagnosis_text:
+        return "If you’d like to talk about your concerns, let me know."
+    overcame_info = crawler_agent.crawl(f"practical steps to handle {diagnosis_text}")
+    return (
+        f"Here's how you may overcome {diagnosis_text}:\n"
+        "• Consider discussing these feelings with a mental health professional.\n"
+        "• Practice mindfulness, relaxation, or therapy as recommended.\n"
+        "• Lean on friends, family, or support groups.\n\n"
+        f"Additional resources:\n{overcame_info[:500]}"
+    )
+
 def collect_symptoms_responses(responses: dict) -> list:
     return [extract_symptom_from_question(question) for question, answer in responses.items() if answer.lower() == "yes"]
 
@@ -177,7 +205,6 @@ def extract_symptom_from_question(question: str) -> str:
         "feelings of hopelessness": "hopelessness",
         "thoughts of self-harm": "thoughts of self-harm"
     }
-    
     for key, value in symptom_map.items():
         if key in question.lower():
             return value
@@ -187,8 +214,9 @@ def reset_session():
     st.session_state.step = 1
     st.session_state.symptoms = []
     st.session_state.diagnosis = ""
+    st.session_state.empathy = ""
+    st.session_state.guidance = ""
     st.session_state.chat_history = []
 
 if __name__ == "__main__":
     main()
-
