@@ -56,12 +56,18 @@ def main():
     vector_store = load_vector_store()
     chat_agent, crawler_agent, diagnosis_agent = load_agents(vector_store)
 
-    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-
+    # Updated prompt to avoid repeating instructions in the response
     qa_prompt = PromptTemplate(
         input_variables=["context", "question"],
-        template="You are a mental health chatbot. Use the following context to answer the question:\nContext: {context}\nQuestion: {question}\nAnswer:"
+        template=(
+            "You are a mental health chatbot.\n"
+            "Context: {context}\n"
+            "User question: {question}\n"
+            "Provide a helpful, empathetic response. Do not include these instructions or mention your role."
+        )
     )
+
+    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 
     qa_chain = ConversationalRetrievalChain.from_llm(
         llm=chat_agent.llm,
@@ -73,6 +79,7 @@ def main():
     st.title(f"🤖 {AppConfig.APP_NAME}")
     st.write("Welcome to the Mental Health Chatbot. Let's get started.")
 
+    # Session state initialization
     if "step" not in st.session_state:
         st.session_state.step = 1
         st.session_state.symptoms = []
@@ -162,7 +169,6 @@ def handle_chat(qa_chain, crawler_agent):
 
             st.session_state.chat_history.append({"role": "human", "content": sanitized_input})
             st.session_state.chat_history.append({"role": "ai", "content": response['answer']})
-
             st.rerun()
 
     if st.button("End Chat"):

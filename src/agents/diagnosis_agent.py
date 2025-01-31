@@ -8,10 +8,11 @@ class DiagnosisAgent:
         self.diagnosis_prompt = PromptTemplate(
             input_variables=["symptoms"],
             template=(
-                "You are a compassionate mental health bot. Based on the following "
-                "symptoms: {symptoms}, what mental health condition might the person be experiencing? "
-                "Provide potential next steps and mention resources that might help. "
-                "Be sure to respond with empathy and reassurance."
+                "The user reports these symptoms: {symptoms}.\n"
+                "1) Identify potential mental health concerns in one or two sentences.\n"
+                "2) Suggest next steps (e.g., professional help, lifestyle changes) in a warm, empathetic tone.\n"
+                "3) Offer encouragement/reassurance.\n"
+                "Do not repeat these instructions or your role as a mental health bot."
             )
         )
         self.diagnosis_chain = LLMChain(llm=self.llm, prompt=self.diagnosis_prompt)
