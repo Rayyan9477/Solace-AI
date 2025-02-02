@@ -1,82 +1,71 @@
+from sympy import re
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from langchain.llms import HuggingFacePipeline
-from typing import Optional
 from transformers import pipeline
+from typing import Optional
+from config.settings import AppConfig
+import logging
 
-class LocalLLM:
-    """
-    Wrapper for a local Causal Language Model that runs on CPU.
-    Manages loading, tokenization, and text generation.
-    """
+logger = logging.getLogger(__name__)
 
-    def __init__(
-        self,
-        model_name: str = "meta-llama/Llama-3.2-1B-Instruct",
-        use_cpu: bool = True
-    ):
-        self.model_name = model_name
-        self.use_cpu = use_cpu
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        self.model = AutoModelForCausalLM.from_pretrained(self.model_name)
-        if self.use_cpu:
-            self.model = self.model.cpu()
+class SafeLLM:
+    """Enterprise-grade LLM wrapper with safety features"""
+    
+    def __init__(self, model_name: str = AppConfig.MODEL_NAME, use_cpu: bool = True):
+        self.device = "cuda" if torch.cuda.is_available() and not use_cpu else "cpu"
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = self._load_model(model_name)
         
-        # Initialize HuggingFace pipeline for LangChain
-        self.llm_pipeline = pipeline(
+        self.generation_pipeline = pipeline(
             "text-generation",
             model=self.model,
             tokenizer=self.tokenizer,
-            device=-1 if self.use_cpu else 0
+            device=0 if self.device == "cuda" else -1,
+            max_new_tokens=AppConfig.MAX_RESPONSE_TOKENS,
+            do_sample=True,
+            temperature=0.7,
+            top_p=0.85,
+            repetition_penalty=1.15,
+            return_full_text=False
         )
-        self.llm = HuggingFacePipeline(pipeline=self.llm_pipeline)
+        
+    def _load_model(self, model_name: str):
+        """Safe model loading with memory management"""
+        try:
+            return AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                low_cpu_mem_usage=True,
+                trust_remote_code=False
+            ).to(self.device)
+        except Exception as e:
+            logger.error(f"Model loading failed: {str(e)}")
+            raise RuntimeError("Failed to initialize language model")
 
-    def generate_text(
-        self,
-        prompt: str,
-        max_length: int = 256,
-        temperature: float = 0.7,
-        num_beams: int = 1,
-        context: Optional[str] = None
-    ) -> str:
-        """
-        Generates text from the local LLM.
-        Optionally includes context for RAG or additional prompt data.
-        """
-        if context:
-            combined_prompt = f"Context:\n{context}\nUser Query:\n{prompt}\nResponse:"
-        else:
-            combined_prompt = f"User Query:\n{prompt}\nResponse:"
+    def generate_safe_response(self, prompt: str, context: str = "") -> str:
+        """Generate response with safety checks"""
+        try:
+            full_prompt = f"Context: {context}\nUser: {prompt}\nAssistant:"
+            
+            output = self.generation_pipeline(
+                full_prompt,
+                pad_token_id=self.tokenizer.eos_token_id,
+                num_return_sequences=1
+            )[0]['generated_text']
+            
+            return self._postprocess(output)
+        except Exception as e:
+            logger.error(f"Generation failed: {str(e)}")
+            return "I'm having trouble responding right now. Please try again."
 
-        inputs = self.tokenizer.encode(combined_prompt, return_tensors="pt")
-        if self.use_cpu:
-            inputs = inputs.cpu()
-
-        with torch.no_grad():
-            output_ids = self.model.generate(
-                inputs,
-                max_length=max_length + inputs['input_ids'].shape[1],
-                num_return_sequences=1,
-                temperature=temperature,
-                do_sample=True,
-                top_p=0.95,
-                top_k=50,
-                repetition_penalty=1.2,
-                pad_token_id=self.tokenizer.pad_token_id,
-                eos_token_id=self.tokenizer.eos_token_id,
-            )
-
-        response = self.tokenizer.decode(
-            output_ids[0], 
-            skip_special_tokens=True,
-            clean_up_tokenization_spaces=True
-        )
-
-        # Extract assistant's response
-        response_parts = response.split("Response:")
-        if len(response_parts) > 1:
-            response = response_parts[1].strip()
-        else:
-            response = response_parts[0].replace(prompt, "").strip()
-
-        return response
+    def _postprocess(self, text: str) -> str:
+        """Response cleanup and safety filtering"""
+        # Remove any incomplete sentences
+        text = text.rsplit('.', 1)[0] + '.' if '.' in text else text
+        
+        # Filter sensitive content
+        text = re.sub(r'\b(自杀|自残|self[- ]?harm)\b', '[REDACTED]', text, flags=re.IGNORECASE)
+        
+        # Trim to last complete sentence
+        return text.strip()

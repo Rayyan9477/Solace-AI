@@ -1,57 +1,49 @@
-# safety_agent.py
 from langchain.llms import BaseLLM
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
+from typing import Dict
 
 class SafetyAgent:
     def __init__(self, llm: BaseLLM):
         self.llm = llm
-        self.safety_prompt = PromptTemplate(
+        self.prompt_template = PromptTemplate(
             input_variables=["message"],
-            template="""Analyze the following message for signs of crisis or immediate danger:
+            template="""Analyze this message for safety concerns:
             Message: {message}
             
-            Determine:
-            1. Is there any indication of immediate self-harm or suicide risk?
-            2. Is there any indication of harm to others?
-            3. What is the severity level (1-10)?
+            Evaluate:
+            1. Immediate self-harm/suicide risk (1-10)
+            2. Harm to others risk (1-10)
+            3. Key risk factors
             
-            Provide a structured assessment."""
+            Format response as:
+            Risk Level: <self_harm_risk>/<harm_to_others_risk>
+            Factors: <comma_separated_factors>"""
         )
-        self.safety_chain = LLMChain(llm=self.llm, prompt=self.safety_prompt)
+        self.chain = LLMChain(llm=self.llm, prompt=self.prompt_template)
 
-    def check_message(self, message: str) -> dict:
-        """
-        Analyzes message for safety concerns and returns structured assessment
-        """
-        result = self.safety_chain.run(message=message)
-        
-        # Parse the result and extract key information
-        severity = self._extract_severity(result)
-        concerns = self._identify_concerns(result)
-        
-        return {
-            'safe': severity < 7,
-            'severity': severity,
-            'concerns': concerns,
-            'raw_assessment': result
-        }
-
-    def _extract_severity(self, assessment: str) -> int:
+    def check_message(self, message: str) -> Dict:
         try:
-            # Extract severity number from the assessment
-            severity_line = [line for line in assessment.split('\n') 
-                           if 'severity' in line.lower()]
-            if severity_line:
-                return int([num for num in severity_line[0] if num.isdigit()][0])
-            return 0
-        except:
-            return 0
+            response = self.chain.run(message=message)
+            return self._parse_response(response)
+        except Exception:
+            return {"safe": False, "severity": 10, "factors": ["system_error"]}
 
-    def _identify_concerns(self, assessment: str) -> list:
-        concerns = []
-        if 'self-harm' in assessment.lower() or 'suicide' in assessment.lower():
-            concerns.append('self_harm_risk')
-        if 'harm to others' in assessment.lower():
-            concerns.append('harm_to_others')
-        return concerns
+    def _parse_response(self, response: str) -> Dict:
+        try:
+            lines = response.split("\n")
+            risk_line = [l for l in lines if "Risk Level:" in l][0]
+            factors_line = [l for l in lines if "Factors:" in l][0]
+            
+            risks = risk_line.split(":")[1].strip().split("/")
+            factors = factors_line.split(":")[1].strip().split(",")
+            
+            return {
+                "safe": int(risks[0]) < 7 and int(risks[1]) < 7,
+                "self_harm_risk": int(risks[0]),
+                "harm_to_others_risk": int(risks[1]),
+                "factors": [f.strip() for f in factors],
+                "raw": response
+            }
+        except Exception:
+            return {"safe": False, "severity": 8, "factors": ["parse_error"]}

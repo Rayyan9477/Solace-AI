@@ -2,49 +2,77 @@ import requests
 from bs4 import BeautifulSoup
 from langchain.tools import Tool
 from langchain.utilities import SerpAPIWrapper
+from config.settings import AppConfig
+import re
+import logging
+from urllib.parse import urlparse
 
 class CrawlerAgent:
     def __init__(self, config: dict):
-        self.max_results = config['max_results']
-        self.max_depth = config['max_depth']
+        self.config = config
         self.search = SerpAPIWrapper()
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'MentalHealthBot/1.0 (+https://example.com/bot)',
+            'Accept-Language': 'en-US,en;q=0.5'
+        })
+        
         self.tools = [
             Tool(
-                name="Search",
-                func=self.search.run,
-                description="Useful for searching the internet for recent or current events"
+                name="WebSearch",
+                func=self.safe_crawl,
+                description="Searches web for mental health resources"
             )
         ]
+        self.logger = logging.getLogger(__name__)
 
-    def crawl(self, query: str) -> str:
-        """
-        Fetch web search results and the top part of each page's content 
-        to enrich chatbot responses.
-        """
-        search_results = self.search.run(query)
-        if not isinstance(search_results, list):
-            # Different responses from API can sometimes be dict
-            return "No additional data found."
-        
-        content = []
-        for result in search_results[:self.max_results]:
-            url = result.get('link', '')
-            if url:
-                page_content = self._fetch_page_content(url, depth=0)
-                content.append(f"Source: {url}\n{page_content}\n")
-        return "\n".join(content).strip()
-
-    def _fetch_page_content(self, url: str, depth: int) -> str:
-        """
-        Recursively fetch page content, limiting to a certain depth,
-        and return the first 500 characters of text.
-        """
-        if depth >= self.max_depth:
-            return ""
+    def safe_crawl(self, query: str) -> str:
+        """Safe web crawling with content validation"""
         try:
-            response = requests.get(url, timeout=10)
-            soup = BeautifulSoup(response.text, 'html.parser')
-            text = soup.get_text(separator='\n', strip=True)
-            return text[:500]
+            results = self.search.run(query)[:self.config['max_results']]
+            return self._process_results(results)
         except Exception as e:
-            return f"Error fetching content: {str(e)}"
+            self.logger.error(f"Crawler error: {str(e)}")
+            return "I couldn't find additional resources right now. Please try again later."
+
+    def _process_results(self, results) -> str:
+        content = []
+        for result in results:
+            if 'link' in result:
+                if self._is_valid_url(result['link']):
+                    page_content = self._fetch_safe_content(result['link'])
+                    content.append(f"**Source:** {result.get('title', result['link'])}\n{page_content}")
+        return "\n\n".join(content[:3])  # Return top 3 results
+
+    def _is_valid_url(self, url: str) -> bool:
+        parsed = urlparse(url)
+        if parsed.netloc in {'example.com', 'localhost'}:
+            return False
+        return parsed.scheme in {'http', 'https'}
+
+    def _fetch_safe_content(self, url: str, depth=0) -> str:
+        if depth >= self.config['max_depth']:
+            return ""
+            
+        try:
+            response = self.session.get(url, timeout=10)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Remove unwanted elements
+            for tag in ['script', 'style', 'nav', 'footer']:
+                for element in soup.find_all(tag):
+                    element.decompose()
+                    
+            text = soup.get_text(separator='\n', strip=True)
+            text = re.sub(r'\n{3,}', '\n\n', text)  # Clean excessive newlines
+            return text[:500] + "..."  # Return first 500 characters
+        except Exception as e:
+            self.logger.warning(f"Failed to fetch {url}: {str(e)}")
+            return ""
+
+    def validate_content(self, text: str) -> bool:
+        """Content safety validation"""
+        blacklist = {'violence', 'suicide', 'self-harm'}
+        return not any(word in text.lower() for word in blacklist)

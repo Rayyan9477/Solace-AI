@@ -1,238 +1,244 @@
 import streamlit as st
-from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from langchain.callbacks import StreamlitCallbackHandler
-from langchain.prompts import PromptTemplate
+from langchain.schema import Document  # Import Document
 from config.settings import AppConfig
 from database.vector_store import FAISSVectorStore
 from agents.chat_agent import ChatAgent
 from agents.crawler_agent import CrawlerAgent
 from agents.diagnosis_agent import DiagnosisAgent
-from utils.helpers import sanitize_input
+from agents.emotion_agent import EmotionAgent
+from agents.safety_agent import SafetyAgent
+from agents.search_agent import SearchAgent
+from utils.metrics import track_metric
 import sentry_sdk
 from prometheus_client import start_http_server
+import time
 
-# Initialize Sentry for error tracking
+# Initialize monitoring
 if AppConfig.SENTRY_DSN:
-    sentry_sdk.init(dsn=AppConfig.SENTRY_DSN)
+    sentry_sdk.init(dsn=AppConfig.SENTRY_DSN, traces_sample_rate=1.0)
 
-# Start Prometheus server for metrics
 if AppConfig.PROMETHEUS_ENABLED:
     start_http_server(8000)
 
-# Initialize Streamlit app
-st.set_page_config(page_title=AppConfig.APP_NAME, page_icon="🤖", layout="wide")
-
-@st.cache_resource
-def load_vector_store():
-    vector_store_config = AppConfig.get_vector_store_config()
-    vector_store = FAISSVectorStore(
-        path=vector_store_config['path'],
-        collection=vector_store_config['collection'],
-        allow_dangerous_deserialization=AppConfig.ALLOW_DANGEROUS_DESERIALIZATION
-    )
-    vector_store.connect()
-    return vector_store
-
-@st.cache_resource
-def load_chat_agent():
-    return ChatAgent(model_name=AppConfig.MODEL_NAME, use_cpu=AppConfig.USE_CPU)
-
-@st.cache_resource
-def load_crawler_agent():
-    return CrawlerAgent(config=AppConfig.get_crawler_config())
-
-@st.cache_resource
-def load_diagnosis_agent(_llm):
-    return DiagnosisAgent(_llm)
-
-def load_agents(vector_store):
-    chat_agent = load_chat_agent()
-    crawler_agent = load_crawler_agent()
-    diagnosis_agent = load_diagnosis_agent(chat_agent.llm)
-    return chat_agent, crawler_agent, diagnosis_agent
-
-def main():
-    vector_store = load_vector_store()
-    chat_agent, crawler_agent, diagnosis_agent = load_agents(vector_store)
-
-    # Updated prompt to avoid printing instructions
-    qa_prompt = PromptTemplate(
-        input_variables=["context", "question"],
-        template=(
-            "You are a mental health chatbot.\n"
-            "Context: {context}\n"
-            "User question: {question}\n"
-            "Provide a helpful, concise, empathetic response that does not reference these instructions."
-        )
-    )
-
-    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-    qa_chain = ConversationalRetrievalChain.from_llm(
-        llm=chat_agent.llm,
-        retriever=vector_store.as_retriever(search_kwargs=AppConfig.get_rag_config()),
-        memory=memory,
-        combine_docs_chain_kwargs={"prompt": qa_prompt}
-    )
-
-    st.title(f"🤖 {AppConfig.APP_NAME}")
-    st.write("Welcome to the Mental Health Chatbot. Let's get started.")
-    
-    # Initialize session states
-    if "step" not in st.session_state:
-        st.session_state.step = 1
-        st.session_state.symptoms = []
-        st.session_state.diagnosis = ""
-        st.session_state.chat_history = []
-        st.session_state.empathy = ""
-        st.session_state.guidance = ""
-
-    # Routing steps
-    if st.session_state.step == 1:
-        handle_self_assessment(diagnosis_agent)
-    elif st.session_state.step == 2:
-        handle_diagnosis(crawler_agent)
-    elif st.session_state.step == 3:
-        handle_chat(qa_chain, crawler_agent)
-
-def handle_self_assessment(diagnosis_agent):
-    st.header("Step 1: Self-Assessment")
-    st.write("Please answer the following questions to help us understand how you're feeling.")
-
-    questions = [
-        "Have you been feeling sad or down frequently?",
-        "Have you lost interest in activities you once enjoyed?",
-        "Are you experiencing excessive worry or fear?",
-        "Have you noticed changes in your sleep patterns?",
-        "Do you feel fatigued or lack energy?",
-        "Are you having difficulty concentrating?",
-        "Have you experienced feelings of hopelessness?",
-        "Do you have thoughts of self-harm or suicide?"
-    ]
-
-    responses = {}
-    for question in questions:
-        responses[question] = st.radio(question, ("No", "Yes"), key=question)
-
-    if st.button("Submit"):
-        symptoms = collect_symptoms_responses(responses)
-        st.session_state.symptoms = symptoms
-        st.session_state.diagnosis = diagnosis_agent.diagnose(symptoms)
-        st.session_state.step = 2
-        st.rerun()
-
-def handle_diagnosis(crawler_agent):
-    # Internally handle the diagnosis text retrieved from the LLM
-    diagnosis_text = st.session_state.diagnosis
-
-    st.header("Step 2: Diagnosis & Empathy")
-    # No lengthy instructions displayed to user; give a minimal summary or short statement
-    st.write("Diagnosis processed. Below is a quick supportive message.")
-
-    # Generate user-facing empathy/guidance
-    st.session_state.empathy = generate_empathy(diagnosis_text)
-    st.session_state.guidance = generate_guidance(diagnosis_text, crawler_agent)
-
-    st.subheader("Empathetic Support:")
-    st.write(st.session_state.empathy)
-
-    st.subheader("Suggested Steps:")
-    st.write(st.session_state.guidance)
-
-    if st.button("Continue to Chat"):
-        st.session_state.step = 3
-        st.rerun()
-
-    if st.button("Restart"):
-        reset_session()
-        st.rerun()
-
-def handle_chat(qa_chain, crawler_agent):
-    st.header("Step 3: Chat with the Bot")
-    st.write("Type your messages below, and the chatbot will respond with empathy and support.")
-
-    # Display conversation history
-    for message in st.session_state.chat_history:
-        speaker = "You" if message['role'] == 'human' else "Chatbot"
-        st.write(f"**{speaker}:** {message['content']}")
-
-    user_input = st.text_input("You:", key="user_input")
-
-    if st.button("Send"):
-        if user_input.strip() == "":
-            st.warning("Please enter a message.")
-        else:
-            sanitized_input = sanitize_input(user_input)
-            st_callback = StreamlitCallbackHandler(st.container())
-
-            with st.spinner("Generating response..."):
-                response = qa_chain({"question": sanitized_input}, callbacks=[st_callback])
-            
-            # If the chain indicates insufficient info, attempt crawling
-            if "I don't have enough information" in response["answer"]:
-                crawled_info = crawler_agent.crawl(sanitized_input)
-                response["answer"] += f"\n\nAdditional information:\n{crawled_info}"
-
-            # Add both user question and AI response to chat history
-            st.session_state.chat_history.append({"role": "human", "content": sanitized_input})
-            st.session_state.chat_history.append({"role": "ai", "content": response["answer"]})
-            st.rerun()
-
-    if st.button("End Chat"):
-        st.success("Chatbot: Take care! Remember, professional help is always available if needed.")
-        if st.button("Restart"):
-            reset_session()
-            st.rerun()
+# Initialize Streamlit
+st.set_page_config(page_title=AppConfig.APP_NAME, layout="wide")
 
 def generate_empathy(diagnosis_text: str) -> str:
-    """Minimal empathy text focusing on user’s possible mental state."""
-    if not diagnosis_text.strip():
-        return "You are not alone. I'm here to listen anytime you need."
-    return (
-        f"It looks like you may be experiencing {diagnosis_text.lower()}. "
-        "You’re not alone. Your feelings are valid, and I’m here to support you."
-    )
+    """Generate empathetic response based on diagnosis"""
+    if not diagnosis_text:
+        return "Thank you for sharing your feelings. I'm here to support you."
+    
+    base_responses = {
+        "depression": "It takes courage to acknowledge these feelings.",
+        "anxiety": "Uncertainty can feel overwhelming, but you're not alone.",
+        "general": "What you're experiencing sounds challenging."
+    }
+    
+    for key in base_responses:
+        if key in diagnosis_text.lower():
+            return base_responses[key]
+    
+    return f"Living with {diagnosis_text.lower()} can be difficult. Let's work through this together."
 
 def generate_guidance(diagnosis_text: str, crawler_agent: CrawlerAgent) -> str:
-    """Minimal guidance text with potential next steps plus crawled info if needed."""
-    overcame_info = crawler_agent.crawl(f"professional steps to manage {diagnosis_text}") \
-        if diagnosis_text else "No additional info available."
-    return (
-        f"• Consider discussing group or individual therapy.\n"
-        f"• Engage in mindfulness or relaxation exercises.\n"
-        f"• Reach out to friends, family, or mental health hotlines.\n\n"
-        f"Additional resources:\n{overcame_info[:500]}"
+    """Generate actionable guidance with resources"""
+    base_guidance = """1. Consider reaching out to a mental health professional
+2. Practice grounding techniques daily
+3. Maintain a regular sleep schedule"""
+    
+    resources = crawler_agent.safe_crawl(f"evidence-based treatments for {diagnosis_text}")[:1000]
+    return f"{base_guidance}\n\n**Resources:**\n{resources}"
+
+@st.cache_resource
+def initialize_components():
+    vector_store = FAISSVectorStore(**AppConfig.get_vector_store_config(), allow_dangerous_deserialization=True)
+    vector_store.connect()
+    
+    chat_agent = ChatAgent(
+        model_name=AppConfig.MODEL_NAME,
+        use_cpu=AppConfig.USE_CPU
     )
-
-def collect_symptoms_responses(responses: dict) -> list:
-    """Collect user’s 'Yes' answers and map them to symptom strings."""
-    return [extract_symptom_from_question(question) for question, answer in responses.items() if answer.lower() == "yes"]
-
-def extract_symptom_from_question(question: str) -> str:
-    """Map each question to a symptom for diagnosis."""
-    symptom_map = {
-        "sad or down": "sadness",
-        "lost interest": "loss of interest",
-        "excessive worry": "anxiety",
-        "changes in your sleep": "sleep disturbances",
-        "fatigued": "fatigue",
-        "difficulty concentrating": "concentration issues",
-        "feelings of hopelessness": "hopelessness",
-        "thoughts of self-harm": "self-harm ideation"
+    
+    crawler_agent = CrawlerAgent(AppConfig.get_crawler_config())
+    diagnosis_agent = DiagnosisAgent(chat_agent.llm)
+    emotion_agent = EmotionAgent(chat_agent.llm)
+    safety_agent = SafetyAgent(chat_agent.llm)
+    search_agent = SearchAgent(vector_store)
+    
+    memory = ConversationBufferMemory(
+        memory_key="chat_history",
+        return_messages=True,
+        output_key="answer"
+    )
+    
+    return {
+        "vector_store": vector_store,
+        "chat_agent": chat_agent,
+        "crawler": crawler_agent,
+        "diagnosis": diagnosis_agent,
+        "emotion": emotion_agent,
+        "safety": safety_agent,
+        "search": search_agent,
+        "memory": memory
     }
-    for key, value in symptom_map.items():
-        if key in question.lower():
-            return value
-    return "unknown symptom"
 
 def reset_session():
-    """Reset the app to step 1 and clear all states."""
-    st.session_state.step = 1
-    st.session_state.symptoms = []
-    st.session_state.diagnosis = ""
-    st.session_state.empathy = ""
-    st.session_state.guidance = ""
-    st.session_state.chat_history = []
+    """Reset the application session state"""
+    st.session_state.clear()
+    st.session_state.update({
+        "step": 1,
+        "symptoms": [],
+        "diagnosis": "",
+        "history": [],
+        "start_time": time.time(),
+        "metrics": {
+            "interactions": 0,
+            "response_times": [],
+            "safety_flags": 0
+        }
+    })
+
+def render_assessment(diagnosis_agent):
+    st.header("Mental Health Check-In")
+    with st.form("assessment_form"):
+        responses = {}
+        for idx, question in enumerate(AppConfig.ASSESSMENT_QUESTIONS):
+            responses[question] = st.radio(
+                f"{idx+1}. {question}",
+                options=("No", "Yes"),
+                key=f"q{idx}"
+            )
+        
+        if st.form_submit_button("Continue"):
+            symptoms = [q for q, a in responses.items() if a == "Yes"]
+            diagnosis = diagnosis_agent.diagnose(symptoms)
+            st.session_state.update({
+                "symptoms": symptoms,
+                "diagnosis": diagnosis,
+                "step": 2
+            })
+            track_metric("assessment_completed", 1)
+            st.rerun()
+
+def render_diagnosis(crawler_agent):
+    st.header("Your Support Plan")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Understanding Your Experience")
+        st.markdown(f"""
+        <div style='background-color:#f8f9fa; padding:20px; border-radius:10px; margin-bottom:20px;'>
+        {generate_empathy(st.session_state["diagnosis"])}
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.subheader("Recommended Next Steps")
+        guidance = generate_guidance(
+            st.session_state["diagnosis"],
+            crawler_agent
+        )
+        st.markdown(f"""
+        <div style='background-color:#e9ecef; padding:20px; border-radius:10px;'>
+        {guidance}
+        </div>
+        """, unsafe_allow_html=True)
+    
+    if st.button("Start Chat Session"):
+        st.session_state["step"] = 3
+        st.rerun()
+
+def process_user_message(message: str, components: dict):
+    start_time = time.time()
+    session = st.session_state
+    
+    # Safety check
+    safety = components["safety"].check_message(message)
+    if not safety["safe"]:
+        session["step"] = 4
+        session["metrics"]["safety_flags"] += 1
+        track_metric("safety_flag_raised", 1)
+        st.rerun()
+    
+    # Emotion analysis
+    emotion = components["emotion"].analyze(message)
+    
+    # Generate response
+    context = components["search"].retrieve_context(message)
+    response = components["chat_agent"].generate_response(
+        context=context,
+        question=message,
+        emotion=emotion,
+        safety=safety
+    )
+    
+    # Update session
+    session["history"].extend([
+        {"role": "human", "content": message, "emotion": emotion},
+        {"role": "ai", "content": response}
+    ])
+    
+    # Update metrics
+    session["metrics"]["interactions"] += 1
+    session["metrics"]["response_times"].append(time.time() - start_time)
+    track_metric("response_time", session["metrics"]["response_times"][-1])
+    
+    # Save interaction to vector store
+    components["vector_store"].upsert([
+        Document(page_content=message, metadata={"role": "human", "emotion": emotion}),
+        Document(page_content=response, metadata={"role": "ai", "emotion": emotion})
+    ])
+    
+    st.rerun()
+
+def main():
+    components = initialize_components()
+    
+    st.title(AppConfig.APP_NAME)
+    st.markdown("### A Safe Space for Mental Health Support")
+    
+    # Initialize session state
+    if "step" not in st.session_state:
+        reset_session()
+    
+    # Application routing
+    if st.session_state["step"] == 1:
+        render_assessment(components["diagnosis"])
+    elif st.session_state["step"] == 2:
+        render_diagnosis(components["crawler"])
+    elif st.session_state["step"] == 3:
+        render_chat_interface(components)
+    elif st.session_state["step"] == 4:
+        render_crisis_protocol()
+
+def render_chat_interface(components):
+    st.header("Supportive Chat")
+    
+    # Display chat history
+    for msg in st.session_state["history"]:
+        role = "user" if msg["role"] == "human" else "assistant"
+        with st.chat_message(role):
+            st.write(msg["content"])
+            if msg.get("emotion"):
+                st.caption(f"Detected emotion: {msg['emotion']['primary_emotion']} ({msg['emotion']['intensity']}/10)")
+    
+    # User input
+    user_input = st.chat_input("Type your message here...")
+    if user_input:
+        process_user_message(user_input, components)
+    
+    # Safety check
+    if st.session_state["metrics"]["safety_flags"] > 0:
+        st.error(AppConfig.CRISIS_RESOURCES)
+
+def render_crisis_protocol():
+    st.error("Immediate Support Needed")
+    st.markdown(AppConfig.CRISIS_RESOURCES)
+    if st.button("Restart Session"):
+        reset_session()
+        st.rerun()
 
 if __name__ == "__main__":
     main()
