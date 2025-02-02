@@ -1,3 +1,5 @@
+# Modified track_metric to update appropriate counters instead of acting as a decorator
+
 from prometheus_client import Counter, Gauge, Histogram, Summary, REGISTRY
 import time
 from typing import Dict, Any
@@ -12,7 +14,6 @@ class Metrics:
         return cls._instance
 
     def _initialize_metrics(self):
-        # Check if metrics are already registered
         if 'chat_interaction_types' not in REGISTRY._names_to_collectors:
             self.INTERACTION_TYPES = Counter(
                 'chat_interaction_types',
@@ -40,6 +41,13 @@ class Metrics:
                 'Count of triggered safety flags',
                 ['severity_level']
             )
+        
+        # New counter for assessment completions
+        if 'assessment_completed' not in REGISTRY._names_to_collectors:
+            self.ASSESSMENT_COMPLETED = Counter(
+                'assessment_completed',
+                'Number of completed assessments'
+            )
 
         if 'embedding_generation_time' not in REGISTRY._names_to_collectors:
             self.EMBEDDING_TIME = Summary(
@@ -49,37 +57,12 @@ class Metrics:
 
 metrics = Metrics()
 
-def track_metric(metric_name: str, labels: Dict[str, Any] = None):
-    """Generic metric tracking decorator"""
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            start_time = time.time()
-            result = func(*args, **kwargs)
-            
-            # Track execution time
-            duration = time.time() - start_time
-            if metric_name == 'embedding':
-                metrics.EMBEDDING_TIME.observe(duration)
-            elif metric_name == 'response':
-                metrics.RESPONSE_TIME.observe(duration)
-            
-            return result
-        return wrapper
-    return decorator
-
-def log_emotion(emotion_data: Dict):
-    """Log emotion metrics"""
-    metrics.EMOTION_GAUGE.labels(
-        emotion=emotion_data.get('primary_emotion', 'unknown')
-    ).set(emotion_data.get('intensity', 0))
-
-def log_safety_event(assessment: Dict):
-    """Log safety events"""
-    if not assessment.get('safe', True):
-        metrics.SAFETY_FLAGS.labels(
-            severity_level=str(assessment.get('severity', 0))
-        ).inc()
-
-def track_interaction(interaction_type: str):
-    """Track interaction types"""
-    metrics.INTERACTION_TYPES.labels(type=interaction_type).inc()
+def track_metric(metric_name: str, value: float):
+    if metric_name == "embedding":
+        metrics.EMBEDDING_TIME.observe(value)
+    elif metric_name == "response":
+        metrics.RESPONSE_TIME.observe(value)
+    elif metric_name == "assessment_completed":
+        metrics.ASSESSMENT_COMPLETED.inc(value)
+    elif metric_name == "safety_flag_raised":
+        metrics.SAFETY_FLAGS.labels(severity_level="raised").inc(value)

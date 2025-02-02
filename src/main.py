@@ -53,7 +53,7 @@ def generate_guidance(diagnosis_text: str, crawler_agent: CrawlerAgent) -> str:
 
 @st.cache_resource
 def initialize_components():
-    vector_store = FAISSVectorStore(**AppConfig.get_vector_store_config(), allow_dangerous_deserialization=True)
+    vector_store = FAISSVectorStore(**AppConfig.get_vector_store_config())
     vector_store.connect()
     
     chat_agent = ChatAgent(

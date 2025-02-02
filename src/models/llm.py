@@ -1,15 +1,17 @@
-from sympy import re
+# Changed import of re and made SafeLLM subclass BaseLLM
+
+from langchain.llms import BaseLLM  # <-- added
+import re  # fixed import
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 from langchain.llms import HuggingFacePipeline
-from transformers import pipeline
-from typing import Optional
+from typing import Optional, List
 from config.settings import AppConfig
 import logging
 
 logger = logging.getLogger(__name__)
 
-class SafeLLM:
+class SafeLLM(BaseLLM):
     """Enterprise-grade LLM wrapper with safety features"""
     
     def __init__(self, model_name: str = AppConfig.MODEL_NAME, use_cpu: bool = True):
@@ -29,7 +31,7 @@ class SafeLLM:
             repetition_penalty=1.15,
             return_full_text=False
         )
-        
+    
     def _load_model(self, model_name: str):
         """Safe model loading with memory management"""
         try:
@@ -42,30 +44,35 @@ class SafeLLM:
         except Exception as e:
             logger.error(f"Model loading failed: {str(e)}")
             raise RuntimeError("Failed to initialize language model")
-
+    
     def generate_safe_response(self, prompt: str, context: str = "") -> str:
         """Generate response with safety checks"""
         try:
             full_prompt = f"Context: {context}\nUser: {prompt}\nAssistant:"
-            
             output = self.generation_pipeline(
                 full_prompt,
                 pad_token_id=self.tokenizer.eos_token_id,
                 num_return_sequences=1
             )[0]['generated_text']
-            
             return self._postprocess(output)
         except Exception as e:
             logger.error(f"Generation failed: {str(e)}")
             return "I'm having trouble responding right now. Please try again."
-
+    
     def _postprocess(self, text: str) -> str:
         """Response cleanup and safety filtering"""
         # Remove any incomplete sentences
         text = text.rsplit('.', 1)[0] + '.' if '.' in text else text
-        
         # Filter sensitive content
         text = re.sub(r'\b(自杀|自残|self[- ]?harm)\b', '[REDACTED]', text, flags=re.IGNORECASE)
-        
-        # Trim to last complete sentence
         return text.strip()
+    
+    def _call(self, prompt: str, stop: Optional[List[str]] = None) -> str:
+        return self.generate_safe_response(prompt)
+    
+    def _identifying_params(self) -> dict:
+        return {"model_name": self.tokenizer.name_or_path}
+    
+    @property
+    def _llm_type(self) -> str:
+        return "safe_llm"

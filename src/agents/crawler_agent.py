@@ -1,3 +1,5 @@
+# Updated safe_crawl to use get_results from the SerpAPIWrapper
+
 import requests
 from bs4 import BeautifulSoup
 from langchain.tools import Tool
@@ -29,7 +31,8 @@ class CrawlerAgent:
     def safe_crawl(self, query: str) -> str:
         """Safe web crawling with content validation"""
         try:
-            results = self.search.run(query)[:self.config['max_results']]
+            results_dict = self.search.get_results(query)
+            results = results_dict.get("organic_results", [])[:self.config['max_results']]
             return self._process_results(results)
         except Exception as e:
             self.logger.error(f"Crawler error: {str(e)}")
@@ -42,7 +45,7 @@ class CrawlerAgent:
                 if self._is_valid_url(result['link']):
                     page_content = self._fetch_safe_content(result['link'])
                     content.append(f"**Source:** {result.get('title', result['link'])}\n{page_content}")
-        return "\n\n".join(content[:3])  # Return top 3 results
+        return "\n\n".join(content[:3])
 
     def _is_valid_url(self, url: str) -> bool:
         parsed = urlparse(url)
@@ -53,26 +56,20 @@ class CrawlerAgent:
     def _fetch_safe_content(self, url: str, depth=0) -> str:
         if depth >= self.config['max_depth']:
             return ""
-            
         try:
             response = self.session.get(url, timeout=10)
             response.raise_for_status()
-            
             soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Remove unwanted elements
             for tag in ['script', 'style', 'nav', 'footer']:
                 for element in soup.find_all(tag):
                     element.decompose()
-                    
             text = soup.get_text(separator='\n', strip=True)
-            text = re.sub(r'\n{3,}', '\n\n', text)  # Clean excessive newlines
-            return text[:500] + "..."  # Return first 500 characters
+            text = re.sub(r'\n{3,}', '\n\n', text)
+            return text[:500] + "..."
         except Exception as e:
             self.logger.warning(f"Failed to fetch {url}: {str(e)}")
             return ""
 
     def validate_content(self, text: str) -> bool:
-        """Content safety validation"""
         blacklist = {'violence', 'suicide', 'self-harm'}
         return not any(word in text.lower() for word in blacklist)

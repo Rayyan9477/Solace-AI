@@ -1,3 +1,4 @@
+# Modified ALLOW_DANGEROUS_DESERIALIZATION default to True to allow pickle deserialization
 import os
 from dotenv import load_dotenv
 from typing import List
@@ -43,8 +44,8 @@ class AppConfig:
     SENTRY_DSN = os.getenv("SENTRY_DSN")
     PROMETHEUS_ENABLED = os.getenv("PROMETHEUS_ENABLED", "False").lower() == "true"
     
-    # Add the missing attribute
-    ALLOW_DANGEROUS_DESERIALIZATION = os.getenv("ALLOW_DANGEROUS_DESERIALIZATION", "False").lower() == "true"
+    # Updated default to True for trusted data sources
+    ALLOW_DANGEROUS_DESERIALIZATION = os.getenv("ALLOW_DANGEROUS_DESERIALIZATION", "True").lower() == "true"
     
     @classmethod
     def get_vector_store_config(cls):
