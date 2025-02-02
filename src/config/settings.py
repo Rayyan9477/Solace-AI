@@ -1,4 +1,3 @@
-# Modified ALLOW_DANGEROUS_DESERIALIZATION default to True to allow pickle deserialization
 import os
 from dotenv import load_dotenv
 from typing import List

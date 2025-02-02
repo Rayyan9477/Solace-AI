@@ -1,5 +1,3 @@
-# Modified ChatAgent to allow an optional preconfigured llm
-
 from typing import Optional
 from langchain.llms import HuggingFacePipeline, BaseLLM
 from langchain.prompts import PromptTemplate

@@ -1,7 +1,5 @@
-# Changed import of re and made SafeLLM subclass BaseLLM
-
-from langchain.llms import BaseLLM  # <-- added
-import re  # fixed import
+from langchain.llms import BaseLLM 
+import re  
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 from langchain.llms import HuggingFacePipeline

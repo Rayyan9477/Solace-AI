@@ -1,5 +1,3 @@
-# Updated safe_crawl to use get_results from the SerpAPIWrapper
-
 import requests
 from bs4 import BeautifulSoup
 from langchain.tools import Tool
