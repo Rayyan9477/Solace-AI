@@ -14,6 +14,7 @@ from utils.metrics import track_metric
 import sentry_sdk
 from prometheus_client import start_http_server
 import time
+from models.llm import SafeLLM
 
 # Initialize monitoring
 if AppConfig.SENTRY_DSN:
