@@ -83,7 +83,7 @@ opentelemetry-util-http==0.50b0
 optuna==4.1.0
 orjson==3.10.14
 pandas==2.2.3
-pillow==11.1.0
+pillow
 posthog==3.8.3
 propcache==0.2.1
 protobuf==5.29.3
@@ -105,13 +105,13 @@ rsa==4.9
 safetensors==0.5.2
 scikit-learn==1.6.1
 scipy==1.15.1
-sentence-transformers==3.3.1
+sentence-transformers
 sentencepiece==0.2.0
 shellingham==1.5.4
 smmap==5.0.2
 SQLAlchemy==2.0.37
 starlette==0.41.3
-streamlit==1.25.1 
+streamlit
 sentry-sdk==1.5.0
 sympy==1.13.1
 tenacity==9.0.0
@@ -127,6 +127,7 @@ typing-inspect==0.9.0
 tzdata==2024.2
 uvicorn==0.34.0
 uvloop==0.21.0
+vaderSentiment==3.3.2
 watchdog==6.0.0
 watchfiles==1.0.4
 websockets==14.1
