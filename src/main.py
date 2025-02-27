@@ -2,7 +2,8 @@ import streamlit as st
 from langchain.memory import ConversationBufferMemory
 from langchain_community.callbacks.streamlit import StreamlitCallbackHandler
 from config.settings import AppConfig
-from database.vector_store import FAISSVectorStore
+from langchain.docstore.document import Document
+from database.vector_store import FaissVectorStore
 from agents.chat_agent import ChatAgent
 from agents.crawler_agent import CrawlerAgent
 from agents.diagnosis_agent import DiagnosisAgent
@@ -53,7 +54,7 @@ def generate_guidance(diagnosis_text: str, crawler_agent: CrawlerAgent) -> str:
 
 @st.cache_resource
 def initialize_components():
-    vector_store = FAISSVectorStore(**AppConfig.get_vector_store_config())
+    vector_store = FaissVectorStore(**AppConfig.get_vector_store_config())
     vector_store.connect()
     
     chat_agent = ChatAgent(

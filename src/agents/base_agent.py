@@ -2,11 +2,11 @@ from typing import Dict, Any, Optional
 from langchain_community.chat_models import ChatAnthropic
 from langchain_core.messages import SystemMessage, HumanMessage
 import agno
-import agno
 from agno.agent import Agent
 from agno.tools import tool as Tool  # Use the correct case or function name
 from agno.memory import Memory
-from agno.knowledge import Knowledge
+# Fix the Knowledge import - using the correct class from agno.knowledge
+from agno.knowledge import VectorKnowledge  # Replace Knowledge with actual class
 from datetime import datetime
 
 class BaseAgent(Agent):
@@ -17,7 +17,7 @@ class BaseAgent(Agent):
         description: str,
         tools: Optional[list[Tool]] = None,
         memory: Optional[Memory] = None,
-        knowledge: Optional[Knowledge] = None
+        knowledge: Optional[VectorKnowledge] = None  # Update type hint
     ):
         super().__init__(
             name=name,
