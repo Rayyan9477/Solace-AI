@@ -1,9 +1,10 @@
 from typing import Dict, Any, Optional
-from langchain.chat_models import ChatAnthropic
-from langchain.schema import SystemMessage, HumanMessage
+from langchain_community.chat_models import ChatAnthropic
+from langchain_core.messages import SystemMessage, HumanMessage
+import agno
 import agno
 from agno.agent import Agent
-from agno.tools import Tool
+from agno.tools import tool as Tool  # Use the correct case or function name
 from agno.memory import Memory
 from agno.knowledge import Knowledge
 from datetime import datetime

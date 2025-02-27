@@ -1,6 +1,6 @@
 from typing import Dict, Any, Optional
 from .base_agent import BaseAgent
-from agno.tools import Tool
+from agno.tools import tool as Tool
 from agno.memory import ConversationMemory
 from agno.knowledge import VectorKnowledge
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer

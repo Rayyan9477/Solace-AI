@@ -1,7 +1,6 @@
 import streamlit as st
 from langchain.memory import ConversationBufferMemory
-from langchain.callbacks import StreamlitCallbackHandler
-from langchain.schema import Document  # Import Document
+from langchain_community.callbacks.streamlit import StreamlitCallbackHandler
 from config.settings import AppConfig
 from database.vector_store import FAISSVectorStore
 from agents.chat_agent import ChatAgent
@@ -14,7 +13,7 @@ from utils.metrics import track_metric
 import sentry_sdk
 from prometheus_client import start_http_server
 import time
-from models.llm import SafeLLM
+from models.llm import AgnoLLM as SafeLLM
 
 # Initialize monitoring
 if AppConfig.SENTRY_DSN:

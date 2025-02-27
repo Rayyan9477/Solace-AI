@@ -1,7 +1,7 @@
-from langchain.chat_models import ChatAnthropic
+from langchain_community.chat_models import ChatAnthropic
 from langchain.prompts import ChatPromptTemplate
 from langchain.chains import LLMChain
-from langchain.schema import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage
 from typing import Dict, List, Optional
 import json
 
