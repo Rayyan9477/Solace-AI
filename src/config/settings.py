@@ -1,67 +1,168 @@
+from typing import Dict, Any
+from pathlib import Path
 import os
 from dotenv import load_dotenv
-from typing import List
 
+# Load environment variables
 load_dotenv()
 
 class AppConfig:
-    # Core Application Settings
-    APP_NAME = "Mental Health Companion"
-    DEBUG = os.getenv("DEBUG", "False").lower() == "true"
-    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-    SECRET_KEY = os.getenv("SECRET_KEY", "supersecret-1234")
+    # Base paths
+    BASE_DIR = Path(__file__).resolve().parent.parent
+    DATA_DIR = BASE_DIR / "data"
+    MODELS_DIR = BASE_DIR / "models"
     
-    # Model Configuration
-    MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Llama-3.2-1B-Instruct")
-    USE_CPU = os.getenv("USE_CPU", "True").lower() == "true"
-    EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-    MAX_RESPONSE_TOKENS = int(os.getenv("MAX_RESPONSE_TOKENS", 512))
-    
-    # RAG Configuration
-    VECTOR_DB_PATH = os.getenv("VECTOR_DB_PATH", "./data/vector_store")
-    VECTOR_DB_COLLECTION = os.getenv("VECTOR_DB_COLLECTION", "mental_health")
-    RAG_TOP_K = int(os.getenv("RAG_TOP_K", 5))
-    RAG_CHUNK_SIZE = 1024
-    RAG_CHUNK_OVERLAP = 256
-    
-    # Safety & Compliance
-    CRISIS_RESOURCES = """**Immediate Support Resources:**
-- National Suicide Prevention Lifeline: 1-800-273-TALK (8255)
-- Crisis Text Line: Text HOME to 741741
-- Emergency Services: 911"""
-    
-    # Assessment Questions
-    ASSESSMENT_QUESTIONS = [
-        "Have you felt consistently sad or empty most days?",
-        "Have you lost interest in activities you usually enjoy?",
-        "Are you experiencing significant changes in appetite or sleep?",
-        "Do you have difficulty concentrating or making decisions?",
-        "Have you had thoughts of self-harm or suicide?"
-    ]
-    
-    # Monitoring
-    SENTRY_DSN = os.getenv("SENTRY_DSN")
-    PROMETHEUS_ENABLED = os.getenv("PROMETHEUS_ENABLED", "False").lower() == "true"
-    
-    # Updated default to True for trusted data sources
-    ALLOW_DANGEROUS_DESERIALIZATION = os.getenv("ALLOW_DANGEROUS_DESERIALIZATION", "True").lower() == "true"
-    
-    @classmethod
-    def get_vector_store_config(cls):
-        return {
-            "path": cls.VECTOR_DB_PATH,
-            "collection": cls.VECTOR_DB_COLLECTION,
-            "allow_dangerous_deserialization": cls.ALLOW_DANGEROUS_DESERIALIZATION
-        }
+    # Create directories if they don't exist
+    for dir_path in [DATA_DIR, MODELS_DIR]:
+        dir_path.mkdir(parents=True, exist_ok=True)
 
-    @classmethod
-    def get_rag_config(cls):
-        return {"k": cls.RAG_TOP_K}
-
-    @classmethod
-    def get_crawler_config(cls):
-        return {
-            "max_results": 3,
-            "max_depth": 1,
-            "timeout": 10
+    # API Keys and Authentication
+    # ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")  # Optional backup
+    PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
+    
+    # LLM Configuration
+    LLM_CONFIG = {
+        "model": "perplexity/r1-1776",
+        "max_tokens": 2000,
+        "temperature": 0.7,
+        "top_p": 0.9
+    }
+    
+    # Vector Database Configuration
+    VECTOR_DB_CONFIG = {
+        "engine": "faiss",  # Options: faiss, milvus, qdrant
+        "dimension": 1536,  # Embedding dimension
+        "index_type": "L2",
+        "metric_type": "cosine",
+        "index_path": str(DATA_DIR / "vector_indexes"),
+        "collection_name": "mental_health_kb"
+    }
+    
+    # Embedding Configuration
+    EMBEDDING_CONFIG = {
+        "model_name": "BAAI/bge-large-en-v1.5",
+        "device": "cpu",
+        "normalize_embeddings": True
+    }
+    
+    # Memory Configuration
+    MEMORY_CONFIG = {
+        "type": "conversation",  # Options: conversation, summary, window
+        "max_history": 10,
+        "summary_interval": 5
+    }
+    
+    # Knowledge Base Configuration
+    KNOWLEDGE_CONFIG = {
+        "chunk_size": 500,
+        "chunk_overlap": 50,
+        "max_chunks_per_doc": 100,
+        "similarity_threshold": 0.75
+    }
+    
+    # Agent Configuration
+    AGENT_CONFIG = {
+        "max_iterations": 5,
+        "max_execution_time": 30,  # seconds
+        "stream_output": True,
+        "verbose": True
+    }
+    
+    # Crawler Configuration
+    CRAWLER_CONFIG = {
+        "max_depth": 3,
+        "max_results": 10,
+        "request_delay": 1.0,
+        "timeout": 10,
+        "max_retries": 3,
+        "trusted_domains": [
+            "nimh.nih.gov",
+            "who.int",
+            "mayoclinic.org",
+            "psychiatry.org",
+            "healthline.com",
+            "psychologytoday.com"
+        ]
+    }
+    
+    # Safety Configuration
+    SAFETY_CONFIG = {
+        "content_filtering": True,
+        "max_toxicity": 0.7,
+        "blocked_categories": [
+            "self-harm",
+            "violence",
+            "hate",
+            "sexual"
+        ],
+        "require_content_warnings": True
+    }
+    
+    # Logging Configuration
+    LOGGING_CONFIG = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "standard": {
+                "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+            }
+        },
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "formatter": "standard",
+                "level": "INFO"
+            },
+            "file": {
+                "class": "logging.FileHandler",
+                "filename": str(DATA_DIR / "app.log"),
+                "formatter": "standard",
+                "level": "DEBUG"
+            }
+        },
+        "root": {
+            "handlers": ["console", "file"],
+            "level": "INFO"
         }
+    }
+    
+    @classmethod
+    def get_vector_store_path(cls) -> str:
+        """Get the vector store path, creating if it doesn't exist"""
+        path = cls.DATA_DIR / "vector_store"
+        path.mkdir(parents=True, exist_ok=True)
+        return str(path)
+    
+    @classmethod
+    def get_model_path(cls, model_name: str) -> str:
+        """Get the path for a specific model"""
+        path = cls.MODELS_DIR / model_name
+        path.mkdir(parents=True, exist_ok=True)
+        return str(path)
+    
+    @classmethod
+    def validate_config(cls) -> Dict[str, Any]:
+        """Validate the configuration and return any issues"""
+        issues = {}
+        
+        # Check required API keys
+        if not cls.ANTHROPIC_API_KEY:
+            issues["api_keys"] = "Missing ANTHROPIC_API_KEY"
+        
+        if not cls.PERPLEXITY_API_KEY:
+            issues["api_keys"] = "Missing PERPLEXITY_API_KEY"
+            
+        # Check directories
+        for dir_name, dir_path in [
+            ("data", cls.DATA_DIR),
+            ("models", cls.MODELS_DIR)
+        ]:
+            if not dir_path.exists():
+                issues[f"{dir_name}_dir"] = f"Directory {dir_path} does not exist"
+                
+        # Check vector store configuration
+        if cls.VECTOR_DB_CONFIG["engine"] not in ["faiss", "milvus", "qdrant"]:
+            issues["vector_db"] = "Invalid vector database engine"
+            
+        return issues

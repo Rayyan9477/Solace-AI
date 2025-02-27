@@ -1,6 +1,13 @@
 from prometheus_client import Counter, Gauge, Histogram, Summary, REGISTRY
 import time
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
+from datetime import datetime
+import logging
+from agno.metrics import MetricsCollector
+from agno.utils import TokenManager
+from config.settings import AppConfig
+
+logger = logging.getLogger(__name__)
 
 class Metrics:
     _instance = None
@@ -82,3 +89,140 @@ def track_metric(metric_name: str, value: float):
         metrics.ASSESSMENT_COMPLETED.inc(value)
     elif metric_name == "safety_flag_raised":
         metrics.SAFETY_FLAGS.labels(severity_level="raised").inc(value)
+
+class MetricsManager:
+    """Manages metrics collection and analysis"""
+    
+    def __init__(self):
+        self.collector = MetricsCollector()
+        self.token_manager = TokenManager()
+        
+    def track_interaction(
+        self,
+        interaction_type: str,
+        data: Dict[str, Any],
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Track an interaction with metadata"""
+        try:
+            # Add basic metadata
+            meta = {
+                'timestamp': datetime.now().isoformat(),
+                'interaction_type': interaction_type,
+                **(metadata or {})
+            }
+            
+            # Calculate token usage if applicable
+            if 'prompt' in data and 'response' in data:
+                meta['token_usage'] = self.token_manager.calculate_usage(
+                    prompt=data['prompt'],
+                    response=data['response']
+                )
+                
+            # Track metrics
+            metrics = {
+                'latency': data.get('latency', 0),
+                'tokens_used': meta.get('token_usage', {}).get('total', 0),
+                'confidence': data.get('confidence', 1.0)
+            }
+            
+            # Add to collector
+            self.collector.add_metrics(
+                metrics=metrics,
+                metadata=meta
+            )
+            
+            return {
+                'metrics': metrics,
+                'metadata': meta
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to track interaction: {str(e)}")
+            return {}
+            
+    def get_metrics_summary(
+        self,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        interaction_type: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Get summary of collected metrics"""
+        try:
+            # Get filtered metrics
+            metrics = self.collector.get_metrics(
+                start_time=start_time,
+                end_time=end_time,
+                filters={'interaction_type': interaction_type} if interaction_type else None
+            )
+            
+            # Calculate summary statistics
+            summary = {
+                'total_interactions': len(metrics),
+                'avg_latency': sum(m['latency'] for m in metrics) / len(metrics) if metrics else 0,
+                'total_tokens': sum(m.get('tokens_used', 0) for m in metrics),
+                'avg_confidence': sum(m.get('confidence', 1.0) for m in metrics) / len(metrics) if metrics else 0
+            }
+            
+            # Add time range
+            summary['time_range'] = {
+                'start': start_time or min(m['metadata']['timestamp'] for m in metrics) if metrics else None,
+                'end': end_time or max(m['metadata']['timestamp'] for m in metrics) if metrics else None
+            }
+            
+            return summary
+            
+        except Exception as e:
+            logger.error(f"Failed to get metrics summary: {str(e)}")
+            return {}
+            
+    def track_error(
+        self,
+        error_type: str,
+        error_message: str,
+        context: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Track an error occurrence"""
+        try:
+            self.collector.add_error(
+                error_type=error_type,
+                message=error_message,
+                metadata={
+                    'timestamp': datetime.now().isoformat(),
+                    'context': context or {}
+                }
+            )
+        except Exception as e:
+            logger.error(f"Failed to track error: {str(e)}")
+            
+    def get_error_summary(
+        self,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Get summary of tracked errors"""
+        try:
+            # Get filtered errors
+            errors = self.collector.get_errors(
+                start_time=start_time,
+                end_time=end_time
+            )
+            
+            # Group by error type
+            error_counts = {}
+            for error in errors:
+                error_type = error['error_type']
+                error_counts[error_type] = error_counts.get(error_type, 0) + 1
+                
+            return {
+                'total_errors': len(errors),
+                'error_types': error_counts,
+                'time_range': {
+                    'start': start_time or min(e['metadata']['timestamp'] for e in errors) if errors else None,
+                    'end': end_time or max(e['metadata']['timestamp'] for e in errors) if errors else None
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get error summary: {str(e)}")
+            return {}

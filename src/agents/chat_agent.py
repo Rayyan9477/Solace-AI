@@ -1,70 +1,76 @@
-from typing import Optional
-from langchain.llms import HuggingFacePipeline, BaseLLM
-from langchain.prompts import PromptTemplate
+from typing import Optional, Dict
+from langchain.chat_models import ChatAnthropic
+from langchain.prompts import ChatPromptTemplate
 from langchain.chains import LLMChain
-import torch
+from langchain.schema import SystemMessage, HumanMessage
 from config.settings import AppConfig
 
 class ChatAgent:
-    def __init__(self, model_name: str, use_cpu: bool = True, llm: Optional[BaseLLM] = None):
-        self.model_name = model_name
-        if llm:
-            self.llm = llm
-        else:
-            device = "cuda" if torch.cuda.is_available() and not use_cpu else "cpu"
-            from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
-            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-            self.model = AutoModelForCausalLM.from_pretrained(
-                model_name,
-                torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-                low_cpu_mem_usage=True
-            ).to(device)
-            self.pipeline = pipeline(
-                "text-generation",
-                model=self.model,
-                tokenizer=self.tokenizer,
-                device=0 if device == "cuda" else -1,
-                max_new_tokens=AppConfig.MAX_RESPONSE_TOKENS,
-                do_sample=True,
-                temperature=0.7,
-                top_p=0.9,
-                repetition_penalty=1.1
-            )
-            self.llm = HuggingFacePipeline(pipeline=self.pipeline)
+    def __init__(self, api_key: str):
+        self.llm = ChatAnthropic(
+            model="claude-3-sonnet-20240229",
+            anthropic_api_key=api_key,
+            max_tokens=AppConfig.MAX_RESPONSE_TOKENS,
+            temperature=0.7
+        )
         
-        self.prompt_template = PromptTemplate(
-            input_variables=["context", "question", "emotion", "safety"],
-            template="""[INST] <<SYS>>
-You are a compassionate mental health counselor. Consider:
-- User's emotional state: {emotion}
-- Safety concerns: {safety}
-- Context: {context}
+        self.prompt_template = ChatPromptTemplate.from_messages([
+            SystemMessage(content="""You are a compassionate mental health counselor working as part of an AI agent team. 
+Your role is to provide empathetic, evidence-based support while considering:
+1. The user's emotional state and intensity
+2. Any safety concerns
+3. Relevant context from other agents
+4. Treatment history and preferences
 
 Guidelines:
-1. Respond with genuine empathy and validation
-2. Provide practical, evidence-based suggestions
-3. Maintain conversational, non-clinical tone
-4. Prioritize user safety in all responses
-<</SYS>>
+- Respond with genuine empathy and validation
+- Provide practical, evidence-based suggestions
+- Maintain a conversational, non-clinical tone
+- Prioritize user safety above all else
+- Collaborate with other agents' insights
+- Be transparent about AI limitations"""),
+            HumanMessage(content="""Context: {context}
+Emotional State: {emotion}
+Safety Assessment: {safety}
+Search Results: {search_results}
+Diagnosis Info: {diagnosis}
 
-User: {question} [/INST]"""
-        )
+User Query: {question}""")
+        ])
         
         self.chain = LLMChain(llm=self.llm, prompt=self.prompt_template)
     
-    def generate_response(self, context: str, question: str, emotion: dict, safety: dict) -> str:
+    def generate_response(self, 
+                         context: str, 
+                         question: str, 
+                         emotion: Dict, 
+                         safety: Dict,
+                         search_results: str = "",
+                         diagnosis: str = "") -> str:
         try:
+            # Format emotional state
+            emotion_str = f"{emotion.get('primary_emotion', 'neutral')} (intensity: {emotion.get('intensity', 5)})"
+            if emotion.get('triggers'):
+                emotion_str += f"\nTriggers: {', '.join(emotion.get('triggers'))}"
+            
+            # Format safety concerns
+            safety_str = "Safety Concerns:\n"
+            if not safety.get('safe', True):
+                safety_str += "- " + safety.get('concerns', ['Potential risk detected'])[0]
+                if safety.get('recommendations'):
+                    safety_str += f"\nRecommendations: {safety.get('recommendations')}"
+            else:
+                safety_str += "No immediate safety concerns identified"
+
             response = self.chain.run({
                 "context": context,
                 "question": question,
-                "emotion": f"{emotion.get('primary_emotion', 'neutral')} (intensity {emotion.get('intensity', 5)})",
-                "safety": "Safety concern detected" if not safety.get('safe', True) else "No immediate safety concerns"
+                "emotion": emotion_str,
+                "safety": safety_str,
+                "search_results": search_results,
+                "diagnosis": diagnosis
             })
-            return self._postprocess_response(response)
+            
+            return response.strip()
         except Exception as e:
-            return "I'm having trouble generating a response right now. Please try again."
-    
-    def _postprocess_response(self, response: str) -> str:
-        for token in ["<s>", "</s>", "[INST]", "[/INST]"]:
-            response = response.replace(token, "")
-        return response.strip()
+            return f"I apologize, but I'm having trouble generating a response right now. Error: {str(e)}"
