@@ -4,7 +4,7 @@ streamlit==1.42.0
 
 # NLP & AI Models
 transformers==4.48.0
-torch==2.5.1+cpu
+torch
 sentence-transformers==3.4.1
 nltk==3.9.1
 vaderSentiment==3.3.2
@@ -22,7 +22,7 @@ langchain-community==0.3.14
 langchain-core==0.3.30
 langchain-text-splitters==0.3.5
 langsmith==0.2.11
-agno==0.2.0  # Ensure correct version
+agno  # Ensure correct version
 
 # API and Model Access
 openai==1.12.0

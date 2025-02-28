@@ -2,7 +2,7 @@ from typing import Dict, Any, Optional
 from .base_agent import BaseAgent
 from agno.tools import tool as Tool
 from agno.memory import Memory
-from agno.knowledge import VectorKnowledge
+from agno.knowledge import AgentKnowledge
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import SystemMessage, HumanMessage
