@@ -1,140 +1,144 @@
 from typing import Dict, Any, Optional, List
 from .base_agent import BaseAgent
-from agno.tools import tool as Tool
-from agno.memory import ConversationMemory
-from agno.knowledge import VectorKnowledge
+from agno.tools import tool
+from agno.memory import Memory
+from agno.knowledge import AgentKnowledge
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import SystemMessage, HumanMessage
 import spacy
 from transformers import pipeline
 from datetime import datetime
 
-class SymptomExtractionTool(Tool):
-    def __init__(self):
-        super().__init__(
-            name="symptom_extraction",
-            description="Extracts mental health symptoms from text using NLP"
-        )
-        # Load spaCy model for medical entity recognition
-        self.nlp = spacy.load("en_core_web_sm")
-        # Load zero-shot classifier for symptom classification
-        self.classifier = pipeline(
-            "zero-shot-classification",
-            model="facebook/bart-large-mnli",
-            device=-1  # Use CPU
-        )
-        
-        self.symptom_categories = [
-            "mood symptoms",
-            "anxiety symptoms",
-            "cognitive symptoms",
-            "behavioral symptoms",
-            "physical symptoms",
-            "social symptoms"
-        ]
-        
-    async def run(self, input_data: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        text = input_data.get('text', '')
-        
-        # Extract entities using spaCy
-        doc = self.nlp(text)
-        entities = [
-            ent.text for ent in doc.ents 
-            if ent.label_ in ["SYMPTOM", "CONDITION", "BEHAVIOR"]
-        ]
-        
-        # Classify symptoms into categories
-        if text:
-            classifications = self.classifier(
-                text,
-                self.symptom_categories,
-                multi_label=True
-            )
-            
-            symptom_categories = [
-                cat for cat, score in zip(classifications['labels'], classifications['scores'])
-                if score > 0.5
-            ]
-        else:
-            symptom_categories = []
-            
-        return {
-            'extracted_symptoms': entities,
-            'symptom_categories': symptom_categories,
-            'raw_text': text
-        }
+# Load models
+nlp = spacy.load("en_core_web_sm")
+symptom_classifier = pipeline(
+    "zero-shot-classification",
+    model="facebook/bart-large-mnli",
+    device=-1  # Use CPU
+)
+diagnostic_classifier = pipeline(
+    "zero-shot-classification",
+    model="facebook/bart-large-mnli",
+    device=-1
+)
 
-class DiagnosticCriteriaTool(Tool):
-    def __init__(self):
-        super().__init__(
-            name="diagnostic_criteria",
-            description="Matches symptoms to diagnostic criteria"
-        )
-        # Load diagnostic criteria classifier
-        self.classifier = pipeline(
-            "zero-shot-classification",
-            model="facebook/bart-large-mnli",
-            device=-1
+@tool("symptom_extraction")
+async def extract_symptoms(text: str) -> Dict[str, Any]:
+    """
+    Extracts mental health symptoms from text using NLP
+    
+    Args:
+        text: The text to analyze for symptoms
+        
+    Returns:
+        Dictionary containing extracted symptoms and categories
+    """
+    # Extract entities using spaCy
+    doc = nlp(text)
+    entities = [
+        ent.text for ent in doc.ents 
+        if ent.label_ in ["SYMPTOM", "CONDITION", "BEHAVIOR"]
+    ]
+    
+    # Define symptom categories
+    symptom_categories = [
+        "mood symptoms",
+        "anxiety symptoms",
+        "cognitive symptoms",
+        "behavioral symptoms",
+        "physical symptoms",
+        "social symptoms"
+    ]
+    
+    # Classify symptoms into categories
+    if text:
+        classifications = symptom_classifier(
+            text,
+            symptom_categories,
+            multi_label=True
         )
         
-        self.diagnostic_categories = [
-            "Major Depressive Disorder",
-            "Generalized Anxiety Disorder",
-            "Bipolar Disorder",
-            "Post-Traumatic Stress Disorder",
-            "Social Anxiety Disorder",
-            "Panic Disorder"
+        detected_categories = [
+            cat for cat, score in zip(classifications['labels'], classifications['scores'])
+            if score > 0.5
         ]
+    else:
+        detected_categories = []
         
-    async def run(self, input_data: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        symptoms = input_data.get('symptoms', [])
-        symptom_text = " ".join(symptoms)
+    return {
+        'extracted_symptoms': entities,
+        'symptom_categories': detected_categories,
+        'raw_text': text
+    }
+
+@tool("diagnostic_criteria")
+async def analyze_diagnostic_criteria(symptoms: List[str]) -> Dict[str, Any]:
+    """
+    Matches symptoms to diagnostic criteria
+    
+    Args:
+        symptoms: List of extracted symptoms to analyze
         
-        if symptom_text:
-            # Classify symptoms against diagnostic criteria
-            classifications = self.classifier(
-                symptom_text,
-                self.diagnostic_categories,
-                multi_label=True
-            )
-            
-            potential_diagnoses = [
-                {
-                    'condition': label,
-                    'confidence': score,
-                    'severity': self._estimate_severity(score)
-                }
-                for label, score in zip(classifications['labels'], classifications['scores'])
-                if score > 0.3  # Lower threshold for potential matches
-            ]
-        else:
-            potential_diagnoses = []
-            
-        return {
-            'potential_diagnoses': potential_diagnoses,
-            'symptom_count': len(symptoms)
-        }
+    Returns:
+        Dictionary containing potential diagnoses and confidence scores
+    """
+    symptom_text = " ".join(symptoms)
+    
+    # Define diagnostic categories
+    diagnostic_categories = [
+        "Major Depressive Disorder",
+        "Generalized Anxiety Disorder",
+        "Bipolar Disorder",
+        "Post-Traumatic Stress Disorder",
+        "Social Anxiety Disorder",
+        "Panic Disorder"
+    ]
+    
+    if symptom_text:
+        # Classify symptoms against diagnostic criteria
+        classifications = diagnostic_classifier(
+            symptom_text,
+            diagnostic_categories,
+            multi_label=True
+        )
         
-    def _estimate_severity(self, confidence_score: float) -> str:
-        if confidence_score > 0.8:
-            return "severe"
-        elif confidence_score > 0.6:
-            return "moderate"
-        else:
-            return "mild"
+        potential_diagnoses = [
+            {
+                'condition': label,
+                'confidence': score,
+                'severity': _estimate_severity(score)
+            }
+            for label, score in zip(classifications['labels'], classifications['scores'])
+            if score > 0.3  # Lower threshold for potential matches
+        ]
+    else:
+        potential_diagnoses = []
+        
+    return {
+        'potential_diagnoses': potential_diagnoses,
+        'symptom_count': len(symptoms)
+    }
+
+def _estimate_severity(confidence_score: float) -> str:
+    """Estimate severity level based on confidence score"""
+    if confidence_score > 0.8:
+        return "severe"
+    elif confidence_score > 0.6:
+        return "moderate"
+    else:
+        return "mild"
 
 class DiagnosisAgent(BaseAgent):
     def __init__(self, api_key: str):
         super().__init__(
             api_key=api_key,
             name="mental_health_diagnostician",
-            description="Expert system for mental health symptom analysis and diagnosis",
-            tools=[
-                SymptomExtractionTool(),
-                DiagnosticCriteriaTool()
-            ],
-            memory=ConversationMemory(),
-            knowledge=VectorKnowledge()
+            role="Expert system for mental health symptom analysis and diagnosis",
+            description="""An AI agent specialized in analyzing mental health symptoms and providing diagnostic insights.
+            Uses evidence-based criteria and maintains clinical accuracy while emphasizing the importance of professional evaluation.""",
+            tools=[extract_symptoms, analyze_diagnostic_criteria],
+            memory=Memory(),
+            knowledge=AgentKnowledge()
         )
         
         self.diagnosis_prompt = ChatPromptTemplate.from_messages([
@@ -165,26 +169,30 @@ Recommendations: [professional and self-help suggestions]
 Additional Considerations: [important factors to consider]""")
         ])
 
-    async def _generate_response(
+    async def generate_response(
         self,
-        input_data: Dict[str, Any],
-        context: Dict[str, Any],
-        tool_results: Dict[str, Any]
+        query: str,
+        context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
+        """Generate diagnostic assessment"""
         try:
-            # Get symptom analysis
-            symptom_data = tool_results.get('symptom_extraction', {})
-            diagnostic_data = tool_results.get('diagnostic_criteria', {})
+            # Extract symptoms
+            symptom_data = await extract_symptoms(query)
+            
+            # Analyze diagnostic criteria
+            diagnostic_data = await analyze_diagnostic_criteria(
+                symptom_data['extracted_symptoms']
+            )
             
             # Get history
             history = context.get('memory', {}).get('last_diagnosis', {})
             
             # Generate diagnostic assessment
-            llm_response = await self.llm.agenerate_messages([
+            llm_response = await self.model.agenerate_messages([
                 self.diagnosis_prompt.format_messages(
-                    symptoms=symptom_data.get('extracted_symptoms', []),
-                    symptom_categories=symptom_data.get('symptom_categories', []),
-                    diagnostic_matches=diagnostic_data.get('potential_diagnoses', []),
+                    symptoms=symptom_data['extracted_symptoms'],
+                    symptom_categories=symptom_data['symptom_categories'],
+                    diagnostic_matches=diagnostic_data['potential_diagnoses'],
                     history=self._format_history(history)
                 )[0]
             ])
@@ -196,7 +204,7 @@ Additional Considerations: [important factors to consider]""")
             analysis['timestamp'] = datetime.now().isoformat()
             analysis['confidence'] = self._calculate_confidence(
                 analysis,
-                diagnostic_data.get('potential_diagnoses', [])
+                diagnostic_data['potential_diagnoses']
             )
             
             return analysis

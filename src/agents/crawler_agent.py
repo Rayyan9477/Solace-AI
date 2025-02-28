@@ -1,8 +1,8 @@
 from typing import Dict, Any, Optional, List
 from .base_agent import BaseAgent
-from agno.tools import tool as Tool
-from agno.memory import ConversationMemory
-from agno.knowledge import VectorKnowledge
+from agno.tools import tool
+from agno.memory import Memory
+from agno.knowledge import AgentKnowledge
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import SystemMessage, HumanMessage
 from datetime import datetime
@@ -16,196 +16,170 @@ import asyncio
 from urllib.parse import urlparse
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from config.settings import AppConfig
+from utils.helpers import TextHelper, DocumentHelper
+
+logger = logging.getLogger(__name__)
 
 class MentalHealthSpider(CrawlSpider):
-    name = 'mental_health'
+    """Spider for crawling mental health resources"""
+    name = 'mental_health_spider'
     
-    # Trusted domains for mental health information
-    allowed_domains = [
-        'nimh.nih.gov',
-        'psychiatry.org',
-        'who.int',
-        'mayoclinic.org',
-        'healthline.com',
-        'psychologytoday.com'
-    ]
-    
-    # Start URLs for crawling
-    start_urls = [
-        'https://www.nimh.nih.gov/health/',
-        'https://www.psychiatry.org/patients-families',
-        'https://www.who.int/mental_health/',
-        'https://www.mayoclinic.org/diseases-conditions/mental-illness/symptoms-causes/',
-        'https://www.healthline.com/health/mental-health',
-        'https://www.psychologytoday.com/us/basics/'
-    ]
-    
-    # Rules for following links
-    rules = (
-        Rule(
-            LinkExtractor(
-                allow=('health', 'mental', 'disorder', 'condition', 'treatment'),
-                deny=('login', 'signup', 'account', 'cart')
-            ),
-            callback='parse_item',
-            follow=True
-        ),
-    )
-    
-    def __init__(self, *args, **kwargs):
+    def __init__(self, start_urls=None, allowed_domains=None, *args, **kwargs):
+        self.start_urls = start_urls or []
+        self.allowed_domains = allowed_domains or []
+        self.text_helper = TextHelper()
         super().__init__(*args, **kwargs)
-        self.results = []
         
-    def parse_item(self, response):
-        """Parse mental health content"""
-        # Extract main content
-        soup = BeautifulSoup(response.text, 'html.parser')
+        # Define crawling rules
+        self.rules = (
+            Rule(
+                LinkExtractor(
+                    allow=AppConfig.CRAWLER_CONFIG.get('url_patterns', []),
+                    deny=AppConfig.CRAWLER_CONFIG.get('blocked_patterns', [])
+                ),
+                callback='parse_item',
+                follow=True
+            ),
+        )
         
-        # Remove unwanted elements
-        for tag in ['script', 'style', 'nav', 'footer', 'header']:
-            for element in soup.find_all(tag):
-                element.decompose()
-        
-        # Extract relevant content
-        title = soup.find('h1').get_text() if soup.find('h1') else ''
-        content = ' '.join([p.get_text() for p in soup.find_all('p')])
-        
-        if title and content:
-            self.results.append({
+    async def parse_item(self, response):
+        """Parse webpage content"""
+        try:
+            # Extract main content
+            content = ' '.join(response.css(AppConfig.CRAWLER_CONFIG['content_selectors']).getall())
+            
+            # Clean and process text
+            processed_content = await self.text_helper.preprocess_text(content)
+            
+            # Extract metadata
+            metadata = {
                 'url': response.url,
-                'title': title,
-                'content': content[:1000],  # Limit content length
-                'source': urlparse(response.url).netloc
-            })
+                'title': response.css('title::text').get(''),
+                'timestamp': self.text_helper.get_timestamp()
+            }
+            
+            return {
+                'content': processed_content,
+                'metadata': metadata
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to parse page {response.url}: {str(e)}")
+            return None
 
-class ContentCrawlerTool(Tool):
-    def __init__(self):
-        super().__init__(
-            name="content_crawler",
-            description="Crawls trusted mental health websites for relevant information"
+@tool("content_crawler")
+async def crawl_content(query: str, urls: List[str], max_pages: int = 10) -> Dict[str, Any]:
+    """
+    Crawls mental health resources from specified URLs
+    
+    Args:
+        query: Search query to guide crawling
+        urls: List of URLs to crawl
+        max_pages: Maximum number of pages to crawl
+        
+    Returns:
+        Dictionary containing crawled content and metadata
+    """
+    try:
+        process = CrawlerProcess(AppConfig.CRAWLER_CONFIG.get('settings', {}))
+        doc_helper = DocumentHelper()
+        
+        # Configure spider
+        spider = MentalHealthSpider(
+            start_urls=urls,
+            allowed_domains=[url.split('/')[2] for url in urls]
         )
-        self.process = CrawlerProcess({
-            'USER_AGENT': 'MentalHealthBot/1.0 (+https://example.com/bot)',
-            'ROBOTSTXT_OBEY': True,
-            'CONCURRENT_REQUESTS': 16,
-            'DOWNLOAD_DELAY': 1,
-            'COOKIES_ENABLED': False
-        })
         
-    async def run(self, input_data: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        query = input_data.get('query', '')
+        # Run crawler
+        results = []
+        process.crawl(
+            spider,
+            max_pages=max_pages
+        )
+        process.start()
         
-        # Create spider instance
-        spider = MentalHealthSpider()
-        
-        # Run spider in a separate thread
-        with ThreadPoolExecutor() as executor:
-            await asyncio.get_event_loop().run_in_executor(
-                executor,
-                self.process.crawl,
-                spider
-            )
-        
-        # Filter and rank results
-        relevant_results = self._filter_results(spider.results, query)
-        
-        return {
-            'results': relevant_results[:5],  # Return top 5 results
-            'total_found': len(relevant_results),
-            'sources': list(set(r['source'] for r in relevant_results))
-        }
-        
-    def _filter_results(self, results: List[Dict], query: str) -> List[Dict]:
-        """Filter and rank results based on relevance"""
-        query_terms = set(query.lower().split())
-        
-        # Score and filter results
-        scored_results = []
+        # Process results
+        documents = []
         for result in results:
-            score = self._calculate_relevance(result, query_terms)
-            if score > 0.3:  # Minimum relevance threshold
-                result['relevance_score'] = score
-                scored_results.append(result)
+            if not result:
+                continue
                 
-        # Sort by relevance
-        return sorted(scored_results, key=lambda x: x['relevance_score'], reverse=True)
-        
-    def _calculate_relevance(self, result: Dict, query_terms: set) -> float:
-        """Calculate result relevance score"""
-        text = f"{result['title']} {result['content']}".lower()
-        
-        # Calculate term frequency
-        term_matches = sum(1 for term in query_terms if term in text)
-        
-        # Calculate relevance score
-        score = term_matches / len(query_terms)
-        
-        # Boost score for trusted sources
-        if 'nimh.nih.gov' in result['source']:
-            score *= 1.3
-        elif 'who.int' in result['source']:
-            score *= 1.2
+            # Create document
+            doc = await doc_helper.create_document(
+                text=result['content'],
+                metadata=result['metadata']
+            )
+            documents.append(doc)
             
-        return min(score, 1.0)
+        return {
+            'documents': documents,
+            'query': query,
+            'total_pages': len(documents),
+            'timestamp': datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Crawling failed: {str(e)}")
+        return {
+            'documents': [],
+            'query': query,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }
 
-class ContentValidatorTool(Tool):
-    def __init__(self):
-        super().__init__(
-            name="content_validator",
-            description="Validates and sanitizes crawled content"
-        )
-        self.unsafe_patterns = [
-            'suicide', 'self-harm', 'kill', 'death',
-            'abuse', 'violence', 'weapon'
-        ]
+@tool("content_validator")
+async def validate_content(documents: List[Dict[str, Any]], min_length: int = 100) -> Dict[str, Any]:
+    """
+    Validates and filters crawled mental health content
+    
+    Args:
+        documents: List of documents to validate
+        min_length: Minimum content length to consider valid
         
-    async def run(self, input_data: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        content = input_data.get('content', [])
+    Returns:
+        Dictionary containing validated documents and metadata
+    """
+    try:
+        text_helper = TextHelper()
+        valid_docs = []
         
-        validated_content = []
-        warnings = []
-        
-        for item in content:
-            validation = self._validate_content(item)
-            if validation['safe']:
-                validated_content.append(item)
-            else:
-                warnings.extend(validation['warnings'])
+        for doc in documents:
+            # Check content length
+            if len(doc['text']) < min_length:
+                continue
                 
-        return {
-            'validated_content': validated_content,
-            'warnings': warnings,
-            'removed_count': len(content) - len(validated_content)
-        }
-        
-    def _validate_content(self, content_item: Dict) -> Dict[str, Any]:
-        """Validate content for safety and appropriateness"""
-        text = f"{content_item['title']} {content_item['content']}".lower()
-        warnings = []
-        
-        # Check for unsafe patterns
-        found_patterns = [p for p in self.unsafe_patterns if p in text]
-        
-        # Validate source
-        if not self._is_trusted_source(content_item['source']):
-            warnings.append(f"Untrusted source: {content_item['source']}")
+            # Extract keywords
+            keywords = await text_helper.extract_keywords(doc['text'])
+            
+            # Check relevance
+            relevant_terms = AppConfig.CRAWLER_CONFIG.get('relevant_terms', [])
+            if not any(term in keywords for term in relevant_terms):
+                continue
+                
+            # Update metadata
+            doc['metadata'].update({
+                'keywords': keywords,
+                'validated': True,
+                'validation_timestamp': datetime.now().isoformat()
+            })
+            
+            valid_docs.append(doc)
             
         return {
-            'safe': not found_patterns and not warnings,
-            'warnings': warnings + [f"Found unsafe pattern: {p}" for p in found_patterns]
+            'documents': valid_docs,
+            'total_valid': len(valid_docs),
+            'total_processed': len(documents),
+            'timestamp': datetime.now().isoformat()
         }
         
-    def _is_trusted_source(self, domain: str) -> bool:
-        """Check if the source is trusted"""
-        trusted_domains = {
-            'nimh.nih.gov',
-            'who.int',
-            'mayoclinic.org',
-            'psychiatry.org',
-            'healthline.com',
-            'psychologytoday.com'
+    except Exception as e:
+        logger.error(f"Content validation failed: {str(e)}")
+        return {
+            'documents': [],
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
         }
-        return domain in trusted_domains
 
 class CrawlerAgent(BaseAgent):
     def __init__(self, api_key: str):
@@ -213,12 +187,9 @@ class CrawlerAgent(BaseAgent):
             api_key=api_key,
             name="information_gatherer",
             description="Expert system for gathering and validating mental health information",
-            tools=[
-                ContentCrawlerTool(),
-                ContentValidatorTool()
-            ],
-            memory=ConversationMemory(),
-            knowledge=VectorKnowledge()
+            tools=[crawl_content, validate_content],
+            memory=Memory(),
+            knowledge=AgentKnowledge()
         )
         
         self.search_prompt = ChatPromptTemplate.from_messages([
@@ -264,7 +235,7 @@ Content Warnings: [if applicable]""")
             llm_response = await self.llm.agenerate_messages([
                 self.search_prompt.format_messages(
                     query=input_data.get('query', ''),
-                    content=crawled_data.get('results', []),
+                    content=crawled_data.get('documents', []),
                     validation=validation_data,
                     history=self._format_history(context.get('memory', {}))
                 )[0]
@@ -277,12 +248,13 @@ Content Warnings: [if applicable]""")
             summary['timestamp'] = datetime.now().isoformat()
             summary['confidence'] = self._calculate_confidence(
                 summary,
-                crawled_data.get('results', [])
+                crawled_data.get('documents', [])
             )
             
             return summary
             
         except Exception as e:
+            logger.error(f"Response generation failed: {str(e)}")
             return self._fallback_analysis()
 
     def _parse_result(self, text: str) -> Dict[str, Any]:
@@ -322,17 +294,18 @@ Content Warnings: [if applicable]""")
     def _calculate_confidence(
         self,
         summary: Dict[str, Any],
-        results: List[Dict[str, Any]]
+        documents: List[Dict[str, Any]]
     ) -> float:
         """Calculate confidence in information summary"""
         confidence = 1.0
         
         # Lower confidence if few results
-        if len(results) < 3:
+        if len(documents) < 3:
             confidence *= 0.8
             
         # Lower confidence if few trusted sources
-        trusted_sources = sum(1 for r in results if self._is_trusted_source(r['source']))
+        trusted_sources = sum(1 for doc in documents 
+                            if self._is_trusted_source(doc['metadata'].get('url', '')))
         if trusted_sources < 2:
             confidence *= 0.7
             
@@ -358,17 +331,21 @@ Content Warnings: [if applicable]""")
             
         return formatted
 
-    def _is_trusted_source(self, domain: str) -> bool:
+    def _is_trusted_source(self, url: str) -> bool:
         """Check if source is trusted"""
-        trusted_domains = {
-            'nimh.nih.gov',
-            'who.int',
-            'mayoclinic.org',
-            'psychiatry.org',
-            'healthline.com',
-            'psychologytoday.com'
-        }
-        return domain in trusted_domains
+        try:
+            domain = urlparse(url).netloc
+            trusted_domains = {
+                'nimh.nih.gov',
+                'who.int',
+                'mayoclinic.org',
+                'psychiatry.org',
+                'healthline.com',
+                'psychologytoday.com'
+            }
+            return domain in trusted_domains
+        except:
+            return False
 
     def _fallback_analysis(self) -> Dict[str, Any]:
         """Conservative fallback analysis"""

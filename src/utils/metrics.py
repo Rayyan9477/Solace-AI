@@ -3,8 +3,8 @@ import time
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import logging
-from agno.metrics import MetricsCollector
-from agno.utils import TokenManager
+# from agno.metrics import MetricsCollector
+# from agno.utils import TokenManager
 from config.settings import AppConfig
 
 logger = logging.getLogger(__name__)
@@ -15,8 +15,7 @@ class Metrics:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(Metrics, cls).__new__(cls)
-        # (Re)initialize metrics to include new counters if added later
-        cls._instance._initialize_metrics()
+            cls._instance._initialize_metrics()
         return cls._instance
 
     def _initialize_metrics(self):
@@ -94,8 +93,8 @@ class MetricsManager:
     """Manages metrics collection and analysis"""
     
     def __init__(self):
-        self.collector = MetricsCollector()
-        self.token_manager = TokenManager()
+        self._metrics = metrics
+        self._start_time = datetime.now()
         
     def track_interaction(
         self,
@@ -112,28 +111,30 @@ class MetricsManager:
                 **(metadata or {})
             }
             
-            # Calculate token usage if applicable
-            if 'prompt' in data and 'response' in data:
-                meta['token_usage'] = self.token_manager.calculate_usage(
-                    prompt=data['prompt'],
-                    response=data['response']
-                )
-                
-            # Track metrics
-            metrics = {
-                'latency': data.get('latency', 0),
-                'tokens_used': meta.get('token_usage', {}).get('total', 0),
-                'confidence': data.get('confidence', 1.0)
-            }
+            # Track latency if provided
+            if 'latency' in data:
+                self._metrics.RESPONSE_TIME.observe(data['latency'])
             
-            # Add to collector
-            self.collector.add_metrics(
-                metrics=metrics,
-                metadata=meta
-            )
+            # Track interaction type
+            self._metrics.INTERACTION_TYPES.labels(type=interaction_type).inc()
+            
+            # Track emotions if present
+            if 'emotions' in data:
+                for emotion, intensity in data['emotions'].items():
+                    self._metrics.EMOTION_GAUGE.labels(emotion=emotion).set(intensity)
+            
+            # Track safety flags
+            if 'safety_flags' in data:
+                for flag in data['safety_flags']:
+                    self._metrics.SAFETY_FLAGS.labels(severity_level=flag).inc()
             
             return {
-                'metrics': metrics,
+                'metrics': {
+                    'latency': data.get('latency', 0),
+                    'interaction_type': interaction_type,
+                    'emotions': data.get('emotions', {}),
+                    'safety_flags': data.get('safety_flags', [])
+                },
                 'metadata': meta
             }
             
@@ -149,26 +150,27 @@ class MetricsManager:
     ) -> Dict[str, Any]:
         """Get summary of collected metrics"""
         try:
-            # Get filtered metrics
-            metrics = self.collector.get_metrics(
-                start_time=start_time,
-                end_time=end_time,
-                filters={'interaction_type': interaction_type} if interaction_type else None
-            )
+            start = datetime.fromisoformat(start_time) if start_time else self._start_time
+            end = datetime.fromisoformat(end_time) if end_time else datetime.now()
             
-            # Calculate summary statistics
+            # Get metrics from Prometheus
             summary = {
-                'total_interactions': len(metrics),
-                'avg_latency': sum(m['latency'] for m in metrics) / len(metrics) if metrics else 0,
-                'total_tokens': sum(m.get('tokens_used', 0) for m in metrics),
-                'avg_confidence': sum(m.get('confidence', 1.0) for m in metrics) / len(metrics) if metrics else 0
+                'total_interactions': self._metrics.INTERACTION_TYPES._value.sum(),
+                'avg_response_time': float(self._metrics.RESPONSE_TIME.describe()['avg']),
+                'total_safety_flags': self._metrics.SAFETY_FLAGS._value.sum(),
+                'total_assessments': self._metrics.ASSESSMENT_COMPLETED._value,
+                'time_range': {
+                    'start': start.isoformat(),
+                    'end': end.isoformat()
+                }
             }
             
-            # Add time range
-            summary['time_range'] = {
-                'start': start_time or min(m['metadata']['timestamp'] for m in metrics) if metrics else None,
-                'end': end_time or max(m['metadata']['timestamp'] for m in metrics) if metrics else None
-            }
+            # Add emotion summaries if available
+            emotions = {}
+            for emotion in self._metrics.EMOTION_GAUGE._metrics:
+                emotions[emotion] = float(self._metrics.EMOTION_GAUGE.labels(emotion=emotion)._value)
+            if emotions:
+                summary['emotions'] = emotions
             
             return summary
             

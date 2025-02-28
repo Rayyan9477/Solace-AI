@@ -1,7 +1,7 @@
 from typing import Dict, Any, Optional
 from .base_agent import BaseAgent
 from agno.tools import tool as Tool
-from agno.memory import ConversationMemory
+from agno.memory import Memory
 from agno.knowledge import VectorKnowledge
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from langchain.prompts import ChatPromptTemplate
@@ -32,7 +32,7 @@ class EmotionAgent(BaseAgent):
             name="emotion_analyzer",
             description="Expert system for emotional analysis and mental health assessment",
             tools=[EmotionAnalysisTool()],
-            memory=ConversationMemory(),
+            memory=Memory(),
             knowledge=VectorKnowledge()
         )
         
