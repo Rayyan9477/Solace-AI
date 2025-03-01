@@ -1,42 +1,47 @@
 from typing import Dict, Any, Optional
 from .base_agent import BaseAgent
-from agno.tools import tool as Tool
-from agno.memory import ConversationMemory
-from agno.knowledge import VectorKnowledge
+from agno.tools import tool
+from agno.memory import Memory
+from agno.knowledge import AgentKnowledge
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import SystemMessage, HumanMessage
 from datetime import datetime
 
-class RiskAssessmentTool(Tool):
-    def __init__(self):
-        super().__init__(
-            name="risk_assessment",
-            description="Assesses risk levels in mental health contexts"
-        )
+# Define risk indicators
+RISK_INDICATORS = {
+    'severe': [
+        'suicide', 'kill', 'die', 'end it all', 'no reason to live',
+        'hurt others', 'violence', 'weapon'
+    ],
+    'high': [
+        'hopeless', 'worthless', 'trapped', 'burden', 'pain',
+        'can\'t go on', 'give up'
+    ],
+    'moderate': [
+        'depressed', 'anxious', 'stressed', 'overwhelmed',
+        'scared', 'alone'
+    ]
+}
+
+@tool(name="risk_assessment", description="Assesses risk levels in mental health contexts")
+async def assess_risk(text: str) -> Dict[str, Any]:
+    """
+    Assesses risk levels in mental health contexts
+    
+    Args:
+        text: The text to analyze for risk indicators
         
-        self.risk_indicators = {
-            'severe': [
-                'suicide', 'kill', 'die', 'end it all', 'no reason to live',
-                'hurt others', 'violence', 'weapon'
-            ],
-            'high': [
-                'hopeless', 'worthless', 'trapped', 'burden', 'pain',
-                'can\'t go on', 'give up'
-            ],
-            'moderate': [
-                'depressed', 'anxious', 'stressed', 'overwhelmed',
-                'scared', 'alone'
-            ]
-        }
-        
-    async def run(self, input_data: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        text = input_data.get('text', '').lower()
+    Returns:
+        Dictionary containing risk assessment results
+    """
+    try:
+        text = text.lower()
         
         # Check for risk indicators
         risk_level = 'SAFE'
         found_indicators = []
         
-        for level, indicators in self.risk_indicators.items():
+        for level, indicators in RISK_INDICATORS.items():
             if any(indicator in text for indicator in indicators):
                 risk_level = level.upper()
                 found_indicators.extend([i for i in indicators if i in text])
@@ -47,6 +52,13 @@ class RiskAssessmentTool(Tool):
             'found_indicators': found_indicators,
             'requires_immediate_action': risk_level == 'SEVERE'
         }
+    except Exception as e:
+        return {
+            'initial_risk_level': 'MODERATE',  # Conservative fallback
+            'found_indicators': [],
+            'requires_immediate_action': False,
+            'error': str(e)
+        }
 
 class SafetyAgent(BaseAgent):
     def __init__(self, api_key: str):
@@ -54,9 +66,9 @@ class SafetyAgent(BaseAgent):
             api_key=api_key,
             name="safety_monitor",
             description="Expert system for mental health crisis assessment and intervention",
-            tools=[RiskAssessmentTool()],
-            memory=ConversationMemory(),
-            knowledge=VectorKnowledge()
+            tools=[assess_risk],
+            memory=Memory(),
+            knowledge=AgentKnowledge()
         )
         
         self.safety_prompt = ChatPromptTemplate.from_messages([
@@ -102,7 +114,7 @@ Resources: [relevant crisis resources]""")
     ) -> Dict[str, Any]:
         try:
             # Get risk assessment
-            risk_result = tool_results.get('risk_assessment', {})
+            risk_result = await assess_risk(input_data.get('text', ''))
             
             # Get message and contexts
             message = input_data.get('text', '')

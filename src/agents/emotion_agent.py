@@ -1,28 +1,39 @@
 from typing import Dict, Any, Optional
 from .base_agent import BaseAgent
-from agno.tools import tool as Tool
+from agno.tools import tool
 from agno.memory import Memory
 from agno.knowledge import AgentKnowledge
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import SystemMessage, HumanMessage
 
-class EmotionAnalysisTool(Tool):
-    def __init__(self):
-        super().__init__(
-            name="emotion_analysis",
-            description="Analyzes emotional content in text using VADER sentiment analysis"
-        )
-        self.analyzer = SentimentIntensityAnalyzer()
+# Initialize VADER sentiment analyzer
+sentiment_analyzer = SentimentIntensityAnalyzer()
+
+@tool(name="emotion_analysis", description="Analyzes emotional content in text using VADER sentiment analysis")
+async def analyze_emotion(text: str) -> Dict[str, Any]:
+    """
+    Analyzes emotional content in text using VADER sentiment analysis
+    
+    Args:
+        text: The text to analyze for emotional content
         
-    async def run(self, input_data: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        text = input_data.get('text', '')
-        sentiment = self.analyzer.polarity_scores(text)
-        
+    Returns:
+        Dictionary containing sentiment scores and analysis
+    """
+    try:
+        sentiment = sentiment_analyzer.polarity_scores(text)
         return {
             'sentiment_scores': sentiment,
             'compound_score': sentiment['compound'],
             'normalized_intensity': abs(sentiment['compound']) * 10
+        }
+    except Exception as e:
+        return {
+            'sentiment_scores': {'neg': 0.0, 'neu': 1.0, 'pos': 0.0, 'compound': 0.0},
+            'compound_score': 0.0,
+            'normalized_intensity': 0.0,
+            'error': str(e)
         }
 
 class EmotionAgent(BaseAgent):
@@ -31,9 +42,9 @@ class EmotionAgent(BaseAgent):
             api_key=api_key,
             name="emotion_analyzer",
             description="Expert system for emotional analysis and mental health assessment",
-            tools=[EmotionAnalysisTool()],
+            tools=[analyze_emotion],
             memory=Memory(),
-            knowledge=VectorKnowledge()
+            knowledge=AgentKnowledge()
         )
         
         self.prompt_template = ChatPromptTemplate.from_messages([
@@ -72,7 +83,7 @@ Pattern Changes: [changes from previous state]""")
     ) -> Dict[str, Any]:
         try:
             # Get sentiment analysis
-            sentiment_result = tool_results.get('emotion_analysis', {})
+            sentiment_result = await analyze_emotion(input_data.get('text', ''))
             
             # Get message and history
             message = input_data.get('text', '')
@@ -164,7 +175,7 @@ Pattern Changes: [changes from previous state]""")
 
     def _fallback_analysis(self, message: str) -> Dict[str, Any]:
         """Enhanced fallback analysis using VADER"""
-        sentiment = self.tools[0].analyzer.polarity_scores(message)
+        sentiment = sentiment_analyzer.polarity_scores(message)
         
         # Map compound score to emotion
         if sentiment['compound'] >= 0.5:

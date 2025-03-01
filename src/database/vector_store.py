@@ -15,8 +15,15 @@ from sentence_transformers import SentenceTransformer
 
 from config.settings import AppConfig
 
+logger = logging.getLogger(__name__)
+
 class BaseVectorStore(ABC):
     """Abstract base class for vector stores"""
+    
+    @abstractmethod
+    def connect(self) -> bool:
+        """Initialize connection to the vector store"""
+        pass
     
     @abstractmethod
     def add_documents(self, documents: List[Dict[str, Any]]) -> bool:
@@ -43,14 +50,37 @@ class FaissVectorStore(BaseVectorStore):
     
     def __init__(self, dimension: int = 1536):
         self.dimension = dimension
-        self.index = faiss.IndexFlatL2(dimension)
+        self.index = None
         self.documents = {}  # Map IDs to documents
-        self.embedder = SentenceTransformer(AppConfig.EMBEDDING_CONFIG["model_name"])
+        self.embedder = None
+        self.is_connected = False
         
-        # Load existing index if available
-        self._load_index()
+    def connect(self) -> bool:
+        """Initialize FAISS index and load existing data"""
+        try:
+            # Initialize embedder
+            self.embedder = SentenceTransformer(AppConfig.EMBEDDING_CONFIG["model_name"])
+            
+            # Initialize FAISS index
+            self.index = faiss.IndexFlatL2(self.dimension)
+            
+            # Load existing index if available
+            self._load_index()
+            
+            self.is_connected = True
+            logger.info("Successfully connected to FAISS vector store")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to connect to FAISS vector store: {str(e)}")
+            self.is_connected = False
+            return False
         
     def add_documents(self, documents: List[Dict[str, Any]]) -> bool:
+        if not self.is_connected:
+            logger.error("Vector store not connected. Call connect() first.")
+            return False
+            
         try:
             # Generate embeddings
             texts = [doc['content'] for doc in documents]
@@ -73,10 +103,14 @@ class FaissVectorStore(BaseVectorStore):
             return True
             
         except Exception as e:
-            logging.error(f"Error adding documents to FAISS: {str(e)}")
+            logger.error(f"Error adding documents to FAISS: {str(e)}")
             return False
             
     def search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
+        if not self.is_connected:
+            logger.error("Vector store not connected. Call connect() first.")
+            return []
+            
         try:
             # Generate query embedding
             query_embedding = self.embedder.encode([query], normalize_embeddings=True)
@@ -98,10 +132,14 @@ class FaissVectorStore(BaseVectorStore):
             return results
             
         except Exception as e:
-            logging.error(f"Error searching FAISS: {str(e)}")
+            logger.error(f"Error searching FAISS: {str(e)}")
             return []
             
     def delete_documents(self, ids: List[str]) -> bool:
+        if not self.is_connected:
+            logger.error("Vector store not connected. Call connect() first.")
+            return False
+            
         try:
             # Remove from documents store
             for doc_id in ids:
@@ -113,10 +151,14 @@ class FaissVectorStore(BaseVectorStore):
             return True
             
         except Exception as e:
-            logging.error(f"Error deleting documents from FAISS: {str(e)}")
+            logger.error(f"Error deleting documents from FAISS: {str(e)}")
             return False
             
     def clear(self) -> bool:
+        if not self.is_connected:
+            logger.error("Vector store not connected. Call connect() first.")
+            return False
+            
         try:
             self.index = faiss.IndexFlatL2(self.dimension)
             self.documents = {}
@@ -124,11 +166,14 @@ class FaissVectorStore(BaseVectorStore):
             return True
             
         except Exception as e:
-            logging.error(f"Error clearing FAISS index: {str(e)}")
+            logger.error(f"Error clearing FAISS index: {str(e)}")
             return False
             
     def _save_index(self):
         """Save FAISS index and documents to disk"""
+        if not self.is_connected:
+            return
+            
         index_path = Path(AppConfig.VECTOR_DB_CONFIG["index_path"])
         index_path.mkdir(parents=True, exist_ok=True)
         
@@ -139,7 +184,6 @@ class FaissVectorStore(BaseVectorStore):
         )
         
         # Save documents
-        import json
         with open(index_path / "documents.json", "w") as f:
             json.dump(self.documents, f)
             
@@ -153,6 +197,8 @@ class FaissVectorStore(BaseVectorStore):
                 self.index = faiss.read_index(
                     str(index_path / "mental_health.index")
                 )
+            else:
+                self.index = faiss.IndexFlatL2(self.dimension)
                 
             # Load documents
             if (index_path / "documents.json").exists():
@@ -160,10 +206,15 @@ class FaissVectorStore(BaseVectorStore):
                     self.documents = json.load(f)
                     
         except Exception as e:
-            logging.error(f"Error loading FAISS index: {str(e)}")
+            logger.error(f"Error loading FAISS index: {str(e)}")
+            self.index = faiss.IndexFlatL2(self.dimension)
+            self.documents = {}
             
     def _rebuild_index(self):
         """Rebuild FAISS index from documents"""
+        if not self.is_connected:
+            return
+            
         self.index = faiss.IndexFlatL2(self.dimension)
         if self.documents:
             embeddings = []

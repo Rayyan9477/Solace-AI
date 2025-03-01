@@ -15,6 +15,7 @@ import sentry_sdk
 from prometheus_client import start_http_server
 import time
 from models.llm import AgnoLLM as SafeLLM
+import os
 
 # Initialize monitoring
 if AppConfig.SENTRY_DSN:
@@ -25,6 +26,10 @@ if AppConfig.PROMETHEUS_ENABLED:
 
 # Initialize Streamlit
 st.set_page_config(page_title=AppConfig.APP_NAME, layout="wide")
+
+APP_NAME = "Mental Health Support Bot"
+APP_VERSION = "1.0.0"
+DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
 def generate_empathy(diagnosis_text: str) -> str:
     """Generate empathetic response based on diagnosis"""

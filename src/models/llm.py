@@ -3,21 +3,80 @@ from langchain.llms import BaseLLM
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 from langchain.llms import HuggingFacePipeline
-from agno.llm import LLMProvider
-from agno.utils import TokenManager
+from datetime import datetime
 import logging
 from config.settings import AppConfig
 
 logger = logging.getLogger(__name__)
 
+class TokenManager:
+    """Manages token usage and content filtering"""
+    
+    def __init__(self):
+        self.blocked_patterns = {
+            'harmful': ['hack', 'exploit', 'vulnerability'],
+            'unsafe': ['password', 'credential', 'secret'],
+            'toxic': ['hate', 'slur', 'offensive']
+        }
+    
+    def calculate_usage(self, prompt: str, response: str) -> Dict[str, int]:
+        """Calculate token usage for prompt and response"""
+        return {
+            'prompt_tokens': len(prompt.split()),
+            'response_tokens': len(response.split()),
+            'total_tokens': len(prompt.split()) + len(response.split())
+        }
+    
+    def filter_content(self, text: str, category: str) -> str:
+        """Filter content based on category"""
+        if category not in self.blocked_patterns:
+            return text
+            
+        filtered_text = text
+        for pattern in self.blocked_patterns[category]:
+            filtered_text = filtered_text.replace(pattern, '[FILTERED]')
+        return filtered_text
+    
+    def check_toxicity(self, text: str) -> float:
+        """Simple toxicity check"""
+        toxic_words = set(self.blocked_patterns['toxic'])
+        words = set(text.lower().split())
+        toxicity_score = len(words.intersection(toxic_words)) / len(words) if words else 0
+        return toxicity_score
+    
+    def contains_blocked_content(self, text: str, category: str) -> bool:
+        """Check if text contains blocked content"""
+        if category not in self.blocked_patterns:
+            return False
+            
+        return any(pattern in text.lower() for pattern in self.blocked_patterns[category])
+    
+    def get_timestamp(self) -> str:
+        """Get current timestamp"""
+        return datetime.now().isoformat()
+
+class LLMProvider:
+    """Base class for LLM providers"""
+    
+    def __init__(self):
+        self.token_manager = TokenManager()
+    
+    async def generate(
+        self,
+        prompt: str,
+        context: Optional[Dict[str, Any]] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Generate response with safety checks and metadata"""
+        raise NotImplementedError("Subclasses must implement generate()")
+
 class AgnoLLM(LLMProvider):
-    """Agno-based LLM provider with safety features"""
+    """Custom LLM provider with safety features"""
     
     def __init__(self, model_config: Dict[str, Any] = None):
         super().__init__()
         self.config = model_config or AppConfig.LLM_CONFIG
         self.device = "cuda" if torch.cuda.is_available() and not self.config.get("use_cpu", True) else "cpu"
-        self.token_manager = TokenManager()
         
         # Initialize model and tokenizer
         self.tokenizer = self._load_tokenizer()
