@@ -7,6 +7,7 @@ from agno.tools import tool
 from agno.memory import Memory
 from agno.knowledge import AgentKnowledge
 from datetime import datetime
+import anthropic
 
 class BaseAgent(Agent):
     def __init__(
@@ -21,15 +22,18 @@ class BaseAgent(Agent):
         show_tool_calls: bool = True,
         markdown: bool = True
     ):
+        chat_model = ChatAnthropic(
+            model="claude-3-sonnet-20240229",
+            anthropic_api_key=api_key,
+            temperature=0.7,
+            max_tokens=2000,
+            anthropic_client=anthropic.Anthropic(api_key=api_key)
+        )
+        
         super().__init__(
             name=name,
             role=role,
-            model=ChatAnthropic(
-                model="claude-3-sonnet-20240229",
-                anthropic_api_key=api_key,
-                temperature=0.7,
-                max_tokens=2000
-            ),
+            model=chat_model,
             description=description,
             tools=tools or [],
             memory=memory or Memory(),

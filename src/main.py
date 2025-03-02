@@ -17,6 +17,13 @@ import time
 from models.llm import AgnoLLM as SafeLLM
 import os
 
+# Ensure required configuration is present
+if not hasattr(AppConfig, 'MAX_RESPONSE_TOKENS'):
+    setattr(AppConfig, 'MAX_RESPONSE_TOKENS', 2000)
+
+if not AppConfig.ANTHROPIC_API_KEY:
+    raise ValueError("ANTHROPIC_API_KEY must be set in the configuration")
+
 # Initialize monitoring
 if AppConfig.SENTRY_DSN:
     sentry_sdk.init(dsn=AppConfig.SENTRY_DSN, traces_sample_rate=1.0)
