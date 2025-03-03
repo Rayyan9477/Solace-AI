@@ -74,7 +74,10 @@ def initialize_components():
         use_cpu=AppConfig.USE_CPU
     )
     
-    crawler_agent = CrawlerAgent(AppConfig.get_crawler_config())
+    # Initialize the crawler agent with the configuration
+    crawler_config = AppConfig.get_crawler_config()
+    crawler_agent = CrawlerAgent(config=crawler_config)
+    
     diagnosis_agent = DiagnosisAgent(chat_agent.llm)
     emotion_agent = EmotionAgent(chat_agent.llm)
     safety_agent = SafetyAgent(chat_agent.llm)

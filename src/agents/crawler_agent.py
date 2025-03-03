@@ -18,6 +18,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from config.settings import AppConfig
 from utils.helpers import TextHelper, DocumentHelper
+from langchain.memory import ConversationBufferMemory
 
 logger = logging.getLogger(__name__)
 
@@ -182,13 +183,13 @@ async def validate_content(documents: List[Dict[str, Any]], min_length: int = 10
         }
 
 class CrawlerAgent(BaseAgent):
-    def __init__(self, api_key: str):
+    def __init__(self, config: Dict[str, Any]):
+        # Let BaseAgent handle memory initialization
         super().__init__(
-            api_key=api_key,
+            api_key=AppConfig.ANTHROPIC_API_KEY,
             name="information_gatherer",
             description="Expert system for gathering and validating mental health information",
             tools=[crawl_content, validate_content],
-            memory=Memory(),
             knowledge=AgentKnowledge()
         )
         

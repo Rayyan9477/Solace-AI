@@ -1,19 +1,29 @@
 from typing import Optional, Dict
-from langchain_community.chat_models import ChatAnthropic
+from langchain_anthropic import ChatAnthropic
 from langchain.prompts import ChatPromptTemplate
 from langchain.chains import LLMChain
 from langchain_core.messages import SystemMessage, HumanMessage
 from config.settings import AppConfig
 import anthropic
+import httpx
+
+class CustomHTTPClient(httpx.Client):
+    def __init__(self, *args, **kwargs):
+        # Remove proxies argument if present
+        kwargs.pop("proxies", None)
+        super().__init__(*args, **kwargs)
 
 class ChatAgent:
     def __init__(self, model_name: str = "claude-3-sonnet-20240229", use_cpu: bool = False):
+        # Create a custom HTTP client for Anthropic
+        http_client = CustomHTTPClient()
+        
+        # Initialize the ChatAnthropic model
         self.llm = ChatAnthropic(
             model=model_name,
             anthropic_api_key=AppConfig.ANTHROPIC_API_KEY,
             max_tokens=AppConfig.MAX_RESPONSE_TOKENS,
             temperature=0.7,
-            anthropic_client=anthropic.Anthropic(api_key=AppConfig.ANTHROPIC_API_KEY)
         )
         
         self.prompt_template = ChatPromptTemplate.from_messages([

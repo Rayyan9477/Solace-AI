@@ -1,6 +1,7 @@
 from typing import Dict, Any, Optional, List
-from langchain_community.chat_models import ChatAnthropic
+from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage, HumanMessage
+from langchain.memory import ConversationBufferMemory
 import agno
 from agno.agent import Agent
 from agno.tools import tool
@@ -8,6 +9,13 @@ from agno.memory import Memory
 from agno.knowledge import AgentKnowledge
 from datetime import datetime
 import anthropic
+import httpx
+
+class CustomHTTPClient(httpx.Client):
+    def __init__(self, *args, **kwargs):
+        # Remove proxies argument if present
+        kwargs.pop("proxies", None)
+        super().__init__(*args, **kwargs)
 
 class BaseAgent(Agent):
     def __init__(
@@ -22,13 +30,30 @@ class BaseAgent(Agent):
         show_tool_calls: bool = True,
         markdown: bool = True
     ):
+        # Create a custom HTTP client for Anthropic
+        http_client = CustomHTTPClient()
+        
+        # Initialize the ChatAnthropic model
         chat_model = ChatAnthropic(
             model="claude-3-sonnet-20240229",
             anthropic_api_key=api_key,
             temperature=0.7,
             max_tokens=2000,
-            anthropic_client=anthropic.Anthropic(api_key=api_key)
         )
+        
+        # Create a default memory if none is provided
+        if memory is None:
+            # Create a langchain memory
+            langchain_memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+            
+            # Create a compatible memory for agno
+            memory = Memory(
+                memory_key="chat_history",
+                chat_memory=langchain_memory,
+                input_key="input",
+                output_key="output",
+                return_messages=True
+            )
         
         super().__init__(
             name=name,
@@ -36,7 +61,7 @@ class BaseAgent(Agent):
             model=chat_model,
             description=description,
             tools=tools or [],
-            memory=memory or Memory(),
+            memory=memory,
             knowledge=knowledge or AgentKnowledge(),
             show_tool_calls=show_tool_calls,
             markdown=markdown
