@@ -5,6 +5,7 @@ from agno.memory import Memory
 from agno.knowledge import AgentKnowledge
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import SystemMessage, HumanMessage
+from langchain.schema.language_model import BaseLanguageModel
 import spacy
 from transformers import pipeline
 from datetime import datetime
@@ -129,15 +130,15 @@ def _estimate_severity(confidence_score: float) -> str:
         return "mild"
 
 class DiagnosisAgent(BaseAgent):
-    def __init__(self, api_key: str):
+    def __init__(self, model: BaseLanguageModel):
         super().__init__(
-            api_key=api_key,
+            model=model,
             name="mental_health_diagnostician",
             role="Expert system for mental health symptom analysis and diagnosis",
             description="""An AI agent specialized in analyzing mental health symptoms and providing diagnostic insights.
             Uses evidence-based criteria and maintains clinical accuracy while emphasizing the importance of professional evaluation.""",
             tools=[extract_symptoms, analyze_diagnostic_criteria],
-            memory=Memory(),
+            memory=Memory(storage={}),  # Initialize with storage parameter
             knowledge=AgentKnowledge()
         )
         
@@ -185,7 +186,7 @@ Additional Considerations: [important factors to consider]""")
             )
             
             # Get history
-            history = context.get('memory', {}).get('last_diagnosis', {})
+            history = context.get('memory', {}).get('last_diagnosis', {}) if context else {}
             
             # Generate diagnostic assessment
             llm_response = await self.model.agenerate_messages([

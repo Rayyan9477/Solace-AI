@@ -43,17 +43,25 @@ class BaseAgent(Agent):
         
         # Create a default memory if none is provided
         if memory is None:
-            # Create a langchain memory
-            langchain_memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-            
-            # Create a compatible memory for agno
-            memory = Memory(
+            # Create a langchain memory instance
+            langchain_memory = ConversationBufferMemory(
                 memory_key="chat_history",
-                chat_memory=langchain_memory,
+                return_messages=True,
                 input_key="input",
-                output_key="output",
-                return_messages=True
+                output_key="output"
             )
+            
+            # Create memory dict for agno Memory
+            memory_dict = {
+                "memory_key": "chat_history",
+                "chat_memory": langchain_memory,
+                "input_key": "input",
+                "output_key": "output",
+                "return_messages": True
+            }
+            
+            # Initialize Memory with the dictionary
+            memory = Memory(**memory_dict)
         
         super().__init__(
             name=name,
