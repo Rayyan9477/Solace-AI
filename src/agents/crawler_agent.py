@@ -222,6 +222,84 @@ Additional Resources: [helpful links]
 Content Warnings: [if applicable]""")
         ])
 
+    def safe_crawl(self, query: str) -> str:
+        """
+        Safely crawl and retrieve mental health resources
+        
+        Args:
+            query: Search query for mental health resources
+            
+        Returns:
+            Formatted string containing safe and relevant resources
+        """
+        try:
+            # Define safe domains for mental health resources
+            safe_domains = [
+                'nimh.nih.gov',
+                'who.int',
+                'mayoclinic.org',
+                'psychiatry.org',
+                'healthline.com',
+                'psychologytoday.com'
+            ]
+            
+            # Generate safe URLs based on query
+            urls = [
+                f'https://www.{domain}/search?q={query}'
+                for domain in safe_domains
+            ]
+            
+            # Crawl content with safety checks
+            results = asyncio.run(crawl_content(
+                query=query,
+                urls=urls,
+                max_pages=5  # Limit to safe number of pages
+            ))
+            
+            # Validate content
+            validated_results = asyncio.run(validate_content(
+                documents=results.get('documents', []),
+                min_length=100
+            ))
+            
+            # Format safe content
+            safe_content = []
+            for doc in validated_results.get('documents', []):
+                if self._is_safe_content(doc.get('text', '')):
+                    safe_content.append(doc.get('text', ''))
+            
+            # Return formatted content
+            return '\n\n'.join(safe_content[:3])  # Limit to top 3 safe results
+            
+        except Exception as e:
+            logger.error(f"Safe crawling failed: {str(e)}")
+            return "Unable to retrieve resources at this time. Please consult with a mental health professional."
+
+    def _is_safe_content(self, content: str) -> bool:
+        """Check if content is safe and appropriate"""
+        # Define unsafe terms
+        unsafe_terms = {
+            'suicide', 'self-harm', 'harmful', 'dangerous',
+            'illegal', 'unethical', 'controversial'
+        }
+        
+        # Check for unsafe terms
+        content_lower = content.lower()
+        if any(term in content_lower for term in unsafe_terms):
+            return False
+            
+        # Check content length
+        if len(content) < 100:
+            return False
+            
+        # Check for professional tone
+        professional_indicators = {
+            'research', 'study', 'clinical', 'professional',
+            'evidence-based', 'treatment', 'therapy'
+        }
+        
+        return any(indicator in content_lower for indicator in professional_indicators)
+
     async def _generate_response(
         self,
         input_data: Dict[str, Any],

@@ -14,6 +14,7 @@ from utils.metrics import track_metric
 import sentry_sdk
 from prometheus_client import start_http_server
 import time
+import asyncio
 from models.llm import AgnoLLM as SafeLLM
 import os
 
@@ -164,12 +165,12 @@ def render_diagnosis(crawler_agent):
         st.session_state["step"] = 3
         st.rerun()
 
-def process_user_message(message: str, components: dict):
+async def process_user_message(message: str, components: dict):
     start_time = time.time()
     session = st.session_state
     
     # Safety check
-    safety = components["safety"].check_message(message)
+    safety = await components["safety"].check_message(message)
     if not safety["safe"]:
         session["step"] = 4
         session["metrics"]["safety_flags"] += 1
@@ -241,7 +242,7 @@ def render_chat_interface(components):
     # User input
     user_input = st.chat_input("Type your message here...")
     if user_input:
-        process_user_message(user_input, components)
+        asyncio.run(process_user_message(user_input, components))
     
     # Safety check
     if st.session_state["metrics"]["safety_flags"] > 0:

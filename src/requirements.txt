@@ -1,6 +1,7 @@
 # Core dependencies
 python-dotenv==1.0.1
 streamlit==1.42.0
+pydantic
 
 # NLP & AI Models
 transformers==4.48.0

@@ -8,6 +8,10 @@ from langchain.schema import SystemMessage, HumanMessage
 from langchain.schema.language_model import BaseLanguageModel
 from langchain.memory import ConversationBufferMemory
 from datetime import datetime
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Define risk indicators
 RISK_INDICATORS = {
@@ -63,7 +67,7 @@ async def assess_risk(text: str) -> Dict[str, Any]:
         }
 
 class SafetyAgent(BaseAgent):
-    def __init__(self, model: BaseLanguageModel):
+    def __init__(self, api_key: str):
         # Create a langchain memory instance
         langchain_memory = ConversationBufferMemory(
             memory_key="chat_history",
@@ -87,7 +91,7 @@ class SafetyAgent(BaseAgent):
         memory = Memory(**memory_dict)
         
         super().__init__(
-            model=model,
+            api_key=api_key,
             name="safety_monitor",
             description="Expert system for mental health crisis assessment and intervention",
             tools=[assess_risk],
@@ -130,41 +134,44 @@ Emergency Protocol: [Yes/No]
 Resources: [relevant crisis resources]""")
         ])
 
-    async def _generate_response(
-        self,
-        input_data: Dict[str, Any],
-        context: Dict[str, Any],
-        tool_results: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def check_message(self, message: str) -> Dict[str, Any]:
+        """
+        Check a message for safety concerns and risk factors
+        
+        Args:
+            message: The message to analyze
+            
+        Returns:
+            Dictionary containing safety assessment results
+        """
         try:
-            # Get risk assessment
-            risk_result = await assess_risk(input_data.get('text', ''))
+            # Get initial risk assessment
+            risk_result = await assess_risk(message)
             
-            # Get message and contexts
-            message = input_data.get('text', '')
-            emotion_data = input_data.get('emotion_data', {})
-            history = context.get('memory', {}).get('last_assessment', {})
-            
-            # Generate LLM analysis
+            # Generate safety analysis using LLM
             llm_response = await self.llm.agenerate_messages([
                 self.safety_prompt.format_messages(
                     message=message,
-                    emotion_data=self._format_emotion_data(emotion_data),
-                    history=self._format_history(history),
+                    emotion_data=self._format_emotion_data({}),  # Empty emotion data for direct checks
+                    history=self._format_history({}),  # Empty history for direct checks
                     risk_assessment=risk_result
                 )[0]
             ])
             
-            # Parse response
+            # Parse and enhance response
             analysis = self._parse_result(llm_response.generations[0][0].text)
             
             # Add metadata
             analysis['timestamp'] = datetime.now().isoformat()
             analysis['confidence'] = self._calculate_confidence(analysis, risk_result)
             
+            # Set safe flag based on risk level
+            analysis['safe'] = analysis['risk_level'] in ['SAFE', 'LOW']
+            
             return analysis
             
         except Exception as e:
+            logger.error(f"Safety check failed: {str(e)}")
             return self._fallback_analysis()
 
     def _parse_result(self, text: str) -> Dict[str, Any]:
