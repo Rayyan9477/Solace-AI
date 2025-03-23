@@ -10,6 +10,7 @@ from agno.knowledge import AgentKnowledge
 from datetime import datetime
 import anthropic
 import httpx
+from langchain.schema.language_model import BaseLanguageModel
 
 class CustomHTTPClient(httpx.Client):
     def __init__(self, *args, **kwargs):
@@ -20,7 +21,7 @@ class CustomHTTPClient(httpx.Client):
 class BaseAgent(Agent):
     def __init__(
         self,
-        api_key: str,
+        model: BaseLanguageModel,
         name: str = "base_agent",
         role: str = "A helpful AI assistant",
         description: str = "A base agent for mental health assistance",
@@ -30,17 +31,6 @@ class BaseAgent(Agent):
         show_tool_calls: bool = True,
         markdown: bool = True
     ):
-        # Create a custom HTTP client for Anthropic
-        http_client = CustomHTTPClient()
-        
-        # Initialize the ChatAnthropic model
-        chat_model = ChatAnthropic(
-            model="claude-3-sonnet-20240229",
-            anthropic_api_key=api_key,
-            temperature=0.7,
-            max_tokens=2000,
-        )
-        
         # Create a default memory if none is provided
         if memory is None:
             # Create a langchain memory instance
@@ -53,6 +43,8 @@ class BaseAgent(Agent):
             
             # Create memory dict for agno Memory
             memory_dict = {
+                "memory": "chat_memory",  # Memory parameter should be a string
+                "storage": "local_storage",  # Storage parameter should be a string
                 "memory_key": "chat_history",
                 "chat_memory": langchain_memory,
                 "input_key": "input",
@@ -66,7 +58,7 @@ class BaseAgent(Agent):
         super().__init__(
             name=name,
             role=role,
-            model=chat_model,
+            model=model,
             description=description,
             tools=tools or [],
             memory=memory,
@@ -74,8 +66,6 @@ class BaseAgent(Agent):
             show_tool_calls=show_tool_calls,
             markdown=markdown
         )
-        
-        self.api_key = api_key
         
     async def process(
         self,

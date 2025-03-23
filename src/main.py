@@ -74,13 +74,11 @@ def initialize_components():
         use_cpu=AppConfig.USE_CPU
     )
     
-    # Initialize the crawler agent with the configuration
-    crawler_config = AppConfig.get_crawler_config()
-    crawler_agent = CrawlerAgent(config=crawler_config)
-    
-    diagnosis_agent = DiagnosisAgent(chat_agent.llm)
-    emotion_agent = EmotionAgent(chat_agent.llm)
-    safety_agent = SafetyAgent(chat_agent.llm)
+    # Initialize agents with the chat model
+    crawler_agent = CrawlerAgent(model=chat_agent.llm)
+    diagnosis_agent = DiagnosisAgent(model=chat_agent.llm)
+    emotion_agent = EmotionAgent(model=chat_agent.llm)
+    safety_agent = SafetyAgent(model=chat_agent.llm)
     search_agent = SearchAgent(vector_store)
     
     memory = ConversationBufferMemory(

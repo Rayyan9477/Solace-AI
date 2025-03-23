@@ -138,7 +138,7 @@ class DiagnosisAgent(BaseAgent):
             description="""An AI agent specialized in analyzing mental health symptoms and providing diagnostic insights.
             Uses evidence-based criteria and maintains clinical accuracy while emphasizing the importance of professional evaluation.""",
             tools=[extract_symptoms, analyze_diagnostic_criteria],
-            memory=Memory(storage={}),  # Initialize with storage parameter
+            memory=Memory(memory="diagnosis_memory", storage="local_storage"),  # Initialize with string values
             knowledge=AgentKnowledge()
         )
         
