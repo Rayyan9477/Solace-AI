@@ -79,7 +79,7 @@ def initialize_components():
     diagnosis_agent = DiagnosisAgent(model=chat_agent.llm)
     emotion_agent = EmotionAgent(model=chat_agent.llm)
     safety_agent = SafetyAgent(model=chat_agent.llm)
-    search_agent = SearchAgent(vector_store)
+    search_agent = SearchAgent(model=chat_agent.llm)
     
     memory = ConversationBufferMemory(
         memory_key="chat_history",

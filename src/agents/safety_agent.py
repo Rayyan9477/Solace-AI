@@ -5,6 +5,8 @@ from agno.memory import Memory
 from agno.knowledge import AgentKnowledge
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import SystemMessage, HumanMessage
+from langchain.schema.language_model import BaseLanguageModel
+from langchain.memory import ConversationBufferMemory
 from datetime import datetime
 
 # Define risk indicators
@@ -61,13 +63,35 @@ async def assess_risk(text: str) -> Dict[str, Any]:
         }
 
 class SafetyAgent(BaseAgent):
-    def __init__(self, api_key: str):
+    def __init__(self, model: BaseLanguageModel):
+        # Create a langchain memory instance
+        langchain_memory = ConversationBufferMemory(
+            memory_key="chat_history",
+            return_messages=True,
+            input_key="input",
+            output_key="output"
+        )
+        
+        # Create memory dict for agno Memory
+        memory_dict = {
+            "memory": "chat_memory",  # Memory parameter should be a string
+            "storage": "local_storage",  # Storage parameter should be a string
+            "memory_key": "chat_history",
+            "chat_memory": langchain_memory,
+            "input_key": "input",
+            "output_key": "output",
+            "return_messages": True
+        }
+        
+        # Initialize Memory with the dictionary
+        memory = Memory(**memory_dict)
+        
         super().__init__(
-            api_key=api_key,
+            model=model,
             name="safety_monitor",
             description="Expert system for mental health crisis assessment and intervention",
             tools=[assess_risk],
-            memory=Memory(),
+            memory=memory,
             knowledge=AgentKnowledge()
         )
         

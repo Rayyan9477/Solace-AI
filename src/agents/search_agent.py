@@ -1,18 +1,13 @@
-from langchain_community.chat_models import ChatAnthropic
 from langchain.prompts import ChatPromptTemplate
 from langchain.chains import LLMChain
 from langchain_core.messages import SystemMessage, HumanMessage
+from langchain.schema.language_model import BaseLanguageModel
 from typing import Dict, List, Optional
 import json
 
 class SearchAgent:
-    def __init__(self, api_key: str):
-        self.llm = ChatAnthropic(
-            model="claude-3-sonnet-20240229",
-            anthropic_api_key=api_key,
-            temperature=0.3,
-            max_tokens=1000
-        )
+    def __init__(self, model: BaseLanguageModel):
+        self.llm = model
         
         self.search_prompt = ChatPromptTemplate.from_messages([
             SystemMessage(content="""You are an expert in mental health information retrieval.

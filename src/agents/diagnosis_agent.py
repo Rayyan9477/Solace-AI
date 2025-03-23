@@ -170,6 +170,57 @@ Recommendations: [professional and self-help suggestions]
 Additional Considerations: [important factors to consider]""")
         ])
 
+    def diagnose(self, symptoms: List[str]) -> str:
+        """Generate a diagnostic assessment for the given symptoms"""
+        try:
+            # Extract symptoms using spaCy
+            doc = nlp(" ".join(symptoms))
+            entities = [
+                ent.text for ent in doc.ents 
+                if ent.label_ in ["SYMPTOM", "CONDITION", "BEHAVIOR"]
+            ]
+            
+            # Classify symptoms
+            symptom_text = " ".join(entities)
+            diagnostic_categories = [
+                "Major Depressive Disorder",
+                "Generalized Anxiety Disorder",
+                "Bipolar Disorder",
+                "Post-Traumatic Stress Disorder",
+                "Social Anxiety Disorder",
+                "Panic Disorder"
+            ]
+            
+            if symptom_text:
+                classifications = diagnostic_classifier(
+                    symptom_text,
+                    diagnostic_categories,
+                    multi_label=True
+                )
+                
+                potential_diagnoses = [
+                    {
+                        'condition': label,
+                        'confidence': score,
+                        'severity': _estimate_severity(score)
+                    }
+                    for label, score in zip(classifications['labels'], classifications['scores'])
+                    if score > 0.3
+                ]
+            else:
+                potential_diagnoses = []
+            
+            # Format the response
+            if potential_diagnoses:
+                # Sort by confidence and get the highest confidence diagnosis
+                best_diagnosis = max(potential_diagnoses, key=lambda x: x['confidence'])
+                return f"{best_diagnosis['condition']} ({best_diagnosis['severity']} severity)"
+            else:
+                return "No specific diagnosis available"
+                
+        except Exception as e:
+            return "Unable to complete diagnostic assessment"
+
     async def generate_response(
         self,
         query: str,
