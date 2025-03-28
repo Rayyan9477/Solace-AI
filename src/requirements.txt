@@ -1,7 +1,7 @@
 # Core dependencies
 python-dotenv==1.0.1
 streamlit==1.42.0
-pydantic
+# pydantic<2.0.0 
 
 # NLP & AI Models
 transformers==4.48.0
@@ -42,8 +42,6 @@ pandas==2.2.3
 scikit-learn==1.6.1
 scipy==1.15.1
 spacy==3.7.2
-pydantic==2.10.5
-pydantic-settings==2.7.1
 dataclasses-json==0.6.7
 
 # Utilities

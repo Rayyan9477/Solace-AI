@@ -1,5 +1,5 @@
 from typing import Dict, Any, Optional, List
-from langchain_anthropic import ChatAnthropic
+from langchain_anthropic.chat_models import ChatAnthropicMessages
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain.memory import ConversationBufferMemory
 import agno

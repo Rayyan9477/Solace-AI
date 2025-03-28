@@ -1,5 +1,6 @@
 from typing import Optional, Dict
 from langchain_anthropic import ChatAnthropic
+from langchain_anthropic.chat_models import ChatAnthropicMessages
 from langchain.prompts import ChatPromptTemplate
 from langchain.chains import LLMChain
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -18,8 +19,8 @@ class ChatAgent:
         # Create a custom HTTP client for Anthropic
         http_client = CustomHTTPClient()
         
-        # Initialize the ChatAnthropic model
-        self.llm = ChatAnthropic(
+        # Initialize the ChatAnthropicMessages model
+        self.llm = ChatAnthropicMessages(
             model=model_name,
             anthropic_api_key=AppConfig.ANTHROPIC_API_KEY,
             max_tokens=AppConfig.MAX_RESPONSE_TOKENS,
