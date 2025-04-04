@@ -242,7 +242,21 @@ def render_chat_interface(components):
     # User input
     user_input = st.chat_input("Type your message here...")
     if user_input:
-        asyncio.run(process_user_message(user_input, components))
+        # Fix for asyncio error - use a synchronous wrapper for async functions
+        def run_async_process():
+            # Create a new event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(process_user_message(user_input, components))
+            finally:
+                loop.close()
+        
+        # Run the async process in a separate thread to avoid blocking Streamlit
+        import threading
+        thread = threading.Thread(target=run_async_process)
+        thread.start()
+        thread.join()  # Wait for the thread to complete
     
     # Safety check
     if st.session_state["metrics"]["safety_flags"] > 0:

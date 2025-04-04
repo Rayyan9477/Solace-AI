@@ -11,6 +11,9 @@ from datetime import datetime
 import anthropic
 import httpx
 from langchain.schema.language_model import BaseLanguageModel
+import logging
+
+logger = logging.getLogger(__name__)
 
 class CustomHTTPClient(httpx.Client):
     def __init__(self, *args, **kwargs):
@@ -55,6 +58,9 @@ class BaseAgent(Agent):
             # Initialize Memory with the dictionary
             memory = Memory(**memory_dict)
         
+        # Store the model for direct access
+        self.llm = model
+        
         super().__init__(
             name=name,
             role=role,
@@ -78,13 +84,24 @@ class BaseAgent(Agent):
             full_context = await self._get_context(query, context or {})
             
             # Generate response using agent framework
-            response = await self.generate_response(
-                query,
-                context=full_context
-            )
+            try:
+                response = await self.generate_response(
+                    query,
+                    context=full_context
+                )
+            except (AttributeError, TypeError) as e:
+                # Fallback for LLMs that don't support async generation
+                logger.warning(f"Async generation not supported: {str(e)}, using fallback method")
+                response = self.generate_response_sync(
+                    query,
+                    context=full_context
+                )
             
             # Update memory
-            await self._update_memory(query, response)
+            try:
+                await self._update_memory(query, response)
+            except Exception as e:
+                logger.warning(f"Failed to update memory: {str(e)}")
             
             return {
                 'response': response,
@@ -96,6 +113,7 @@ class BaseAgent(Agent):
             }
             
         except Exception as e:
+            logger.error(f"Error processing query: {str(e)}")
             return {
                 'error': str(e),
                 'timestamp': datetime.now().isoformat()
@@ -144,3 +162,20 @@ class BaseAgent(Agent):
             confidence *= 0.7
             
         return confidence 
+
+    def generate_response_sync(
+        self,
+        query: str,
+        context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Synchronous version of generate_response for fallback"""
+        try:
+            # Simple implementation for fallback
+            if hasattr(self.llm, 'generate'):
+                response = self.llm.generate([query])
+                return response.generations[0][0].text
+            else:
+                return "I'm having trouble generating a response right now."
+        except Exception as e:
+            logger.error(f"Error in sync response generation: {str(e)}")
+            return "I'm having trouble generating a response right now." 

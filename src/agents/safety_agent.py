@@ -67,7 +67,7 @@ async def assess_risk(text: str) -> Dict[str, Any]:
         }
 
 class SafetyAgent(BaseAgent):
-    def __init__(self, api_key: str):
+    def __init__(self, model: BaseLanguageModel):
         # Create a langchain memory instance
         langchain_memory = ConversationBufferMemory(
             memory_key="chat_history",
@@ -91,7 +91,7 @@ class SafetyAgent(BaseAgent):
         memory = Memory(**memory_dict)
         
         super().__init__(
-            api_key=api_key,
+            model=model,
             name="safety_monitor",
             description="Expert system for mental health crisis assessment and intervention",
             tools=[assess_risk],
@@ -149,17 +149,32 @@ Resources: [relevant crisis resources]""")
             risk_result = await assess_risk(message)
             
             # Generate safety analysis using LLM
-            llm_response = await self.llm.agenerate_messages([
-                self.safety_prompt.format_messages(
+            try:
+                # Try to use agenerate_messages if available
+                llm_response = await self.llm.agenerate_messages([
+                    self.safety_prompt.format_messages(
+                        message=message,
+                        emotion_data=self._format_emotion_data({}),  # Empty emotion data for direct checks
+                        history=self._format_history({}),  # Empty history for direct checks
+                        risk_assessment=risk_result
+                    )[0]
+                ])
+                
+                # Parse and enhance response
+                analysis = self._parse_result(llm_response.generations[0][0].text)
+            except (AttributeError, TypeError):
+                # Fallback for LLMs that don't support agenerate_messages
+                logger.warning("LLM does not support agenerate_messages, using fallback method")
+                messages = self.safety_prompt.format_messages(
                     message=message,
-                    emotion_data=self._format_emotion_data({}),  # Empty emotion data for direct checks
-                    history=self._format_history({}),  # Empty history for direct checks
+                    emotion_data=self._format_emotion_data({}),
+                    history=self._format_history({}),
                     risk_assessment=risk_result
-                )[0]
-            ])
-            
-            # Parse and enhance response
-            analysis = self._parse_result(llm_response.generations[0][0].text)
+                )
+                
+                # Use a synchronous approach as fallback
+                response = self.llm.generate([messages[0]])
+                analysis = self._parse_result(response.generations[0][0].text)
             
             # Add metadata
             analysis['timestamp'] = datetime.now().isoformat()

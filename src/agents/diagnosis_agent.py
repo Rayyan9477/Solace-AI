@@ -9,6 +9,7 @@ from langchain.schema.language_model import BaseLanguageModel
 import spacy
 from transformers import pipeline
 from datetime import datetime
+import logging
 
 # Load models
 nlp = spacy.load("en_core_web_sm")
@@ -22,6 +23,8 @@ diagnostic_classifier = pipeline(
     model="facebook/bart-large-mnli",
     device=-1
 )
+
+logger = logging.getLogger(__name__)
 
 @tool("symptom_extraction")
 async def extract_symptoms(text: str) -> Dict[str, Any]:
@@ -221,48 +224,55 @@ Additional Considerations: [important factors to consider]""")
         except Exception as e:
             return "Unable to complete diagnostic assessment"
 
-    async def generate_response(
+    async def _generate_response(
         self,
-        query: str,
-        context: Optional[Dict[str, Any]] = None
+        input_data: Dict[str, Any],
+        context: Dict[str, Any],
+        tool_results: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Generate diagnostic assessment"""
         try:
             # Extract symptoms
-            symptom_data = await extract_symptoms(query)
+            symptoms_result = await extract_symptoms(input_data.get('text', ''))
             
-            # Analyze diagnostic criteria
-            diagnostic_data = await analyze_diagnostic_criteria(
-                symptom_data['extracted_symptoms']
-            )
+            # Get message and history
+            message = input_data.get('text', '')
+            history = context.get('memory', {}).get('last_diagnosis', {})
             
-            # Get history
-            history = context.get('memory', {}).get('last_diagnosis', {}) if context else {}
-            
-            # Generate diagnostic assessment
-            llm_response = await self.model.agenerate_messages([
-                self.diagnosis_prompt.format_messages(
-                    symptoms=symptom_data['extracted_symptoms'],
-                    symptom_categories=symptom_data['symptom_categories'],
-                    diagnostic_matches=diagnostic_data['potential_diagnoses'],
-                    history=self._format_history(history)
-                )[0]
-            ])
-            
-            # Parse response
-            analysis = self._parse_result(llm_response.generations[0][0].text)
+            # Generate LLM analysis
+            try:
+                # Try to use agenerate_messages if available
+                llm_response = await self.model.agenerate_messages([
+                    self.diagnosis_prompt.format_messages(
+                        message=message,
+                        history=self._format_history(history),
+                        symptoms=symptoms_result
+                    )[0]
+                ])
+                
+                # Parse response
+                parsed = self._parse_result(llm_response.generations[0][0].text)
+            except (AttributeError, TypeError):
+                # Fallback for LLMs that don't support agenerate_messages
+                logger.warning("LLM does not support agenerate_messages, using fallback method")
+                messages = self.diagnosis_prompt.format_messages(
+                    message=message,
+                    history=self._format_history(history),
+                    symptoms=symptoms_result
+                )
+                
+                # Use a synchronous approach as fallback
+                response = self.model.generate([messages[0]])
+                parsed = self._parse_result(response.generations[0][0].text)
             
             # Add metadata
-            analysis['timestamp'] = datetime.now().isoformat()
-            analysis['confidence'] = self._calculate_confidence(
-                analysis,
-                diagnostic_data['potential_diagnoses']
-            )
+            parsed['confidence'] = self._calculate_confidence(parsed, symptoms_result)
+            parsed['timestamp'] = input_data.get('timestamp')
             
-            return analysis
+            return parsed
             
         except Exception as e:
-            return self._fallback_analysis()
+            logger.error(f"Error generating diagnosis response: {str(e)}")
+            return self._fallback_analysis(input_data.get('text', ''))
 
     def _parse_result(self, text: str) -> Dict[str, Any]:
         """Parse the structured diagnostic assessment"""
@@ -331,7 +341,7 @@ Additional Considerations: [important factors to consider]""")
 - Conditions: {', '.join(history.get('potential_conditions', []))}
 - Severity: {history.get('severity_level', 'unknown')}"""
 
-    def _fallback_analysis(self) -> Dict[str, Any]:
+    def _fallback_analysis(self, text: str) -> Dict[str, Any]:
         """Conservative fallback analysis"""
         return {
             'primary_concerns': ['Unable to complete full diagnostic assessment'],

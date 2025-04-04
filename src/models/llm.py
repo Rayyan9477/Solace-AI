@@ -78,11 +78,18 @@ class AgnoLLM(LLMProvider):
         self.config = model_config or AppConfig.LLM_CONFIG
         self.device = "cuda" if torch.cuda.is_available() and not self.config.get("use_cpu", True) else "cpu"
         
-        # Initialize model and tokenizer
-        self.tokenizer = self._load_tokenizer()
-        self.model = self._load_model()
-        self.pipeline = self._create_pipeline()
-        
+        # Initialize model and tokenizer with error handling
+        try:
+            self.tokenizer = self._load_tokenizer()
+            self.model = self._load_model()
+            self.pipeline = self._create_pipeline()
+        except Exception as e:
+            logger.error(f"Failed to initialize AgnoLLM: {str(e)}")
+            # Set fallback values to prevent errors
+            self.tokenizer = None
+            self.model = None
+            self.pipeline = None
+            
     def _load_tokenizer(self):
         """Load tokenizer with safety checks"""
         try:
@@ -97,12 +104,27 @@ class AgnoLLM(LLMProvider):
     def _load_model(self):
         """Load model with memory optimization"""
         try:
-            return AutoModelForCausalLM.from_pretrained(
-                self.config["model"],
-                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                low_cpu_mem_usage=True,
-                trust_remote_code=False
-            ).to(self.device)
+            # Use a try-except block to handle potential PyTorch class instantiation errors
+            try:
+                return AutoModelForCausalLM.from_pretrained(
+                    self.config["model"],
+                    device_map=self.device,
+                    torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                    low_cpu_mem_usage=True
+                )
+            except RuntimeError as e:
+                if "Tried to instantiate class" in str(e):
+                    # Handle the specific PyTorch class instantiation error
+                    logger.warning(f"PyTorch class instantiation error: {str(e)}")
+                    # Try an alternative approach
+                    return AutoModelForCausalLM.from_pretrained(
+                        self.config["model"],
+                        device_map="auto",
+                        torch_dtype=torch.float32,
+                        low_cpu_mem_usage=True
+                    )
+                else:
+                    raise
         except Exception as e:
             logger.error(f"Failed to load model: {str(e)}")
             raise RuntimeError("Model initialization failed")

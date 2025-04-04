@@ -8,9 +8,13 @@ from langchain.prompts import ChatPromptTemplate
 from langchain.schema import SystemMessage, HumanMessage
 from langchain.schema.language_model import BaseLanguageModel
 from langchain.memory import ConversationBufferMemory
+import logging
 
 # Initialize VADER sentiment analyzer
 sentiment_analyzer = SentimentIntensityAnalyzer()
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 @tool(name="emotion_analysis", description="Analyzes emotional content in text using VADER sentiment analysis")
 async def analyze_emotion(text: str) -> Dict[str, Any]:
@@ -114,16 +118,30 @@ Pattern Changes: [changes from previous state]""")
             history = context.get('memory', {}).get('last_analysis', {})
             
             # Generate LLM analysis
-            llm_response = await self.llm.agenerate_messages([
-                self.prompt_template.format_messages(
+            try:
+                # Try to use agenerate_messages if available
+                llm_response = await self.llm.agenerate_messages([
+                    self.prompt_template.format_messages(
+                        message=message,
+                        history=self._format_history(history),
+                        sentiment=sentiment_result
+                    )[0]
+                ])
+                
+                # Parse response
+                parsed = self._parse_result(llm_response.generations[0][0].text)
+            except (AttributeError, TypeError):
+                # Fallback for LLMs that don't support agenerate_messages
+                logger.warning("LLM does not support agenerate_messages, using fallback method")
+                messages = self.prompt_template.format_messages(
                     message=message,
                     history=self._format_history(history),
                     sentiment=sentiment_result
-                )[0]
-            ])
-            
-            # Parse response
-            parsed = self._parse_result(llm_response.generations[0][0].text)
+                )
+                
+                # Use a synchronous approach as fallback
+                response = self.llm.generate([messages[0]])
+                parsed = self._parse_result(response.generations[0][0].text)
             
             # Add metadata
             parsed['confidence'] = self._calculate_confidence(parsed, sentiment_result)
@@ -132,6 +150,7 @@ Pattern Changes: [changes from previous state]""")
             return parsed
             
         except Exception as e:
+            logger.error(f"Error generating emotion response: {str(e)}")
             return self._fallback_analysis(input_data.get('text', ''))
 
     def _parse_result(self, text: str) -> Dict[str, Any]:

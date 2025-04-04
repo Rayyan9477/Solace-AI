@@ -77,6 +77,8 @@ ipython_config.py
 # Environments
 .env
 .venv
+myenv/
+.myenv
 new_venv/
 env/
 venv/
