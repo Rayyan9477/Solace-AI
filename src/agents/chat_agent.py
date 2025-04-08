@@ -1,12 +1,19 @@
-from typing import Optional, Dict
+from typing import Optional, Dict, Any, List
 from langchain_anthropic import ChatAnthropic
 from langchain_anthropic.chat_models import ChatAnthropicMessages
 from langchain.prompts import ChatPromptTemplate
-from langchain.chains import LLMChain
-from langchain_core.messages import SystemMessage, HumanMessage
-from config.settings import AppConfig
+from langchain.schema import SystemMessage, HumanMessage
+from langchain.schema.language_model import BaseLanguageModel
+from langchain.memory import ConversationBufferMemory
+from agno.memory import Memory
+from agno.knowledge import AgentKnowledge
+from .base_agent import BaseAgent
 import anthropic
 import httpx
+import logging
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 class CustomHTTPClient(httpx.Client):
     def __init__(self, *args, **kwargs):
@@ -14,76 +21,156 @@ class CustomHTTPClient(httpx.Client):
         kwargs.pop("proxies", None)
         super().__init__(*args, **kwargs)
 
-class ChatAgent:
-    def __init__(self, model_name: str = "claude-3-sonnet-20240229", use_cpu: bool = False):
-        # Create a custom HTTP client for Anthropic
-        http_client = CustomHTTPClient()
-        
-        # Initialize the ChatAnthropicMessages model
-        self.llm = ChatAnthropicMessages(
-            model=model_name,
-            anthropic_api_key=AppConfig.ANTHROPIC_API_KEY,
-            max_tokens=AppConfig.MAX_RESPONSE_TOKENS,
-            temperature=0.7,
+class ChatAgent(BaseAgent):
+    def __init__(self, model: BaseLanguageModel):
+        # Create a langchain memory instance
+        langchain_memory = ConversationBufferMemory(
+            memory_key="chat_history",
+            return_messages=True,
+            input_key="input",
+            output_key="output"
         )
         
-        self.prompt_template = ChatPromptTemplate.from_messages([
-            SystemMessage(content="""You are a compassionate mental health counselor working as part of an AI agent team. 
-Your role is to provide empathetic, evidence-based support while considering:
-1. The user's emotional state and intensity
-2. Any safety concerns
-3. Relevant context from other agents
-4. Treatment history and preferences
+        # Create memory dict for agno Memory
+        memory_dict = {
+            "memory": "chat_memory",  # Memory parameter should be a string
+            "storage": "local_storage",  # Storage parameter should be a string
+            "memory_key": "chat_history",
+            "chat_memory": langchain_memory,
+            "input_key": "input",
+            "output_key": "output",
+            "return_messages": True
+        }
+        
+        # Initialize Memory with the dictionary
+        memory = Memory(**memory_dict)
+        
+        super().__init__(
+            model=model,
+            name="chat_assistant",
+            description="Supportive mental health chat assistant",
+            tools=[],
+            memory=memory,
+            knowledge=AgentKnowledge()
+        )
+        
+        self.chat_prompt = ChatPromptTemplate.from_messages([
+            SystemMessage(content="""You are a supportive mental health assistant.
+Your role is to provide empathetic, non-judgmental support while:
+1. Maintaining professional boundaries
+2. Offering evidence-based information
+3. Encouraging professional help when appropriate
+4. Avoiding diagnostic statements
+5. Focusing on emotional support and coping strategies
 
 Guidelines:
-- Respond with genuine empathy and validation
-- Provide practical, evidence-based suggestions
-- Maintain a conversational, non-clinical tone
-- Prioritize user safety above all else
-- Collaborate with other agents' insights
-- Be transparent about AI limitations"""),
-            HumanMessage(content="""Context: {context}
-Emotional State: {emotion}
-Safety Assessment: {safety}
-Search Results: {search_results}
-Diagnosis Info: {diagnosis}
+- Be warm and empathetic
+- Validate feelings without reinforcing negative patterns
+- Suggest practical coping strategies
+- Encourage professional help when appropriate
+- Maintain a supportive, non-judgmental tone"""),
+            HumanMessage(content="""User Message: {message}
+Emotional Context: {emotion_data}
+Safety Context: {safety_data}
+Previous Conversation: {history}
 
-User Query: {question}""")
+Provide a supportive, empathetic response that addresses the user's emotional needs while maintaining appropriate boundaries.""")
         ])
-        
-        self.chain = LLMChain(llm=self.llm, prompt=self.prompt_template)
     
-    def generate_response(self, 
-                         context: str, 
-                         question: str, 
-                         emotion: Dict, 
-                         safety: Dict,
-                         search_results: str = "",
-                         diagnosis: str = "") -> str:
+    async def generate_response(self, message: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Generate a supportive response to a user message
+        
+        Args:
+            message: The user's message
+            context: Additional context including emotion and safety data
+            
+        Returns:
+            Dictionary containing the response and metadata
+        """
         try:
-            # Format emotional state
-            emotion_str = f"{emotion.get('primary_emotion', 'neutral')} (intensity: {emotion.get('intensity', 5)})"
-            if emotion.get('triggers'):
-                emotion_str += f"\nTriggers: {', '.join(emotion.get('triggers'))}"
+            # Get conversation history
+            history = await self.memory.get("chat_history", [])
             
-            # Format safety concerns
-            safety_str = "Safety Concerns:\n"
-            if not safety.get('safe', True):
-                safety_str += "- " + safety.get('concerns', ['Potential risk detected'])[0]
-                if safety.get('recommendations'):
-                    safety_str += f"\nRecommendations: {safety.get('recommendations')}"
-            else:
-                safety_str += "No immediate safety concerns identified"
-
-            response = self.chain.run({
-                "context": context,
-                "question": question,
-                "emotion": emotion_str,
-                "safety": safety_str,
-                "search_results": search_results,
-                "diagnosis": diagnosis
-            })
+            # Format context data
+            emotion_data = self._format_emotion_data(context.get("emotion", {})) if context else "No emotional data available"
+            safety_data = self._format_safety_data(context.get("safety", {})) if context else "No safety data available"
             
-            return response.strip()
+            # Generate response
+            try:
+                # Try to use agenerate_messages if available
+                llm_response = await self.llm.agenerate_messages([
+                    self.chat_prompt.format_messages(
+                        message=message,
+                        emotion_data=emotion_data,
+                        safety_data=safety_data,
+                        history=self._format_history(history)
+                    )[0]
+                ])
+                
+                response_text = llm_response.generations[0][0].text
+            except (AttributeError, TypeError):
+                # Fallback for LLMs that don't support agenerate_messages
+                logger.warning("LLM does not support agenerate_messages, using fallback method")
+                messages = self.chat_prompt.format_messages(
+                    message=message,
+                    emotion_data=emotion_data,
+                    safety_data=safety_data,
+                    history=self._format_history(history)
+                )
+                
+                # Use a synchronous approach as fallback
+                response = self.llm.generate([messages[0]])
+                response_text = response.generations[0][0].text
+            
+            # Update memory
+            await self.memory.add("chat_history", [
+                {"role": "user", "content": message},
+                {"role": "assistant", "content": response_text}
+            ])
+            
+            return {
+                "response": response_text,
+                "timestamp": datetime.now().isoformat()
+            }
+            
         except Exception as e:
-            return f"I apologize, but I'm having trouble generating a response right now. Error: {str(e)}"
+            logger.error(f"Error generating chat response: {str(e)}")
+            return {
+                "response": "I'm having trouble generating a response right now. Please try again later.",
+                "error": str(e)
+            }
+    
+    def _format_emotion_data(self, emotion_data: Dict[str, Any]) -> str:
+        """Format emotional context for the prompt"""
+        if not emotion_data:
+            return "No emotional data available"
+            
+        return f"""Emotional State:
+- Primary: {emotion_data.get('primary_emotion', 'unknown')}
+- Secondary: {', '.join(emotion_data.get('secondary_emotions', []))}
+- Intensity: {emotion_data.get('intensity', 'unknown')}
+- Clinical Indicators: {', '.join(emotion_data.get('clinical_indicators', []))}"""
+    
+    def _format_safety_data(self, safety_data: Dict[str, Any]) -> str:
+        """Format safety context for the prompt"""
+        if not safety_data:
+            return "No safety data available"
+            
+        return f"""Safety Assessment:
+- Risk Level: {safety_data.get('risk_level', 'unknown')}
+- Concerns: {', '.join(safety_data.get('concerns', []))}
+- Warning Signs: {', '.join(safety_data.get('warning_signs', []))}
+- Emergency Protocol: {'Yes' if safety_data.get('emergency_protocol') else 'No'}"""
+    
+    def _format_history(self, history: List[Dict[str, Any]]) -> str:
+        """Format conversation history for the prompt"""
+        if not history:
+            return "No previous conversation history"
+            
+        formatted_history = []
+        for i, msg in enumerate(history[-5:]):  # Limit to last 5 messages
+            role = "User" if msg.get("role") == "user" else "Assistant"
+            formatted_history.append(f"{role}: {msg.get('content', '')}")
+            
+        return "\n".join(formatted_history)

@@ -9,6 +9,7 @@ from langchain.schema import SystemMessage, HumanMessage
 from langchain.schema.language_model import BaseLanguageModel
 from langchain.memory import ConversationBufferMemory
 import logging
+from datetime import datetime
 
 # Initialize VADER sentiment analyzer
 sentiment_analyzer = SentimentIntensityAnalyzer()
@@ -103,26 +104,29 @@ Clinical Indicators: [relevant observations]
 Pattern Changes: [changes from previous state]""")
         ])
 
-    async def _generate_response(
-        self,
-        input_data: Dict[str, Any],
-        context: Dict[str, Any],
-        tool_results: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def analyze_emotion(self, text: str) -> Dict[str, Any]:
+        """
+        Analyze the emotional content of a message
+        
+        Args:
+            text: The text to analyze
+            
+        Returns:
+            Dictionary containing emotional analysis
+        """
         try:
             # Get sentiment analysis
-            sentiment_result = await analyze_emotion(input_data.get('text', ''))
+            sentiment_result = await analyze_emotion(text)
             
-            # Get message and history
-            message = input_data.get('text', '')
-            history = context.get('memory', {}).get('last_analysis', {})
+            # Get history
+            history = await self.memory.get("last_analysis", {})
             
             # Generate LLM analysis
             try:
                 # Try to use agenerate_messages if available
                 llm_response = await self.llm.agenerate_messages([
                     self.prompt_template.format_messages(
-                        message=message,
+                        message=text,
                         history=self._format_history(history),
                         sentiment=sentiment_result
                     )[0]
@@ -134,7 +138,7 @@ Pattern Changes: [changes from previous state]""")
                 # Fallback for LLMs that don't support agenerate_messages
                 logger.warning("LLM does not support agenerate_messages, using fallback method")
                 messages = self.prompt_template.format_messages(
-                    message=message,
+                    message=text,
                     history=self._format_history(history),
                     sentiment=sentiment_result
                 )
@@ -145,13 +149,16 @@ Pattern Changes: [changes from previous state]""")
             
             # Add metadata
             parsed['confidence'] = self._calculate_confidence(parsed, sentiment_result)
-            parsed['timestamp'] = input_data.get('timestamp')
+            parsed['timestamp'] = datetime.now().isoformat()
+            
+            # Update memory
+            await self.memory.add("last_analysis", parsed)
             
             return parsed
             
         except Exception as e:
-            logger.error(f"Error generating emotion response: {str(e)}")
-            return self._fallback_analysis(input_data.get('text', ''))
+            logger.error(f"Error analyzing emotion: {str(e)}")
+            return self._fallback_analysis(text)
 
     def _parse_result(self, text: str) -> Dict[str, Any]:
         """Parse the structured output from Claude"""

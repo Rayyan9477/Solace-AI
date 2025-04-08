@@ -95,11 +95,21 @@ class AgnoLLM(LLMProvider):
         try:
             return AutoTokenizer.from_pretrained(
                 self.config["model"],
-                trust_remote_code=False
+                trust_remote_code=True,  # Add trust_remote_code parameter
+                padding_side="left"  # Add padding_side parameter
             )
         except Exception as e:
             logger.error(f"Failed to load tokenizer: {str(e)}")
-            raise RuntimeError("Tokenizer initialization failed")
+            # Try with a fallback model if the primary one fails
+            try:
+                logger.warning("Attempting to load fallback tokenizer")
+                return AutoTokenizer.from_pretrained(
+                    "gpt2",  # Use a simple fallback model
+                    trust_remote_code=True
+                )
+            except Exception as fallback_error:
+                logger.error(f"Fallback tokenizer also failed: {str(fallback_error)}")
+                raise RuntimeError("Tokenizer initialization failed")
             
     def _load_model(self):
         """Load model with memory optimization"""
@@ -108,20 +118,22 @@ class AgnoLLM(LLMProvider):
             try:
                 return AutoModelForCausalLM.from_pretrained(
                     self.config["model"],
-                    device_map=self.device,
-                    torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                    low_cpu_mem_usage=True
+                    device_map="auto",  # Use auto instead of specific device
+                    torch_dtype=torch.float32,  # Use float32 for better compatibility
+                    low_cpu_mem_usage=True,
+                    trust_remote_code=True  # Add trust_remote_code parameter
                 )
             except RuntimeError as e:
                 if "Tried to instantiate class" in str(e):
                     # Handle the specific PyTorch class instantiation error
                     logger.warning(f"PyTorch class instantiation error: {str(e)}")
-                    # Try an alternative approach
+                    # Try an alternative approach with more conservative settings
                     return AutoModelForCausalLM.from_pretrained(
                         self.config["model"],
-                        device_map="auto",
+                        device_map="cpu",  # Force CPU
                         torch_dtype=torch.float32,
-                        low_cpu_mem_usage=True
+                        low_cpu_mem_usage=True,
+                        trust_remote_code=True
                     )
                 else:
                     raise
@@ -146,7 +158,24 @@ class AgnoLLM(LLMProvider):
             )
         except Exception as e:
             logger.error(f"Failed to create pipeline: {str(e)}")
-            raise RuntimeError("Pipeline creation failed")
+            # Try with more conservative settings
+            try:
+                logger.warning("Attempting to create pipeline with conservative settings")
+                return pipeline(
+                    "text-generation",
+                    model=self.model,
+                    tokenizer=self.tokenizer,
+                    device=-1,  # Force CPU
+                    max_new_tokens=1000,  # Reduce max tokens
+                    do_sample=False,  # Disable sampling
+                    temperature=0.5,  # Lower temperature
+                    top_p=0.8,
+                    repetition_penalty=1.0,
+                    return_full_text=False
+                )
+            except Exception as fallback_error:
+                logger.error(f"Fallback pipeline also failed: {str(fallback_error)}")
+                raise RuntimeError("Pipeline creation failed")
             
     async def generate(
         self,
@@ -156,6 +185,20 @@ class AgnoLLM(LLMProvider):
     ) -> Dict[str, Any]:
         """Generate response with safety checks and metadata"""
         try:
+            # Check if pipeline is available
+            if not self.pipeline:
+                logger.warning("Pipeline not available, using fallback response")
+                return {
+                    'response': "I apologize, but I'm having trouble generating a response right now. Please try again later.",
+                    'metadata': {
+                        'model': self.config["model"],
+                        'token_usage': {'prompt_tokens': 0, 'response_tokens': 0, 'total_tokens': 0},
+                        'safety_flags': {},
+                        'timestamp': self.token_manager.get_timestamp(),
+                        'fallback': True
+                    }
+                }
+                
             # Apply safety filters to prompt
             safe_prompt = self._apply_safety_filters(prompt)
             

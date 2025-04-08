@@ -30,7 +30,7 @@ class AppConfig:
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
     
     # LLM settings
-    MODEL_NAME = os.getenv("MODEL_NAME", "claude-3-sonnet-20240229")
+    MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Llama-2-7b-chat-hf")
     USE_CPU = os.getenv("USE_CPU", "True").lower() == "true"
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
     MAX_RESPONSE_TOKENS = 2000
