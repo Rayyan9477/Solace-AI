@@ -29,20 +29,44 @@ class AppConfig:
     PROMETHEUS_ENABLED = os.getenv("PROMETHEUS_ENABLED", "False").lower() == "true"
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
     
-    # LLM settings
-    MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Llama-2-7b-chat-hf")
-    USE_CPU = os.getenv("USE_CPU", "True").lower() == "true"
-    ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-    MAX_RESPONSE_TOKENS = 2000
-    
+    # Model settings
+    MODEL_NAME = "gemini-2.5-pro"
+    GEMINI_API_KEY = "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"
+    USE_CPU = True  # Always true for cloud-based models
+    MAX_RESPONSE_TOKENS = int(os.getenv("MAX_RESPONSE_TOKENS", "2000"))
+
+    # LLM Configuration
     LLM_CONFIG = {
         "model": MODEL_NAME,
-        "use_cpu": USE_CPU,
+        "api_key": GEMINI_API_KEY,
+        "temperature": float(os.getenv("TEMPERATURE", "0.7")),
+        "top_p": float(os.getenv("TOP_P", "0.9")),
+        "top_k": int(os.getenv("TOP_K", "50")),
         "max_tokens": MAX_RESPONSE_TOKENS,
-        "temperature": 0.7,
-        "top_p": 0.9,
-        "frequency_penalty": 0.0,
-        "presence_penalty": 0.0
+        "generation_config": {
+            "temperature": 0.7,
+            "top_p": 0.9,
+            "top_k": 50,
+            "max_output_tokens": MAX_RESPONSE_TOKENS,
+        },
+        "safety_settings": [
+            {
+                "category": "HARM_CATEGORY_HARASSMENT",
+                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+            },
+            {
+                "category": "HARM_CATEGORY_HATE_SPEECH",
+                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+            },
+            {
+                "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+            },
+            {
+                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+            }
+        ]
     }
     
     # Embedding Configuration
@@ -63,10 +87,33 @@ class AppConfig:
     
     # Safety settings
     SAFETY_CONFIG = {
-        "max_toxicity": 0.7,
-        "blocked_categories": ["harmful", "unsafe", "toxic"],
-        "require_human_review": True
+        "max_toxicity": float(os.getenv("MAX_TOXICITY", "0.7")),
+        "blocked_categories": [
+            "harmful",
+            "unsafe",
+            "toxic",
+            "explicit",
+            "biased",
+            "discriminatory"
+        ],
+        "content_filters": {
+            "profanity": True,
+            "personal_info": True,
+            "malicious_code": True,
+            "sensitive_topics": True
+        },
+        "require_human_review": os.getenv("REQUIRE_HUMAN_REVIEW", "True").lower() == "true",
+        "max_retries": int(os.getenv("MAX_RETRIES", "3")),
+        "fallback_responses": {
+            "error": "I apologize, but I'm having trouble processing your request safely.",
+            "blocked": "I apologize, but I cannot provide that type of content or assistance.",
+            "review": "This request requires human review for safety purposes."
+        }
     }
+    
+    # Model paths and caching
+    MODEL_CACHE_DIR = MODEL_DIR / "cache"
+    MODEL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     
     # Assessment questions
     ASSESSMENT_QUESTIONS = [
@@ -135,3 +182,14 @@ class AppConfig:
     def get_data_path(cls, filename: str) -> Path:
         """Get path for a data file"""
         return cls.DATA_DIR / filename
+    
+    @classmethod
+    def get_model_config(cls) -> Dict[str, Any]:
+        """Get complete model configuration"""
+        return {
+            **cls.LLM_CONFIG,
+            "model_cache_dir": str(cls.MODEL_CACHE_DIR),
+            "trust_remote_code": True,
+            "device_map": "auto" if not cls.USE_CPU else None,
+            "low_cpu_mem_usage": True
+        }

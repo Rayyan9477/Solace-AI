@@ -22,6 +22,7 @@ from agents.agent_orchestrator import AgentOrchestrator
 import logging
 from datetime import datetime
 import threading
+import google.generativeai as genai
 
 # Set up logging
 logging.basicConfig(
@@ -34,8 +35,11 @@ logger = logging.getLogger(__name__)
 if not hasattr(AppConfig, 'MAX_RESPONSE_TOKENS'):
     setattr(AppConfig, 'MAX_RESPONSE_TOKENS', 2000)
 
-if not AppConfig.ANTHROPIC_API_KEY:
-    raise ValueError("ANTHROPIC_API_KEY must be set in the configuration")
+if not AppConfig.GEMINI_API_KEY:
+    raise ValueError("GEMINI_API_KEY must be set in the configuration")
+
+# Initialize Gemini
+genai.configure(api_key=AppConfig.GEMINI_API_KEY)
 
 # Initialize monitoring
 if AppConfig.SENTRY_DSN:

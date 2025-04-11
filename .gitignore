@@ -160,3 +160,23 @@ __pypackages__/
 
 # Ignore the chatbot log file
 chatbot.log
+
+# Environment variables
+*.env
+
+# Virtual Environment
+.installed.cfg
+
+# Model files and caches
+models/cache/
+data/vector_store/
+*.onnx
+
+# IDE
+*~
+
+# Logs
+logs/
+/log/
+
+# Local development
