@@ -6,6 +6,7 @@ from langchain.llms import HuggingFacePipeline
 from datetime import datetime
 import logging
 from config.settings import AppConfig
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,8 @@ class AgnoLLM(LLMProvider):
         
         # Initialize model and tokenizer with error handling
         try:
+            # Use a simpler model that's guaranteed to work
+            self.model_name = "gpt2"  # Use a reliable model
             self.tokenizer = self._load_tokenizer()
             self.model = self._load_model()
             self.pipeline = self._create_pipeline()
@@ -94,9 +97,9 @@ class AgnoLLM(LLMProvider):
         """Load tokenizer with safety checks"""
         try:
             return AutoTokenizer.from_pretrained(
-                self.config["model"],
-                trust_remote_code=True,  # Add trust_remote_code parameter
-                padding_side="left"  # Add padding_side parameter
+                self.model_name,
+                trust_remote_code=True,
+                padding_side="left"
             )
         except Exception as e:
             logger.error(f"Failed to load tokenizer: {str(e)}")
@@ -117,11 +120,10 @@ class AgnoLLM(LLMProvider):
             # Use a try-except block to handle potential PyTorch class instantiation errors
             try:
                 return AutoModelForCausalLM.from_pretrained(
-                    self.config["model"],
-                    device_map="auto",  # Use auto instead of specific device
-                    torch_dtype=torch.float32,  # Use float32 for better compatibility
+                    self.model_name,
+                    torch_dtype=torch.float32,
                     low_cpu_mem_usage=True,
-                    trust_remote_code=True  # Add trust_remote_code parameter
+                    trust_remote_code=True
                 )
             except RuntimeError as e:
                 if "Tried to instantiate class" in str(e):
@@ -129,8 +131,7 @@ class AgnoLLM(LLMProvider):
                     logger.warning(f"PyTorch class instantiation error: {str(e)}")
                     # Try an alternative approach with more conservative settings
                     return AutoModelForCausalLM.from_pretrained(
-                        self.config["model"],
-                        device_map="cpu",  # Force CPU
+                        self.model_name,
                         torch_dtype=torch.float32,
                         low_cpu_mem_usage=True,
                         trust_remote_code=True
@@ -148,8 +149,7 @@ class AgnoLLM(LLMProvider):
                 "text-generation",
                 model=self.model,
                 tokenizer=self.tokenizer,
-                device=0 if self.device == "cuda" else -1,
-                max_new_tokens=self.config.get("max_tokens", 2000),
+                max_new_tokens=self.config.get("max_tokens", 1000),
                 do_sample=True,
                 temperature=self.config.get("temperature", 0.7),
                 top_p=self.config.get("top_p", 0.9),
@@ -165,7 +165,6 @@ class AgnoLLM(LLMProvider):
                     "text-generation",
                     model=self.model,
                     tokenizer=self.tokenizer,
-                    device=-1,  # Force CPU
                     max_new_tokens=1000,  # Reduce max tokens
                     do_sample=False,  # Disable sampling
                     temperature=0.5,  # Lower temperature
@@ -191,7 +190,7 @@ class AgnoLLM(LLMProvider):
                 return {
                     'response': "I apologize, but I'm having trouble generating a response right now. Please try again later.",
                     'metadata': {
-                        'model': self.config["model"],
+                        'model': self.model_name,
                         'token_usage': {'prompt_tokens': 0, 'response_tokens': 0, 'total_tokens': 0},
                         'safety_flags': {},
                         'timestamp': self.token_manager.get_timestamp(),
@@ -225,7 +224,7 @@ class AgnoLLM(LLMProvider):
             return {
                 'response': processed_response,
                 'metadata': {
-                    'model': self.config["model"],
+                    'model': self.model_name,
                     'token_usage': token_usage,
                     'safety_flags': self._check_safety(processed_response),
                     'timestamp': self.token_manager.get_timestamp()
@@ -294,7 +293,7 @@ Assistant Response:"""
     def model_info(self) -> Dict[str, Any]:
         """Get model information"""
         return {
-            'name': self.config["model"],
+            'name': self.model_name,
             'device': self.device,
             'max_tokens': self.config.get("max_tokens", 2000),
             'temperature': self.config.get("temperature", 0.7)

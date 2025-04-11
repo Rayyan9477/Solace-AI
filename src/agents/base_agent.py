@@ -46,8 +46,8 @@ class BaseAgent(Agent):
             
             # Create memory dict for agno Memory
             memory_dict = {
-                "memory": "chat_memory",  # Memory parameter should be a string
-                "storage": "local_storage",  # Storage parameter should be a string
+                "memory": "chat_memory",
+                "storage": "local_storage",
                 "memory_key": "chat_history",
                 "chat_memory": langchain_memory,
                 "input_key": "input",
@@ -125,8 +125,17 @@ class BaseAgent(Agent):
         context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Get relevant context from memory and knowledge"""
-        memory_context = await self.memory.get(context.get('session_id'))
-        knowledge_context = await self.knowledge.search(query)
+        try:
+            memory_context = await self.memory.get("chat_history", [])
+        except Exception as e:
+            logger.warning(f"Failed to get memory context: {str(e)}")
+            memory_context = []
+            
+        try:
+            knowledge_context = await self.knowledge.search(query)
+        except Exception as e:
+            logger.warning(f"Failed to get knowledge context: {str(e)}")
+            knowledge_context = []
         
         return {
             'memory': memory_context,
@@ -140,13 +149,14 @@ class BaseAgent(Agent):
         response: Dict[str, Any]
     ) -> None:
         """Update agent memory"""
-        await self.memory.add(
-            data={
-                'query': query,
-                'response': response,
-                'timestamp': datetime.now().isoformat()
-            }
-        )
+        try:
+            if hasattr(self.memory, 'chat_memory'):
+                self.memory.chat_memory.add_user_message(query)
+                self.memory.chat_memory.add_ai_message(response.get('response', ''))
+            else:
+                logger.warning("Memory does not have chat_memory attribute")
+        except Exception as e:
+            logger.warning(f"Failed to update memory: {str(e)}")
         
     def _calculate_confidence(self, response: Dict[str, Any]) -> float:
         """Calculate confidence score for the response"""

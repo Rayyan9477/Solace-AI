@@ -1,5 +1,4 @@
 from typing import Optional, Dict, Any, List
-from langchain_anthropic import ChatAnthropic
 from langchain_anthropic.chat_models import ChatAnthropicMessages
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import SystemMessage, HumanMessage

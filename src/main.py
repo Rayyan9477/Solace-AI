@@ -2,7 +2,7 @@ import streamlit as st
 from langchain.memory import ConversationBufferMemory
 from langchain_community.callbacks.streamlit import StreamlitCallbackHandler
 from config.settings import AppConfig
-from langchain.docstore.document import Document
+from langchain_community.docstore.document import Document
 from database.vector_store import FaissVectorStore
 from agents.chat_agent import ChatAgent
 from agents.crawler_agent import CrawlerAgent

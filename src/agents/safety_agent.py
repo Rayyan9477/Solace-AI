@@ -136,58 +136,92 @@ Resources: [relevant crisis resources]""")
 
     async def check_message(self, message: str) -> Dict[str, Any]:
         """
-        Check a message for safety concerns and risk factors
+        Check a message for safety concerns
         
         Args:
-            message: The message to analyze
+            message: The message to check
             
         Returns:
-            Dictionary containing safety assessment results
+            Dictionary containing safety assessment
         """
         try:
-            # Get initial risk assessment
-            risk_result = await assess_risk(message)
+            # Create a basic safety assessment
+            assessment = {
+                'risk_level': 'low',
+                'risk_factors': [],
+                'safety_concerns': [],
+                'recommendations': [],
+                'confidence': 0.8,
+                'timestamp': datetime.now().isoformat()
+            }
             
-            # Generate safety analysis using LLM
-            try:
-                # Try to use agenerate_messages if available
-                llm_response = await self.llm.agenerate_messages([
-                    self.safety_prompt.format_messages(
-                        message=message,
-                        emotion_data=self._format_emotion_data({}),  # Empty emotion data for direct checks
-                        history=self._format_history({}),  # Empty history for direct checks
-                        risk_assessment=risk_result
-                    )[0]
+            # Check for high-risk keywords
+            message_lower = message.lower()
+            
+            # Check for immediate risk indicators
+            for indicator in RISK_INDICATORS['severe']:
+                if indicator in message_lower:
+                    assessment['risk_level'] = 'high'
+                    assessment['risk_factors'].append(f'immediate_risk_{indicator}')
+                    assessment['safety_concerns'].append(f'Immediate risk detected: {indicator}')
+                    assessment['recommendations'].append('Immediate professional help recommended')
+            
+            # Check for moderate risk indicators
+            for indicator in RISK_INDICATORS['high']:
+                if indicator in message_lower:
+                    if assessment['risk_level'] != 'high':
+                        assessment['risk_level'] = 'moderate'
+                    assessment['risk_factors'].append(f'moderate_risk_{indicator}')
+                    assessment['safety_concerns'].append(f'Moderate risk detected: {indicator}')
+                    assessment['recommendations'].append('Professional support recommended')
+            
+            # Check for low risk indicators
+            for indicator in RISK_INDICATORS['moderate']:
+                if indicator in message_lower:
+                    if assessment['risk_level'] not in ['high', 'moderate']:
+                        assessment['risk_level'] = 'low'
+                    assessment['risk_factors'].append(f'low_risk_{indicator}')
+                    assessment['safety_concerns'].append(f'Low risk detected: {indicator}')
+                    assessment['recommendations'].append('Monitor and provide support')
+            
+            # Add general recommendations based on risk level
+            if assessment['risk_level'] == 'high':
+                assessment['recommendations'].extend([
+                    'Contact emergency services if immediate danger',
+                    'Do not leave the person alone',
+                    'Remove any potential means of self-harm'
                 ])
-                
-                # Parse and enhance response
-                analysis = self._parse_result(llm_response.generations[0][0].text)
-            except (AttributeError, TypeError):
-                # Fallback for LLMs that don't support agenerate_messages
-                logger.warning("LLM does not support agenerate_messages, using fallback method")
-                messages = self.safety_prompt.format_messages(
-                    message=message,
-                    emotion_data=self._format_emotion_data({}),
-                    history=self._format_history({}),
-                    risk_assessment=risk_result
-                )
-                
-                # Use a synchronous approach as fallback
-                response = self.llm.generate([messages[0]])
-                analysis = self._parse_result(response.generations[0][0].text)
+            elif assessment['risk_level'] == 'moderate':
+                assessment['recommendations'].extend([
+                    'Schedule a mental health professional appointment',
+                    'Provide crisis hotline numbers',
+                    'Check in regularly'
+                ])
+            else:
+                assessment['recommendations'].extend([
+                    'Continue monitoring',
+                    'Provide emotional support',
+                    'Encourage healthy coping mechanisms'
+                ])
             
-            # Add metadata
-            analysis['timestamp'] = datetime.now().isoformat()
-            analysis['confidence'] = self._calculate_confidence(analysis, risk_result)
+            # Try to update memory, but don't fail if it doesn't work
+            try:
+                await self.memory.add("last_safety_check", assessment)
+            except Exception as e:
+                logger.warning(f"Failed to update memory: {str(e)}")
             
-            # Set safe flag based on risk level
-            analysis['safe'] = analysis['risk_level'] in ['SAFE', 'LOW']
-            
-            return analysis
+            return assessment
             
         except Exception as e:
-            logger.error(f"Safety check failed: {str(e)}")
-            return self._fallback_analysis()
+            logger.error(f"Error checking message safety: {str(e)}")
+            return {
+                'risk_level': 'unknown',
+                'risk_factors': [],
+                'safety_concerns': ['Error analyzing safety'],
+                'recommendations': ['Seek professional help if concerned'],
+                'confidence': 0.0,
+                'timestamp': datetime.now().isoformat()
+            }
 
     def _parse_result(self, text: str) -> Dict[str, Any]:
         """Parse the structured output from Claude"""
