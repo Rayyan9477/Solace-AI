@@ -3,7 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
-
+key.py
 # C extensions
 *.egg-info/
 *.egg
@@ -180,3 +180,4 @@ logs/
 /log/
 
 # Local development
+.qodo

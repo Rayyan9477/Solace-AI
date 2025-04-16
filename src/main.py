@@ -14,14 +14,12 @@ from utils.metrics import track_metric
 import sentry_sdk
 from prometheus_client import start_http_server
 import time
-import asyncio
 from models.llm import AgnoLLM as SafeLLM
 import os
 from typing import Dict, Any, List
 from agents.agent_orchestrator import AgentOrchestrator
 import logging
 from datetime import datetime
-import threading
 import google.generativeai as genai
 
 # Set up logging
@@ -36,10 +34,15 @@ if not hasattr(AppConfig, 'MAX_RESPONSE_TOKENS'):
     setattr(AppConfig, 'MAX_RESPONSE_TOKENS', 2000)
 
 if not AppConfig.GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY must be set in the configuration")
+    st.error("GEMINI_API_KEY is missing from your .env file. Please set it and restart the app.")
+    st.stop()
 
-# Initialize Gemini
-genai.configure(api_key=AppConfig.GEMINI_API_KEY)
+# Initialize Gemini 2.0 Flash
+try:
+    genai.configure(api_key=AppConfig.GEMINI_API_KEY)
+except Exception as e:
+    st.error(f"Failed to initialize Gemini: {e}")
+    st.stop()
 
 # Initialize monitoring
 if AppConfig.SENTRY_DSN:
@@ -86,7 +89,22 @@ def initialize_components() -> Dict[str, Any]:
     try:
         # Initialize the LLM
         try:
-            llm = SafeLLM()
+            # Initialize with explicit model config
+            llm_config = {
+                "model": AppConfig.MODEL_NAME,
+                "api_key": AppConfig.GEMINI_API_KEY,
+                "temperature": float(os.getenv("TEMPERATURE", "0.7")),
+                "top_p": float(os.getenv("TOP_P", "0.9")),
+                "top_k": int(os.getenv("TOP_K", "50")),
+                "max_tokens": AppConfig.MAX_RESPONSE_TOKENS
+            }
+            
+            llm = SafeLLM(model_config=llm_config)
+            
+            # Verify LLM is initialized properly
+            if llm.model is None:
+                raise ValueError("LLM model instance not properly initialized")
+                
         except Exception as llm_error:
             logger.error(f"Failed to initialize LLM: {str(llm_error)}")
             st.error("Failed to initialize the language model. The application may not function correctly.")
@@ -102,31 +120,48 @@ def initialize_components() -> Dict[str, Any]:
             }
         
         # Initialize agents
-        safety_agent = SafetyAgent(model=llm)
-        emotion_agent = EmotionAgent(model=llm)
-        chat_agent = ChatAgent(model=llm)
-        diagnosis_agent = DiagnosisAgent(model=llm)
-        crawler_agent = CrawlerAgent(model=llm)
-        
-        # Initialize orchestrator
-        orchestrator = AgentOrchestrator(
-            agents={
+        try:
+            safety_agent = SafetyAgent(model=llm)
+            emotion_agent = EmotionAgent(model=llm)
+            chat_agent = ChatAgent(model=llm)
+            diagnosis_agent = DiagnosisAgent(model=llm)
+            crawler_agent = CrawlerAgent(model=llm)
+            
+            # Initialize orchestrator
+            orchestrator = AgentOrchestrator(
+                agents={
+                    "safety": safety_agent,
+                    "emotion": emotion_agent,
+                    "chat": chat_agent,
+                    "diagnosis": diagnosis_agent,
+                    "crawler": crawler_agent
+                }
+            )
+            
+            logger.info("Successfully initialized all agents and orchestrator")
+            
+            return {
                 "safety": safety_agent,
                 "emotion": emotion_agent,
-                "chat": chat_agent,
-                "diagnosis": diagnosis_agent
+                "chat_agent": chat_agent,
+                "diagnosis": diagnosis_agent,
+                "crawler": crawler_agent,
+                "orchestrator": orchestrator,
+                "llm": llm
             }
-        )
-        
-        return {
-            "safety": safety_agent,
-            "emotion": emotion_agent,
-            "chat_agent": chat_agent,
-            "diagnosis": diagnosis_agent,
-            "crawler": crawler_agent,
-            "orchestrator": orchestrator,
-            "llm": llm
-        }
+        except Exception as agent_error:
+            logger.error(f"Error initializing agents: {str(agent_error)}")
+            st.error(f"Error initializing agent components: {str(agent_error)}")
+            # Return partial initialization with just the LLM
+            return {
+                "llm": llm,
+                "safety": None,
+                "emotion": None,
+                "chat_agent": None,
+                "diagnosis": None,
+                "crawler": None,
+                "orchestrator": None
+            }
     except Exception as e:
         logger.error(f"Error initializing components: {str(e)}")
         st.error(f"Error initializing application: {str(e)}")
@@ -161,6 +196,10 @@ def render_assessment(diagnosis_agent):
         
         if st.form_submit_button("Continue"):
             symptoms = [q for q, a in responses.items() if a == "Yes"]
+            if diagnosis_agent is None:
+                st.error("Diagnosis service is currently unavailable. Please try again later.")
+                logger.warning("Diagnosis agent not initialized, cannot perform diagnosis.")
+                return
             diagnosis = diagnosis_agent.diagnose(symptoms)
             st.session_state.update({
                 "symptoms": symptoms,
@@ -209,15 +248,25 @@ def render_diagnosis(crawler_agent):
         st.session_state["step"] = 3
         st.rerun()
 
-async def process_user_message(user_input: str, components: Dict[str, Any]) -> Dict[str, Any]:
+def process_user_message(user_input: str, components: Dict[str, Any]) -> Dict[str, Any]:
     """Process a user message and generate a response"""
     try:
         # Check if components are available
-        if not components or not components.get("safety") or not components.get("emotion") or not components.get("chat_agent"):
+        if not components:
+            logger.error("No components available for processing message")
             return {
                 "response": "I apologize, but the chat functionality is currently unavailable. Please try again later.",
-                "error": "Components not available"
+                "error": "No components available"
             }
+            
+        # Check for essential components
+        for component_name in ["safety", "emotion", "chat_agent"]:
+            if component_name not in components or components[component_name] is None:
+                logger.error(f"Missing required component: {component_name}")
+                return {
+                    "response": "I apologize, but the chat functionality is currently unavailable. Please try again later.",
+                    "error": f"Missing {component_name} component"
+                }
             
         # Ensure metrics key exists
         if "metrics" not in st.session_state:
@@ -231,7 +280,12 @@ async def process_user_message(user_input: str, components: Dict[str, Any]) -> D
         st.session_state["metrics"]["interactions"] += 1
         
         # Safety check
-        safety_result = await components["safety"].check_message(user_input)
+        try:
+            safety_result = components["safety"].check_message(user_input)
+        except Exception as safety_error:
+            logger.error(f"Safety check failed: {str(safety_error)}")
+            safety_result = {"safe": True}  # Default to safe if check fails
+            
         if not safety_result.get("safe", True):
             st.session_state["metrics"]["safety_flags"] += 1
             return {
@@ -240,14 +294,27 @@ async def process_user_message(user_input: str, components: Dict[str, Any]) -> D
             }
         
         # Emotion analysis
-        emotion_result = await components["emotion"].analyze_emotion(user_input)
+        try:
+            emotion_result = components["emotion"].analyze_emotion(user_input)
+        except Exception as emotion_error:
+            logger.error(f"Emotion analysis failed: {str(emotion_error)}")
+            emotion_result = {"primary_emotion": "unknown"}  # Default emotion
         
         # Generate response
         start_time = time.time()
-        response = await components["chat_agent"].generate_response(user_input, {
-            "emotion": emotion_result,
-            "safety": safety_result
-        })
+        try:
+            response = components["chat_agent"].generate_response(user_input, {
+                "emotion": emotion_result,
+                "safety": safety_result
+            })
+        except Exception as chat_error:
+            logger.error(f"Chat generation failed: {str(chat_error)}")
+            return {
+                "response": "I'm having difficulty generating a response right now. Could you try rephrasing your message?",
+                "error": str(chat_error),
+                "emotion": emotion_result
+            }
+            
         end_time = time.time()
         
         # Update metrics
@@ -270,6 +337,32 @@ def main():
     
     st.title(AppConfig.APP_NAME)
     st.markdown("### A Safe Space for Mental Health Support")
+    
+    # Show system status in expander
+    with st.expander("System Status", expanded=False):
+        st.markdown("### Component Status")
+        
+        # Check component status
+        component_status = {
+            "Language Model": components.get("llm") is not None,
+            "Safety Agent": components.get("safety") is not None,
+            "Emotion Agent": components.get("emotion") is not None,
+            "Chat Agent": components.get("chat_agent") is not None,
+            "Diagnosis Agent": components.get("diagnosis") is not None
+        }
+        
+        # Display status
+        for component, status in component_status.items():
+            if status:
+                st.success(f"✅ {component}: Available")
+            else:
+                st.error(f"❌ {component}: Unavailable")
+                
+        # Show environment info
+        st.markdown("### Environment")
+        st.write(f"App Version: {AppConfig.APP_VERSION}")
+        st.write(f"Debug Mode: {'Enabled' if AppConfig.DEBUG else 'Disabled'}")
+        st.write(f"Model: {AppConfig.MODEL_NAME}")
     
     # Initialize session state
     if "step" not in st.session_state:
@@ -319,52 +412,39 @@ def render_chat_interface(components: Dict[str, Any]):
         with st.chat_message("user"):
             st.write(user_input)
         
-        # Process message in a separate thread to avoid blocking the UI
+        # Process message synchronously
         with st.spinner("Thinking..."):
             try:
-                # Get the current event loop or create a new one
-                try:
-                    loop = asyncio.get_event_loop()
-                except RuntimeError:
-                    # Create a new event loop if none exists
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                
-                # Run the async process in a separate thread
-                result = None
-                
-                def run_async_process():
-                    nonlocal result
-                    result = loop.run_until_complete(process_user_message(user_input, components))
-                
-                # Run in a separate thread to avoid blocking the UI
-                thread = threading.Thread(target=run_async_process)
-                thread.start()
-                thread.join()  # Wait for the thread to complete
+                result = process_user_message(user_input, components)
                 
                 if result:
-                    # Update session state with the new messages
-                    st.session_state["history"].extend([
-                        {"role": "user", "content": user_input},
-                        {"role": "assistant", "content": result["response"]}
-                    ])
-                    
-                    # Display assistant response
-                    with st.chat_message("assistant"):
-                        st.write(result["response"])
-                        if "emotion" in result:
-                            st.caption(f"Emotion: {result['emotion'].get('primary_emotion', 'unknown')}")
-                    
-                    # Handle safety alerts
-                    if result.get("safety_alert", False):
-                        st.warning("⚠️ Safety Alert: Please consider reaching out to a mental health professional or crisis hotline.")
-                        st.session_state["step"] = 4  # Move to crisis protocol
-                        st.rerun()
+                    # Check for specific errors returned by process_user_message
+                    if "error" in result:
+                        st.error(f"Assistant Error: {result['error']}")
+                        logger.error(f"Error processed from process_user_message: {result['error']}")
+                    else:
+                        # Update session state with the new messages
+                        st.session_state["history"].extend([
+                            {"role": "user", "content": user_input},
+                            {"role": "assistant", "content": result["response"], "emotion": result.get("emotion")}
+                        ])
+                        
+                        # Display assistant response
+                        with st.chat_message("assistant"):
+                            st.write(result["response"])
+                            if "emotion" in result and result["emotion"]:
+                                st.caption(f"Emotion: {result['emotion'].get('primary_emotion', 'unknown')}")
+                        
+                        # Handle safety alerts
+                        if result.get("safety_alert", False):
+                            st.warning("⚠️ Safety Alert: Please consider reaching out to a mental health professional or crisis hotline.")
+                            st.session_state["step"] = 4  # Move to crisis protocol
+                            st.rerun()
                 else:
                     st.error("Failed to generate a response. Please try again.")
             except Exception as e:
-                st.error(f"An error occurred: {str(e)}")
-                logger.error(f"Error in chat interface: {str(e)}")
+                st.error(f"An error occurred while processing your message: {str(e)}")
+                logger.error(f"Error in chat interface during processing: {str(e)}")
     
     # Add a button to go back to assessment
     if st.button("Start New Assessment"):

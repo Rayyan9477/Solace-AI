@@ -10,20 +10,31 @@ import spacy
 from transformers import pipeline
 from datetime import datetime
 import logging
-
+logger = logging.getLogger(__name__)
 # Load models
-nlp = spacy.load("en_core_web_sm")
-symptom_classifier = pipeline(
-    "zero-shot-classification",
-    model="facebook/bart-large-mnli",
-    device=-1  # Use CPU
-)
-diagnostic_classifier = pipeline(
-    "zero-shot-classification",
-    model="facebook/bart-large-mnli",
-    device=-1
-)
+try:
+    nlp = spacy.load("en_core_web_sm")
+except Exception as e:
+    logger.warning(f"Failed to load spaCy model: {str(e)}. Using fallback methods.")
+    nlp = None
 
+try:
+    symptom_classifier = pipeline(
+        "zero-shot-classification",
+        model="facebook/bart-large-mnli",
+        device=-1  # Use CPU
+    )
+    diagnostic_classifier = pipeline(
+        "zero-shot-classification",
+        model="facebook/bart-large-mnli",
+        device=-1
+    )
+except Exception as e:
+    logger.warning(f"Failed to load transformers pipeline: {str(e)}. Using fallback methods.")
+    symptom_classifier = None
+    diagnostic_classifier = None
+
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 @tool("symptom_extraction")
@@ -176,12 +187,32 @@ Additional Considerations: [important factors to consider]""")
     def diagnose(self, symptoms: List[str]) -> str:
         """Generate a diagnostic assessment for the given symptoms"""
         try:
+            logger.info(f"Diagnosing symptoms: {symptoms}")
+            
+            if not symptoms:
+                logger.warning("Empty symptoms list provided")
+                return "Insufficient information for diagnosis"
+            
+            # Check if required NLP models are available
+            if nlp is None or diagnostic_classifier is None:
+                logger.error("Required NLP models not available for diagnosis")
+                return "Diagnostic service temporarily unavailable"
+            
             # Extract symptoms using spaCy
-            doc = nlp(" ".join(symptoms))
-            entities = [
-                ent.text for ent in doc.ents 
-                if ent.label_ in ["SYMPTOM", "CONDITION", "BEHAVIOR"]
-            ]
+            try:
+                doc = nlp(" ".join(symptoms))
+                entities = [
+                    ent.text for ent in doc.ents 
+                    if ent.label_ in ["SYMPTOM", "CONDITION", "BEHAVIOR"]
+                ]
+                
+                # If no entities were found, use the original symptoms
+                if not entities:
+                    logger.info("No entities extracted, using original symptoms")
+                    entities = symptoms
+            except Exception as spacy_error:
+                logger.error(f"Error in spaCy processing: {str(spacy_error)}")
+                entities = symptoms  # Fallback to using raw symptoms
             
             # Classify symptoms
             symptom_text = " ".join(entities)
@@ -194,35 +225,76 @@ Additional Considerations: [important factors to consider]""")
                 "Panic Disorder"
             ]
             
-            if symptom_text:
-                classifications = diagnostic_classifier(
-                    symptom_text,
-                    diagnostic_categories,
-                    multi_label=True
-                )
-                
-                potential_diagnoses = [
-                    {
-                        'condition': label,
-                        'confidence': score,
-                        'severity': _estimate_severity(score)
-                    }
-                    for label, score in zip(classifications['labels'], classifications['scores'])
-                    if score > 0.3
-                ]
-            else:
-                potential_diagnoses = []
+            try:
+                if symptom_text:
+                    classifications = diagnostic_classifier(
+                        symptom_text,
+                        diagnostic_categories,
+                        multi_label=True
+                    )
+                    
+                    potential_diagnoses = [
+                        {
+                            'condition': label,
+                            'confidence': score,
+                            'severity': _estimate_severity(score)
+                        }
+                        for label, score in zip(classifications['labels'], classifications['scores'])
+                        if score > 0.3
+                    ]
+                else:
+                    logger.warning("Empty symptom text after processing")
+                    potential_diagnoses = []
+            except Exception as classifier_error:
+                logger.error(f"Error in diagnostic classification: {str(classifier_error)}")
+                # Fallback - simple keyword matching
+                potential_diagnoses = self._fallback_diagnosis(symptom_text, diagnostic_categories)
             
             # Format the response
             if potential_diagnoses:
                 # Sort by confidence and get the highest confidence diagnosis
                 best_diagnosis = max(potential_diagnoses, key=lambda x: x['confidence'])
+                logger.info(f"Diagnosis result: {best_diagnosis['condition']} ({best_diagnosis['severity']} severity)")
                 return f"{best_diagnosis['condition']} ({best_diagnosis['severity']} severity)"
             else:
+                logger.info("No specific diagnosis available from symptoms")
                 return "No specific diagnosis available"
                 
         except Exception as e:
+            logger.error(f"Error in diagnosis process: {str(e)}")
             return "Unable to complete diagnostic assessment"
+
+    def _fallback_diagnosis(self, symptom_text: str, categories: List[str]) -> List[Dict[str, Any]]:
+        """Simple fallback for diagnosis when the classifier fails"""
+        results = []
+        symptom_words = set(symptom_text.lower().split())
+        
+        # Simple keyword matching
+        keywords = {
+            "Major Depressive Disorder": ["sad", "depressed", "hopeless", "tired", "sleep", "interest"],
+            "Generalized Anxiety Disorder": ["worry", "anxious", "nervous", "stress", "fear"],
+            "Bipolar Disorder": ["mood", "energy", "high", "low", "irritable"],
+            "Post-Traumatic Stress Disorder": ["trauma", "flashback", "nightmare", "avoid"],
+            "Social Anxiety Disorder": ["social", "embarrass", "fear", "shy", "awkward"],
+            "Panic Disorder": ["panic", "attack", "heart", "breath", "dizzy"]
+        }
+        
+        for category in categories:
+            count = 0
+            relevant_keywords = keywords.get(category, [])
+            for keyword in relevant_keywords:
+                if keyword in symptom_words:
+                    count += 1
+                    
+            if count > 0:
+                confidence = min(0.3 + (count * 0.1), 0.8)  # Limit to 0.8 max
+                results.append({
+                    'condition': category,
+                    'confidence': confidence,
+                    'severity': _estimate_severity(confidence)
+                })
+                
+        return results
 
     async def _generate_response(
         self,

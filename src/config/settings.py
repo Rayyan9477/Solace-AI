@@ -3,8 +3,9 @@ from typing import Dict, Any, Optional
 import os
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Load environment variables from project root .env file
+dotenv_path = Path(__file__).resolve().parent.parent.parent / '.env'
+load_dotenv(dotenv_path=dotenv_path)
 
 class AppConfig:
     """Application configuration settings"""
@@ -30,8 +31,12 @@ class AppConfig:
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
     
     # Model settings
-    MODEL_NAME = "gemini-2.5-pro"
-    GEMINI_API_KEY = "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"
+    # Set your Gemini API key here if not using .env
+    # Only Gemini 2.0 Flash is supported
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    if not GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY environment variable must be set in your .env file.")
+    MODEL_NAME = "gemini-2.0-flash"
     USE_CPU = True  # Always true for cloud-based models
     MAX_RESPONSE_TOKENS = int(os.getenv("MAX_RESPONSE_TOKENS", "2000"))
 
@@ -42,31 +47,7 @@ class AppConfig:
         "temperature": float(os.getenv("TEMPERATURE", "0.7")),
         "top_p": float(os.getenv("TOP_P", "0.9")),
         "top_k": int(os.getenv("TOP_K", "50")),
-        "max_tokens": MAX_RESPONSE_TOKENS,
-        "generation_config": {
-            "temperature": 0.7,
-            "top_p": 0.9,
-            "top_k": 50,
-            "max_output_tokens": MAX_RESPONSE_TOKENS,
-        },
-        "safety_settings": [
-            {
-                "category": "HARM_CATEGORY_HARASSMENT",
-                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-            },
-            {
-                "category": "HARM_CATEGORY_HATE_SPEECH",
-                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-            },
-            {
-                "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-            },
-            {
-                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-            }
-        ]
+        "max_tokens": MAX_RESPONSE_TOKENS
     }
     
     # Embedding Configuration

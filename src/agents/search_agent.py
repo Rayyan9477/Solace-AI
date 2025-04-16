@@ -4,6 +4,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from langchain.schema.language_model import BaseLanguageModel
 from typing import Dict, List, Optional
 import json
+from datetime import datetime
 
 class SearchAgent:
     def __init__(self, model: BaseLanguageModel):
@@ -153,9 +154,8 @@ Content Warnings: [any needed warnings]""")
             formatted += f"Topics: {', '.join(search['params']['topics'])}\n"
             
         return formatted
-
+        
     def _get_timestamp(self) -> str:
         """Get current timestamp"""
-        from datetime import datetime
         return datetime.now().isoformat()
 

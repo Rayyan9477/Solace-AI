@@ -1,23 +1,98 @@
 from typing import Dict, Any, Optional, List
 import logging
 from datetime import datetime
+from agno.agent import Agent
 
 logger = logging.getLogger(__name__)
 
 class AgentOrchestrator:
-    def __init__(self, agents: Dict[str, Any]):
+    """Orchestrates interactions between multiple specialized agents"""
+    
+    def __init__(self, agents: Dict[str, Agent] = None):
         """
         Initialize the agent orchestrator with a dictionary of agents
         
         Args:
             agents: Dictionary of agent instances with keys like 'safety', 'emotion', 'chat', etc.
         """
-        self.agents = agents
+        self.agents = agents or {}
+        self.execution_history = []
         self.conversation_history = []
         self.emotion_history = []
         self.safety_history = []
         
         logger.info("AgentOrchestrator initialized with %d agents", len(agents))
+
+    def add_agent(self, name: str, agent: Agent) -> None:
+        """Add an agent to the orchestrator"""
+        self.agents[name] = agent
+        
+    def remove_agent(self, name: str) -> bool:
+        """Remove an agent from the orchestrator"""
+        if name in self.agents:
+            del self.agents[name]
+            return True
+        return False
+        
+    def get_agent(self, name: str) -> Optional[Agent]:
+        """Get an agent by name"""
+        return self.agents.get(name)
+        
+    def list_agents(self) -> List[str]:
+        """List all registered agents"""
+        return list(self.agents.keys())
+        
+    async def process(self, 
+                     query: str, 
+                     agent_name: str = None, 
+                     context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Process a query using a specific agent or delegate to appropriate agent"""
+        # Store in execution history
+        self.execution_history.append({
+            'query': query,
+            'agent': agent_name,
+            'context': context
+        })
+        
+        # If agent specified, use that agent
+        if agent_name and agent_name in self.agents:
+            return await self.agents[agent_name].process(query, context)
+            
+        # Otherwise, select the best agent based on query
+        selected_agent = self._select_agent(query, context)
+        if selected_agent:
+            return await selected_agent.process(query, context)
+            
+        # If no agent found, use safe fallback
+        return {
+            'response': "I'm not sure how to help with that. Could you please rephrase your question?",
+            'metadata': {
+                'agent_name': 'fallback',
+                'confidence': 0.0
+            }
+        }
+        
+    def _select_agent(self, query: str, context: Dict[str, Any] = None) -> Optional[Agent]:
+        """Select the most appropriate agent for a query"""
+        if not self.agents:
+            return None
+            
+        # Check if there's an explicit request for a specific agent
+        for name, agent in self.agents.items():
+            agent_keywords = [
+                name.lower(), 
+                agent.name.lower(), 
+                agent.description.lower()
+            ]
+            if any(keyword in query.lower() for keyword in agent_keywords):
+                return agent
+                
+        # Default to using the chat agent if available
+        if 'chat' in self.agents:
+            return self.agents['chat']
+            
+        # Otherwise return the first available agent
+        return list(self.agents.values())[0] if self.agents else None
 
     async def process_message(self, message: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
@@ -132,4 +207,4 @@ class AgentOrchestrator:
             'risk_level_history': risk_levels,
             'emergency_protocols_activated': sum(1 for p in protocols if p),
             'current_risk_level': risk_levels[-1] if risk_levels else 'UNKNOWN'
-        } 
+        }

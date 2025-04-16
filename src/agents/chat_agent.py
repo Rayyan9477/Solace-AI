@@ -1,5 +1,5 @@
 from typing import Optional, Dict, Any, List
-from langchain_anthropic.chat_models import ChatAnthropicMessages
+# Only Gemini 2.0 Flash is supported. Remove Anthropic/Claude imports.
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import SystemMessage, HumanMessage
 from langchain.schema.language_model import BaseLanguageModel
