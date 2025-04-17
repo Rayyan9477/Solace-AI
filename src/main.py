@@ -248,7 +248,7 @@ def render_diagnosis(crawler_agent):
         st.session_state["step"] = 3
         st.rerun()
 
-def process_user_message(user_input: str, components: Dict[str, Any]) -> Dict[str, Any]:
+async def process_user_message(user_input: str, components: Dict[str, Any]) -> Dict[str, Any]:
     """Process a user message and generate a response"""
     try:
         # Check if components are available
@@ -281,7 +281,8 @@ def process_user_message(user_input: str, components: Dict[str, Any]) -> Dict[st
         
         # Safety check
         try:
-            safety_result = components["safety"].check_message(user_input)
+            # Properly await the coroutine
+            safety_result = await components["safety"].check_message(user_input)
         except Exception as safety_error:
             logger.error(f"Safety check failed: {str(safety_error)}")
             safety_result = {"safe": True}  # Default to safe if check fails
@@ -295,7 +296,8 @@ def process_user_message(user_input: str, components: Dict[str, Any]) -> Dict[st
         
         # Emotion analysis
         try:
-            emotion_result = components["emotion"].analyze_emotion(user_input)
+            # Properly await the coroutine
+            emotion_result = await components["emotion"].analyze_emotion(user_input)
         except Exception as emotion_error:
             logger.error(f"Emotion analysis failed: {str(emotion_error)}")
             emotion_result = {"primary_emotion": "unknown"}  # Default emotion
@@ -303,7 +305,8 @@ def process_user_message(user_input: str, components: Dict[str, Any]) -> Dict[st
         # Generate response
         start_time = time.time()
         try:
-            response = components["chat_agent"].generate_response(user_input, {
+            # Properly await the coroutine
+            response = await components["chat_agent"].generate_response(user_input, {
                 "emotion": emotion_result,
                 "safety": safety_result
             })
@@ -388,6 +391,8 @@ def main():
 
 def render_chat_interface(components: Dict[str, Any]):
     """Render the chat interface"""
+    import asyncio
+    
     st.markdown("### Chat with Your Mental Health Assistant")
     
     # Check if components are available
@@ -412,10 +417,11 @@ def render_chat_interface(components: Dict[str, Any]):
         with st.chat_message("user"):
             st.write(user_input)
         
-        # Process message synchronously
+        # Process message asynchronously
         with st.spinner("Thinking..."):
             try:
-                result = process_user_message(user_input, components)
+                # Use asyncio to run the async function
+                result = asyncio.run(process_user_message(user_input, components))
                 
                 if result:
                     # Check for specific errors returned by process_user_message
