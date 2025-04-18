@@ -60,7 +60,7 @@ class AgentOrchestrator:
             
         # Otherwise, select the best agent based on query
         selected_agent = self._select_agent(query, context)
-        if selected_agent:
+        if (selected_agent):
             return await selected_agent.process(query, context)
             
         # If no agent found, use safe fallback
@@ -114,6 +114,14 @@ class AgentOrchestrator:
             safety_data = await self.agents["safety"].check_message(message)
             self.safety_history.append(safety_data)
             
+            # Suggested standardized assessments based on clinical indicators
+            suggestions = []
+            indicators = emotion_data.get('clinical_indicators', [])
+            if 'depression symptoms' in indicators:
+                suggestions.append('PHQ-9 assessment suggested to evaluate depression severity')
+            if 'anxiety symptoms' in indicators:
+                suggestions.append('GAD-7 assessment suggested to evaluate anxiety levels')
+
             # Step 3: Generate response
             response = await self.agents["chat"].generate_response(
                 message=message,
@@ -131,17 +139,18 @@ class AgentOrchestrator:
                 'response': response.get('response', ''),
                 'emotion_analysis': emotion_data,
                 'safety_assessment': safety_data,
+                'assessment_suggestions': suggestions,
                 'timestamp': datetime.now().isoformat(),
                 'requires_escalation': safety_data.get('emergency_protocol', False)
             }
-            
+
             # Store in history
             self.conversation_history.append({
                 'user_message': message,
                 'system_response': result,
                 'timestamp': datetime.now().isoformat()
             })
-            
+
             return result
             
         except Exception as e:

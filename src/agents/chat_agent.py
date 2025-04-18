@@ -71,9 +71,10 @@ Guidelines:
             HumanMessage(content="""User Message: {message}
 Emotional Context: {emotion_data}
 Safety Context: {safety_data}
+Diagnosis: {diagnosis_data}
 Previous Conversation: {history}
 
-Provide a supportive, empathetic response that addresses the user's emotional needs while maintaining appropriate boundaries.""")
+Provide a supportive, empathetic response that addresses the user's emotional needs and current diagnosis while maintaining appropriate boundaries and suggesting coping strategies.""")
         ])
     
     async def generate_response(self, message: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
@@ -94,6 +95,8 @@ Provide a supportive, empathetic response that addresses the user's emotional ne
             # Format context data
             emotion_data = self._format_emotion_data(context.get("emotion", {})) if context else "No emotional data available"
             safety_data = self._format_safety_data(context.get("safety", {})) if context else "No safety data available"
+            # Include diagnosis context
+            diagnosis_data = context.get("diagnosis", "No diagnosis available")
             
             # Generate response
             try:
@@ -103,6 +106,7 @@ Provide a supportive, empathetic response that addresses the user's emotional ne
                         message=message,
                         emotion_data=emotion_data,
                         safety_data=safety_data,
+                        diagnosis_data=diagnosis_data,
                         history=self._format_history(history)
                     )[0]
                 ])
@@ -111,34 +115,37 @@ Provide a supportive, empathetic response that addresses the user's emotional ne
             except (AttributeError, TypeError):
                 # Fallback for LLMs that don't support agenerate_messages
                 logger.warning("LLM does not support agenerate_messages, using fallback method")
-                messages = self.chat_prompt.format_messages(
+                # Render full prompt with diagnosis
+                rendered_msgs = self.chat_prompt.format_messages(
                     message=message,
                     emotion_data=emotion_data,
                     safety_data=safety_data,
+                    diagnosis_data=diagnosis_data,
                     history=self._format_history(history)
                 )
-                
+                prompt_text = "\n".join(m.content for m in rendered_msgs)
                 # Use a synchronous approach as fallback
-                response = self.llm.generate([messages[0]])
-                response_text = response.generations[0][0].text
+                sync_result = self.llm.generate([prompt_text])
+                response_text = sync_result.generations[0][0].text
             
-            # Update memory
-            await self.memory.add("chat_history", [
-                {"role": "user", "content": message},
-                {"role": "assistant", "content": response_text}
-            ])
-            
+            # Attempt to update memory, but don't let it break response
+            try:
+                await self.memory.add("chat_history", [
+                    {"role": "user", "content": message},
+                    {"role": "assistant", "content": response_text}
+                ])
+            except Exception as mem_error:
+                logger.warning(f"Failed to update chat memory: {mem_error}")
+
+            # Return the generated response
             return {
                 "response": response_text,
                 "timestamp": datetime.now().isoformat()
             }
-            
+        # Catch generation errors separately to still return fallback
         except Exception as e:
-            logger.error(f"Error generating chat response: {str(e)}")
-            return {
-                "response": "I'm having trouble generating a response right now. Please try again later.",
-                "error": str(e)
-            }
+            logger.error(f"Error in chat response generation, returning fallback: {e}")
+            return {"response": "I'm having trouble generating a response right now. Please try again later."}
     
     def _format_emotion_data(self, emotion_data: Dict[str, Any]) -> str:
         """Format emotional context for the prompt"""

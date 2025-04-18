@@ -184,27 +184,59 @@ def reset_session():
     })
 
 def render_assessment(diagnosis_agent):
+    import asyncio
+    from agents.diagnosis_agent import phq9_assessment, gad7_assessment
     st.header("Mental Health Check-In")
     with st.form("assessment_form"):
-        responses = {}
-        for idx, question in enumerate(AppConfig.ASSESSMENT_QUESTIONS):
-            responses[question] = st.radio(
-                f"{idx+1}. {question}",
-                options=("No", "Yes"),
-                key=f"q{idx}"
-            )
-        
+        phq9_resps = []
+        st.subheader("Depression Screening (PHQ-9)")
+        for i, q in enumerate(AppConfig.PHQ9_QUESTIONS):
+            choice = st.radio(f"{i+1}. {q}",
+                               options=["Not at all", "Several days", "More than half the days", "Nearly every day"],
+                               key=f"phq9_{i}")
+            phq9_resps.append(["Not at all","Several days","More than half the days","Nearly every day"].index(choice))
+        st.subheader("Anxiety Screening (GAD-7)")
+        gad7_resps = []
+        for i, q in enumerate(AppConfig.GAD7_QUESTIONS):
+            choice = st.radio(f"{i+1}. {q}",
+                               options=["Not at all", "Several days", "More than half the days", "Nearly every day"],
+                               key=f"gad7_{i}")
+            gad7_resps.append(["Not at all","Several days","More than half the days","Nearly every day"].index(choice))
         if st.form_submit_button("Continue"):
-            symptoms = [q for q, a in responses.items() if a == "Yes"]
-            if diagnosis_agent is None:
-                st.error("Diagnosis service is currently unavailable. Please try again later.")
-                logger.warning("Diagnosis agent not initialized, cannot perform diagnosis.")
-                return
-            diagnosis = diagnosis_agent.diagnose(symptoms)
+            # Compute PHQ-9 score and severity inline
+            phq9_score = sum(phq9_resps)
+            if phq9_score >= 20:
+                phq9_severity = "severe"
+            elif phq9_score >= 15:
+                phq9_severity = "moderately severe"
+            elif phq9_score >= 10:
+                phq9_severity = "moderate"
+            elif phq9_score >= 5:
+                phq9_severity = "mild"
+            else:
+                phq9_severity = "minimal"
+            phq9_result = {"score": phq9_score, "severity": phq9_severity}
+            # Compute GAD-7 score and severity inline
+            gad7_score = sum(gad7_resps)
+            if gad7_score >= 15:
+                gad7_severity = "severe"
+            elif gad7_score >= 10:
+                gad7_severity = "moderate"
+            elif gad7_score >= 5:
+                gad7_severity = "mild"
+            else:
+                gad7_severity = "minimal"
+            gad7_result = {"score": gad7_score, "severity": gad7_severity}
+            # Store diagnosis summary
+            diag_text = (
+                f"PHQ-9: {phq9_severity.capitalize()} (score {phq9_score}), "
+                f"GAD-7: {gad7_severity.capitalize()} (score {gad7_score})"
+            )
             st.session_state.update({
-                "symptoms": symptoms,
-                "diagnosis": diagnosis,
-                "step": 2
+                "phq9": phq9_result,
+                "gad7": gad7_result,
+                "diagnosis": diag_text,
+                "step": 3
             })
             track_metric("assessment_completed", 1)
             st.rerun()

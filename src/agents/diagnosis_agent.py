@@ -143,6 +143,56 @@ def _estimate_severity(confidence_score: float) -> str:
     else:
         return "mild"
 
+@tool("phq9_assessment")
+async def phq9_assessment(responses: List[int]) -> Dict[str, Any]:
+    """
+    Administers PHQ-9 questionnaire and computes depression severity.
+    Args:
+        responses: List of 9 integer responses (0-3) for PHQ-9 items
+    Returns:
+        Dictionary with total score, severity category, and interpretation
+    """
+    score = sum(responses)
+    if score >= 20:
+        severity = "severe"
+    elif score >= 15:
+        severity = "moderately severe"
+    elif score >= 10:
+        severity = "moderate"
+    elif score >= 5:
+        severity = "mild"
+    else:
+        severity = "minimal"
+    interpretation = (
+        f"PHQ-9 total score {score} indicates {severity} depressive symptoms."
+        " Recommend referral to mental health professional for comprehensive evaluation."
+    )
+    return {"score": score, "severity": severity, "interpretation": interpretation}
+
+@tool("gad7_assessment")
+async def gad7_assessment(responses: List[int]) -> Dict[str, Any]:
+    """
+    Administers GAD-7 questionnaire and computes anxiety severity.
+    Args:
+        responses: List of 7 integer responses (0-3) for GAD-7 items
+    Returns:
+        Dictionary with total score, severity category, and interpretation
+    """
+    score = sum(responses)
+    if score >= 15:
+        severity = "severe"
+    elif score >= 10:
+        severity = "moderate"
+    elif score >= 5:
+        severity = "mild"
+    else:
+        severity = "minimal"
+    interpretation = (
+        f"GAD-7 total score {score} indicates {severity} anxiety symptoms."
+        " Consider stress management strategies and professional consultation."
+    )
+    return {"score": score, "severity": severity, "interpretation": interpretation}
+
 class DiagnosisAgent(BaseAgent):
     def __init__(self, model: BaseLanguageModel):
         super().__init__(
@@ -151,7 +201,7 @@ class DiagnosisAgent(BaseAgent):
             role="Expert system for mental health symptom analysis and diagnosis",
             description="""An AI agent specialized in analyzing mental health symptoms and providing diagnostic insights.
             Uses evidence-based criteria and maintains clinical accuracy while emphasizing the importance of professional evaluation.""",
-            tools=[extract_symptoms, analyze_diagnostic_criteria],
+            tools=[extract_symptoms, analyze_diagnostic_criteria, phq9_assessment, gad7_assessment],
             memory=Memory(memory="diagnosis_memory", storage="local_storage"),  # Initialize with string values
             knowledge=AgentKnowledge()
         )
