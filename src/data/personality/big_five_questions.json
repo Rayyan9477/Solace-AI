@@ -1,0 +1,422 @@
+[
+  {
+    "id": 1,
+    "text": "I am the life of the party.",
+    "trait": "extraversion",
+    "reversed": false,
+    "facet": "gregariousness"
+  },
+  {
+    "id": 2,
+    "text": "I don't talk a lot.",
+    "trait": "extraversion",
+    "reversed": true,
+    "facet": "gregariousness"
+  },
+  {
+    "id": 3,
+    "text": "I feel comfortable around people.",
+    "trait": "extraversion",
+    "reversed": false,
+    "facet": "warmth"
+  },
+  {
+    "id": 4,
+    "text": "I keep in the background.",
+    "trait": "extraversion",
+    "reversed": true,
+    "facet": "assertiveness"
+  },
+  {
+    "id": 5,
+    "text": "I start conversations.",
+    "trait": "extraversion",
+    "reversed": false,
+    "facet": "gregariousness"
+  },
+  {
+    "id": 6,
+    "text": "I have little to say.",
+    "trait": "extraversion",
+    "reversed": true,
+    "facet": "gregariousness"
+  },
+  {
+    "id": 7,
+    "text": "I talk to a lot of different people at parties.",
+    "trait": "extraversion",
+    "reversed": false,
+    "facet": "gregariousness"
+  },
+  {
+    "id": 8,
+    "text": "I don't like to draw attention to myself.",
+    "trait": "extraversion",
+    "reversed": true,
+    "facet": "assertiveness"
+  },
+  {
+    "id": 9,
+    "text": "I don't mind being the center of attention.",
+    "trait": "extraversion",
+    "reversed": false,
+    "facet": "assertiveness"
+  },
+  {
+    "id": 10,
+    "text": "I am quiet around strangers.",
+    "trait": "extraversion",
+    "reversed": true,
+    "facet": "warmth"
+  },
+  {
+    "id": 11,
+    "text": "I get excited by new ideas and projects.",
+    "trait": "extraversion",
+    "reversed": false,
+    "facet": "excitement-seeking"
+  },
+  {
+    "id": 12,
+    "text": "I prefer one-on-one conversations to group activities.",
+    "trait": "extraversion",
+    "reversed": true,
+    "facet": "gregariousness"
+  },
+  {
+    "id": 13,
+    "text": "I feel little concern for others.",
+    "trait": "agreeableness",
+    "reversed": true,
+    "facet": "altruism"
+  },
+  {
+    "id": 14,
+    "text": "I am interested in people.",
+    "trait": "agreeableness",
+    "reversed": false,
+    "facet": "warmth"
+  },
+  {
+    "id": 15,
+    "text": "I insult people.",
+    "trait": "agreeableness",
+    "reversed": true,
+    "facet": "cooperation"
+  },
+  {
+    "id": 16,
+    "text": "I sympathize with others' feelings.",
+    "trait": "agreeableness",
+    "reversed": false,
+    "facet": "empathy"
+  },
+  {
+    "id": 17,
+    "text": "I am not interested in other people's problems.",
+    "trait": "agreeableness",
+    "reversed": true,
+    "facet": "altruism"
+  },
+  {
+    "id": 18,
+    "text": "I have a soft heart.",
+    "trait": "agreeableness",
+    "reversed": false,
+    "facet": "empathy"
+  },
+  {
+    "id": 19,
+    "text": "I am not really interested in others.",
+    "trait": "agreeableness",
+    "reversed": true,
+    "facet": "warmth"
+  },
+  {
+    "id": 20,
+    "text": "I take time out for others.",
+    "trait": "agreeableness",
+    "reversed": false,
+    "facet": "altruism"
+  },
+  {
+    "id": 21,
+    "text": "I feel others' emotions.",
+    "trait": "agreeableness",
+    "reversed": false,
+    "facet": "empathy"
+  },
+  {
+    "id": 22,
+    "text": "I make people feel at ease.",
+    "trait": "agreeableness",
+    "reversed": false,
+    "facet": "warmth"
+  },
+  {
+    "id": 23,
+    "text": "I am hard to get to know.",
+    "trait": "agreeableness",
+    "reversed": true,
+    "facet": "warmth"
+  },
+  {
+    "id": 24,
+    "text": "I tend to trust people and give them the benefit of the doubt.",
+    "trait": "agreeableness",
+    "reversed": false,
+    "facet": "trust"
+  },
+  {
+    "id": 25,
+    "text": "I am always prepared.",
+    "trait": "conscientiousness",
+    "reversed": false,
+    "facet": "self-discipline"
+  },
+  {
+    "id": 26,
+    "text": "I leave my belongings around.",
+    "trait": "conscientiousness",
+    "reversed": true,
+    "facet": "orderliness"
+  },
+  {
+    "id": 27,
+    "text": "I pay attention to details.",
+    "trait": "conscientiousness",
+    "reversed": false,
+    "facet": "orderliness"
+  },
+  {
+    "id": 28,
+    "text": "I make a mess of things.",
+    "trait": "conscientiousness",
+    "reversed": true,
+    "facet": "orderliness"
+  },
+  {
+    "id": 29,
+    "text": "I get chores done right away.",
+    "trait": "conscientiousness",
+    "reversed": false,
+    "facet": "dutifulness"
+  },
+  {
+    "id": 30,
+    "text": "I often forget to put things back in their proper place.",
+    "trait": "conscientiousness",
+    "reversed": true,
+    "facet": "orderliness"
+  },
+  {
+    "id": 31,
+    "text": "I like order.",
+    "trait": "conscientiousness",
+    "reversed": false,
+    "facet": "orderliness"
+  },
+  {
+    "id": 32,
+    "text": "I shirk my duties.",
+    "trait": "conscientiousness",
+    "reversed": true,
+    "facet": "dutifulness"
+  },
+  {
+    "id": 33,
+    "text": "I follow a schedule.",
+    "trait": "conscientiousness",
+    "reversed": false,
+    "facet": "self-discipline"
+  },
+  {
+    "id": 34,
+    "text": "I am exacting in my work.",
+    "trait": "conscientiousness",
+    "reversed": false,
+    "facet": "achievement-striving"
+  },
+  {
+    "id": 35,
+    "text": "I leave a mess in my room.",
+    "trait": "conscientiousness",
+    "reversed": true,
+    "facet": "orderliness"
+  },
+  {
+    "id": 36,
+    "text": "I keep my promises.",
+    "trait": "conscientiousness",
+    "reversed": false,
+    "facet": "dutifulness"
+  },
+  {
+    "id": 37,
+    "text": "I get stressed out easily.",
+    "trait": "neuroticism",
+    "reversed": false,
+    "facet": "anxiety"
+  },
+  {
+    "id": 38,
+    "text": "I am relaxed most of the time.",
+    "trait": "neuroticism",
+    "reversed": true,
+    "facet": "anxiety"
+  },
+  {
+    "id": 39,
+    "text": "I worry about things.",
+    "trait": "neuroticism",
+    "reversed": false,
+    "facet": "anxiety"
+  },
+  {
+    "id": 40,
+    "text": "I seldom feel blue.",
+    "trait": "neuroticism",
+    "reversed": true,
+    "facet": "depression"
+  },
+  {
+    "id": 41,
+    "text": "I am easily disturbed.",
+    "trait": "neuroticism",
+    "reversed": false,
+    "facet": "vulnerability"
+  },
+  {
+    "id": 42,
+    "text": "I get upset easily.",
+    "trait": "neuroticism",
+    "reversed": false,
+    "facet": "anger"
+  },
+  {
+    "id": 43,
+    "text": "I change my mood a lot.",
+    "trait": "neuroticism",
+    "reversed": false,
+    "facet": "emotional-volatility"
+  },
+  {
+    "id": 44,
+    "text": "I have frequent mood swings.",
+    "trait": "neuroticism",
+    "reversed": false,
+    "facet": "emotional-volatility"
+  },
+  {
+    "id": 45,
+    "text": "I get irritated easily.",
+    "trait": "neuroticism",
+    "reversed": false,
+    "facet": "anger"
+  },
+  {
+    "id": 46,
+    "text": "I often feel blue.",
+    "trait": "neuroticism",
+    "reversed": false,
+    "facet": "depression"
+  },
+  {
+    "id": 47,
+    "text": "I am much more anxious than most people.",
+    "trait": "neuroticism",
+    "reversed": false,
+    "facet": "anxiety"
+  },
+  {
+    "id": 48,
+    "text": "I remain calm under pressure.",
+    "trait": "neuroticism",
+    "reversed": true,
+    "facet": "vulnerability"
+  },
+  {
+    "id": 49,
+    "text": "I have a rich vocabulary.",
+    "trait": "openness",
+    "reversed": false,
+    "facet": "intellect"
+  },
+  {
+    "id": 50,
+    "text": "I have difficulty understanding abstract ideas.",
+    "trait": "openness",
+    "reversed": true,
+    "facet": "intellect"
+  },
+  {
+    "id": 51,
+    "text": "I have a vivid imagination.",
+    "trait": "openness",
+    "reversed": false,
+    "facet": "imagination"
+  },
+  {
+    "id": 52,
+    "text": "I am not interested in abstract ideas.",
+    "trait": "openness",
+    "reversed": true,
+    "facet": "intellect"
+  },
+  {
+    "id": 53,
+    "text": "I have excellent ideas.",
+    "trait": "openness",
+    "reversed": false,
+    "facet": "intellect"
+  },
+  {
+    "id": 54,
+    "text": "I do not have a good imagination.",
+    "trait": "openness",
+    "reversed": true,
+    "facet": "imagination"
+  },
+  {
+    "id": 55,
+    "text": "I am quick to understand things.",
+    "trait": "openness",
+    "reversed": false,
+    "facet": "intellect"
+  },
+  {
+    "id": 56,
+    "text": "I use difficult words.",
+    "trait": "openness",
+    "reversed": false,
+    "facet": "intellect"
+  },
+  {
+    "id": 57,
+    "text": "I spend time reflecting on things.",
+    "trait": "openness",
+    "reversed": false,
+    "facet": "introspection"
+  },
+  {
+    "id": 58,
+    "text": "I am full of ideas.",
+    "trait": "openness",
+    "reversed": false,
+    "facet": "creativity"
+  },
+  {
+    "id": 59,
+    "text": "I enjoy thinking about complex problems.",
+    "trait": "openness",
+    "reversed": false,
+    "facet": "intellect"
+  },
+  {
+    "id": 60,
+    "text": "I avoid philosophical discussions.",
+    "trait": "openness",
+    "reversed": true,
+    "facet": "intellect"
+  }
+]

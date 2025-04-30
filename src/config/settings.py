@@ -9,27 +9,27 @@ load_dotenv(dotenv_path=dotenv_path)
 
 class AppConfig:
     """Application configuration settings"""
-    
+
     # Application settings
     APP_NAME = "Mental Health Support Bot"
     APP_VERSION = "1.0.0"
     DEBUG = os.getenv("DEBUG", "False").lower() == "true"
-    
+
     # Paths
     BASE_DIR = Path(__file__).resolve().parent.parent
     DATA_DIR = BASE_DIR / "data"
     MODEL_DIR = BASE_DIR / "models"
     VECTOR_STORE_PATH = DATA_DIR / "vector_store"
-    
+
     # Create directories if they don't exist
     for dir_path in [DATA_DIR, MODEL_DIR, VECTOR_STORE_PATH]:
         dir_path.mkdir(parents=True, exist_ok=True)
-    
+
     # Monitoring settings
     SENTRY_DSN = os.getenv("SENTRY_DSN", "")
     PROMETHEUS_ENABLED = os.getenv("PROMETHEUS_ENABLED", "False").lower() == "true"
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-    
+
     # Model settings
     # Set your Gemini API key here if not using .env
     # Only Gemini 2.0 Flash is supported
@@ -49,13 +49,13 @@ class AppConfig:
         "top_k": int(os.getenv("TOP_K", "50")),
         "max_tokens": MAX_RESPONSE_TOKENS
     }
-    
+
     # Embedding Configuration
     EMBEDDING_CONFIG = {
         "model_name": "sentence-transformers/all-mpnet-base-v2",
         "normalize_embeddings": True
     }
-    
+
     # Vector Database Configuration
     VECTOR_DB_CONFIG = {
         "engine": "faiss",
@@ -65,7 +65,7 @@ class AppConfig:
         "index_path": str(VECTOR_STORE_PATH),
         "collection_name": "mental_health_kb"
     }
-    
+
     # Safety settings
     SAFETY_CONFIG = {
         "max_toxicity": float(os.getenv("MAX_TOXICITY", "0.7")),
@@ -91,11 +91,11 @@ class AppConfig:
             "review": "This request requires human review for safety purposes."
         }
     }
-    
+
     # Model paths and caching
     MODEL_CACHE_DIR = MODEL_DIR / "cache"
     MODEL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    
+
     # Assessment questions
     ASSESSMENT_QUESTIONS = [
         "Have you been feeling down or depressed?",
@@ -104,7 +104,23 @@ class AppConfig:
         "Do you feel anxious or worried most of the time?",
         "Have you had thoughts of harming yourself?"
     ]
-    
+
+    # Personality assessment settings
+    PERSONALITY_CONFIG = {
+        "big_five": {
+            "enabled": True,
+            "num_questions": 20,  # Shortened version for better user experience
+            "min_questions": 10,  # Minimum number of questions required for valid results
+            "traits": ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"]
+        },
+        "mbti": {
+            "enabled": True,
+            "num_questions": 20,  # Standard MBTI short form
+            "min_questions": 8,   # Minimum number of questions required for valid results
+            "dimensions": ["E/I", "S/N", "T/F", "J/P"]
+        }
+    }
+
     # Standardized screening questionnaires
     PHQ9_QUESTIONS = [
         "Little interest or pleasure in doing things?",
@@ -126,26 +142,26 @@ class AppConfig:
         "Becoming easily annoyed or irritable?",
         "Feeling afraid as if something awful might happen?"
     ]
-    
+
     # Crisis resources
     CRISIS_RESOURCES = """
     **Emergency Resources:**
     - National Crisis Hotline: 988
     - Emergency Services: 911
     - Crisis Text Line: Text HOME to 741741
-    
+
     **Additional Support:**
     - National Alliance on Mental Health: 1-800-950-NAMI
     - Substance Abuse and Mental Health Services: 1-800-662-HELP
     """
-    
+
     @classmethod
     def get_vector_store_config(cls) -> Dict[str, Any]:
         """Get vector store configuration"""
         return {
             "dimension": cls.VECTOR_DB_CONFIG["dimension"]
         }
-    
+
     @classmethod
     def get_crawler_config(cls) -> Dict[str, Any]:
         """Get crawler configuration"""
@@ -160,7 +176,7 @@ class AppConfig:
             ],
             "user_agent": f"MentalHealthBot/{cls.APP_VERSION}"
         }
-    
+
     @classmethod
     def validate_config(cls) -> bool:
         """Validate configuration settings"""
@@ -168,24 +184,24 @@ class AppConfig:
         for dir_path in required_dirs:
             if not dir_path.exists():
                 return False
-        
+
         required_settings = [
             cls.APP_NAME,
             cls.MODEL_NAME,
             cls.EMBEDDING_CONFIG["model_name"]
         ]
         return all(required_settings)
-    
+
     @classmethod
     def get_model_path(cls, model_name: str) -> Path:
         """Get path for a specific model"""
         return cls.MODEL_DIR / model_name
-    
+
     @classmethod
     def get_data_path(cls, filename: str) -> Path:
         """Get path for a data file"""
         return cls.DATA_DIR / filename
-    
+
     @classmethod
     def get_model_config(cls) -> Dict[str, Any]:
         """Get complete model configuration"""

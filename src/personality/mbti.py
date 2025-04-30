@@ -10,223 +10,402 @@ class MBTIAssessment:
     """
     Implementation of the Myers-Briggs Type Indicator (MBTI) personality assessment.
     """
-    
+
     def __init__(self):
         """Initialize the MBTI assessment"""
         self.questions = self._load_questions()
         self.type_descriptions = self._load_type_descriptions()
-    
+
     def _load_questions(self) -> List[Dict[str, Any]]:
         """Load the MBTI questions from the data file"""
         try:
             # Try to load questions from the data directory
             data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'personality')
             os.makedirs(data_dir, exist_ok=True)
-            
+
             questions_path = os.path.join(data_dir, 'mbti_questions.json')
-            
+
             # If the file doesn't exist, create it with default questions
             if not os.path.exists(questions_path):
                 self._create_default_questions(questions_path)
-            
+
             with open(questions_path, 'r') as f:
                 return json.load(f)
         except Exception as e:
             logger.error(f"Error loading MBTI questions: {str(e)}")
             # Return a minimal set of questions as fallback
             return self._get_fallback_questions()
-    
+
     def _create_default_questions(self, file_path: str) -> None:
-        """Create a default questions file"""
+        """Create a default questions file based on 16personalities.com format"""
         default_questions = [
+            # Extraversion vs. Introversion (E/I) questions
             {
                 "id": 1,
-                "text": "At a party, you:",
+                "text": "At social events, you:",
                 "options": [
-                    {"key": "A", "text": "Interact with many, including strangers", "dimension": "E"},
-                    {"key": "B", "text": "Interact with a few, known to you", "dimension": "I"}
-                ]
+                    {"key": "A", "text": "Interact with many people, including strangers", "dimension": "E"},
+                    {"key": "B", "text": "Interact with a few people you know well", "dimension": "I"}
+                ],
+                "category": "E/I"
             },
             {
                 "id": 2,
-                "text": "You are more:",
+                "text": "You tend to:",
                 "options": [
-                    {"key": "A", "text": "Realistic than speculative", "dimension": "S"},
-                    {"key": "B", "text": "Speculative than realistic", "dimension": "N"}
-                ]
+                    {"key": "A", "text": "Think out loud and get energized by conversation", "dimension": "E"},
+                    {"key": "B", "text": "Think things through inside your head first", "dimension": "I"}
+                ],
+                "category": "E/I"
             },
             {
                 "id": 3,
-                "text": "Is it worse to:",
+                "text": "When you're in a group, you usually prefer to:",
                 "options": [
-                    {"key": "A", "text": "Have your head in the clouds", "dimension": "S"},
-                    {"key": "B", "text": "Be in a rut", "dimension": "N"}
-                ]
+                    {"key": "A", "text": "Join in and contribute to the conversation", "dimension": "E"},
+                    {"key": "B", "text": "Listen and observe more than speak", "dimension": "I"}
+                ],
+                "category": "E/I"
             },
             {
                 "id": 4,
-                "text": "You are more impressed by:",
+                "text": "After spending time with a large group of people, you typically feel:",
                 "options": [
-                    {"key": "A", "text": "Principles", "dimension": "T"},
-                    {"key": "B", "text": "Emotions", "dimension": "F"}
-                ]
+                    {"key": "A", "text": "Energized and wanting more social interaction", "dimension": "E"},
+                    {"key": "B", "text": "Drained and needing alone time to recharge", "dimension": "I"}
+                ],
+                "category": "E/I"
             },
             {
                 "id": 5,
-                "text": "You are drawn more to:",
+                "text": "You consider yourself more of a:",
                 "options": [
-                    {"key": "A", "text": "Convincing reason", "dimension": "T"},
-                    {"key": "B", "text": "Touching hearts", "dimension": "F"}
-                ]
+                    {"key": "A", "text": "Talker who thinks while speaking", "dimension": "E"},
+                    {"key": "B", "text": "Listener who thinks before speaking", "dimension": "I"}
+                ],
+                "category": "E/I"
             },
             {
                 "id": 6,
-                "text": "You prefer to work:",
+                "text": "Your ideal weekend would involve:",
                 "options": [
-                    {"key": "A", "text": "To deadlines", "dimension": "J"},
-                    {"key": "B", "text": "Just whenever", "dimension": "P"}
-                ]
+                    {"key": "A", "text": "Going out with friends or to social events", "dimension": "E"},
+                    {"key": "B", "text": "Spending quiet time at home or with a few close friends", "dimension": "I"}
+                ],
+                "category": "E/I"
             },
             {
                 "id": 7,
-                "text": "You tend to choose:",
+                "text": "When facing a challenge, you prefer to:",
                 "options": [
-                    {"key": "A", "text": "Rather carefully", "dimension": "J"},
-                    {"key": "B", "text": "Somewhat impulsively", "dimension": "P"}
-                ]
+                    {"key": "A", "text": "Discuss it with others to work through solutions", "dimension": "E"},
+                    {"key": "B", "text": "Think it through on your own first", "dimension": "I"}
+                ],
+                "category": "E/I"
             },
+
+            # Sensing vs. Intuition (S/N) questions
             {
                 "id": 8,
-                "text": "At parties, you:",
+                "text": "You are more interested in:",
                 "options": [
-                    {"key": "A", "text": "Stay late, with increasing energy", "dimension": "E"},
-                    {"key": "B", "text": "Leave early, with decreased energy", "dimension": "I"}
-                ]
+                    {"key": "A", "text": "What is real and concrete in the present", "dimension": "S"},
+                    {"key": "B", "text": "What could be possible in the future", "dimension": "N"}
+                ],
+                "category": "S/N"
             },
             {
                 "id": 9,
-                "text": "You are more attracted to:",
+                "text": "You prefer explanations that are:",
                 "options": [
-                    {"key": "A", "text": "Sensible people", "dimension": "S"},
-                    {"key": "B", "text": "Imaginative people", "dimension": "N"}
-                ]
+                    {"key": "A", "text": "Practical and focused on facts", "dimension": "S"},
+                    {"key": "B", "text": "Theoretical and focused on ideas", "dimension": "N"}
+                ],
+                "category": "S/N"
             },
             {
                 "id": 10,
-                "text": "You are more interested in:",
+                "text": "When learning something new, you prefer to:",
                 "options": [
-                    {"key": "A", "text": "What is actual", "dimension": "S"},
-                    {"key": "B", "text": "What is possible", "dimension": "N"}
-                ]
+                    {"key": "A", "text": "Master practical skills through hands-on experience", "dimension": "S"},
+                    {"key": "B", "text": "Understand the underlying concepts and theories", "dimension": "N"}
+                ],
+                "category": "S/N"
             },
             {
                 "id": 11,
-                "text": "In judging others, you are more swayed by:",
+                "text": "You tend to focus more on:",
                 "options": [
-                    {"key": "A", "text": "Laws than circumstances", "dimension": "T"},
-                    {"key": "B", "text": "Circumstances than laws", "dimension": "F"}
-                ]
+                    {"key": "A", "text": "Details and specific facts", "dimension": "S"},
+                    {"key": "B", "text": "The big picture and patterns", "dimension": "N"}
+                ],
+                "category": "S/N"
             },
             {
                 "id": 12,
-                "text": "In approaching others, you are usually more:",
+                "text": "You would describe yourself as more:",
                 "options": [
-                    {"key": "A", "text": "Objective", "dimension": "T"},
-                    {"key": "B", "text": "Personal", "dimension": "F"}
-                ]
+                    {"key": "A", "text": "Practical and grounded", "dimension": "S"},
+                    {"key": "B", "text": "Imaginative and innovative", "dimension": "N"}
+                ],
+                "category": "S/N"
             },
             {
                 "id": 13,
-                "text": "You are more:",
+                "text": "You are more likely to trust:",
                 "options": [
-                    {"key": "A", "text": "Punctual", "dimension": "J"},
-                    {"key": "B", "text": "Leisurely", "dimension": "P"}
-                ]
+                    {"key": "A", "text": "Your direct experience and observations", "dimension": "S"},
+                    {"key": "B", "text": "Your intuition and hunches", "dimension": "N"}
+                ],
+                "category": "S/N"
             },
             {
                 "id": 14,
-                "text": "It bothers you more having things:",
+                "text": "When solving problems, you prefer to:",
                 "options": [
-                    {"key": "A", "text": "Incomplete", "dimension": "J"},
-                    {"key": "B", "text": "Completed", "dimension": "P"}
-                ]
+                    {"key": "A", "text": "Use proven methods and established solutions", "dimension": "S"},
+                    {"key": "B", "text": "Find new approaches and innovative solutions", "dimension": "N"}
+                ],
+                "category": "S/N"
             },
+
+            # Thinking vs. Feeling (T/F) questions
             {
                 "id": 15,
-                "text": "In your social groups, you:",
+                "text": "When making decisions, you typically prioritize:",
                 "options": [
-                    {"key": "A", "text": "Keep abreast of others' happenings", "dimension": "E"},
-                    {"key": "B", "text": "Get behind on the news", "dimension": "I"}
-                ]
+                    {"key": "A", "text": "Logic, consistency, and objective analysis", "dimension": "T"},
+                    {"key": "B", "text": "People's feelings and maintaining harmony", "dimension": "F"}
+                ],
+                "category": "T/F"
             },
             {
                 "id": 16,
-                "text": "In doing ordinary things, you are more likely to:",
+                "text": "You are more convinced by:",
                 "options": [
-                    {"key": "A", "text": "Do it the usual way", "dimension": "S"},
-                    {"key": "B", "text": "Do it your own way", "dimension": "N"}
-                ]
+                    {"key": "A", "text": "A strong logical argument", "dimension": "T"},
+                    {"key": "B", "text": "A compelling emotional appeal", "dimension": "F"}
+                ],
+                "category": "T/F"
             },
             {
                 "id": 17,
-                "text": "Writers should:",
+                "text": "When giving feedback, you tend to be:",
                 "options": [
-                    {"key": "A", "text": "Say what they mean and mean what they say", "dimension": "S"},
-                    {"key": "B", "text": "Express things more by use of analogy", "dimension": "N"}
-                ]
+                    {"key": "A", "text": "Direct and straightforward about what needs improvement", "dimension": "T"},
+                    {"key": "B", "text": "Tactful and encouraging, focusing on the positive", "dimension": "F"}
+                ],
+                "category": "T/F"
             },
             {
                 "id": 18,
-                "text": "You are more drawn to:",
+                "text": "In conflicts, you are more concerned with:",
                 "options": [
-                    {"key": "A", "text": "Consistency of thought", "dimension": "T"},
-                    {"key": "B", "text": "Harmonious human relationships", "dimension": "F"}
-                ]
+                    {"key": "A", "text": "Finding the objectively fair solution", "dimension": "T"},
+                    {"key": "B", "text": "Making sure everyone's feelings are considered", "dimension": "F"}
+                ],
+                "category": "T/F"
             },
             {
                 "id": 19,
-                "text": "You are more comfortable making:",
+                "text": "You value more highly:",
                 "options": [
-                    {"key": "A", "text": "Logical judgments", "dimension": "T"},
-                    {"key": "B", "text": "Value judgments", "dimension": "F"}
-                ]
+                    {"key": "A", "text": "Truth, even if it might hurt someone's feelings", "dimension": "T"},
+                    {"key": "B", "text": "Compassion, even if it means bending the truth", "dimension": "F"}
+                ],
+                "category": "T/F"
             },
             {
                 "id": 20,
-                "text": "You want things:",
+                "text": "You consider yourself more:",
                 "options": [
-                    {"key": "A", "text": "Settled and decided", "dimension": "J"},
-                    {"key": "B", "text": "Unsettled and undecided", "dimension": "P"}
-                ]
+                    {"key": "A", "text": "Analytical and objective", "dimension": "T"},
+                    {"key": "B", "text": "Empathetic and understanding", "dimension": "F"}
+                ],
+                "category": "T/F"
+            },
+            {
+                "id": 21,
+                "text": "When someone comes to you with a problem, you're more likely to:",
+                "options": [
+                    {"key": "A", "text": "Help them analyze the situation and find a solution", "dimension": "T"},
+                    {"key": "B", "text": "Listen and provide emotional support", "dimension": "F"}
+                ],
+                "category": "T/F"
+            },
+
+            # Judging vs. Perceiving (J/P) questions
+            {
+                "id": 22,
+                "text": "You prefer:",
+                "options": [
+                    {"key": "A", "text": "Having a detailed plan and sticking to it", "dimension": "J"},
+                    {"key": "B", "text": "Going with the flow and adapting as you go", "dimension": "P"}
+                ],
+                "category": "J/P"
+            },
+            {
+                "id": 23,
+                "text": "You find it more satisfying to:",
+                "options": [
+                    {"key": "A", "text": "Complete a project and check it off your list", "dimension": "J"},
+                    {"key": "B", "text": "Start a new project with fresh possibilities", "dimension": "P"}
+                ],
+                "category": "J/P"
+            },
+            {
+                "id": 24,
+                "text": "Your workspace is usually:",
+                "options": [
+                    {"key": "A", "text": "Organized and structured", "dimension": "J"},
+                    {"key": "B", "text": "Flexible and adaptable to what you're working on", "dimension": "P"}
+                ],
+                "category": "J/P"
+            },
+            {
+                "id": 25,
+                "text": "You prefer to:",
+                "options": [
+                    {"key": "A", "text": "Make decisions and settle matters quickly", "dimension": "J"},
+                    {"key": "B", "text": "Keep options open and decide later", "dimension": "P"}
+                ],
+                "category": "J/P"
+            },
+            {
+                "id": 26,
+                "text": "You tend to:",
+                "options": [
+                    {"key": "A", "text": "Plan ahead and follow schedules", "dimension": "J"},
+                    {"key": "B", "text": "Be spontaneous and adapt to circumstances", "dimension": "P"}
+                ],
+                "category": "J/P"
+            },
+            {
+                "id": 27,
+                "text": "You feel more comfortable when:",
+                "options": [
+                    {"key": "A", "text": "Things are decided and settled", "dimension": "J"},
+                    {"key": "B", "text": "Options remain open and flexible", "dimension": "P"}
+                ],
+                "category": "J/P"
+            },
+            {
+                "id": 28,
+                "text": "When it comes to deadlines, you typically:",
+                "options": [
+                    {"key": "A", "text": "Complete work well ahead of time", "dimension": "J"},
+                    {"key": "B", "text": "Work in bursts of energy, often close to the deadline", "dimension": "P"}
+                ],
+                "category": "J/P"
+            },
+
+            # Additional E/I questions
+            {
+                "id": 29,
+                "text": "You find phone calls with friends:",
+                "options": [
+                    {"key": "A", "text": "Energizing and you often initiate them", "dimension": "E"},
+                    {"key": "B", "text": "Sometimes draining and you often let them go to voicemail", "dimension": "I"}
+                ],
+                "category": "E/I"
+            },
+            {
+                "id": 30,
+                "text": "You prefer working:",
+                "options": [
+                    {"key": "A", "text": "In a team environment with lots of interaction", "dimension": "E"},
+                    {"key": "B", "text": "Independently or with minimal interruptions", "dimension": "I"}
+                ],
+                "category": "E/I"
+            },
+
+            # Additional S/N questions
+            {
+                "id": 31,
+                "text": "You are more drawn to:",
+                "options": [
+                    {"key": "A", "text": "Realistic stories about actual events", "dimension": "S"},
+                    {"key": "B", "text": "Fantasy and science fiction that explore possibilities", "dimension": "N"}
+                ],
+                "category": "S/N"
+            },
+            {
+                "id": 32,
+                "text": "You find more value in people who are:",
+                "options": [
+                    {"key": "A", "text": "Practical and reliable", "dimension": "S"},
+                    {"key": "B", "text": "Imaginative and insightful", "dimension": "N"}
+                ],
+                "category": "S/N"
+            },
+
+            # Additional T/F questions
+            {
+                "id": 33,
+                "text": "You find it easier to:",
+                "options": [
+                    {"key": "A", "text": "Apply logical analysis to problems", "dimension": "T"},
+                    {"key": "B", "text": "Understand how people feel and what they need", "dimension": "F"}
+                ],
+                "category": "T/F"
+            },
+            {
+                "id": 34,
+                "text": "You are more likely to be described as:",
+                "options": [
+                    {"key": "A", "text": "Fair and reasonable", "dimension": "T"},
+                    {"key": "B", "text": "Warm and compassionate", "dimension": "F"}
+                ],
+                "category": "T/F"
+            },
+
+            # Additional J/P questions
+            {
+                "id": 35,
+                "text": "You prefer:",
+                "options": [
+                    {"key": "A", "text": "Clear expectations and structure", "dimension": "J"},
+                    {"key": "B", "text": "Freedom to adapt and change course", "dimension": "P"}
+                ],
+                "category": "J/P"
+            },
+            {
+                "id": 36,
+                "text": "You find more satisfaction in:",
+                "options": [
+                    {"key": "A", "text": "Following through on commitments", "dimension": "J"},
+                    {"key": "B", "text": "Exploring new possibilities", "dimension": "P"}
+                ],
+                "category": "J/P"
             }
         ]
-        
+
         try:
             with open(file_path, 'w') as f:
                 json.dump(default_questions, f, indent=2)
         except Exception as e:
             logger.error(f"Error creating default questions file: {str(e)}")
-    
+
     def _load_type_descriptions(self) -> Dict[str, Any]:
         """Load the MBTI type descriptions"""
         try:
             # Try to load descriptions from the data directory
             data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'personality')
             os.makedirs(data_dir, exist_ok=True)
-            
+
             descriptions_path = os.path.join(data_dir, 'mbti_descriptions.json')
-            
+
             # If the file doesn't exist, create it with default descriptions
             if not os.path.exists(descriptions_path):
                 self._create_default_descriptions(descriptions_path)
-            
+
             with open(descriptions_path, 'r') as f:
                 return json.load(f)
         except Exception as e:
             logger.error(f"Error loading MBTI descriptions: {str(e)}")
             # Return a minimal set of descriptions as fallback
             return self._get_fallback_descriptions()
-    
+
     def _create_default_descriptions(self, file_path: str) -> None:
         """Create a default descriptions file"""
         default_descriptions = {
@@ -327,13 +506,13 @@ class MBTIAssessment:
                 "weaknesses": ["Stubborn", "Intolerant", "Impatient", "Arrogant", "Poor handling of emotions"]
             }
         }
-        
+
         try:
             with open(file_path, 'w') as f:
                 json.dump(default_descriptions, f, indent=2)
         except Exception as e:
             logger.error(f"Error creating default descriptions file: {str(e)}")
-    
+
     def _get_fallback_questions(self) -> List[Dict[str, Any]]:
         """Return a minimal set of questions as fallback"""
         return [
@@ -370,7 +549,7 @@ class MBTIAssessment:
                 ]
             }
         ]
-    
+
     def _get_fallback_descriptions(self) -> Dict[str, Any]:
         """Return a minimal set of descriptions as fallback"""
         return {
@@ -391,30 +570,30 @@ class MBTIAssessment:
             "ENFJ": {"name": "The Teacher", "description": "Warm, empathetic, and responsive."},
             "ENTJ": {"name": "The Commander", "description": "Frank, decisive, and assumes leadership."}
         }
-    
+
     def get_questions(self, num_questions: int = 20) -> List[Dict[str, Any]]:
         """
         Get a specified number of MBTI questions
-        
+
         Args:
             num_questions: Number of questions to return (default: 20)
-            
+
         Returns:
             List of question dictionaries
         """
         # Ensure we don't request more questions than available
         num_questions = min(num_questions, len(self.questions))
-        
+
         # Ensure we have a balanced set of questions for each dimension
         dimensions = ["E/I", "S/N", "T/F", "J/P"]
         questions_per_dimension = num_questions // 4
         remaining = num_questions % 4
-        
+
         selected_questions = []
-        
+
         # Group questions by dimension
         dimension_questions = {dim: [] for dim in dimensions}
-        
+
         for question in self.questions:
             # Determine the dimension based on the first option
             if len(question["options"]) >= 1:
@@ -427,7 +606,7 @@ class MBTIAssessment:
                     dimension_questions["T/F"].append(question)
                 elif option_dimension in "JP":
                     dimension_questions["J/P"].append(question)
-        
+
         # Select questions for each dimension
         for dimension in dimensions:
             available = dimension_questions[dimension]
@@ -436,7 +615,7 @@ class MBTIAssessment:
             # Randomly select questions to avoid always using the same ones
             selected = random.sample(available, count) if count > 0 else []
             selected_questions.extend(selected)
-        
+
         # Add remaining questions if needed
         if remaining > 0:
             remaining_pool = []
@@ -444,20 +623,20 @@ class MBTIAssessment:
                 available = dimension_questions[dimension]
                 used = [q for q in selected_questions if q in available]
                 remaining_pool.extend([q for q in available if q not in used])
-            
+
             if remaining_pool:
                 additional = random.sample(remaining_pool, min(remaining, len(remaining_pool)))
                 selected_questions.extend(additional)
-        
+
         return selected_questions
-    
+
     def compute_results(self, responses: Dict[str, Any]) -> Dict[str, Any]:
         """
         Compute MBTI personality assessment results
-        
+
         Args:
             responses: Dictionary containing user responses to assessment questions
-            
+
         Returns:
             Dictionary containing assessment results
         """
@@ -469,33 +648,33 @@ class MBTIAssessment:
                 "T": 0, "F": 0,
                 "J": 0, "P": 0
             }
-            
+
             # Process each response
             for question_id, response_key in responses.items():
                 # Find the corresponding question
                 question = next((q for q in self.questions if str(q["id"]) == str(question_id)), None)
-                
+
                 if question:
                     # Find the selected option
                     selected_option = next((opt for opt in question["options"] if opt["key"] == response_key), None)
-                    
+
                     if selected_option and "dimension" in selected_option:
                         dimension = selected_option["dimension"]
                         dimension_counts[dimension] += 1
-            
+
             # Determine the personality type
             personality_type = ""
             personality_type += "E" if dimension_counts["E"] >= dimension_counts["I"] else "I"
             personality_type += "S" if dimension_counts["S"] >= dimension_counts["N"] else "N"
             personality_type += "T" if dimension_counts["T"] >= dimension_counts["F"] else "F"
             personality_type += "J" if dimension_counts["J"] >= dimension_counts["P"] else "P"
-            
+
             # Calculate percentages for each dimension
             total_ei = dimension_counts["E"] + dimension_counts["I"]
             total_sn = dimension_counts["S"] + dimension_counts["N"]
             total_tf = dimension_counts["T"] + dimension_counts["F"]
             total_jp = dimension_counts["J"] + dimension_counts["P"]
-            
+
             percentages = {
                 "E": (dimension_counts["E"] / total_ei * 100) if total_ei > 0 else 50,
                 "I": (dimension_counts["I"] / total_ei * 100) if total_ei > 0 else 50,
@@ -506,13 +685,13 @@ class MBTIAssessment:
                 "J": (dimension_counts["J"] / total_jp * 100) if total_jp > 0 else 50,
                 "P": (dimension_counts["P"] / total_jp * 100) if total_jp > 0 else 50
             }
-            
+
             # Get the type description
             type_info = self.type_descriptions.get(personality_type, {
                 "name": f"Type {personality_type}",
                 "description": "No detailed description available for this type."
             })
-            
+
             # Prepare the results
             results = {
                 "model": "MBTI",
@@ -568,9 +747,9 @@ class MBTIAssessment:
                     }
                 }
             }
-            
+
             return results
-            
+
         except Exception as e:
             logger.error(f"Error computing MBTI results: {str(e)}")
             return {

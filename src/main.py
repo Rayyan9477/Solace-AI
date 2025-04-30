@@ -10,6 +10,7 @@ from agents.diagnosis_agent import DiagnosisAgent
 from agents.emotion_agent import EmotionAgent
 from agents.safety_agent import SafetyAgent
 from agents.search_agent import SearchAgent
+from agents.personality_agent import PersonalityAgent
 from utils.metrics import track_metric
 import sentry_sdk
 from prometheus_client import start_http_server
@@ -62,17 +63,17 @@ def generate_empathy(diagnosis_text: str) -> str:
     """Generate empathetic response based on diagnosis"""
     if not diagnosis_text:
         return "Thank you for sharing your feelings. I'm here to support you."
-    
+
     base_responses = {
         "depression": "It takes courage to acknowledge these feelings.",
         "anxiety": "Uncertainty can feel overwhelming, but you're not alone.",
         "general": "What you're experiencing sounds challenging."
     }
-    
+
     for key in base_responses:
         if key in diagnosis_text.lower():
             return base_responses[key]
-    
+
     return f"Living with {diagnosis_text.lower()} can be difficult. Let's work through this together."
 
 def generate_guidance(diagnosis_text: str, crawler_agent: CrawlerAgent) -> str:
@@ -80,7 +81,7 @@ def generate_guidance(diagnosis_text: str, crawler_agent: CrawlerAgent) -> str:
     base_guidance = """1. Consider reaching out to a mental health professional
 2. Practice grounding techniques daily
 3. Maintain a regular sleep schedule"""
-    
+
     resources = crawler_agent.safe_crawl(f"evidence-based treatments for {diagnosis_text}")[:1000]
     return f"{base_guidance}\n\n**Resources:**\n{resources}"
 
@@ -98,13 +99,13 @@ def initialize_components() -> Dict[str, Any]:
                 "top_k": int(os.getenv("TOP_K", "50")),
                 "max_tokens": AppConfig.MAX_RESPONSE_TOKENS
             }
-            
+
             llm = SafeLLM(model_config=llm_config)
-            
+
             # Verify LLM is initialized properly
             if llm.model is None:
                 raise ValueError("LLM model instance not properly initialized")
-                
+
         except Exception as llm_error:
             logger.error(f"Failed to initialize LLM: {str(llm_error)}")
             st.error("Failed to initialize the language model. The application may not function correctly.")
@@ -118,7 +119,7 @@ def initialize_components() -> Dict[str, Any]:
                 "orchestrator": None,
                 "llm": None
             }
-        
+
         # Initialize agents
         try:
             safety_agent = SafetyAgent(model=llm)
@@ -126,7 +127,8 @@ def initialize_components() -> Dict[str, Any]:
             chat_agent = ChatAgent(model=llm)
             diagnosis_agent = DiagnosisAgent(model=llm)
             crawler_agent = CrawlerAgent(model=llm)
-            
+            personality_agent = PersonalityAgent(model=llm)
+
             # Initialize orchestrator
             orchestrator = AgentOrchestrator(
                 agents={
@@ -134,18 +136,20 @@ def initialize_components() -> Dict[str, Any]:
                     "emotion": emotion_agent,
                     "chat": chat_agent,
                     "diagnosis": diagnosis_agent,
-                    "crawler": crawler_agent
+                    "crawler": crawler_agent,
+                    "personality": personality_agent
                 }
             )
-            
+
             logger.info("Successfully initialized all agents and orchestrator")
-            
+
             return {
                 "safety": safety_agent,
                 "emotion": emotion_agent,
                 "chat_agent": chat_agent,
                 "diagnosis": diagnosis_agent,
                 "crawler": crawler_agent,
+                "personality": personality_agent,
                 "orchestrator": orchestrator,
                 "llm": llm
             }
@@ -160,6 +164,7 @@ def initialize_components() -> Dict[str, Any]:
                 "chat_agent": None,
                 "diagnosis": None,
                 "crawler": None,
+                "personality": None,
                 "orchestrator": None
             }
     except Exception as e:
@@ -174,6 +179,7 @@ def reset_session():
         "step": 1,
         "symptoms": [],
         "diagnosis": "",
+        "personality": {},
         "history": [],
         "start_time": time.time(),
         "metrics": {
@@ -244,7 +250,7 @@ def render_assessment(diagnosis_agent):
 def render_diagnosis(crawler_agent):
     st.header("Your Support Plan")
     col1, col2 = st.columns(2)
-    
+
     with col1:
         st.subheader("Understanding Your Experience")
         st.markdown(f"""
@@ -252,7 +258,7 @@ def render_diagnosis(crawler_agent):
         {generate_empathy(st.session_state["diagnosis"])}
         </div>
         """, unsafe_allow_html=True)
-    
+
     with col2:
         st.subheader("Recommended Next Steps")
         # Check if crawler_agent is available
@@ -260,7 +266,7 @@ def render_diagnosis(crawler_agent):
             guidance = """1. Consider reaching out to a mental health professional
 2. Practice grounding techniques daily
 3. Maintain a regular sleep schedule
-            
+
 **Resources:**
 - National Crisis Hotline: 988
 - Emergency Services: 911
@@ -275,8 +281,8 @@ def render_diagnosis(crawler_agent):
         {guidance}
         </div>
         """, unsafe_allow_html=True)
-    
-    if st.button("Start Chat Session"):
+
+    if st.button("Continue to Personality Assessment"):
         st.session_state["step"] = 3
         st.rerun()
 
@@ -290,7 +296,7 @@ async def process_user_message(user_input: str, components: Dict[str, Any]) -> D
                 "response": "I apologize, but the chat functionality is currently unavailable. Please try again later.",
                 "error": "No components available"
             }
-            
+
         # Check for essential components
         for component_name in ["safety", "emotion", "chat_agent"]:
             if component_name not in components or components[component_name] is None:
@@ -299,7 +305,7 @@ async def process_user_message(user_input: str, components: Dict[str, Any]) -> D
                     "response": "I apologize, but the chat functionality is currently unavailable. Please try again later.",
                     "error": f"Missing {component_name} component"
                 }
-            
+
         # Ensure metrics key exists
         if "metrics" not in st.session_state:
             st.session_state["metrics"] = {
@@ -307,10 +313,10 @@ async def process_user_message(user_input: str, components: Dict[str, Any]) -> D
                 "response_times": [],
                 "safety_flags": 0
             }
-        
+
         # Update metrics
         st.session_state["metrics"]["interactions"] += 1
-        
+
         # Safety check
         try:
             # Properly await the coroutine
@@ -318,14 +324,14 @@ async def process_user_message(user_input: str, components: Dict[str, Any]) -> D
         except Exception as safety_error:
             logger.error(f"Safety check failed: {str(safety_error)}")
             safety_result = {"safe": True}  # Default to safe if check fails
-            
+
         if not safety_result.get("safe", True):
             st.session_state["metrics"]["safety_flags"] += 1
             return {
                 "response": "I'm concerned about your safety. Please consider reaching out to a mental health professional or crisis hotline.",
                 "safety_alert": True
             }
-        
+
         # Emotion analysis
         try:
             # Properly await the coroutine
@@ -333,7 +339,7 @@ async def process_user_message(user_input: str, components: Dict[str, Any]) -> D
         except Exception as emotion_error:
             logger.error(f"Emotion analysis failed: {str(emotion_error)}")
             emotion_result = {"primary_emotion": "unknown"}  # Default emotion
-        
+
         # Generate response
         start_time = time.time()
         try:
@@ -349,12 +355,12 @@ async def process_user_message(user_input: str, components: Dict[str, Any]) -> D
                 "error": str(chat_error),
                 "emotion": emotion_result
             }
-            
+
         end_time = time.time()
-        
+
         # Update metrics
         st.session_state["metrics"]["response_times"].append(end_time - start_time)
-        
+
         return {
             "response": response.get("response", "I'm having trouble generating a response right now."),
             "emotion": emotion_result,
@@ -369,40 +375,41 @@ async def process_user_message(user_input: str, components: Dict[str, Any]) -> D
 
 def main():
     components = initialize_components()
-    
+
     st.title(AppConfig.APP_NAME)
     st.markdown("### A Safe Space for Mental Health Support")
-    
+
     # Show system status in expander
     with st.expander("System Status", expanded=False):
         st.markdown("### Component Status")
-        
+
         # Check component status
         component_status = {
             "Language Model": components.get("llm") is not None,
             "Safety Agent": components.get("safety") is not None,
             "Emotion Agent": components.get("emotion") is not None,
             "Chat Agent": components.get("chat_agent") is not None,
-            "Diagnosis Agent": components.get("diagnosis") is not None
+            "Diagnosis Agent": components.get("diagnosis") is not None,
+            "Personality Agent": components.get("personality") is not None
         }
-        
+
         # Display status
         for component, status in component_status.items():
             if status:
                 st.success(f"✅ {component}: Available")
             else:
                 st.error(f"❌ {component}: Unavailable")
-                
+
         # Show environment info
         st.markdown("### Environment")
         st.write(f"App Version: {AppConfig.APP_VERSION}")
         st.write(f"Debug Mode: {'Enabled' if AppConfig.DEBUG else 'Disabled'}")
         st.write(f"Model: {AppConfig.MODEL_NAME}")
-    
+
     # Initialize session state
     if "step" not in st.session_state:
         reset_session()
-    
+
     # Ensure metrics key exists
     if "metrics" not in st.session_state:
         st.session_state["metrics"] = {
@@ -410,23 +417,452 @@ def main():
             "response_times": [],
             "safety_flags": 0
         }
-    
+
     # Application routing
     if st.session_state["step"] == 1:
         render_assessment(components["diagnosis"])
     elif st.session_state["step"] == 2:
         render_diagnosis(components["crawler"])
     elif st.session_state["step"] == 3:
-        render_chat_interface(components)
+        render_personality_assessment(components["personality"])
     elif st.session_state["step"] == 4:
+        render_chat_interface(components)
+    elif st.session_state["step"] == 5:
         render_crisis_protocol()
+
+def render_personality_assessment(personality_agent):
+    """Render the personality assessment interface"""
+    import asyncio
+    import json
+
+    st.header("Personality Assessment")
+
+    # Check if personality_agent is available
+    if personality_agent is None:
+        st.warning("The personality assessment functionality is currently unavailable. Please try again later.")
+        if st.button("Skip to Chat"):
+            st.session_state["step"] = 4
+            st.rerun()
+        return
+
+    # Determine which assessment to show
+    if "personality_step" not in st.session_state:
+        st.session_state["personality_step"] = 1  # 1: Choose assessment, 2: Take assessment, 3: View results
+
+    # Step 1: Choose assessment type
+    if st.session_state["personality_step"] == 1:
+        st.subheader("Choose Your Assessment")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("""
+            ### Big Five (OCEAN) Assessment
+
+            The Big Five personality traits, also known as the OCEAN model, is a widely accepted framework that describes personality along five dimensions:
+
+            - **Openness** to experience
+            - **Conscientiousness**
+            - **Extraversion**
+            - **Agreeableness**
+            - **Neuroticism**
+
+            This assessment takes about 10-15 minutes to complete.
+            """)
+
+            if st.button("Take Big Five Assessment"):
+                st.session_state["assessment_type"] = "big_five"
+                st.session_state["personality_step"] = 2
+                st.rerun()
+
+        with col2:
+            st.markdown("""
+            ### Myers-Briggs Type Indicator (MBTI)
+
+            The MBTI assessment categorizes people into 16 personality types based on four dimensions:
+
+            - **Extraversion (E)** vs. **Introversion (I)**
+            - **Sensing (S)** vs. **Intuition (N)**
+            - **Thinking (T)** vs. **Feeling (F)**
+            - **Judging (J)** vs. **Perceiving (P)**
+
+            This assessment takes about 5-10 minutes to complete.
+            """)
+
+            if st.button("Take MBTI Assessment"):
+                st.session_state["assessment_type"] = "mbti"
+                st.session_state["personality_step"] = 2
+                st.rerun()
+
+        st.markdown("---")
+        if st.button("Skip Personality Assessment"):
+            st.session_state["step"] = 4  # Skip to chat
+            st.rerun()
+
+    # Step 2: Take the selected assessment
+    elif st.session_state["personality_step"] == 2:
+        assessment_type = st.session_state.get("assessment_type", "big_five")
+
+        if assessment_type == "big_five":
+            # Import the BigFiveAssessment class
+            from personality.big_five import BigFiveAssessment
+            assessment = BigFiveAssessment()
+
+            st.subheader("Big Five (OCEAN) Personality Assessment")
+            st.markdown("""
+            For each statement, indicate how accurately it describes you on a scale from 1 to 5:
+
+            1. Very Inaccurate
+            2. Moderately Inaccurate
+            3. Neither Accurate Nor Inaccurate
+            4. Moderately Accurate
+            5. Very Accurate
+            """)
+
+            # Get questions (limit to 20 for brevity)
+            questions = assessment.get_questions(20)
+
+            # Create a form for the assessment
+            with st.form("big_five_form"):
+                responses = {}
+
+                for q in questions:
+                    response = st.radio(
+                        f"{q['text']}",
+                        options=[1, 2, 3, 4, 5],
+                        format_func=lambda x: ["Very Inaccurate", "Moderately Inaccurate", "Neither Accurate Nor Inaccurate", "Moderately Accurate", "Very Accurate"][x-1],
+                        key=f"big_five_{q['id']}"
+                    )
+                    responses[str(q['id'])] = response
+
+                if st.form_submit_button("Submit Assessment"):
+                    # Compute results
+                    results = assessment.compute_results(responses)
+
+                    # Store in session state
+                    st.session_state["personality"] = {
+                        "type": "big_five",
+                        "results": results
+                    }
+
+                    # Move to results view
+                    st.session_state["personality_step"] = 3
+                    st.rerun()
+
+        elif assessment_type == "mbti":
+            # Import the MBTIAssessment class
+            from personality.mbti import MBTIAssessment
+            assessment = MBTIAssessment()
+
+            st.subheader("Myers-Briggs Type Indicator (MBTI) Assessment")
+            st.markdown("""
+            For each question, select the option (A or B) that best describes you.
+            There are no right or wrong answers - just choose what feels most natural to you.
+            """)
+
+            # Get questions
+            questions = assessment.get_questions()
+
+            # Create a form for the assessment
+            with st.form("mbti_form"):
+                responses = {}
+
+                for q in questions:
+                    options = q.get("options", [])
+                    if len(options) >= 2:
+                        option_texts = [f"{opt['key']}: {opt['text']}" for opt in options]
+                        response = st.radio(
+                            f"{q['text']}",
+                            options=options,
+                            format_func=lambda x: f"{x['key']}: {x['text']}",
+                            key=f"mbti_{q['id']}"
+                        )
+                        responses[str(q['id'])] = response["key"]
+
+                if st.form_submit_button("Submit Assessment"):
+                    # Compute results
+                    results = assessment.compute_results(responses)
+
+                    # Store in session state
+                    st.session_state["personality"] = {
+                        "type": "mbti",
+                        "results": results
+                    }
+
+                    # Move to results view
+                    st.session_state["personality_step"] = 3
+                    st.rerun()
+
+    # Step 3: View results
+    elif st.session_state["personality_step"] == 3:
+        personality_data = st.session_state.get("personality", {})
+        results = personality_data.get("results", {})
+
+        if not results:
+            st.warning("No assessment results found. Please take an assessment first.")
+            st.session_state["personality_step"] = 1
+            st.rerun()
+
+        st.subheader("Your Personality Assessment Results")
+
+        # Process results based on assessment type
+        if personality_data.get("type") == "big_five":
+            # Display Big Five results
+            st.markdown("### Big Five (OCEAN) Profile")
+
+            # Create a bar chart for the main traits
+            import matplotlib.pyplot as plt
+            import numpy as np
+
+            traits = results.get("traits", {})
+            if traits:
+                # Extract trait scores and names
+                trait_names = list(traits.keys())
+                trait_scores = [traits[name].get("score", 50) for name in trait_names]
+
+                # Capitalize trait names for display
+                trait_names = [name.capitalize() for name in trait_names]
+
+                # Create the chart
+                fig, ax = plt.subplots(figsize=(10, 6))
+                bars = ax.bar(trait_names, trait_scores, color=['#3498db', '#2ecc71', '#e74c3c', '#f39c12', '#9b59b6'])
+
+                # Add labels and title
+                ax.set_ylabel('Percentile Score')
+                ax.set_title('Your Big Five Personality Profile')
+                ax.set_ylim(0, 100)
+
+                # Add a horizontal line at 50%
+                ax.axhline(y=50, color='gray', linestyle='--', alpha=0.7)
+
+                # Add value labels on top of bars
+                for bar in bars:
+                    height = bar.get_height()
+                    ax.text(bar.get_x() + bar.get_width()/2., height + 2,
+                            f'{int(height)}%', ha='center', va='bottom')
+
+                st.pyplot(fig)
+
+                # Display trait descriptions
+                st.markdown("### Trait Descriptions")
+
+                for trait_name, trait_data in traits.items():
+                    score = trait_data.get("score", 50)
+                    category = trait_data.get("category", "average")
+
+                    # Get description based on category
+                    if trait_name == "openness":
+                        if category == "high":
+                            description = "You are curious, imaginative, and open to new experiences. You likely have a broad range of interests and appreciate art, creativity, and intellectual pursuits."
+                        elif category == "low":
+                            description = "You prefer routine, practicality, and tradition. You may focus more on concrete facts than abstract theories and might be more conventional in your approach."
+                        else:
+                            description = "You balance curiosity with practicality. You can appreciate new ideas while maintaining a grounded perspective."
+                    elif trait_name == "conscientiousness":
+                        if category == "high":
+                            description = "You are organized, disciplined, and detail-oriented. You likely plan ahead, follow through on commitments, and strive for achievement."
+                        elif category == "low":
+                            description = "You tend to be more flexible, spontaneous, and relaxed about deadlines or organization. You may prefer to go with the flow rather than stick to rigid plans."
+                        else:
+                            description = "You balance organization with flexibility. You can be structured when needed but also adapt to changing circumstances."
+                    elif trait_name == "extraversion":
+                        if category == "high":
+                            description = "You are outgoing, energetic, and draw energy from social interactions. You likely enjoy being around others and may seek excitement and stimulation."
+                        elif category == "low":
+                            description = "You tend to be more reserved and may prefer solitary activities. You might find social interactions draining and need time alone to recharge."
+                        else:
+                            description = "You balance sociability with independence. You can enjoy social situations but also value your alone time."
+                    elif trait_name == "agreeableness":
+                        if category == "high":
+                            description = "You are compassionate, cooperative, and considerate of others' feelings. You likely value harmony and may prioritize others' needs."
+                        elif category == "low":
+                            description = "You tend to be more direct, competitive, or skeptical. You might prioritize truth over tact and may be more willing to challenge others."
+                        else:
+                            description = "You balance cooperation with healthy skepticism. You can be kind while maintaining appropriate boundaries."
+                    elif trait_name == "neuroticism":
+                        if category == "high":
+                            description = "You may experience emotions more intensely and be more sensitive to stress. You might worry more than others and be more aware of potential problems."
+                        elif category == "low":
+                            description = "You tend to be emotionally stable and resilient to stress. You likely remain calm under pressure and recover quickly from setbacks."
+                        else:
+                            description = "You have a balanced emotional response. You can feel appropriate emotions without being overwhelmed by them."
+                    else:
+                        description = "No detailed description available for this trait."
+
+                    st.markdown(f"**{trait_name.capitalize()} ({int(score)}%)**: {description}")
+
+            # Get interpretation from personality agent
+            try:
+                # Use asyncio to run the async function
+                interpretation_result = asyncio.run(personality_agent.conduct_assessment("big_five", results))
+                interpretation = interpretation_result.get("interpretation", {})
+
+                if interpretation and not isinstance(interpretation, str) and "error" not in interpretation:
+                    st.markdown("### Personalized Insights")
+
+                    # Display key insights
+                    if interpretation.get("key_insights"):
+                        st.markdown("#### Key Insights")
+                        for insight in interpretation["key_insights"]:
+                            st.markdown(f"- {insight}")
+
+                    # Display strengths and growth areas in columns
+                    if interpretation.get("strengths") or interpretation.get("growth_areas"):
+                        col1, col2 = st.columns(2)
+
+                        with col1:
+                            if interpretation.get("strengths"):
+                                st.markdown("#### Strengths")
+                                for strength in interpretation["strengths"]:
+                                    st.markdown(f"- {strength}")
+
+                        with col2:
+                            if interpretation.get("growth_areas"):
+                                st.markdown("#### Growth Areas")
+                                for area in interpretation["growth_areas"]:
+                                    st.markdown(f"- {area}")
+
+                    # Display mental health implications
+                    if interpretation.get("mental_health_implications"):
+                        st.markdown("#### Mental Health Insights")
+                        for implication in interpretation["mental_health_implications"]:
+                            st.markdown(f"- {implication}")
+            except Exception as e:
+                st.warning(f"Could not generate personalized insights: {str(e)}")
+
+        elif personality_data.get("type") == "mbti":
+            # Display MBTI results
+            personality_type = results.get("type", "")
+            type_name = results.get("type_name", "")
+
+            st.markdown(f"### Your MBTI Type: {personality_type} - {type_name}")
+
+            # Display type description
+            description = results.get("description", "No description available.")
+            st.markdown(f"**Description**: {description}")
+
+            # Display dimension scores
+            dimensions = results.get("dimensions", {})
+            if dimensions:
+                st.markdown("### Dimension Preferences")
+
+                # Create a horizontal bar chart for each dimension
+                import matplotlib.pyplot as plt
+                import numpy as np
+
+                fig, axes = plt.subplots(4, 1, figsize=(10, 12))
+
+                dimension_names = ["E/I", "S/N", "T/F", "J/P"]
+                dimension_labels = [
+                    ["Extraversion", "Introversion"],
+                    ["Sensing", "Intuition"],
+                    ["Thinking", "Feeling"],
+                    ["Judging", "Perceiving"]
+                ]
+                dimension_colors = [
+                    ["#3498db", "#2980b9"],
+                    ["#2ecc71", "#27ae60"],
+                    ["#e74c3c", "#c0392b"],
+                    ["#f39c12", "#d35400"]
+                ]
+
+                for i, dim_name in enumerate(dimension_names):
+                    dim_data = dimensions.get(dim_name, {})
+                    if not dim_data:
+                        continue
+
+                    percentages = dim_data.get("percentages", {})
+                    if not percentages:
+                        continue
+
+                    # Get the two dimension values (e.g., E and I)
+                    dim_keys = list(percentages.keys())
+                    if len(dim_keys) < 2:
+                        continue
+
+                    # Get scores
+                    scores = [percentages.get(dim_keys[0], 50), percentages.get(dim_keys[1], 50)]
+
+                    # Create the horizontal bar chart
+                    ax = axes[i]
+                    bars = ax.barh([dimension_labels[i][0], dimension_labels[i][1]], scores, color=dimension_colors[i])
+
+                    # Add labels
+                    ax.set_xlim(0, 100)
+                    ax.set_title(f"{dimension_labels[i][0]} vs {dimension_labels[i][1]}")
+
+                    # Add value labels
+                    for bar in bars:
+                        width = bar.get_width()
+                        ax.text(width + 2, bar.get_y() + bar.get_height()/2.,
+                                f'{int(width)}%', ha='left', va='center')
+
+                plt.tight_layout()
+                st.pyplot(fig)
+
+            # Display strengths and weaknesses
+            col1, col2 = st.columns(2)
+
+            with col1:
+                strengths = results.get("strengths", [])
+                if strengths:
+                    st.markdown("### Strengths")
+                    for strength in strengths:
+                        st.markdown(f"- {strength}")
+
+            with col2:
+                weaknesses = results.get("weaknesses", [])
+                if weaknesses:
+                    st.markdown("### Potential Challenges")
+                    for weakness in weaknesses:
+                        st.markdown(f"- {weakness}")
+
+            # Get interpretation from personality agent
+            try:
+                # Use asyncio to run the async function
+                interpretation_result = asyncio.run(personality_agent.conduct_assessment("mbti", results))
+                interpretation = interpretation_result.get("interpretation", {})
+
+                if interpretation and not isinstance(interpretation, str) and "error" not in interpretation:
+                    st.markdown("### Personalized Insights")
+
+                    # Display key insights
+                    if interpretation.get("key_insights"):
+                        st.markdown("#### Key Insights")
+                        for insight in interpretation["key_insights"]:
+                            st.markdown(f"- {insight}")
+
+                    # Display communication preferences
+                    if interpretation.get("communication_preferences"):
+                        st.markdown("#### Communication Style")
+                        for pref in interpretation["communication_preferences"]:
+                            st.markdown(f"- {pref}")
+
+                    # Display stress responses
+                    if interpretation.get("stress_responses"):
+                        st.markdown("#### Stress Response")
+                        for response in interpretation["stress_responses"]:
+                            st.markdown(f"- {response}")
+
+                    # Display mental health implications
+                    if interpretation.get("mental_health_implications"):
+                        st.markdown("#### Mental Health Insights")
+                        for implication in interpretation["mental_health_implications"]:
+                            st.markdown(f"- {implication}")
+            except Exception as e:
+                st.warning(f"Could not generate personalized insights: {str(e)}")
+
+        # Button to continue to chat
+        if st.button("Continue to Chat"):
+            st.session_state["step"] = 4
+            st.rerun()
 
 def render_chat_interface(components: Dict[str, Any]):
     """Render the chat interface"""
     import asyncio
-    
+
     st.markdown("### Chat with Your Mental Health Assistant")
-    
+
     # Check if components are available
     if not components or not components.get("chat_agent"):
         st.warning("The chat functionality is currently unavailable. Please try again later.")
@@ -434,27 +870,27 @@ def render_chat_interface(components: Dict[str, Any]):
             reset_session()
             st.rerun()
         return
-    
+
     # Display chat history
     for message in st.session_state["history"]:
         with st.chat_message(message["role"]):
             st.write(message["content"])
             if "emotion" in message:
                 st.caption(f"Emotion: {message['emotion'].get('primary_emotion', 'unknown')}")
-    
+
     # Chat input
     user_input = st.chat_input("Type your message here...")
     if user_input:
         # Display user message immediately
         with st.chat_message("user"):
             st.write(user_input)
-        
+
         # Process message asynchronously
         with st.spinner("Thinking..."):
             try:
                 # Use asyncio to run the async function
                 result = asyncio.run(process_user_message(user_input, components))
-                
+
                 if result:
                     # Check for specific errors returned by process_user_message
                     if "error" in result:
@@ -466,24 +902,24 @@ def render_chat_interface(components: Dict[str, Any]):
                             {"role": "user", "content": user_input},
                             {"role": "assistant", "content": result["response"], "emotion": result.get("emotion")}
                         ])
-                        
+
                         # Display assistant response
                         with st.chat_message("assistant"):
                             st.write(result["response"])
                             if "emotion" in result and result["emotion"]:
                                 st.caption(f"Emotion: {result['emotion'].get('primary_emotion', 'unknown')}")
-                        
+
                         # Handle safety alerts
                         if result.get("safety_alert", False):
                             st.warning("⚠️ Safety Alert: Please consider reaching out to a mental health professional or crisis hotline.")
-                            st.session_state["step"] = 4  # Move to crisis protocol
+                            st.session_state["step"] = 5  # Move to crisis protocol
                             st.rerun()
                 else:
                     st.error("Failed to generate a response. Please try again.")
             except Exception as e:
                 st.error(f"An error occurred while processing your message: {str(e)}")
                 logger.error(f"Error in chat interface during processing: {str(e)}")
-    
+
     # Add a button to go back to assessment
     if st.button("Start New Assessment"):
         reset_session()
