@@ -22,6 +22,9 @@ from agents.agent_orchestrator import AgentOrchestrator
 import logging
 from datetime import datetime
 import google.generativeai as genai
+# Voice AI imports
+from utils.voice_ai import VoiceAI
+from components.voice_component import VoiceComponent
 
 # Set up logging
 logging.basicConfig(
@@ -117,9 +120,22 @@ def initialize_components() -> Dict[str, Any]:
                 "diagnosis": None,
                 "crawler": None,
                 "orchestrator": None,
-                "llm": None
+                "llm": None,
+                "voice_ai": None
             }
 
+        # Initialize Voice AI
+        try:
+            logger.info("Initializing Voice AI with Whisper STT and Dia-1.6B TTS...")
+            voice_ai = VoiceAI(
+                stt_model="openai/whisper-large-v3-turbo",
+                tts_model="nari-labs/Dia-1.6B"
+            )
+            logger.info("Voice AI initialized successfully")
+        except Exception as voice_error:
+            logger.error(f"Failed to initialize Voice AI: {str(voice_error)}")
+            voice_ai = None
+            
         # Initialize agents
         try:
             safety_agent = SafetyAgent(model=llm)
@@ -151,14 +167,16 @@ def initialize_components() -> Dict[str, Any]:
                 "crawler": crawler_agent,
                 "personality": personality_agent,
                 "orchestrator": orchestrator,
-                "llm": llm
+                "llm": llm,
+                "voice_ai": voice_ai
             }
         except Exception as agent_error:
             logger.error(f"Error initializing agents: {str(agent_error)}")
             st.error(f"Error initializing agent components: {str(agent_error)}")
-            # Return partial initialization with just the LLM
+            # Return partial initialization with just the LLM and voice
             return {
                 "llm": llm,
+                "voice_ai": voice_ai,
                 "safety": None,
                 "emotion": None,
                 "chat_agent": None,
@@ -858,7 +876,7 @@ def render_personality_assessment(personality_agent):
             st.rerun()
 
 def render_chat_interface(components: Dict[str, Any]):
-    """Render the chat interface"""
+    """Render the chat interface with voice capabilities"""
     import asyncio
 
     st.markdown("### Chat with Your Mental Health Assistant")
@@ -870,6 +888,53 @@ def render_chat_interface(components: Dict[str, Any]):
             reset_session()
             st.rerun()
         return
+    
+    # Initialize voice component if available
+    voice_enabled = components.get("voice_ai") is not None
+    
+    if voice_enabled:
+        # Initialize voice component with callback for speech-to-text
+        if "voice_component" not in st.session_state:
+            voice_ai = components["voice_ai"]
+            
+            def on_voice_input(text):
+                if text:  # Process voice input like a regular text input
+                    st.session_state["voice_input"] = text
+                    st.rerun()
+            
+            st.session_state["voice_component"] = VoiceComponent(
+                voice_ai=voice_ai,
+                on_transcription=on_voice_input
+            )
+            
+            # Initialize voice settings
+            if "voice_style" not in st.session_state:
+                st.session_state["voice_style"] = "warm"
+    
+    # Add voice controls in an expander
+    if voice_enabled:
+        with st.expander("🎤 Voice Interaction Settings", expanded=False):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("### 🎙️ Speech Input")
+                st.session_state["voice_component"].render_voice_input()
+                
+            with col2:
+                st.markdown("### 🔊 Voice Settings")
+                st.session_state["voice_style"] = st.session_state["voice_component"].render_voice_selector()
+                st.checkbox("Automatically speak responses", value=True, key="auto_speak_responses")
+                
+                # Test voice button
+                if st.button("Test Voice"):
+                    test_text = "Hello! I'm your mental health assistant. I'm here to listen and support you with empathy and compassion."
+                    st.session_state["voice_component"].render_voice_output(
+                        test_text, 
+                        autoplay=True
+                    )
+                    
+        # Horizontal separator
+        st.markdown("---")
 
     # Display chat history
     for message in st.session_state["history"]:
@@ -877,9 +942,32 @@ def render_chat_interface(components: Dict[str, Any]):
             st.write(message["content"])
             if "emotion" in message:
                 st.caption(f"Emotion: {message['emotion'].get('primary_emotion', 'unknown')}")
+                
+        # Play voice response for assistant messages if enabled
+        if voice_enabled and message["role"] == "assistant" and st.session_state.get("auto_speak_responses", False):
+            # Check if this message hasn't been spoken yet (using a simple tracking system)
+            message_id = hash(message["content"])
+            if "spoken_messages" not in st.session_state:
+                st.session_state["spoken_messages"] = set()
+                
+            if message_id not in st.session_state["spoken_messages"]:
+                # Speak the message
+                st.session_state["voice_component"].render_voice_output(
+                    message["content"],
+                    autoplay=True
+                )
+                # Mark as spoken
+                st.session_state["spoken_messages"].add(message_id)
 
-    # Chat input
-    user_input = st.chat_input("Type your message here...")
+    # Check if we have a pending voice input
+    if voice_enabled and "voice_input" in st.session_state:
+        user_input = st.session_state["voice_input"]
+        # Clear the input so it doesn't get processed again
+        del st.session_state["voice_input"]
+    else:
+        # Regular text input
+        user_input = st.chat_input("Type your message here, or use the voice input above...")
+        
     if user_input:
         # Display user message immediately
         with st.chat_message("user"):
@@ -908,6 +996,13 @@ def render_chat_interface(components: Dict[str, Any]):
                             st.write(result["response"])
                             if "emotion" in result and result["emotion"]:
                                 st.caption(f"Emotion: {result['emotion'].get('primary_emotion', 'unknown')}")
+                                
+                        # Speak the assistant's response if voice is enabled
+                        if voice_enabled and st.session_state.get("auto_speak_responses", False):
+                            st.session_state["voice_component"].render_voice_output(
+                                result["response"],
+                                autoplay=True
+                            )
 
                         # Handle safety alerts
                         if result.get("safety_alert", False):
