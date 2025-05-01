@@ -212,3 +212,21 @@ class AppConfig:
             "device_map": "auto" if not cls.USE_CPU else None,
             "low_cpu_mem_usage": True
         }
+
+    # Voice Configuration - using free models
+    VOICE_CONFIG = {
+        "stt_model": "openai/whisper-large-v3-turbo",  # Free and lightweight Whisper model
+        "tts_model": "nari-labs/Dia-1.6B",  # Free multilingual TTS model
+        "cache_dir": str(Path(__file__).resolve().parent.parent / 'models' / 'cache'),
+        "use_gpu": os.getenv("USE_GPU", "True").lower() == "true",
+        "voice_styles": {
+            "default": {},
+            "male": {"voice_preset": "male"},
+            "female": {"voice_preset": "female"},
+            "warm": {
+                "voice_preset": "female",
+                "temperature": 0.7,
+                "speaking_rate": 0.9
+            }
+        }
+    }

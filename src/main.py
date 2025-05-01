@@ -15,6 +15,7 @@ from utils.metrics import track_metric
 import sentry_sdk
 from prometheus_client import start_http_server
 import time
+import asyncio
 from models.llm import AgnoLLM as SafeLLM
 import os
 from typing import Dict, Any, List
@@ -22,16 +23,31 @@ from agents.agent_orchestrator import AgentOrchestrator
 import logging
 from datetime import datetime
 import google.generativeai as genai
+import torch
 # Voice AI imports
-from utils.voice_ai import VoiceAI
+from utils.voice_ai import VoiceAI, VoiceManager
 from components.voice_component import VoiceComponent
 
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name=s) - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Configure CUDA/CPU device
+if torch.cuda.is_available():
+    try:
+        # Test CUDA initialization
+        torch.cuda.init()
+        device = "cuda"
+        logger.info("CUDA is available and initialized successfully")
+    except Exception as e:
+        device = "cpu"
+        logger.warning(f"CUDA initialization failed, falling back to CPU: {str(e)}")
+else:
+    device = "cpu"
+    logger.info("CUDA is not available, using CPU")
 
 # Ensure required configuration is present
 if not hasattr(AppConfig, 'MAX_RESPONSE_TOKENS'):
@@ -91,9 +107,13 @@ def generate_guidance(diagnosis_text: str, crawler_agent: CrawlerAgent) -> str:
 def initialize_components() -> Dict[str, Any]:
     """Initialize all components for the application"""
     try:
-        # Initialize the LLM
+        # Show initialization progress
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+
+        # Initialize the LLM (20% of progress)
         try:
-            # Initialize with explicit model config
+            status_text.text("Initializing language model...")
             llm_config = {
                 "model": AppConfig.MODEL_NAME,
                 "api_key": AppConfig.GEMINI_API_KEY,
@@ -102,42 +122,42 @@ def initialize_components() -> Dict[str, Any]:
                 "top_k": int(os.getenv("TOP_K", "50")),
                 "max_tokens": AppConfig.MAX_RESPONSE_TOKENS
             }
-
             llm = SafeLLM(model_config=llm_config)
-
-            # Verify LLM is initialized properly
             if llm.model is None:
                 raise ValueError("LLM model instance not properly initialized")
-
+            progress_bar.progress(0.2)
         except Exception as llm_error:
             logger.error(f"Failed to initialize LLM: {str(llm_error)}")
             st.error("Failed to initialize the language model. The application may not function correctly.")
-            # Return empty components to allow the app to start
-            return {
-                "safety": None,
-                "emotion": None,
-                "chat_agent": None,
-                "diagnosis": None,
-                "crawler": None,
-                "orchestrator": None,
-                "llm": None,
-                "voice_ai": None
-            }
+            progress_bar.progress(1.0)
+            return {}
 
-        # Initialize Voice AI
-        try:
-            logger.info("Initializing Voice AI with Whisper STT and Dia-1.6B TTS...")
-            voice_ai = VoiceAI(
-                stt_model="openai/whisper-large-v3-turbo",
-                tts_model="nari-labs/Dia-1.6B"
-            )
+        # Initialize Voice AI with progress updates (40% of progress)
+        status_text.text("Initializing Voice AI models...")
+        voice_manager = VoiceManager()
+        voice_result = asyncio.run(voice_manager.initialize())
+        
+        if voice_result["success"]:
+            voice_ai = voice_result["voice_ai"]
             logger.info("Voice AI initialized successfully")
-        except Exception as voice_error:
-            logger.error(f"Failed to initialize Voice AI: {str(voice_error)}")
+        else:
+            error_msg = voice_result.get("error", "Unknown error")
+            if "missing_dependencies" in voice_result:
+                missing = voice_result["missing_dependencies"]
+                st.warning(
+                    f"Voice features are disabled due to missing dependencies: {', '.join(missing)}. "
+                    "To enable voice features, install the required packages:\n"
+                    f"pip install {' '.join(missing)}"
+                )
+            else:
+                st.warning(f"Voice features will not be available: {error_msg}. The application will continue in text-only mode.")
             voice_ai = None
             
-        # Initialize agents
+        progress_bar.progress(0.6)
+
+        # Initialize agents (40% of progress)
         try:
+            status_text.text("Initializing AI agents...")
             safety_agent = SafetyAgent(model=llm)
             emotion_agent = EmotionAgent(model=llm)
             chat_agent = ChatAgent(model=llm)
@@ -156,8 +176,14 @@ def initialize_components() -> Dict[str, Any]:
                     "personality": personality_agent
                 }
             )
-
+            progress_bar.progress(1.0)
+            status_text.text("Initialization complete!")
             logger.info("Successfully initialized all agents and orchestrator")
+
+            # Clear progress indicators
+            time.sleep(0.5)
+            progress_bar.empty()
+            status_text.empty()
 
             return {
                 "safety": safety_agent,
@@ -173,6 +199,8 @@ def initialize_components() -> Dict[str, Any]:
         except Exception as agent_error:
             logger.error(f"Error initializing agents: {str(agent_error)}")
             st.error(f"Error initializing agent components: {str(agent_error)}")
+            progress_bar.progress(1.0)
+            status_text.empty()
             # Return partial initialization with just the LLM and voice
             return {
                 "llm": llm,

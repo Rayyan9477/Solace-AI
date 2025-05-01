@@ -13,7 +13,10 @@ from typing import Dict, Any, Callable, Optional
 from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 import av
 import queue
+import nest_asyncio
 
+# Apply nest_asyncio to allow nested event loops
+nest_asyncio.apply()
 
 class VoiceComponent:
     """Component for handling voice interaction in Streamlit"""
@@ -30,14 +33,32 @@ class VoiceComponent:
         self.on_transcription = on_transcription
         self.audio_queue = queue.Queue()
         self.recording = False
+        self.model_initialized = False
+        
+        # Create event loop for async operations
+        try:
+            self.loop = asyncio.get_event_loop()
+        except RuntimeError:
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
         
         # Set RTC configuration for WebRTC (using Google's STUN servers)
         self.rtc_configuration = RTCConfiguration(
             {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
         )
-        
+
     def render_voice_input(self):
         """Render voice input component"""
+        # Initialize models if not done yet
+        if not self.model_initialized:
+            with st.spinner("Loading speech recognition model..."):
+                try:
+                    self.loop.run_until_complete(self.voice_ai.initialize_stt())
+                    self.model_initialized = True
+                except Exception as e:
+                    st.error(f"Failed to initialize speech recognition: {str(e)}")
+                    return
+        
         # Create a unique key for the WebRTC component
         webrtc_ctx = webrtc_streamer(
             key="speech-to-text",
@@ -67,7 +88,7 @@ class VoiceComponent:
             status_indicator.info("🔄 Transcribing...")
             
             # Process the audio data asynchronously
-            result = asyncio.run(self.voice_ai.speech_to_text(audio_data))
+            result = self.loop.run_until_complete(self.process_audio(audio_data))
             
             if result["success"] and result["text"]:
                 # Clear the status and show the transcribed text
@@ -79,35 +100,71 @@ class VoiceComponent:
             else:
                 status_indicator.error("❌ Failed to transcribe speech")
     
+    async def process_audio(self, audio_data: bytes) -> Dict[str, Any]:
+        """Process audio data asynchronously"""
+        try:
+            result = await self.voice_ai.speech_to_text(audio_data)
+            return result
+        except Exception as e:
+            return {"success": False, "error": str(e), "text": ""}
+
     def render_voice_output(self, text: str, autoplay: bool = True):
-        """
-        Render voice output component
-        
-        Args:
-            text: Text to convert to speech
-            autoplay: Whether to autoplay the audio
-        """
-        # Create placeholder for audio player
-        audio_player = st.empty()
-        
-        # Convert text to speech
-        result = asyncio.run(self.voice_ai.text_to_speech(text))
-        
-        if result["success"] and result["audio_bytes"]:
-            # Create audio player with base64 encoded audio
-            audio_base64 = base64.b64encode(result["audio_bytes"]).decode("utf-8")
-            audio_html = f"""
-                <audio id="audio-player" {"autoplay" if autoplay else ""} controls>
+        """Render voice output component"""
+        try:
+            # Initialize TTS model if needed
+            if not hasattr(self, 'tts_initialized'):
+                with st.spinner("Loading text-to-speech model..."):
+                    self.loop.run_until_complete(self.voice_ai.initialize_tts())
+                    self.tts_initialized = True
+            
+            # Generate speech
+            result = self.loop.run_until_complete(self.voice_ai.text_to_speech(
+                text,
+                voice_style=st.session_state.get("voice_style", "warm")
+            ))
+            
+            if result["success"] and result["audio_bytes"]:
+                # Convert audio bytes to base64 for HTML audio element
+                audio_base64 = base64.b64encode(result["audio_bytes"]).decode()
+                
+                # Create audio element with autoplay if enabled
+                audio_html = f"""
+                <audio {' autoplay' if autoplay else ''} controls>
                     <source src="data:audio/wav;base64,{audio_base64}" type="audio/wav">
                     Your browser does not support the audio element.
                 </audio>
-            """
-            audio_player.markdown(audio_html, unsafe_allow_html=True)
-            return True
-        else:
-            st.error("Failed to generate speech")
-            return False
-
+                """
+                st.markdown(audio_html, unsafe_allow_html=True)
+            else:
+                st.error("Failed to generate speech")
+                
+        except Exception as e:
+            st.error(f"Error generating speech: {str(e)}")
+    
+    def render_voice_selector(self):
+        """Render voice selector component"""
+        voices = {
+            "default": "Default Voice",
+            "male": "Male Voice",
+            "female": "Female Voice", 
+            "child": "Child Voice",
+            "elder": "Elder Voice",
+            "warm": "Warm & Compassionate"
+        }
+        
+        selected_voice = st.selectbox(
+            "Select Voice Style",
+            options=list(voices.keys()),
+            format_func=lambda x: voices[x],
+            index=5  # Default to warm voice
+        )
+        
+        # Save the selected voice style
+        if selected_voice != st.session_state.get("voice_style"):
+            self.voice_ai.set_voice_style(selected_voice)
+        
+        return selected_voice
+    
     def _get_audio_processor_factory(self):
         """Create an audio processor factory for WebRTC"""
         audio_buffer = bytearray()
@@ -118,7 +175,7 @@ class VoiceComponent:
                 self.recording_started = False
                 self.silent_frames = 0
                 self.max_silence_frames = 30  # About 3 seconds of silence
-                
+            
             def recv(self, frame):
                 nonlocal audio_buffer
                 
@@ -147,7 +204,7 @@ class VoiceComponent:
                     
                     # Reset silence counter
                     self.silent_frames = 0
-                
+                    
                 # Return the frame for visualization/debugging
                 return frame
         
@@ -155,23 +212,3 @@ class VoiceComponent:
         AudioProcessor.audio_queue = self.audio_queue
         
         return AudioProcessor
-    
-    def render_voice_selector(self):
-        """Render voice selector component"""
-        voices = {
-            "default": "Default Voice",
-            "male": "Male Voice",
-            "female": "Female Voice", 
-            "child": "Child Voice",
-            "elder": "Elder Voice",
-            "warm": "Warm & Compassionate"
-        }
-        
-        selected_voice = st.selectbox(
-            "Select Voice Style",
-            options=list(voices.keys()),
-            format_func=lambda x: voices[x],
-            index=5  # Default to warm voice
-        )
-        
-        return selected_voice

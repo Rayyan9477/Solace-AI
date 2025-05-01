@@ -23,14 +23,69 @@ logger = logging.getLogger(__name__)
 class VoiceAI:
     """Voice AI module for speech processing"""
     
+    @staticmethod
+    def check_dependencies() -> Dict[str, bool]:
+        """
+        Check if required dependencies for voice features are available
+        
+        Returns:
+            Dict with dependency status
+        """
+        dependencies = {
+            "torch": False,
+            "transformers": False,
+            "streamlit_webrtc": False,
+            "soundfile": False,
+            "scipy": False
+        }
+        
+        try:
+            import torch
+            dependencies["torch"] = True
+        except ImportError:
+            pass
+            
+        try:
+            import transformers
+            dependencies["transformers"] = True
+        except ImportError:
+            pass
+            
+        try:
+            import streamlit_webrtc
+            dependencies["streamlit_webrtc"] = True
+        except ImportError:
+            pass
+            
+        try:
+            import soundfile
+            dependencies["soundfile"] = True
+        except ImportError:
+            pass
+            
+        try:
+            import scipy
+            dependencies["scipy"] = True
+        except ImportError:
+            pass
+            
+        return dependencies
+    
     def __init__(self, stt_model: str = "openai/whisper-large-v3-turbo", tts_model: str = "nari-labs/Dia-1.6B"):
         """
         Initialize VoiceAI with specified models
-        
+
         Args:
-            stt_model: Name of the speech-to-text model to use
-            tts_model: Name of the text-to-speech model to use
+            stt_model: Name of the speech-to-text model to use from HuggingFace
+            tts_model: Name of the text-to-speech model to use from HuggingFace
         """
+        # Check dependencies first
+        self.dependencies = self.check_dependencies()
+        if not all(self.dependencies.values()):
+            missing = [dep for dep, status in self.dependencies.items() if not status]
+            logger.warning(f"Missing voice dependencies: {', '.join(missing)}")
+            raise ImportError(f"Required voice dependencies not available: {', '.join(missing)}")
+
         self.stt_model_name = stt_model
         self.tts_model_name = tts_model
         self.stt_pipeline = None
@@ -54,58 +109,57 @@ class VoiceAI:
         self.current_voice = "warm"
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         
-        # Create cache directory
-        os.makedirs(os.path.join(os.path.dirname(__file__), '..', 'models', 'cache'), exist_ok=True)
+        # Create cache directory for model downloads
+        cache_dir = os.path.join(os.path.dirname(__file__), '..', 'models', 'cache')
+        os.makedirs(cache_dir, exist_ok=True)
+        
+        # Store cache_dir for model loading
+        self.cache_dir = cache_dir
         
         # Initialize models lazily (on first use)
-    
+        logger.info(f"VoiceAI initialized. Device: {self.device}, Cache dir: {cache_dir}")
+
     async def initialize_stt(self):
         """Initialize speech-to-text model (if not already initialized)"""
         if self.stt_pipeline is None:
             try:
                 logger.info(f"Initializing STT model: {self.stt_model_name}")
-                
-                # Set cache directory
-                cache_dir = os.path.join(os.path.dirname(__file__), '..', 'models', 'cache')
-                
-                # Initialize WhisperForConditionalGeneration with specific parameters
+
+                # Initialize Whisper pipeline with specific configuration
                 self.stt_pipeline = pipeline(
                     "automatic-speech-recognition",
                     model=self.stt_model_name,
                     device=self.device,
                     torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                    model_kwargs={"cache_dir": cache_dir}
+                    model_kwargs={"cache_dir": self.cache_dir, "low_cpu_mem_usage": True}
                 )
-                
+
                 logger.info(f"STT model initialized successfully on {self.device}")
                 return True
             except Exception as e:
-                logger.error(f"Failed to initialize STT model: {str(e)}")
+                logger.error(f"Failed to initialize STT model: {str(e)}", exc_info=True)
                 return False
         return True
-    
+
     async def initialize_tts(self):
         """Initialize text-to-speech model (if not already initialized)"""
         if self.tts_pipeline is None:
             try:
                 logger.info(f"Initializing TTS model: {self.tts_model_name}")
-                
-                # Set cache directory
-                cache_dir = os.path.join(os.path.dirname(__file__), '..', 'models', 'cache')
-                
-                # Initialize TTS pipeline
+
+                # Initialize TTS pipeline with specific configuration
                 self.tts_pipeline = pipeline(
                     "text-to-speech",
                     model=self.tts_model_name,
                     device=self.device,
                     torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                    model_kwargs={"cache_dir": cache_dir}
+                    model_kwargs={"cache_dir": self.cache_dir, "low_cpu_mem_usage": True}
                 )
-                
+
                 logger.info(f"TTS model initialized successfully on {self.device}")
                 return True
             except Exception as e:
-                logger.error(f"Failed to initialize TTS model: {str(e)}")
+                logger.error(f"Failed to initialize TTS model: {str(e)}", exc_info=True)
                 return False
         return True
 
@@ -275,3 +329,73 @@ class VoiceAI:
         wav_bytes = buffer.getvalue()
         
         return wav_bytes
+
+class VoiceManager:
+    """Manager class for handling voice feature initialization and fallback"""
+    
+    def __init__(self):
+        self.voice_ai = None
+        self.voice_enabled = False
+        self.initialization_error = None
+        
+    async def initialize(self) -> Dict[str, Any]:
+        """
+        Initialize voice features with proper error handling
+        
+        Returns:
+            Dict containing initialization status and any error messages
+        """
+        try:
+            # First check if dependencies are available
+            dependency_check = VoiceAI.check_dependencies()
+            missing_deps = [dep for dep, status in dependency_check.items() if not status]
+            
+            if missing_deps:
+                self.initialization_error = f"Missing dependencies: {', '.join(missing_deps)}"
+                return {
+                    "success": False,
+                    "error": self.initialization_error,
+                    "voice_ai": None,
+                    "missing_dependencies": missing_deps
+                }
+            
+            # Initialize VoiceAI
+            self.voice_ai = VoiceAI()
+            
+            # Test STT initialization
+            stt_success = await self.voice_ai.initialize_stt()
+            if not stt_success:
+                raise Exception("Failed to initialize speech-to-text model")
+                
+            # Test TTS initialization
+            tts_success = await self.voice_ai.initialize_tts()
+            if not tts_success:
+                raise Exception("Failed to initialize text-to-speech model")
+            
+            self.voice_enabled = True
+            return {
+                "success": True,
+                "voice_ai": self.voice_ai,
+                "error": None
+            }
+            
+        except Exception as e:
+            self.initialization_error = str(e)
+            return {
+                "success": False,
+                "error": self.initialization_error,
+                "voice_ai": None
+            }
+    
+    def get_initialization_status(self) -> Dict[str, Any]:
+        """
+        Get current initialization status
+        
+        Returns:
+            Dict with status information
+        """
+        return {
+            "enabled": self.voice_enabled,
+            "error": self.initialization_error,
+            "voice_ai": self.voice_ai
+        }
