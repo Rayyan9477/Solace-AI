@@ -141,6 +141,7 @@ pytorch_model.bin
 tf_model.h5
 checkpoint/
 checkpoint*
+cache
 
 # Data files
 data.pth

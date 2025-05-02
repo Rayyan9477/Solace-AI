@@ -1,6 +1,6 @@
 """
 Voice AI module for speech-to-text and text-to-speech capabilities.
-Uses Whisper for STT and Dia-1.6B for TTS.
+Uses Whisper for STT and SpeechT5 for TTS.
 """
 
 import os
@@ -9,7 +9,7 @@ import numpy as np
 import asyncio
 import tempfile
 import soundfile as sf
-from transformers import pipeline, WhisperForConditionalGeneration, WhisperProcessor
+from transformers import pipeline, WhisperForConditionalGeneration, WhisperProcessor, SpeechT5Processor, SpeechT5ForTextToSpeech, SpeechT5HifiGan
 from typing import Dict, Any, Optional
 import logging
 from config.settings import AppConfig
@@ -71,7 +71,7 @@ class VoiceAI:
             
         return dependencies
     
-    def __init__(self, stt_model: str = "openai/whisper-large-v3-turbo", tts_model: str = "nari-labs/Dia-1.6B"):
+    def __init__(self, stt_model: str = "openai/whisper-large-v3-turbo", tts_model: str = "microsoft/speecht5_tts"):
         """
         Initialize VoiceAI with specified models
 
@@ -90,20 +90,18 @@ class VoiceAI:
         self.tts_model_name = tts_model
         self.stt_pipeline = None
         self.tts_pipeline = None
+        self.tts_processor = None
+        self.tts_model = None
+        self.vocoder = None
         
         # Voice style configurations
         self.voice_styles = {
-            "default": {},
-            "male": {"voice_preset": "male"},
-            "female": {"voice_preset": "female"},
-            "child": {"voice_preset": "child"},
-            "elder": {"voice_preset": "elder"},
-            "warm": {
-                "voice_preset": "female", 
-                "temperature": 0.7, 
-                "top_k": 50, 
-                "speaking_rate": 0.9
-            }
+            "default": {"pitch_factor": 1.0, "speaking_rate": 1.0},
+            "male": {"pitch_factor": 0.85, "speaking_rate": 0.95},
+            "female": {"pitch_factor": 1.15, "speaking_rate": 1.0},
+            "child": {"pitch_factor": 1.3, "speaking_rate": 1.1},
+            "elder": {"pitch_factor": 0.75, "speaking_rate": 0.85},
+            "warm": {"pitch_factor": 1.05, "speaking_rate": 0.9}
         }
         
         self.current_voice = "warm"
@@ -143,18 +141,28 @@ class VoiceAI:
 
     async def initialize_tts(self):
         """Initialize text-to-speech model (if not already initialized)"""
-        if self.tts_pipeline is None:
+        if self.tts_processor is None or self.tts_model is None:
             try:
                 logger.info(f"Initializing TTS model: {self.tts_model_name}")
 
-                # Initialize TTS pipeline with specific configuration
-                self.tts_pipeline = pipeline(
-                    "text-to-speech",
-                    model=self.tts_model_name,
-                    device=self.device,
-                    torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                    model_kwargs={"cache_dir": self.cache_dir, "low_cpu_mem_usage": True}
+                # Initialize SpeechT5 models directly instead of using pipeline
+                self.tts_processor = SpeechT5Processor.from_pretrained(
+                    self.tts_model_name,
+                    cache_dir=self.cache_dir
                 )
+                
+                self.tts_model = SpeechT5ForTextToSpeech.from_pretrained(
+                    self.tts_model_name,
+                    cache_dir=self.cache_dir,
+                    torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                    low_cpu_mem_usage=True
+                ).to(self.device)
+                
+                # Initialize vocoder
+                self.vocoder = SpeechT5HifiGan.from_pretrained(
+                    "microsoft/speecht5_hifigan",
+                    cache_dir=self.cache_dir
+                ).to(self.device)
 
                 logger.info(f"TTS model initialized successfully on {self.device}")
                 return True
@@ -240,17 +248,24 @@ class VoiceAI:
             
             start_time = time.time()
             
-            # Generate speech using the TTS pipeline
-            output = self.tts_pipeline(
-                enhanced_text,
-                **style
-            )
+            # Process the text with the TTS model
+            inputs = self.tts_processor(text=enhanced_text, return_tensors="pt").to(self.device)
             
-            audio_array = output["audio"]
-            sampling_rate = output["sampling_rate"]
+            # Get speaker embeddings (we'll use a zero vector for a neutral voice)
+            speaker_embeddings = torch.zeros((1, 512)).to(self.device)
             
-            # Convert audio array to bytes
-            audio_bytes = self._audio_array_to_wav_bytes(audio_array, sampling_rate)
+            # Generate speech
+            speech = self.tts_model.generate_speech(
+                inputs["input_ids"], 
+                speaker_embeddings, 
+                vocoder=self.vocoder
+            ).cpu().numpy()
+            
+            # Apply voice style modifications (pitch, rate)
+            modified_speech = self._apply_voice_style(speech, style)
+            
+            # Convert to WAV format
+            audio_bytes = self._speech_to_wav(modified_speech)
             
             end_time = time.time()
             logger.info(f"Speech generation completed in {end_time - start_time:.2f} seconds")
@@ -268,13 +283,6 @@ class VoiceAI:
                 "audio_bytes": b"",
                 "error": str(e)
             }
-    
-    def set_voice_style(self, style: str):
-        """Set the voice style to use for TTS"""
-        if style in self.voice_styles:
-            self.current_voice = style
-            return True
-        return False
     
     def _enhance_text_for_empathy(self, text: str) -> str:
         """
@@ -307,28 +315,57 @@ class VoiceAI:
         
         return text
     
-    def _audio_array_to_wav_bytes(self, audio_array: np.ndarray, sample_rate: int) -> bytes:
-        """
-        Convert audio array to WAV bytes
-        
-        Args:
-            audio_array: Audio as numpy array
-            sample_rate: Sample rate of the audio
+    def _apply_voice_style(self, speech_array: np.ndarray, style: Dict[str, float]) -> np.ndarray:
+        """Apply voice style modifications (pitch, rate)"""
+        try:
+            from scipy import signal
             
-        Returns:
-            Audio as WAV bytes
-        """
-        # Create a bytes buffer
-        buffer = io.BytesIO()
-        
-        # Save the audio array to the buffer as WAV
-        wavfile.write(buffer, sample_rate, audio_array)
-        
-        # Get the bytes from the buffer
-        buffer.seek(0)
-        wav_bytes = buffer.getvalue()
-        
-        return wav_bytes
+            # Apply pitch modification
+            pitch_factor = style.get("pitch_factor", 1.0)
+            if pitch_factor != 1.0:
+                # Simple pitch shifting using resampling
+                speech_array = signal.resample(speech_array, int(len(speech_array) / pitch_factor))
+            
+            # Apply speaking rate modification
+            speaking_rate = style.get("speaking_rate", 1.0)
+            if speaking_rate != 1.0:
+                # Simple rate modification using resampling
+                speech_array = signal.resample(speech_array, int(len(speech_array) * speaking_rate))
+            
+            return speech_array
+            
+        except Exception as e:
+            logger.warning(f"Failed to apply voice style, using unmodified audio: {str(e)}")
+            return speech_array
+    
+    def _speech_to_wav(self, speech_array: np.ndarray, sample_rate: int = 16000) -> bytes:
+        """Convert speech array to WAV format bytes"""
+        try:
+            import io
+            import soundfile as sf
+            
+            # Create in-memory buffer
+            wav_buffer = io.BytesIO()
+            
+            # Write WAV data to buffer
+            sf.write(wav_buffer, speech_array, sample_rate, format='WAV')
+            
+            # Get bytes from buffer
+            wav_buffer.seek(0)
+            wav_bytes = wav_buffer.read()
+            
+            return wav_bytes
+            
+        except Exception as e:
+            logger.error(f"Failed to convert speech to WAV: {str(e)}")
+            return b""
+    
+    def set_voice_style(self, style: str):
+        """Set the voice style to use for TTS"""
+        if style in self.voice_styles:
+            self.current_voice = style
+            return True
+        return False
 
 class VoiceManager:
     """Manager class for handling voice feature initialization and fallback"""

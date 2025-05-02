@@ -8,24 +8,47 @@ logger = logging.getLogger(__name__)
 class AgentOrchestrator:
     """Orchestrates interactions between multiple specialized agents"""
 
-    def __init__(self, agents: Dict[str, Agent] = None):
+    def __init__(self, agents: Dict[str, Agent] = None, **named_agents):
         """
         Initialize the agent orchestrator with a dictionary of agents
+        
+        Can be initialized in two ways:
+        1. With a dictionary of agents: AgentOrchestrator(agents={"chat": chat_agent, ...})
+        2. With named arguments: AgentOrchestrator(chat=chat_agent, emotion=emotion_agent, ...)
 
         Args:
             agents: Dictionary of agent instances with keys like 'safety', 'emotion', 'chat', etc.
+            **named_agents: Alternative way to provide agents with named arguments
         """
-        self.agents = agents or {}
+        # Handle both initialization methods
+        if agents is None:
+            self.agents = named_agents
+        else:
+            self.agents = agents
+
+        # Backwards compatibility for specific agent access methods
+        self._safety_agent = self.agents.get("safety")
+        self._emotion_agent = self.agents.get("emotion")
+        self._chat_agent = self.agents.get("chat", self.agents.get("chat_agent"))
+
         self.execution_history = []
         self.conversation_history = []
         self.emotion_history = []
         self.safety_history = []
 
-        logger.info("AgentOrchestrator initialized with %d agents", len(agents))
+        logger.info("AgentOrchestrator initialized with %d agents", len(self.agents))
 
     def add_agent(self, name: str, agent: Agent) -> None:
         """Add an agent to the orchestrator"""
         self.agents[name] = agent
+        
+        # Update specific agent references if applicable
+        if name == "safety":
+            self._safety_agent = agent
+        elif name == "emotion":
+            self._emotion_agent = agent
+        elif name in ["chat", "chat_agent"]:
+            self._chat_agent = agent
 
     def remove_agent(self, name: str) -> bool:
         """Remove an agent from the orchestrator"""

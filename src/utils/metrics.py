@@ -10,24 +10,37 @@ from config.settings import AppConfig
 logger = logging.getLogger(__name__)
 
 class Metrics:
-    _instance = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(Metrics, cls).__new__(cls)
-            cls._instance._initialize_metrics()
-        return cls._instance
-
+    
+    def __init__(self):
+        """Initialize metrics tracking system"""
+        self.initialized = False
+        self.prometheus_enabled = False
+        try:
+            from prometheus_client import Counter, Histogram, Gauge, REGISTRY
+            self.prometheus_enabled = True
+            self.REGISTRY = REGISTRY
+            self._initialize_metrics()
+            self.initialized = True
+        except ImportError:
+            # Prometheus is not installed, provide fallback tracking
+            self.metrics_store = {
+                'interaction_types': {},
+                'response_times': [],
+                'emotion_intensities': {},
+                'safety_flags': 0
+            }
+            
     def _initialize_metrics(self):
         # Initialize INTERACTION_TYPES Counter
         try:
+            from prometheus_client import Counter, Histogram, Gauge
             self.INTERACTION_TYPES = Counter(
                 'chat_interaction_types',
                 'Count of different interaction types',
                 ['type']
             )
         except ValueError:
-            self.INTERACTION_TYPES = REGISTRY._names_to_collectors['chat_interaction_types']
+            self.INTERACTION_TYPES = self.REGISTRY._names_to_collectors['chat_interaction_types']
 
         # Initialize RESPONSE_TIME Histogram
         try:
@@ -37,7 +50,7 @@ class Metrics:
                 buckets=[0.1, 0.5, 1, 2, 5]
             )
         except ValueError:
-            self.RESPONSE_TIME = REGISTRY._names_to_collectors['response_time_seconds']
+            self.RESPONSE_TIME = self.REGISTRY._names_to_collectors['response_time_seconds']
 
         # Initialize EMOTION_GAUGE Gauge
         try:
@@ -47,53 +60,86 @@ class Metrics:
                 ['emotion']
             )
         except ValueError:
-            self.EMOTION_GAUGE = REGISTRY._names_to_collectors['user_emotion_intensity']
+            self.EMOTION_GAUGE = self.REGISTRY._names_to_collectors['user_emotion_intensity']
 
         # Initialize SAFETY_FLAGS Counter
         try:
             self.SAFETY_FLAGS = Counter(
-                'safety_flag_triggers',
-                'Count of triggered safety flags',
-                ['severity_level']
+                'safety_flags',
+                'Count of safety flags raised during conversations',
+                ['severity']
             )
         except ValueError:
-            self.SAFETY_FLAGS = REGISTRY._names_to_collectors['safety_flag_triggers']
+            self.SAFETY_FLAGS = self.REGISTRY._names_to_collectors['safety_flags']
+    
+    def track_interaction(self, interaction_type: str):
+        """Track interaction type"""
+        if self.prometheus_enabled and self.initialized:
+            self.INTERACTION_TYPES.labels(type=interaction_type).inc()
+        else:
+            # Fallback tracking
+            if interaction_type not in self.metrics_store['interaction_types']:
+                self.metrics_store['interaction_types'][interaction_type] = 0
+            self.metrics_store['interaction_types'][interaction_type] += 1
+    
+    def track_response_time(self, time_seconds: float):
+        """Track response generation time"""
+        if self.prometheus_enabled and self.initialized:
+            self.RESPONSE_TIME.observe(time_seconds)
+        else:
+            # Fallback tracking
+            self.metrics_store['response_times'].append(time_seconds)
+    
+    def track_emotion(self, emotion: str, intensity: float):
+        """Track detected emotion intensity"""
+        if self.prometheus_enabled and self.initialized:
+            self.EMOTION_GAUGE.labels(emotion=emotion).set(intensity)
+        else:
+            # Fallback tracking
+            self.metrics_store['emotion_intensities'][emotion] = intensity
+    
+    def track_safety_flag(self, severity: str = "warning"):
+        """Track safety flag occurrence"""
+        if self.prometheus_enabled and self.initialized:
+            self.SAFETY_FLAGS.labels(severity=severity).inc()
+        else:
+            # Fallback tracking
+            self.metrics_store['safety_flags'] += 1
+    
+    def get_metrics_summary(self):
+        """Get a summary of tracked metrics (for fallback mode)"""
+        if not self.prometheus_enabled:
+            return self.metrics_store
+        else:
+            # For prometheus mode, this would require more complex collection logic
+            return "Metrics available via Prometheus endpoint"
 
-        # Initialize ASSESSMENT_COMPLETED Counter
-        try:
-            self.ASSESSMENT_COMPLETED = Counter(
-                'assessment_completed',
-                'Number of completed assessments'
-            )
-        except ValueError:
-            self.ASSESSMENT_COMPLETED = REGISTRY._names_to_collectors['assessment_completed']
 
-        # Initialize EMBEDDING_TIME Summary
-        try:
-            self.EMBEDDING_TIME = Summary(
-                'embedding_generation_time',
-                'Time spent generating text embeddings'
-            )
-        except ValueError:
-            self.EMBEDDING_TIME = REGISTRY._names_to_collectors['embedding_generation_time']
+# Singleton instance for global access
+metrics_manager = Metrics()
 
-metrics = Metrics()
-
-def track_metric(metric_name: str, value: float):
-    if metric_name == "embedding":
-        metrics.EMBEDDING_TIME.observe(value)
-    elif metric_name == "response":
-        metrics.RESPONSE_TIME.observe(value)
-    elif metric_name == "assessment_completed":
-        metrics.ASSESSMENT_COMPLETED.inc(value)
-    elif metric_name == "safety_flag_raised":
-        metrics.SAFETY_FLAGS.labels(severity_level="raised").inc(value)
+def track_metric(metric_type: str, value, **kwargs):
+    """Convenience function for tracking metrics"""
+    if metric_type == "interaction":
+        metrics_manager.track_interaction(value)
+    elif metric_type == "response_time":
+        metrics_manager.track_response_time(value)
+    elif metric_type == "emotion":
+        emotion = value
+        intensity = kwargs.get("intensity", 5.0)
+        metrics_manager.track_emotion(emotion, intensity)
+    elif metric_type == "safety_flag":
+        severity = kwargs.get("severity", "warning")
+        metrics_manager.track_safety_flag(severity)
+    else:
+        # Unknown metric type, log it
+        pass
 
 class MetricsManager:
     """Manages metrics collection and analysis"""
     
     def __init__(self):
-        self._metrics = metrics
+        self._metrics = metrics_manager
         self._start_time = datetime.now()
         
     def track_interaction(
@@ -113,20 +159,20 @@ class MetricsManager:
             
             # Track latency if provided
             if 'latency' in data:
-                self._metrics.RESPONSE_TIME.observe(data['latency'])
+                self._metrics.track_response_time(data['latency'])
             
             # Track interaction type
-            self._metrics.INTERACTION_TYPES.labels(type=interaction_type).inc()
+            self._metrics.track_interaction(interaction_type)
             
             # Track emotions if present
             if 'emotions' in data:
                 for emotion, intensity in data['emotions'].items():
-                    self._metrics.EMOTION_GAUGE.labels(emotion=emotion).set(intensity)
+                    self._metrics.track_emotion(emotion, intensity)
             
             # Track safety flags
             if 'safety_flags' in data:
                 for flag in data['safety_flags']:
-                    self._metrics.SAFETY_FLAGS.labels(severity_level=flag).inc()
+                    self._metrics.track_safety_flag(flag)
             
             return {
                 'metrics': {

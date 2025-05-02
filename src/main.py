@@ -11,6 +11,7 @@ from agents.emotion_agent import EmotionAgent
 from agents.safety_agent import SafetyAgent
 from agents.search_agent import SearchAgent
 from agents.personality_agent import PersonalityAgent
+from agents.integrated_diagnosis_agent import IntegratedDiagnosisAgent
 from utils.metrics import track_metric
 import sentry_sdk
 from prometheus_client import start_http_server
@@ -27,6 +28,8 @@ import torch
 # Voice AI imports
 from utils.voice_ai import VoiceAI, VoiceManager
 from components.voice_component import VoiceComponent
+from components.integrated_assessment import IntegratedAssessmentComponent
+from components.diagnosis_results import DiagnosisResultsComponent
 
 # Set up logging
 logging.basicConfig(
@@ -136,7 +139,7 @@ def initialize_components() -> Dict[str, Any]:
         status_text.text("Initializing Voice AI models...")
         voice_manager = VoiceManager()
         voice_result = asyncio.run(voice_manager.initialize())
-        
+
         if voice_result["success"]:
             voice_ai = voice_result["voice_ai"]
             logger.info("Voice AI initialized successfully")
@@ -152,7 +155,7 @@ def initialize_components() -> Dict[str, Any]:
             else:
                 st.warning(f"Voice features will not be available: {error_msg}. The application will continue in text-only mode.")
             voice_ai = None
-            
+
         progress_bar.progress(0.6)
 
         # Initialize agents (40% of progress)
@@ -164,6 +167,11 @@ def initialize_components() -> Dict[str, Any]:
             diagnosis_agent = DiagnosisAgent(model=llm)
             crawler_agent = CrawlerAgent(model=llm)
             personality_agent = PersonalityAgent(model=llm)
+            integrated_diagnosis_agent = IntegratedDiagnosisAgent(model=llm)
+
+            # Initialize integrated assessment component
+            from components.integrated_assessment import IntegratedAssessment
+            integrated_diagnosis = IntegratedAssessment(diagnosis_agent=diagnosis_agent)
 
             # Initialize orchestrator
             orchestrator = AgentOrchestrator(
@@ -173,7 +181,8 @@ def initialize_components() -> Dict[str, Any]:
                     "chat": chat_agent,
                     "diagnosis": diagnosis_agent,
                     "crawler": crawler_agent,
-                    "personality": personality_agent
+                    "personality": personality_agent,
+                    "integrated_diagnosis": integrated_diagnosis_agent
                 }
             )
             progress_bar.progress(1.0)
@@ -192,9 +201,11 @@ def initialize_components() -> Dict[str, Any]:
                 "diagnosis": diagnosis_agent,
                 "crawler": crawler_agent,
                 "personality": personality_agent,
+                "integrated_diagnosis": integrated_diagnosis_agent,
                 "orchestrator": orchestrator,
                 "llm": llm,
-                "voice_ai": voice_ai
+                "voice_ai": voice_ai,
+                "integrated_diagnosis": integrated_diagnosis
             }
         except Exception as agent_error:
             logger.error(f"Error initializing agents: {str(agent_error)}")
@@ -211,6 +222,7 @@ def initialize_components() -> Dict[str, Any]:
                 "diagnosis": None,
                 "crawler": None,
                 "personality": None,
+                "integrated_diagnosis": None,
                 "orchestrator": None
             }
     except Exception as e:
@@ -228,6 +240,12 @@ def reset_session():
         "personality": {},
         "history": [],
         "start_time": time.time(),
+        "assessment_component": None,
+        "assessment_complete": False,
+        "assessment_data": {},
+        "integrated_assessment_results": {},
+        "empathy_response": "",
+        "immediate_actions": [],
         "metrics": {
             "interactions": 0,
             "response_times": [],
@@ -389,10 +407,16 @@ async def process_user_message(user_input: str, components: Dict[str, Any]) -> D
         # Generate response
         start_time = time.time()
         try:
+            # Get diagnosis data from integrated assessment if available
+            diagnosis_data = {}
+            if "integrated_assessment_results" in st.session_state:
+                diagnosis_data = st.session_state["integrated_assessment_results"].get("assessment_results", {})
+
             # Properly await the coroutine
             response = await components["chat_agent"].generate_response(user_input, {
                 "emotion": emotion_result,
-                "safety": safety_result
+                "safety": safety_result,
+                "diagnosis": diagnosis_data
             })
         except Exception as chat_error:
             logger.error(f"Chat generation failed: {str(chat_error)}")
@@ -466,7 +490,7 @@ def main():
 
     # Application routing
     if st.session_state["step"] == 1:
-        render_assessment(components["diagnosis"])
+        render_integrated_assessment(components["integrated_diagnosis"])
     elif st.session_state["step"] == 2:
         render_diagnosis(components["crawler"])
     elif st.session_state["step"] == 3:
@@ -475,6 +499,78 @@ def main():
         render_chat_interface(components)
     elif st.session_state["step"] == 5:
         render_crisis_protocol()
+
+def render_integrated_assessment(integrated_diagnosis_agent):
+    """Render the integrated assessment interface"""
+    import asyncio
+
+    # Check if integrated_diagnosis_agent is available
+    if integrated_diagnosis_agent is None:
+        st.warning("The integrated assessment functionality is currently unavailable. Falling back to standard assessment.")
+        render_assessment(None)  # Fallback to standard assessment
+        return
+
+    # Initialize assessment component if not already done
+    if "assessment_component" not in st.session_state or st.session_state["assessment_component"] is None:
+        def on_assessment_complete(assessment_data):
+            # Store assessment data in session state
+            st.session_state["assessment_data"] = assessment_data
+
+            # Process the assessment data
+            with st.spinner("Analyzing your responses..."):
+                # Run the assessment
+                assessment_results = asyncio.run(integrated_diagnosis_agent.conduct_assessment(
+                    assessment_data["mental_health_responses"],
+                    assessment_data["personality_responses"]
+                ))
+
+                # Store results in session state
+                st.session_state["integrated_assessment_results"] = assessment_results
+
+                # Generate empathy response
+                empathy_response = integrated_diagnosis_agent.generate_empathy_response(
+                    assessment_results.get("assessment_results", {})
+                )
+
+                # Generate immediate actions
+                immediate_actions = integrated_diagnosis_agent.generate_immediate_actions(
+                    assessment_results.get("assessment_results", {})
+                )
+
+                # Store in session state
+                st.session_state["empathy_response"] = empathy_response
+                st.session_state["immediate_actions"] = immediate_actions
+
+                # Move to results display
+                st.session_state["assessment_complete"] = True
+
+        # Create the assessment component
+        from components.integrated_assessment import IntegratedAssessmentComponent
+        st.session_state["assessment_component"] = IntegratedAssessmentComponent(
+            on_complete=on_assessment_complete
+        )
+
+    # Check if assessment is complete
+    if st.session_state.get("assessment_complete", False):
+        # Render the results
+        from components.diagnosis_results import DiagnosisResultsComponent
+        results_component = DiagnosisResultsComponent(
+            on_continue=lambda: st.session_state.update({"step": 4})  # Move to chat interface
+        )
+
+        results_component.render(
+            st.session_state.get("integrated_assessment_results", {}).get("assessment_results", {}),
+            st.session_state.get("empathy_response", ""),
+            st.session_state.get("immediate_actions", [])
+        )
+    else:
+        # Check that the assessment component exists before rendering
+        if st.session_state["assessment_component"] is not None:
+            st.session_state["assessment_component"].render()
+        else:
+            st.error("Could not initialize assessment component. Please try again or contact support.")
+            if st.button("Try Standard Assessment Instead"):
+                render_assessment(None)
 
 def render_personality_assessment(personality_agent):
     """Render the personality assessment interface"""
@@ -916,51 +1012,51 @@ def render_chat_interface(components: Dict[str, Any]):
             reset_session()
             st.rerun()
         return
-    
+
     # Initialize voice component if available
     voice_enabled = components.get("voice_ai") is not None
-    
+
     if voice_enabled:
         # Initialize voice component with callback for speech-to-text
         if "voice_component" not in st.session_state:
             voice_ai = components["voice_ai"]
-            
+
             def on_voice_input(text):
                 if text:  # Process voice input like a regular text input
                     st.session_state["voice_input"] = text
                     st.rerun()
-            
+
             st.session_state["voice_component"] = VoiceComponent(
                 voice_ai=voice_ai,
                 on_transcription=on_voice_input
             )
-            
+
             # Initialize voice settings
             if "voice_style" not in st.session_state:
                 st.session_state["voice_style"] = "warm"
-    
+
     # Add voice controls in an expander
     if voice_enabled:
         with st.expander("🎤 Voice Interaction Settings", expanded=False):
             col1, col2 = st.columns(2)
-            
+
             with col1:
                 st.markdown("### 🎙️ Speech Input")
                 st.session_state["voice_component"].render_voice_input()
-                
+
             with col2:
                 st.markdown("### 🔊 Voice Settings")
                 st.session_state["voice_style"] = st.session_state["voice_component"].render_voice_selector()
                 st.checkbox("Automatically speak responses", value=True, key="auto_speak_responses")
-                
+
                 # Test voice button
                 if st.button("Test Voice"):
                     test_text = "Hello! I'm your mental health assistant. I'm here to listen and support you with empathy and compassion."
                     st.session_state["voice_component"].render_voice_output(
-                        test_text, 
+                        test_text,
                         autoplay=True
                     )
-                    
+
         # Horizontal separator
         st.markdown("---")
 
@@ -970,14 +1066,14 @@ def render_chat_interface(components: Dict[str, Any]):
             st.write(message["content"])
             if "emotion" in message:
                 st.caption(f"Emotion: {message['emotion'].get('primary_emotion', 'unknown')}")
-                
+
         # Play voice response for assistant messages if enabled
         if voice_enabled and message["role"] == "assistant" and st.session_state.get("auto_speak_responses", False):
             # Check if this message hasn't been spoken yet (using a simple tracking system)
             message_id = hash(message["content"])
             if "spoken_messages" not in st.session_state:
                 st.session_state["spoken_messages"] = set()
-                
+
             if message_id not in st.session_state["spoken_messages"]:
                 # Speak the message
                 st.session_state["voice_component"].render_voice_output(
@@ -995,7 +1091,7 @@ def render_chat_interface(components: Dict[str, Any]):
     else:
         # Regular text input
         user_input = st.chat_input("Type your message here, or use the voice input above...")
-        
+
     if user_input:
         # Display user message immediately
         with st.chat_message("user"):
@@ -1024,7 +1120,7 @@ def render_chat_interface(components: Dict[str, Any]):
                             st.write(result["response"])
                             if "emotion" in result and result["emotion"]:
                                 st.caption(f"Emotion: {result['emotion'].get('primary_emotion', 'unknown')}")
-                                
+
                         # Speak the assistant's response if voice is enabled
                         if voice_enabled and st.session_state.get("auto_speak_responses", False):
                             st.session_state["voice_component"].render_voice_output(
