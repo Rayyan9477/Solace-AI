@@ -590,431 +590,389 @@ def render_integrated_assessment(integrated_diagnosis_agent):
                 render_assessment(None)
 
 def render_personality_assessment(personality_agent):
-    """Render the personality assessment interface"""
+    """Render the personality assessment interface with voice and emotion integration"""
     import asyncio
     import json
-
+    from components.dynamic_personality_assessment import DynamicPersonalityAssessmentComponent
+    
+    # Check if voice components are available in session state
+    voice_ai = st.session_state.get("voice_ai")
+    whisper_voice_manager = st.session_state.get("whisper_voice_manager")
+    emotion_agent = st.session_state.get("emotion_agent")
+    
+    # Initialize the dynamic assessment component if not already in session state
+    if "dynamic_personality_component" not in st.session_state:
+        # Define callback for assessment completion
+        def on_assessment_complete(results):
+            st.session_state["personality"] = results
+            st.session_state["personality_assessment_complete"] = True
+            # Store completed assessment in session state
+            if "completed_assessments" not in st.session_state:
+                st.session_state["completed_assessments"] = []
+            # Add a timestamp to the assessment
+            results["timestamp"] = datetime.now().isoformat()
+            st.session_state["completed_assessments"].append(results)
+        
+        # Create component instance with available components
+        st.session_state["dynamic_personality_component"] = DynamicPersonalityAssessmentComponent(
+            personality_agent=personality_agent,
+            voice_ai=voice_ai,
+            whisper_voice_manager=whisper_voice_manager,
+            emotion_agent=emotion_agent,
+            on_complete=on_assessment_complete
+        )
+    
+    # Header and description
     st.header("Personality Assessment")
-
-    # Check if personality_agent is available
-    if personality_agent is None:
-        st.warning("The personality assessment functionality is currently unavailable. Please try again later.")
-        if st.button("Skip to Chat"):
-            st.session_state["step"] = 4
-            st.rerun()
-        return
-
-    # Determine which assessment to show
-    if "personality_step" not in st.session_state:
-        st.session_state["personality_step"] = 1  # 1: Choose assessment, 2: Take assessment, 3: View results
-
-    # Step 1: Choose assessment type
-    if st.session_state["personality_step"] == 1:
-        st.subheader("Choose Your Assessment")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.markdown("""
-            ### Big Five (OCEAN) Assessment
-
-            The Big Five personality traits, also known as the OCEAN model, is a widely accepted framework that describes personality along five dimensions:
-
-            - **Openness** to experience
-            - **Conscientiousness**
-            - **Extraversion**
-            - **Agreeableness**
-            - **Neuroticism**
-
-            This assessment takes about 10-15 minutes to complete.
-            """)
-
-            if st.button("Take Big Five Assessment"):
-                st.session_state["assessment_type"] = "big_five"
-                st.session_state["personality_step"] = 2
-                st.rerun()
-
-        with col2:
-            st.markdown("""
-            ### Myers-Briggs Type Indicator (MBTI)
-
-            The MBTI assessment categorizes people into 16 personality types based on four dimensions:
-
-            - **Extraversion (E)** vs. **Introversion (I)**
-            - **Sensing (S)** vs. **Intuition (N)**
-            - **Thinking (T)** vs. **Feeling (F)**
-            - **Judging (J)** vs. **Perceiving (P)**
-
-            This assessment takes about 5-10 minutes to complete.
-            """)
-
-            if st.button("Take MBTI Assessment"):
-                st.session_state["assessment_type"] = "mbti"
-                st.session_state["personality_step"] = 2
-                st.rerun()
-
-        st.markdown("---")
-        if st.button("Skip Personality Assessment"):
-            st.session_state["step"] = 4  # Skip to chat
-            st.rerun()
-
-    # Step 2: Take the selected assessment
-    elif st.session_state["personality_step"] == 2:
-        assessment_type = st.session_state.get("assessment_type", "big_five")
-
-        if assessment_type == "big_five":
-            # Import the BigFiveAssessment class
-            from personality.big_five import BigFiveAssessment
-            assessment = BigFiveAssessment()
-
-            st.subheader("Big Five (OCEAN) Personality Assessment")
-            st.markdown("""
-            For each statement, indicate how accurately it describes you on a scale from 1 to 5:
-
-            1. Very Inaccurate
-            2. Moderately Inaccurate
-            3. Neither Accurate Nor Inaccurate
-            4. Moderately Accurate
-            5. Very Accurate
-            """)
-
-            # Get questions (limit to 20 for brevity)
-            questions = assessment.get_questions(20)
-
-            # Create a form for the assessment
-            with st.form("big_five_form"):
-                responses = {}
-
-                for q in questions:
-                    response = st.radio(
-                        f"{q['text']}",
-                        options=[1, 2, 3, 4, 5],
-                        format_func=lambda x: ["Very Inaccurate", "Moderately Inaccurate", "Neither Accurate Nor Inaccurate", "Moderately Accurate", "Very Accurate"][x-1],
-                        key=f"big_five_{q['id']}"
-                    )
-                    responses[str(q['id'])] = response
-
-                if st.form_submit_button("Submit Assessment"):
-                    # Compute results
-                    results = assessment.compute_results(responses)
-
-                    # Store in session state
-                    st.session_state["personality"] = {
-                        "type": "big_five",
-                        "results": results
-                    }
-
-                    # Move to results view
-                    st.session_state["personality_step"] = 3
-                    st.rerun()
-
-        elif assessment_type == "mbti":
-            # Import the MBTIAssessment class
-            from personality.mbti import MBTIAssessment
-            assessment = MBTIAssessment()
-
-            st.subheader("Myers-Briggs Type Indicator (MBTI) Assessment")
-            st.markdown("""
-            For each question, select the option (A or B) that best describes you.
-            There are no right or wrong answers - just choose what feels most natural to you.
-            """)
-
-            # Get questions
-            questions = assessment.get_questions()
-
-            # Create a form for the assessment
-            with st.form("mbti_form"):
-                responses = {}
-
-                for q in questions:
-                    options = q.get("options", [])
-                    if len(options) >= 2:
-                        option_texts = [f"{opt['key']}: {opt['text']}" for opt in options]
-                        response = st.radio(
-                            f"{q['text']}",
-                            options=options,
-                            format_func=lambda x: f"{x['key']}: {x['text']}",
-                            key=f"mbti_{q['id']}"
-                        )
-                        responses[str(q['id'])] = response["key"]
-
-                if st.form_submit_button("Submit Assessment"):
-                    # Compute results
-                    results = assessment.compute_results(responses)
-
-                    # Store in session state
-                    st.session_state["personality"] = {
-                        "type": "mbti",
-                        "results": results
-                    }
-
-                    # Move to results view
-                    st.session_state["personality_step"] = 3
-                    st.rerun()
-
-    # Step 3: View results
-    elif st.session_state["personality_step"] == 3:
+    
+    # If assessment is complete, show results or offer to retake
+    if st.session_state.get("personality_assessment_complete", False):
         personality_data = st.session_state.get("personality", {})
-        results = personality_data.get("results", {})
-
-        if not results:
+        
+        if not personality_data:
             st.warning("No assessment results found. Please take an assessment first.")
-            st.session_state["personality_step"] = 1
-            st.rerun()
+            if st.button("Take New Assessment"):
+                st.session_state["personality_assessment_complete"] = False
+                # Reset dynamic component state
+                if "dynamic_assessment_state" in st.session_state:
+                    del st.session_state["dynamic_assessment_state"]
+                st.rerun()
+        else:
+            # Display assessment results
+            assessment_type = personality_data.get("assessment_type", "")
+            if not assessment_type and "traits" in personality_data:
+                assessment_type = "big_five"
+            elif not assessment_type and "type" in personality_data:
+                assessment_type = "mbti"
+            
+            # Show results based on assessment type
+            if assessment_type == "big_five" or "traits" in personality_data:
+                _render_big_five_results(personality_data, personality_agent, voice_ai)
+            elif assessment_type == "mbti" or "type" in personality_data:
+                _render_mbti_results(personality_data, personality_agent, voice_ai)
+            else:
+                st.error("Unknown assessment type in results")
+            
+            # Show button to retake assessment
+            if st.button("Take Another Assessment"):
+                # Reset assessment completion flag
+                st.session_state["personality_assessment_complete"] = False
+                # Reset dynamic component state
+                if "dynamic_assessment_state" in st.session_state:
+                    del st.session_state["dynamic_assessment_state"]
+                st.rerun()
+            
+            # Button to continue to chat
+            if st.button("Continue to Chat"):
+                st.session_state["step"] = 4
+                st.rerun()
+    else:
+        # Render the dynamic assessment component
+        st.session_state["dynamic_personality_component"].render()
 
-        st.subheader("Your Personality Assessment Results")
+def _render_big_five_results(results, personality_agent, voice_ai=None):
+    """Render Big Five assessment results with voice capabilities"""
+    import asyncio
+    import matplotlib.pyplot as plt
+    import numpy as np
+    
+    # Get trait data
+    traits = results.get("traits", {})
+    
+    if not traits:
+        st.warning("No trait data found in results")
+        return
+    
+    st.markdown("### Your Big Five (OCEAN) Profile")
+    
+    # Play audio summary if voice is enabled
+    if voice_ai and "voice_summary_played" not in st.session_state:
+        # Create a summary of the results
+        trait_highlights = []
+        for trait_name, trait_data in traits.items():
+            score = trait_data.get("score", 50)
+            category = trait_data.get("category", "average")
+            trait_highlights.append(f"Your {trait_name} score is {int(score)}%, which is {category}.")
+        
+        summary = "I've analyzed your personality profile. " + " ".join(trait_highlights[:3])
+        
+        # Play the summary
+        voice_ai.text_to_speech(summary, voice_style="warm")
+        st.session_state["voice_summary_played"] = True
+    
+    # Create a bar chart for the main traits
+    if traits:
+        # Extract trait scores and names
+        trait_names = list(traits.keys())
+        trait_scores = [traits[name].get("score", 50) for name in trait_names]
+        
+        # Capitalize trait names for display
+        trait_names = [name.capitalize() for name in trait_names]
+        
+        # Create the chart
+        fig, ax = plt.subplots(figsize=(10, 6))
+        bars = ax.bar(trait_names, trait_scores, color=['#3498db', '#2ecc71', '#e74c3c', '#f39c12', '#9b59b6'])
+        
+        # Add labels and title
+        ax.set_ylabel('Percentile Score')
+        ax.set_title('Your Big Five Personality Profile')
+        ax.set_ylim(0, 100)
+        
+        # Add a horizontal line at 50%
+        ax.axhline(y=50, color='gray', linestyle='--', alpha=0.7)
+        
+        # Add value labels on top of bars
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height + 2,
+                    f'{int(height)}%', ha='center', va='bottom')
+        
+        st.pyplot(fig)
+    
+    # Display trait descriptions
+    st.markdown("### Trait Descriptions")
+    
+    for trait_name, trait_data in traits.items():
+        score = trait_data.get("score", 50)
+        category = trait_data.get("category", "average")
+        facets = trait_data.get("facets", [])
+        
+        # Get description based on category
+        description = _get_big_five_trait_description(trait_name, category)
+        
+        # Create expander for each trait
+        with st.expander(f"**{trait_name.capitalize()} ({int(score)}%)**", expanded=score > 80 or score < 20):
+            st.markdown(description)
+            
+            # Show facets if available
+            if facets:
+                st.markdown("#### Facet Breakdown")
+                for facet in facets:
+                    facet_name = facet.get("name", "")
+                    facet_score = facet.get("score", 0)
+                    facet_category = facet.get("category", "average")
+                    
+                    if facet_name:
+                        st.markdown(f"**{facet_name.capitalize()}**: {facet_score} ({facet_category})")
+    
+    # Get and display interpretation if available
+    if "interpretation" in results and isinstance(results["interpretation"], dict):
+        _render_personality_interpretation(results["interpretation"])
+    else:
+        # Generate interpretation using personality agent
+        try:
+            interpretation_result = asyncio.run(personality_agent.conduct_assessment("big_five", results))
+            interpretation = interpretation_result.get("interpretation", {})
+            
+            if interpretation and not isinstance(interpretation, str) and "error" not in interpretation:
+                _render_personality_interpretation(interpretation)
+        except Exception as e:
+            st.warning(f"Could not generate personalized insights: {str(e)}")
 
-        # Process results based on assessment type
-        if personality_data.get("type") == "big_five":
-            # Display Big Five results
-            st.markdown("### Big Five (OCEAN) Profile")
+def _render_mbti_results(results, personality_agent, voice_ai=None):
+    """Render MBTI assessment results with voice capabilities"""
+    import asyncio
+    import matplotlib.pyplot as plt
+    import numpy as np
+    
+    # Get MBTI type data
+    personality_type = results.get("type", "")
+    type_name = results.get("type_name", "")
+    
+    if not personality_type:
+        st.warning("No personality type found in results")
+        return
+    
+    st.markdown(f"### Your MBTI Type: {personality_type} - {type_name}")
+    
+    # Play audio summary if voice is enabled
+    if voice_ai and "voice_summary_played" not in st.session_state:
+        # Create a summary of the results
+        description = results.get("description", "")
+        summary_text = f"Your personality type is {personality_type}, known as {type_name}. {description[:100]}..."
+        
+        # Play the summary
+        voice_ai.text_to_speech(summary_text, voice_style="warm")
+        st.session_state["voice_summary_played"] = True
+    
+    # Display type description
+    description = results.get("description", "No description available.")
+    st.markdown(f"**Description**: {description}")
+    
+    # Display dimension scores
+    dimensions = results.get("dimensions", {})
+    if dimensions:
+        st.markdown("### Dimension Preferences")
+        
+        # Create a horizontal bar chart for each dimension
+        fig, axes = plt.subplots(4, 1, figsize=(10, 12))
+        
+        dimension_names = ["E/I", "S/N", "T/F", "J/P"]
+        dimension_labels = [
+            ["Extraversion", "Introversion"],
+            ["Sensing", "Intuition"],
+            ["Thinking", "Feeling"],
+            ["Judging", "Perceiving"]
+        ]
+        dimension_colors = [
+            ["#3498db", "#2980b9"],
+            ["#2ecc71", "#27ae60"],
+            ["#e74c3c", "#c0392b"],
+            ["#f39c12", "#d35400"]
+        ]
+        
+        for i, dim_name in enumerate(dimension_names):
+            dim_data = dimensions.get(dim_name, {})
+            if not dim_data:
+                continue
+            
+            percentages = dim_data.get("percentages", {})
+            if not percentages:
+                continue
+            
+            # Get the two dimension values (e.g., E and I)
+            dim_keys = list(percentages.keys())
+            if len(dim_keys) < 2:
+                continue
+            
+            # Get scores
+            scores = [percentages.get(dim_keys[0], 50), percentages.get(dim_keys[1], 50)]
+            
+            # Create the horizontal bar chart
+            ax = axes[i]
+            bars = ax.barh([dimension_labels[i][0], dimension_labels[i][1]], scores, color=dimension_colors[i])
+            
+            # Add labels
+            ax.set_xlim(0, 100)
+            ax.set_title(f"{dimension_labels[i][0]} vs {dimension_labels[i][1]}")
+            
+            # Add value labels
+            for bar in bars:
+                width = bar.get_width()
+                ax.text(width + 2, bar.get_y() + bar.get_height()/2.,
+                        f'{int(width)}%', ha='left', va='center')
+        
+        plt.tight_layout()
+        st.pyplot(fig)
+    
+    # Display strengths and weaknesses
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        strengths = results.get("strengths", [])
+        if strengths:
+            st.markdown("### Strengths")
+            for strength in strengths:
+                st.markdown(f"- {strength}")
+    
+    with col2:
+        weaknesses = results.get("weaknesses", [])
+        if weaknesses:
+            st.markdown("### Potential Challenges")
+            for weakness in weaknesses:
+                st.markdown(f"- {weakness}")
+    
+    # Get and display interpretation if available
+    if "interpretation" in results and isinstance(results["interpretation"], dict):
+        _render_personality_interpretation(results["interpretation"])
+    else:
+        # Generate interpretation using personality agent
+        try:
+            interpretation_result = asyncio.run(personality_agent.conduct_assessment("mbti", results))
+            interpretation = interpretation_result.get("interpretation", {})
+            
+            if interpretation and not isinstance(interpretation, str) and "error" not in interpretation:
+                _render_personality_interpretation(interpretation)
+        except Exception as e:
+            st.warning(f"Could not generate personalized insights: {str(e)}")
 
-            # Create a bar chart for the main traits
-            import matplotlib.pyplot as plt
-            import numpy as np
+def _get_big_five_trait_description(trait_name, category):
+    """Get description for a Big Five trait based on category"""
+    if trait_name == "openness":
+        if category == "high":
+            return "You are curious, imaginative, and open to new experiences. You likely have a broad range of interests and appreciate art, creativity, and intellectual pursuits."
+        elif category == "low":
+            return "You prefer routine, practicality, and tradition. You may focus more on concrete facts than abstract theories and might be more conventional in your approach."
+        else:
+            return "You balance curiosity with practicality. You can appreciate new ideas while maintaining a grounded perspective."
+    elif trait_name == "conscientiousness":
+        if category == "high":
+            return "You are organized, disciplined, and detail-oriented. You likely plan ahead, follow through on commitments, and strive for achievement."
+        elif category == "low":
+            return "You tend to be more flexible, spontaneous, and relaxed about deadlines or organization. You may prefer to go with the flow rather than stick to rigid plans."
+        else:
+            return "You balance organization with flexibility. You can be structured when needed but also adapt to changing circumstances."
+    elif trait_name == "extraversion":
+        if category == "high":
+            return "You are outgoing, energetic, and draw energy from social interactions. You likely enjoy being around others and may seek excitement and stimulation."
+        elif category == "low":
+            return "You tend to be more reserved and may prefer solitary activities. You might find social interactions draining and need time alone to recharge."
+        else:
+            return "You balance sociability with independence. You can enjoy social situations but also value your alone time."
+    elif trait_name == "agreeableness":
+        if category == "high":
+            return "You are compassionate, cooperative, and considerate of others' feelings. You likely value harmony and may prioritize others' needs."
+        elif category == "low":
+            return "You tend to be more direct, competitive, or skeptical. You might prioritize truth over tact and may be more willing to challenge others."
+        else:
+            return "You balance cooperation with healthy skepticism. You can be kind while maintaining appropriate boundaries."
+    elif trait_name == "neuroticism":
+        if category == "high":
+            return "You may experience emotions more intensely and be more sensitive to stress. You might worry more than others and be more aware of potential problems."
+        elif category == "low":
+            return "You tend to be emotionally stable and resilient to stress. You likely remain calm under pressure and recover quickly from setbacks."
+        else:
+            return "You have a balanced emotional response. You can feel appropriate emotions without being overwhelmed by them."
+    else:
+        return "No detailed description available for this trait."
 
-            traits = results.get("traits", {})
-            if traits:
-                # Extract trait scores and names
-                trait_names = list(traits.keys())
-                trait_scores = [traits[name].get("score", 50) for name in trait_names]
-
-                # Capitalize trait names for display
-                trait_names = [name.capitalize() for name in trait_names]
-
-                # Create the chart
-                fig, ax = plt.subplots(figsize=(10, 6))
-                bars = ax.bar(trait_names, trait_scores, color=['#3498db', '#2ecc71', '#e74c3c', '#f39c12', '#9b59b6'])
-
-                # Add labels and title
-                ax.set_ylabel('Percentile Score')
-                ax.set_title('Your Big Five Personality Profile')
-                ax.set_ylim(0, 100)
-
-                # Add a horizontal line at 50%
-                ax.axhline(y=50, color='gray', linestyle='--', alpha=0.7)
-
-                # Add value labels on top of bars
-                for bar in bars:
-                    height = bar.get_height()
-                    ax.text(bar.get_x() + bar.get_width()/2., height + 2,
-                            f'{int(height)}%', ha='center', va='bottom')
-
-                st.pyplot(fig)
-
-                # Display trait descriptions
-                st.markdown("### Trait Descriptions")
-
-                for trait_name, trait_data in traits.items():
-                    score = trait_data.get("score", 50)
-                    category = trait_data.get("category", "average")
-
-                    # Get description based on category
-                    if trait_name == "openness":
-                        if category == "high":
-                            description = "You are curious, imaginative, and open to new experiences. You likely have a broad range of interests and appreciate art, creativity, and intellectual pursuits."
-                        elif category == "low":
-                            description = "You prefer routine, practicality, and tradition. You may focus more on concrete facts than abstract theories and might be more conventional in your approach."
-                        else:
-                            description = "You balance curiosity with practicality. You can appreciate new ideas while maintaining a grounded perspective."
-                    elif trait_name == "conscientiousness":
-                        if category == "high":
-                            description = "You are organized, disciplined, and detail-oriented. You likely plan ahead, follow through on commitments, and strive for achievement."
-                        elif category == "low":
-                            description = "You tend to be more flexible, spontaneous, and relaxed about deadlines or organization. You may prefer to go with the flow rather than stick to rigid plans."
-                        else:
-                            description = "You balance organization with flexibility. You can be structured when needed but also adapt to changing circumstances."
-                    elif trait_name == "extraversion":
-                        if category == "high":
-                            description = "You are outgoing, energetic, and draw energy from social interactions. You likely enjoy being around others and may seek excitement and stimulation."
-                        elif category == "low":
-                            description = "You tend to be more reserved and may prefer solitary activities. You might find social interactions draining and need time alone to recharge."
-                        else:
-                            description = "You balance sociability with independence. You can enjoy social situations but also value your alone time."
-                    elif trait_name == "agreeableness":
-                        if category == "high":
-                            description = "You are compassionate, cooperative, and considerate of others' feelings. You likely value harmony and may prioritize others' needs."
-                        elif category == "low":
-                            description = "You tend to be more direct, competitive, or skeptical. You might prioritize truth over tact and may be more willing to challenge others."
-                        else:
-                            description = "You balance cooperation with healthy skepticism. You can be kind while maintaining appropriate boundaries."
-                    elif trait_name == "neuroticism":
-                        if category == "high":
-                            description = "You may experience emotions more intensely and be more sensitive to stress. You might worry more than others and be more aware of potential problems."
-                        elif category == "low":
-                            description = "You tend to be emotionally stable and resilient to stress. You likely remain calm under pressure and recover quickly from setbacks."
-                        else:
-                            description = "You have a balanced emotional response. You can feel appropriate emotions without being overwhelmed by them."
-                    else:
-                        description = "No detailed description available for this trait."
-
-                    st.markdown(f"**{trait_name.capitalize()} ({int(score)}%)**: {description}")
-
-            # Get interpretation from personality agent
-            try:
-                # Use asyncio to run the async function
-                interpretation_result = asyncio.run(personality_agent.conduct_assessment("big_five", results))
-                interpretation = interpretation_result.get("interpretation", {})
-
-                if interpretation and not isinstance(interpretation, str) and "error" not in interpretation:
-                    st.markdown("### Personalized Insights")
-
-                    # Display key insights
-                    if interpretation.get("key_insights"):
-                        st.markdown("#### Key Insights")
-                        for insight in interpretation["key_insights"]:
-                            st.markdown(f"- {insight}")
-
-                    # Display strengths and growth areas in columns
-                    if interpretation.get("strengths") or interpretation.get("growth_areas"):
-                        col1, col2 = st.columns(2)
-
-                        with col1:
-                            if interpretation.get("strengths"):
-                                st.markdown("#### Strengths")
-                                for strength in interpretation["strengths"]:
-                                    st.markdown(f"- {strength}")
-
-                        with col2:
-                            if interpretation.get("growth_areas"):
-                                st.markdown("#### Growth Areas")
-                                for area in interpretation["growth_areas"]:
-                                    st.markdown(f"- {area}")
-
-                    # Display mental health implications
-                    if interpretation.get("mental_health_implications"):
-                        st.markdown("#### Mental Health Insights")
-                        for implication in interpretation["mental_health_implications"]:
-                            st.markdown(f"- {implication}")
-            except Exception as e:
-                st.warning(f"Could not generate personalized insights: {str(e)}")
-
-        elif personality_data.get("type") == "mbti":
-            # Display MBTI results
-            personality_type = results.get("type", "")
-            type_name = results.get("type_name", "")
-
-            st.markdown(f"### Your MBTI Type: {personality_type} - {type_name}")
-
-            # Display type description
-            description = results.get("description", "No description available.")
-            st.markdown(f"**Description**: {description}")
-
-            # Display dimension scores
-            dimensions = results.get("dimensions", {})
-            if dimensions:
-                st.markdown("### Dimension Preferences")
-
-                # Create a horizontal bar chart for each dimension
-                import matplotlib.pyplot as plt
-                import numpy as np
-
-                fig, axes = plt.subplots(4, 1, figsize=(10, 12))
-
-                dimension_names = ["E/I", "S/N", "T/F", "J/P"]
-                dimension_labels = [
-                    ["Extraversion", "Introversion"],
-                    ["Sensing", "Intuition"],
-                    ["Thinking", "Feeling"],
-                    ["Judging", "Perceiving"]
-                ]
-                dimension_colors = [
-                    ["#3498db", "#2980b9"],
-                    ["#2ecc71", "#27ae60"],
-                    ["#e74c3c", "#c0392b"],
-                    ["#f39c12", "#d35400"]
-                ]
-
-                for i, dim_name in enumerate(dimension_names):
-                    dim_data = dimensions.get(dim_name, {})
-                    if not dim_data:
-                        continue
-
-                    percentages = dim_data.get("percentages", {})
-                    if not percentages:
-                        continue
-
-                    # Get the two dimension values (e.g., E and I)
-                    dim_keys = list(percentages.keys())
-                    if len(dim_keys) < 2:
-                        continue
-
-                    # Get scores
-                    scores = [percentages.get(dim_keys[0], 50), percentages.get(dim_keys[1], 50)]
-
-                    # Create the horizontal bar chart
-                    ax = axes[i]
-                    bars = ax.barh([dimension_labels[i][0], dimension_labels[i][1]], scores, color=dimension_colors[i])
-
-                    # Add labels
-                    ax.set_xlim(0, 100)
-                    ax.set_title(f"{dimension_labels[i][0]} vs {dimension_labels[i][1]}")
-
-                    # Add value labels
-                    for bar in bars:
-                        width = bar.get_width()
-                        ax.text(width + 2, bar.get_y() + bar.get_height()/2.,
-                                f'{int(width)}%', ha='left', va='center')
-
-                plt.tight_layout()
-                st.pyplot(fig)
-
-            # Display strengths and weaknesses
-            col1, col2 = st.columns(2)
-
-            with col1:
-                strengths = results.get("strengths", [])
-                if strengths:
-                    st.markdown("### Strengths")
-                    for strength in strengths:
-                        st.markdown(f"- {strength}")
-
-            with col2:
-                weaknesses = results.get("weaknesses", [])
-                if weaknesses:
-                    st.markdown("### Potential Challenges")
-                    for weakness in weaknesses:
-                        st.markdown(f"- {weakness}")
-
-            # Get interpretation from personality agent
-            try:
-                # Use asyncio to run the async function
-                interpretation_result = asyncio.run(personality_agent.conduct_assessment("mbti", results))
-                interpretation = interpretation_result.get("interpretation", {})
-
-                if interpretation and not isinstance(interpretation, str) and "error" not in interpretation:
-                    st.markdown("### Personalized Insights")
-
-                    # Display key insights
-                    if interpretation.get("key_insights"):
-                        st.markdown("#### Key Insights")
-                        for insight in interpretation["key_insights"]:
-                            st.markdown(f"- {insight}")
-
-                    # Display communication preferences
-                    if interpretation.get("communication_preferences"):
-                        st.markdown("#### Communication Style")
-                        for pref in interpretation["communication_preferences"]:
-                            st.markdown(f"- {pref}")
-
-                    # Display stress responses
-                    if interpretation.get("stress_responses"):
-                        st.markdown("#### Stress Response")
-                        for response in interpretation["stress_responses"]:
-                            st.markdown(f"- {response}")
-
-                    # Display mental health implications
-                    if interpretation.get("mental_health_implications"):
-                        st.markdown("#### Mental Health Insights")
-                        for implication in interpretation["mental_health_implications"]:
-                            st.markdown(f"- {implication}")
-            except Exception as e:
-                st.warning(f"Could not generate personalized insights: {str(e)}")
-
-        # Button to continue to chat
-        if st.button("Continue to Chat"):
-            st.session_state["step"] = 4
-            st.rerun()
+def _render_personality_interpretation(interpretation):
+    """Render the personality interpretation sections"""
+    # Display key insights
+    if interpretation.get("key_insights"):
+        st.markdown("### Personalized Insights")
+        for insight in interpretation["key_insights"]:
+            st.markdown(f"- {insight}")
+    
+    # Display strengths and growth areas in columns
+    if interpretation.get("strengths") or interpretation.get("growth_areas"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if interpretation.get("strengths"):
+                st.markdown("#### Strengths")
+                for strength in interpretation["strengths"]:
+                    st.markdown(f"- {strength}")
+        
+        with col2:
+            if interpretation.get("growth_areas"):
+                st.markdown("#### Growth Areas")
+                for area in interpretation["growth_areas"]:
+                    st.markdown(f"- {area}")
+    
+    # Display communication preferences
+    if interpretation.get("communication_preferences"):
+        st.markdown("#### Communication Style")
+        for pref in interpretation["communication_preferences"]:
+            st.markdown(f"- {pref}")
+    
+    # Display stress responses
+    if interpretation.get("stress_responses"):
+        st.markdown("#### Stress Response")
+        for response in interpretation["stress_responses"]:
+            st.markdown(f"- {response}")
+    
+    # Display mental health implications
+    if interpretation.get("mental_health_implications"):
+        st.markdown("#### Mental Health Insights")
+        for implication in interpretation["mental_health_implications"]:
+            st.markdown(f"- {implication}")
+    
+    # Display emotional patterns
+    if interpretation.get("emotional_patterns"):
+        st.markdown("#### Emotional Tendencies")
+        for pattern in interpretation["emotional_patterns"]:
+            st.markdown(f"- {pattern}")
 
 def render_chat_interface(components: Dict[str, Any]):
     """Render the chat interface with voice capabilities"""

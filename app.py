@@ -329,6 +329,6 @@ class MentalHealthApp:
         self.ui_manager.render_current()
 
 # Application entry point
-if __name____ == "__main__":
+if __name__ == "__main__":
     app = MentalHealthApp()
     app.run()

@@ -157,11 +157,40 @@ Provide a supportive, empathetic response that addresses the user's emotional ne
         if not emotion_data:
             return "No emotional data available"
 
-        return f"""Emotional State:
+        # Check if we have voice emotion data
+        voice_emotion = emotion_data.get('voice_emotion', {})
+        voice_primary = voice_emotion.get('primary_emotion', 'unknown') if voice_emotion else 'unknown'
+        voice_confidence = voice_emotion.get('confidence', 0.0) if voice_emotion else 0.0
+        
+        # Check if we have voice emotions detailed data
+        voice_emotions_detailed = emotion_data.get('voice_emotions_detailed', {})
+        
+        # Format standard emotion data
+        standard_emotion = f"""Emotional State (Text Analysis):
 - Primary: {emotion_data.get('primary_emotion', 'unknown')}
 - Secondary: {', '.join(emotion_data.get('secondary_emotions', []))}
 - Intensity: {emotion_data.get('intensity', 'unknown')}
 - Clinical Indicators: {', '.join(emotion_data.get('clinical_indicators', []))}"""
+
+        # If we have voice emotion data with decent confidence, include it
+        if voice_emotion and voice_confidence > 0.4:
+            # Get top 3 voice emotions for display
+            top_voice_emotions = []
+            if voice_emotions_detailed:
+                sorted_emotions = sorted(voice_emotions_detailed.items(), key=lambda x: x[1], reverse=True)[:3]
+                top_voice_emotions = [f"{emotion}: {score:.2f}" for emotion, score in sorted_emotions]
+            
+            voice_emotion_str = f"""
+
+Voice Emotion Analysis:
+- Primary: {voice_primary}
+- Confidence: {voice_confidence:.2f}
+- Top emotions: {', '.join(top_voice_emotions) if top_voice_emotions else 'None detected'}
+- Congruence: {emotion_data.get('congruence', 'unknown')}"""
+            
+            return standard_emotion + voice_emotion_str
+        
+        return standard_emotion
 
     def _format_safety_data(self, safety_data: Dict[str, Any]) -> str:
         """Format safety context for the prompt"""

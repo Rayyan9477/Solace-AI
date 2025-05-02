@@ -573,41 +573,53 @@ class MBTIAssessment:
 
     def get_questions(self, num_questions: int = 20) -> List[Dict[str, Any]]:
         """
-        Get a specified number of MBTI questions
-
+        Get a specified number of MBTI questions, balanced across all dimensions
+        
         Args:
             num_questions: Number of questions to return (default: 20)
-
+            
         Returns:
             List of question dictionaries
         """
         # Ensure we don't request more questions than available
         num_questions = min(num_questions, len(self.questions))
-
-        # Ensure we have a balanced set of questions for each dimension
+        
+        # Create dictionary to store questions by dimension
+        dimension_questions = {
+            "E/I": [],
+            "S/N": [],
+            "T/F": [],
+            "J/P": []
+        }
+        
+        # Categorize questions by dimension
         dimensions = ["E/I", "S/N", "T/F", "J/P"]
+        
+        # Sort questions into appropriate dimensions
+        for question in self.questions:
+            if "category" in question:
+                dimension = question["category"]
+                if dimension in dimensions:
+                    dimension_questions[dimension].append(question)
+            else:
+                # For questions without a category, check the first option's dimension
+                if "options" in question and len(question["options"]) > 0:
+                    option_dimension = question["options"][0]["dimension"]
+                    if option_dimension in "EI":
+                        dimension_questions["E/I"].append(question)
+                    elif option_dimension in "SN":
+                        dimension_questions["S/N"].append(question)
+                    elif option_dimension in "TF":
+                        dimension_questions["T/F"].append(question)
+                    elif option_dimension in "JP":
+                        dimension_questions["J/P"].append(question)
+
+        # Calculate how many questions to select from each dimension
         questions_per_dimension = num_questions // 4
         remaining = num_questions % 4
-
-        selected_questions = []
-
-        # Group questions by dimension
-        dimension_questions = {dim: [] for dim in dimensions}
-
-        for question in self.questions:
-            # Determine the dimension based on the first option
-            if len(question["options"]) >= 1:
-                option_dimension = question["options"][0]["dimension"]
-                if option_dimension in "EI":
-                    dimension_questions["E/I"].append(question)
-                elif option_dimension in "SN":
-                    dimension_questions["S/N"].append(question)
-                elif option_dimension in "TF":
-                    dimension_questions["T/F"].append(question)
-                elif option_dimension in "JP":
-                    dimension_questions["J/P"].append(question)
-
+        
         # Select questions for each dimension
+        selected_questions = []
         for dimension in dimensions:
             available = dimension_questions[dimension]
             # If we don't have enough questions for this dimension, use what we have
@@ -615,7 +627,7 @@ class MBTIAssessment:
             # Randomly select questions to avoid always using the same ones
             selected = random.sample(available, count) if count > 0 else []
             selected_questions.extend(selected)
-
+        
         # Add remaining questions if needed
         if remaining > 0:
             remaining_pool = []
@@ -623,136 +635,180 @@ class MBTIAssessment:
                 available = dimension_questions[dimension]
                 used = [q for q in selected_questions if q in available]
                 remaining_pool.extend([q for q in available if q not in used])
-
+                
             if remaining_pool:
                 additional = random.sample(remaining_pool, min(remaining, len(remaining_pool)))
                 selected_questions.extend(additional)
-
+                
         return selected_questions
 
     def compute_results(self, responses: Dict[str, Any]) -> Dict[str, Any]:
         """
         Compute MBTI personality assessment results
-
+        
         Args:
             responses: Dictionary containing user responses to assessment questions
-
+            
         Returns:
-            Dictionary containing assessment results
+            Dictionary containing assessment results including MBTI type and scores
         """
         try:
-            # Initialize counters for each dimension
-            dimension_counts = {
-                "E": 0, "I": 0,
-                "S": 0, "N": 0,
-                "T": 0, "F": 0,
-                "J": 0, "P": 0
+            # Initialize dimension scores
+            dimension_scores = {
+                "E": 0, "I": 0,  # Extraversion vs. Introversion
+                "S": 0, "N": 0,  # Sensing vs. Intuition
+                "T": 0, "F": 0,  # Thinking vs. Feeling
+                "J": 0, "P": 0   # Judging vs. Perceiving
             }
-
-            # Process each response
+            
+            # Count responses for each question
             for question_id, response_key in responses.items():
                 # Find the corresponding question
                 question = next((q for q in self.questions if str(q["id"]) == str(question_id)), None)
-
-                if question:
+                
+                if question and "options" in question:
                     # Find the selected option
                     selected_option = next((opt for opt in question["options"] if opt["key"] == response_key), None)
-
+                    
                     if selected_option and "dimension" in selected_option:
+                        # Increment the score for the selected dimension
                         dimension = selected_option["dimension"]
-                        dimension_counts[dimension] += 1
-
-            # Determine the personality type
+                        if dimension in dimension_scores:
+                            dimension_scores[dimension] += 1
+            
+            # Determine the personality type based on the highest score in each dimension pair
             personality_type = ""
-            personality_type += "E" if dimension_counts["E"] >= dimension_counts["I"] else "I"
-            personality_type += "S" if dimension_counts["S"] >= dimension_counts["N"] else "N"
-            personality_type += "T" if dimension_counts["T"] >= dimension_counts["F"] else "F"
-            personality_type += "J" if dimension_counts["J"] >= dimension_counts["P"] else "P"
-
+            
+            # E/I dimension
+            if dimension_scores["E"] > dimension_scores["I"]:
+                personality_type += "E"
+            else:
+                personality_type += "I"
+                
+            # S/N dimension
+            if dimension_scores["S"] > dimension_scores["N"]:
+                personality_type += "S"
+            else:
+                personality_type += "N"
+                
+            # T/F dimension
+            if dimension_scores["T"] > dimension_scores["F"]:
+                personality_type += "T"
+            else:
+                personality_type += "F"
+                
+            # J/P dimension
+            if dimension_scores["J"] > dimension_scores["P"]:
+                personality_type += "J"
+            else:
+                personality_type += "P"
+                
             # Calculate percentages for each dimension
-            total_ei = dimension_counts["E"] + dimension_counts["I"]
-            total_sn = dimension_counts["S"] + dimension_counts["N"]
-            total_tf = dimension_counts["T"] + dimension_counts["F"]
-            total_jp = dimension_counts["J"] + dimension_counts["P"]
-
-            percentages = {
-                "E": (dimension_counts["E"] / total_ei * 100) if total_ei > 0 else 50,
-                "I": (dimension_counts["I"] / total_ei * 100) if total_ei > 0 else 50,
-                "S": (dimension_counts["S"] / total_sn * 100) if total_sn > 0 else 50,
-                "N": (dimension_counts["N"] / total_sn * 100) if total_sn > 0 else 50,
-                "T": (dimension_counts["T"] / total_tf * 100) if total_tf > 0 else 50,
-                "F": (dimension_counts["F"] / total_tf * 100) if total_tf > 0 else 50,
-                "J": (dimension_counts["J"] / total_jp * 100) if total_jp > 0 else 50,
-                "P": (dimension_counts["P"] / total_jp * 100) if total_jp > 0 else 50
+            dimension_percentages = {
+                "E/I": {
+                    "E": self._calculate_percentage(dimension_scores["E"], dimension_scores["E"] + dimension_scores["I"]),
+                    "I": self._calculate_percentage(dimension_scores["I"], dimension_scores["E"] + dimension_scores["I"])
+                },
+                "S/N": {
+                    "S": self._calculate_percentage(dimension_scores["S"], dimension_scores["S"] + dimension_scores["N"]),
+                    "N": self._calculate_percentage(dimension_scores["N"], dimension_scores["S"] + dimension_scores["N"])
+                },
+                "T/F": {
+                    "T": self._calculate_percentage(dimension_scores["T"], dimension_scores["T"] + dimension_scores["F"]),
+                    "F": self._calculate_percentage(dimension_scores["F"], dimension_scores["T"] + dimension_scores["F"])
+                },
+                "J/P": {
+                    "J": self._calculate_percentage(dimension_scores["J"], dimension_scores["J"] + dimension_scores["P"]),
+                    "P": self._calculate_percentage(dimension_scores["P"], dimension_scores["J"] + dimension_scores["P"])
+                }
             }
-
+            
             # Get the type description
-            type_info = self.type_descriptions.get(personality_type, {
-                "name": f"Type {personality_type}",
-                "description": "No detailed description available for this type."
-            })
-
-            # Prepare the results
+            type_description = self.type_descriptions.get(personality_type, {})
+            type_name = type_description.get("name", "Unknown Type")
+            description = type_description.get("description", "No description available.")
+            strengths = type_description.get("strengths", [])
+            weaknesses = type_description.get("weaknesses", [])
+            
+            # Prepare and return the results
             results = {
-                "model": "MBTI",
                 "type": personality_type,
-                "type_name": type_info.get("name", f"Type {personality_type}"),
-                "description": type_info.get("description", ""),
-                "strengths": type_info.get("strengths", []),
-                "weaknesses": type_info.get("weaknesses", []),
+                "type_name": type_name,
+                "description": description,
+                "strengths": strengths,
+                "weaknesses": weaknesses,
+                "scores": dimension_scores,
                 "dimensions": {
                     "E/I": {
-                        "preference": "E" if dimension_counts["E"] >= dimension_counts["I"] else "I",
+                        "dominant": "E" if dimension_scores["E"] > dimension_scores["I"] else "I",
                         "scores": {
-                            "E": dimension_counts["E"],
-                            "I": dimension_counts["I"]
+                            "E": dimension_scores["E"],
+                            "I": dimension_scores["I"]
                         },
-                        "percentages": {
-                            "E": percentages["E"],
-                            "I": percentages["I"]
-                        }
+                        "percentages": dimension_percentages["E/I"]
                     },
                     "S/N": {
-                        "preference": "S" if dimension_counts["S"] >= dimension_counts["N"] else "N",
+                        "dominant": "S" if dimension_scores["S"] > dimension_scores["N"] else "N",
                         "scores": {
-                            "S": dimension_counts["S"],
-                            "N": dimension_counts["N"]
+                            "S": dimension_scores["S"],
+                            "N": dimension_scores["N"]
                         },
-                        "percentages": {
-                            "S": percentages["S"],
-                            "N": percentages["N"]
-                        }
+                        "percentages": dimension_percentages["S/N"]
                     },
                     "T/F": {
-                        "preference": "T" if dimension_counts["T"] >= dimension_counts["F"] else "F",
+                        "dominant": "T" if dimension_scores["T"] > dimension_scores["F"] else "F",
                         "scores": {
-                            "T": dimension_counts["T"],
-                            "F": dimension_counts["F"]
+                            "T": dimension_scores["T"],
+                            "F": dimension_scores["F"]
                         },
-                        "percentages": {
-                            "T": percentages["T"],
-                            "F": percentages["F"]
-                        }
+                        "percentages": dimension_percentages["T/F"]
                     },
                     "J/P": {
-                        "preference": "J" if dimension_counts["J"] >= dimension_counts["P"] else "P",
+                        "dominant": "J" if dimension_scores["J"] > dimension_scores["P"] else "P",
                         "scores": {
-                            "J": dimension_counts["J"],
-                            "P": dimension_counts["P"]
+                            "J": dimension_scores["J"],
+                            "P": dimension_scores["P"]
                         },
-                        "percentages": {
-                            "J": percentages["J"],
-                            "P": percentages["P"]
-                        }
+                        "percentages": dimension_percentages["J/P"]
                     }
                 }
             }
-
+            
             return results
-
+            
         except Exception as e:
             logger.error(f"Error computing MBTI results: {str(e)}")
             return {
                 "error": str(e),
                 "message": "Failed to compute personality assessment results"
             }
+    
+    def _calculate_percentage(self, score: int, total: int) -> float:
+        """Calculate percentage, avoiding division by zero"""
+        if total == 0:
+            return 50.0  # Default to middle if no data
+        return round((score / total) * 100, 1)
+    
+    def _get_fallback_descriptions(self) -> Dict[str, Any]:
+        """Return a minimal set of descriptions as fallback"""
+        return {
+            # Just include a few common types as fallback
+            "INTJ": {
+                "name": "The Architect",
+                "description": "Strategic, thoughtful, and detail-oriented planners with a vision for the future.",
+                "strengths": ["Strategic thinking", "Independent", "Analytical"],
+                "weaknesses": ["Perfectionist", "Critical", "Dismissive of emotions"]
+            },
+            "ENFP": {
+                "name": "The Champion",
+                "description": "Enthusiastic, creative, and sociable free spirits who find meaning and connection everywhere.",
+                "strengths": ["Enthusiastic", "Creative", "Empathetic"],
+                "weaknesses": ["Disorganized", "Overcommitted", "Trouble focusing"]
+            },
+            "ISFJ": {
+                "name": "The Protector",
+                "description": "Dedicated, warm-hearted protectors who respect traditions and seek to help others.",
+                "strengths": ["Reliable", "Patient", "Supportive"],
+                "weaknesses": ["Overly reserved", "Resistant to change", "Overworking"]
+            }
+        }

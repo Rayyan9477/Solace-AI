@@ -138,6 +138,27 @@ class BigFiveAssessment:
                 "reversed": True,
                 "facet": "gregariousness"
             },
+            {
+                "id": 61,
+                "text": "I find it easy to approach and talk with strangers.",
+                "trait": "extraversion",
+                "reversed": False,
+                "facet": "sociability"
+            },
+            {
+                "id": 62,
+                "text": "I enjoy being part of a loud, energetic crowd.",
+                "trait": "extraversion",
+                "reversed": False,
+                "facet": "gregariousness"
+            },
+            {
+                "id": 63,
+                "text": "I prefer a quiet evening at home to a big social event.",
+                "trait": "extraversion",
+                "reversed": True,
+                "facet": "sociability"
+            },
 
             # Agreeableness questions
             {
@@ -223,6 +244,27 @@ class BigFiveAssessment:
                 "trait": "agreeableness",
                 "reversed": False,
                 "facet": "trust"
+            },
+            {
+                "id": 64,
+                "text": "I believe most people have good intentions.",
+                "trait": "agreeableness",
+                "reversed": False,
+                "facet": "trust"
+            },
+            {
+                "id": 65,
+                "text": "I am willing to compromise my own comfort to help others.",
+                "trait": "agreeableness",
+                "reversed": False,
+                "facet": "altruism"
+            },
+            {
+                "id": 66,
+                "text": "I find it hard to forgive people who have hurt me.",
+                "trait": "agreeableness",
+                "reversed": True,
+                "facet": "forgiveness"
             },
 
             # Conscientiousness questions
@@ -310,6 +352,27 @@ class BigFiveAssessment:
                 "reversed": False,
                 "facet": "dutifulness"
             },
+            {
+                "id": 67,
+                "text": "I set high standards for myself and others.",
+                "trait": "conscientiousness",
+                "reversed": False,
+                "facet": "achievement-striving"
+            },
+            {
+                "id": 68,
+                "text": "I often rush into things without thinking them through.",
+                "trait": "conscientiousness",
+                "reversed": True,
+                "facet": "deliberation"
+            },
+            {
+                "id": 69,
+                "text": "I stick to my plans even when it's difficult.",
+                "trait": "conscientiousness",
+                "reversed": False,
+                "facet": "self-discipline"
+            },
 
             # Neuroticism questions
             {
@@ -396,6 +459,27 @@ class BigFiveAssessment:
                 "reversed": True,
                 "facet": "vulnerability"
             },
+            {
+                "id": 70,
+                "text": "I often experience feelings of helplessness or sadness.",
+                "trait": "neuroticism",
+                "reversed": False,
+                "facet": "depression"
+            },
+            {
+                "id": 71,
+                "text": "I tend to feel uncomfortable in unfamiliar situations.",
+                "trait": "neuroticism",
+                "reversed": False,
+                "facet": "anxiety"
+            },
+            {
+                "id": 72,
+                "text": "I find it easy to bounce back after disappointments.",
+                "trait": "neuroticism",
+                "reversed": True,
+                "facet": "resilience"
+            },
 
             # Openness questions
             {
@@ -481,10 +565,29 @@ class BigFiveAssessment:
                 "trait": "openness",
                 "reversed": True,
                 "facet": "intellect"
+            },
+            {
+                "id": 73,
+                "text": "I enjoy experiencing new cultures and customs.",
+                "trait": "openness",
+                "reversed": False,
+                "facet": "adventurousness"
+            },
+            {
+                "id": 74,
+                "text": "I prefer familiar routines to exploring new activities.",
+                "trait": "openness",
+                "reversed": True,
+                "facet": "adventurousness"
+            },
+            {
+                "id": 75,
+                "text": "I enjoy artistic and creative pursuits.",
+                "trait": "openness",
+                "reversed": False,
+                "facet": "artistic-interests"
             }
         ]
-
-
 
         try:
             with open(file_path, 'w') as f:
@@ -590,7 +693,18 @@ class BigFiveAssessment:
     def _compute_with_five_factor_e(self, responses: Dict[str, Any]) -> Dict[str, Any]:
         """Compute results using the five-factor-e library"""
         try:
-            from ipipneo import IpipNeo
+            # Try to import ipipneo
+            try:
+                from ipipneo import IpipNeo
+                has_library = True
+            except ImportError:
+                has_library = False
+                logger.warning("The 'ipipneo' module from five-factor-e library could not be imported.")
+                return self._compute_simplified(responses)
+
+            # Proceed only if import was successful
+            if not has_library:
+                return self._compute_simplified(responses)
 
             # Convert our response format to five-factor-e format
             ipip_responses = {"answers": []}

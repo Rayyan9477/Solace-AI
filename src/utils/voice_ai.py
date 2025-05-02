@@ -18,6 +18,7 @@ import io
 import torchaudio
 from .audio_player import AudioPlayer
 from .dia_tts import DiaTTS
+from ..config.settings import AppConfig  # Import AppConfig from settings
 
 # Configure logger
 logger = logging.getLogger(__name__)

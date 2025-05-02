@@ -13,6 +13,8 @@ from transformers import AutoProcessor, AutoModel
 import io
 import soundfile as sf
 import time
+import soundfile
+
 
 # Configure logger
 logger = logging.getLogger(__name__)

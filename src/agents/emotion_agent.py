@@ -43,6 +43,42 @@ async def analyze_emotion(text: str) -> Dict[str, Any]:
             'error': str(e)
         }
 
+@tool(name="voice_emotion_analysis", description="Analyzes emotional content from voice data")
+async def analyze_voice_emotion(emotion_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Processes voice emotion analysis data
+    
+    Args:
+        emotion_data: Dictionary containing voice emotion analysis results
+        
+    Returns:
+        Dictionary with processed emotion data
+    """
+    try:
+        if not emotion_data or not emotion_data.get("success", False):
+            return {
+                "success": False,
+                "primary_emotion": "unknown",
+                "confidence": 0.0,
+                "emotions": {}
+            }
+        
+        return {
+            "success": True,
+            "primary_emotion": emotion_data.get("primary_emotion", "neutral"),
+            "confidence": emotion_data.get("confidence", 0.0),
+            "emotions": emotion_data.get("emotions", {})
+        }
+    except Exception as e:
+        logger.error(f"Error processing voice emotion data: {str(e)}")
+        return {
+            "success": False,
+            "primary_emotion": "unknown",
+            "confidence": 0.0,
+            "emotions": {},
+            "error": str(e)
+        }
+
 class EmotionAgent(BaseAgent):
     def __init__(self, model: BaseLanguageModel):
         # Create a langchain memory instance
@@ -71,7 +107,7 @@ class EmotionAgent(BaseAgent):
             model=model,
             name="emotion_analyzer",
             description="Expert system for emotional analysis and mental health assessment",
-            tools=[analyze_emotion],
+            tools=[analyze_emotion, analyze_voice_emotion],
             memory=memory,
             knowledge=AgentKnowledge()
         )
@@ -84,6 +120,7 @@ Your role is to analyze messages for emotional content, considering:
 3. Underlying psychological triggers
 4. Potential mental health indicators
 5. Changes in emotional patterns over time
+6. Voice emotion data when available
 
 Use the following emotion categories:
 - Basic: sad, anxious, angry, happy, neutral
@@ -93,7 +130,8 @@ Use the following emotion categories:
 Provide detailed analysis while maintaining clinical accuracy."""),
             HumanMessage(content="""Message: {message}
 Previous Emotion State: {history}
-Sentiment Analysis: {sentiment}
+Text Sentiment Analysis: {sentiment}
+Voice Emotion Analysis: {voice_emotion}
 
 Analyze the emotional content and provide structured output in the following format:
 Primary Emotion: [emotion]
@@ -101,7 +139,8 @@ Secondary Emotions: [comma-separated list]
 Intensity (1-10): [number]
 Triggers: [comma-separated list]
 Clinical Indicators: [relevant observations]
-Pattern Changes: [changes from previous state]""")
+Pattern Changes: [changes from previous state]
+Congruence: [match between voice tone and text content]""")
         ])
 
     async def analyze_emotion(self, text: str) -> Dict[str, Any]:
@@ -196,6 +235,217 @@ Pattern Changes: [changes from previous state]""")
         except Exception as e:
             logger.error(f"Error analyzing emotion: {str(e)}")
             return self._fallback_analysis(text)
+
+    async def analyze_with_voice_and_text(self, text: str, voice_emotion_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Analyze both text content and voice emotion data for comprehensive emotion analysis
+        
+        Args:
+            text: The text to analyze
+            voice_emotion_data: Optional voice emotion analysis results
+            
+        Returns:
+            Dictionary containing combined emotional analysis
+        """
+        try:
+            # Get text sentiment analysis
+            sentiment_result = {
+                'sentiment_scores': {'neg': 0.0, 'neu': 1.0, 'pos': 0.0, 'compound': 0.0},
+                'compound_score': 0.0,
+                'normalized_intensity': 0.0
+            }
+            
+            # Use VADER sentiment analyzer for text
+            try:
+                sentiment = sentiment_analyzer.polarity_scores(text)
+                sentiment_result = {
+                    'sentiment_scores': sentiment,
+                    'compound_score': sentiment['compound'],
+                    'normalized_intensity': abs(sentiment['compound']) * 10
+                }
+            except Exception as e:
+                logger.warning(f"VADER sentiment analysis failed: {str(e)}")
+            
+            # Get history
+            history = {}
+            try:
+                history = await self.memory.get("last_analysis", {})
+            except Exception as e:
+                logger.warning(f"Failed to get memory: {str(e)}")
+            
+            # Create base analysis from text
+            text_analysis = self._create_text_analysis(text, sentiment_result)
+            
+            # If voice emotion data is available, integrate it
+            if (voice_emotion_data and voice_emotion_data.get("success", False)):
+                combined_analysis = self._integrate_voice_and_text(text_analysis, voice_emotion_data)
+            else:
+                combined_analysis = text_analysis
+            
+            # Add voice emotion data to the analysis for reference
+            if voice_emotion_data:
+                combined_analysis['voice_emotion'] = voice_emotion_data
+            
+            # Add timestamp
+            combined_analysis['timestamp'] = datetime.now().isoformat()
+            
+            # Check for emotion congruence between voice and text
+            combined_analysis['congruence'] = self._check_emotion_congruence(
+                text_emotion=text_analysis.get('primary_emotion', 'neutral'),
+                voice_emotion=voice_emotion_data.get('primary_emotion', 'neutral') if voice_emotion_data else 'unknown'
+            )
+            
+            # Try to update memory with the new analysis
+            try:
+                await self.memory.add("last_analysis", combined_analysis)
+            except Exception as e:
+                logger.warning(f"Failed to update memory: {str(e)}")
+            
+            return combined_analysis
+            
+        except Exception as e:
+            logger.error(f"Error in combined emotion analysis: {str(e)}")
+            return self._fallback_analysis(text)
+    
+    def _create_text_analysis(self, text: str, sentiment_result: Dict[str, Any]) -> Dict[str, Any]:
+        """Create basic emotion analysis from text content"""
+        # Base analysis structure
+        analysis = {
+            'primary_emotion': 'neutral',
+            'secondary_emotions': [],
+            'intensity': 5,
+            'triggers': [],
+            'clinical_indicators': [],
+            'pattern_changes': [],
+            'confidence': 0.7
+        }
+        
+        # Determine primary emotion based on sentiment
+        compound = sentiment_result.get('compound_score', 0)
+        if compound > 0.05:
+            analysis['primary_emotion'] = 'happy'
+            analysis['secondary_emotions'] = ['content', 'satisfied']
+        elif compound < -0.05:
+            analysis['primary_emotion'] = 'sad'
+            analysis['secondary_emotions'] = ['disappointed', 'frustrated']
+        else:
+            analysis['primary_emotion'] = 'neutral'
+            analysis['secondary_emotions'] = ['calm', 'balanced']
+        
+        # Set intensity based on sentiment
+        analysis['intensity'] = min(10, max(1, int(abs(compound) * 10)))
+        
+        # Add basic triggers based on common words
+        text_lower = text.lower()
+        if 'work' in text_lower or 'job' in text_lower:
+            analysis['triggers'].append('work-related stress')
+        if 'family' in text_lower or 'parent' in text_lower:
+            analysis['triggers'].append('family dynamics')
+        if 'health' in text_lower or 'sick' in text_lower:
+            analysis['triggers'].append('health concerns')
+        
+        # Add basic clinical indicators
+        if 'depressed' in text_lower or 'hopeless' in text_lower:
+            analysis['clinical_indicators'].append('depression symptoms')
+        if 'anxious' in text_lower or 'worried' in text_lower:
+            analysis['clinical_indicators'].append('anxiety symptoms')
+        if 'angry' in text_lower or 'frustrated' in text_lower:
+            analysis['clinical_indicators'].append('emotional dysregulation')
+        
+        return analysis
+    
+    def _integrate_voice_and_text(self, text_analysis: Dict[str, Any], voice_emotion: Dict[str, Any]) -> Dict[str, Any]:
+        """Integrate voice emotion data with text analysis"""
+        # Start with the text analysis
+        combined = text_analysis.copy()
+        
+        # Get voice emotion primary emotion and confidence
+        voice_primary = voice_emotion.get('primary_emotion', 'neutral')
+        voice_confidence = voice_emotion.get('confidence', 0.0)
+        voice_source = voice_emotion.get('source', 'unknown')
+        
+        # Keep track of the voice_source for reference
+        combined['voice_source'] = voice_source
+        
+        # If voice emotion has high confidence, adjust the primary emotion
+        if voice_confidence > 0.6:
+            # Keep track of the text-based emotion
+            combined['text_primary_emotion'] = combined['primary_emotion']
+            
+            # Weight voice emotion higher for emotional expression
+            combined['primary_emotion'] = voice_primary
+            
+            # Add voice emotion to secondary emotions if not already there
+            if voice_primary not in combined['secondary_emotions']:
+                combined['secondary_emotions'].insert(0, voice_primary)
+        else:
+            # Lower confidence in voice emotion, add as secondary if strong enough
+            if voice_confidence > 0.4 and voice_primary not in combined['secondary_emotions']:
+                combined['secondary_emotions'].append(voice_primary)
+        
+        # Adjust intensity based on voice emotion intensity
+        voice_emotions = voice_emotion.get('emotions', {})
+        if voice_emotions:
+            # Get the highest emotion score as a proxy for intensity
+            max_score = max(voice_emotions.values()) if voice_emotions else 0
+            
+            # Blend text and voice intensity, weight voice emotion more heavily (60/40 split)
+            voice_intensity = int(max_score * 10)
+            combined['intensity'] = int((combined['intensity'] * 0.4) + (voice_intensity * 0.6))
+        
+        # Add voice emotion confidence to the analysis
+        combined['voice_confidence'] = voice_confidence
+        
+        # Increase overall confidence when voice and text align
+        if voice_primary == combined.get('text_primary_emotion', combined['primary_emotion']):
+            combined['confidence'] = min(1.0, combined['confidence'] + 0.2)
+        
+        # Add detailed voice emotion analysis
+        combined['voice_emotions_detailed'] = voice_emotions
+        
+        # Extract top 3 voice emotions for quick reference
+        if voice_emotions:
+            top_voice_emotions = sorted(voice_emotions.items(), key=lambda x: x[1], reverse=True)[:3]
+            combined['top_voice_emotions'] = {emotion: score for emotion, score in top_voice_emotions}
+        
+        # Add special note if voice emotion is significantly different from text emotion
+        if voice_primary != combined.get('text_primary_emotion', combined['primary_emotion']):
+            if 'clinical_indicators' not in combined:
+                combined['clinical_indicators'] = []
+            combined['clinical_indicators'].append(f"voice-text emotion mismatch ({voice_primary} vs {combined.get('text_primary_emotion', combined['primary_emotion'])})")
+        
+        return combined
+    
+    def _check_emotion_congruence(self, text_emotion: str, voice_emotion: str) -> str:
+        """
+        Check if emotions expressed in text and voice are congruent
+        
+        Returns:
+            String describing congruence: "high", "medium", "low", or "unknown"
+        """
+        if voice_emotion == "unknown":
+            return "unknown"
+            
+        # Map emotions to higher-level categories
+        positive_emotions = ["happy", "excitement", "joy", "content", "satisfaction"]
+        negative_emotions = ["sad", "anger", "fear", "disgust", "anxiety", "frustration"]
+        neutral_emotions = ["neutral", "calm", "surprise"]
+        
+        # Determine emotional valence categories
+        text_valence = "positive" if text_emotion in positive_emotions else "negative" if text_emotion in negative_emotions else "neutral"
+        voice_valence = "positive" if voice_emotion in positive_emotions else "negative" if voice_emotion in negative_emotions else "neutral"
+        
+        # Check for exact match
+        if text_emotion == voice_emotion:
+            return "high"
+            
+        # Check for same valence category
+        elif text_valence == voice_valence:
+            return "medium"
+            
+        # Different valence categories
+        else:
+            return "low"
 
     def _parse_result(self, text: str) -> Dict[str, Any]:
         """Parse the structured output from Claude"""

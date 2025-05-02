@@ -295,3 +295,6 @@ python-dotenv>=1.0.0
 librosa>=0.10.1
 PyAudio>=0.2.13
 webrtcvad>=2.0.10
+# Voice Emotion Analysis
+hume>=0.4.1
+librosa>=0.10.1

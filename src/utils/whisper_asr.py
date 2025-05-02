@@ -15,7 +15,9 @@ from typing import Dict, Any, Optional, Tuple, Union
 from pathlib import Path
 import huggingface_hub
 import json
+import asyncio
 from config.settings import AppConfig
+from .voice_emotion_analyzer import VoiceEmotionAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -37,19 +39,54 @@ MODEL_MAPPINGS = {
 class WhisperASR:
     """Direct integration with OpenAI's Whisper for ASR"""
     
-    def __init__(self, model_name: str = "turbo"):
+    def __init__(self, model_name: str = "turbo", analyze_emotions: bool = False, use_hume_ai: bool = False, use_audeering: bool = True):
         """
         Initialize Whisper ASR
         
         Args:
             model_name: Name of the Whisper model to use ("tiny", "base", "small", "medium", "large", "turbo")
                        or HF model path like "openai/whisper-large-v3-turbo"
+            analyze_emotions: Whether to analyze emotions in speech
+            use_hume_ai: Whether to use Hume AI for emotion analysis (requires API key)
+            use_audeering: Whether to use audeering model for emotion analysis (default: True)
         """
         self.model_name = model_name
         # Map to standard whisper model name if HF path provided
         self.whisper_model_name = MODEL_MAPPINGS.get(model_name.lower(), "large-v3")
         self.model = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+        # Define model download path
+        if hasattr(AppConfig, 'VOICE_CONFIG') and 'cache_dir' in AppConfig.VOICE_CONFIG:
+            self.cache_dir = AppConfig.VOICE_CONFIG['cache_dir']
+        else:
+            self.cache_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'models', 'cache')
+        
+        os.makedirs(self.cache_dir, exist_ok=True)
+        
+        # Configure huggingface_hub to use the cache directory
+        huggingface_hub.config.HUGGINGFACE_HUB_CACHE = self.cache_dir
+        os.environ["TRANSFORMERS_CACHE"] = self.cache_dir
+
+        # Emotion analysis configuration
+        self.analyze_emotions = analyze_emotions
+        self.use_hume_ai = use_hume_ai
+        self.use_audeering = use_audeering
+        self.emotion_analyzer = None
+        if analyze_emotions:
+            # Get Hume AI API key from environment or AppConfig
+            hume_api_key = os.environ.get("HUME_API_KEY")
+            if hasattr(AppConfig, 'HUME_API_KEY'):
+                hume_api_key = AppConfig.HUME_API_KEY
+            
+            # Initialize emotion analyzer
+            self.emotion_analyzer = VoiceEmotionAnalyzer(
+                use_hume_ai=use_hume_ai,
+                hume_api_key=hume_api_key,
+                device=self.device,
+                use_audeering=use_audeering,
+                cache_dir=self.cache_dir
+            )
         
         # Configuration settings with defaults
         self.config = {
@@ -329,6 +366,144 @@ class WhisperASR:
                 "error": str(e)
             }
     
+    async def _analyze_audio_emotions(self, audio_data: np.ndarray) -> Dict[str, Any]:
+        """
+        Analyze emotions in audio data
+        
+        Args:
+            audio_data: Audio data as numpy array
+            
+        Returns:
+            Dictionary with emotion analysis results
+        """
+        if not self.analyze_emotions or self.emotion_analyzer is None:
+            return {"success": False, "error": "Emotion analyzer not enabled"}
+            
+        try:
+            # Save audio data to a temporary file for analysis
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+                temp_path = temp_file.name
+                
+                # Write audio data to the file
+                import soundfile as sf
+                sf.write(temp_path, audio_data, self.sample_rate)
+                
+                # Analyze emotions
+                emotion_results = await self.emotion_analyzer.analyze_emotions(temp_path)
+                
+                # Clean up temporary file
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
+                    
+                return emotion_results
+                
+        except Exception as e:
+            logger.error(f"Error analyzing emotions: {str(e)}")
+            return {"success": False, "error": str(e)}
+    
+    async def transcribe_audio_with_emotion(self, audio_data: np.ndarray) -> Dict[str, Any]:
+        """
+        Transcribe audio data using Whisper and analyze emotions
+        
+        Args:
+            audio_data: Audio data as numpy array
+            
+        Returns:
+            Dictionary with transcription and emotion analysis results
+        """
+        # Get transcription results
+        transcription = self.transcribe_audio(audio_data)
+        
+        # If transcription failed or emotion analysis is disabled, return early
+        if not transcription["success"] or not self.analyze_emotions:
+            return transcription
+            
+        # Analyze emotions if transcription was successful
+        emotion_results = await self._analyze_audio_emotions(audio_data)
+        
+        # Add emotion results to transcription results
+        if emotion_results["success"]:
+            transcription["emotion"] = emotion_results
+            
+            # Log the detected emotion
+            primary_emotion = emotion_results.get("primary_emotion", "unknown")
+            logger.info(f"Detected voice emotion: {primary_emotion}")
+            print(f"🎭 Detected emotion: {primary_emotion}")
+        else:
+            logger.warning(f"Emotion analysis failed: {emotion_results.get('error', 'Unknown error')}")
+            
+        return transcription
+
+    async def record_and_transcribe_with_emotion(self) -> Dict[str, Any]:
+        """
+        Record audio from microphone, transcribe it, and analyze emotions
+        
+        Returns:
+            Dictionary with transcription and emotion analysis results
+        """
+        # Record audio
+        success, audio_data = self.record_audio()
+        if not success:
+            return {"success": False, "text": "", "error": "Failed to record audio"}
+        
+        # Transcribe the audio with emotion analysis
+        return await self.transcribe_audio_with_emotion(audio_data)
+    
+    async def process_audio_file_with_emotion(self, audio_file_path: str) -> Dict[str, Any]:
+        """
+        Process an existing audio file, transcribe it, and analyze emotions
+        
+        Args:
+            audio_file_path: Path to audio file
+            
+        Returns:
+            Dictionary with transcription and emotion analysis results
+        """
+        try:
+            # First do the standard transcription
+            transcription = self.process_audio_file(audio_file_path)
+            
+            # If transcription failed or emotion analysis is disabled, return early
+            if not transcription["success"] or not self.analyze_emotions:
+                return transcription
+                
+            # For emotion analysis, we need to load the audio file
+            import soundfile as sf
+            audio_data, sample_rate = sf.read(audio_file_path)
+            
+            # Resample if needed
+            if sample_rate != self.sample_rate:
+                # Simple resampling - for production, use a proper audio library like librosa
+                audio_data = np.interp(
+                    np.linspace(0, len(audio_data), int(len(audio_data) * self.sample_rate / sample_rate)),
+                    np.arange(len(audio_data)),
+                    audio_data
+                )
+            
+            # Analyze emotions
+            emotion_results = await self._analyze_audio_emotions(audio_data)
+            
+            # Add emotion results to transcription results
+            if emotion_results["success"]:
+                transcription["emotion"] = emotion_results
+                
+                # Log the detected emotion
+                primary_emotion = emotion_results.get("primary_emotion", "unknown")
+                logger.info(f"Detected voice emotion: {primary_emotion}")
+                print(f"🎭 Detected emotion: {primary_emotion}")
+            
+            return transcription
+            
+        except Exception as e:
+            logger.error(f"Error processing audio file with emotion: {str(e)}")
+            return {
+                "success": False,
+                "text": "",
+                "error": str(e)
+            }
+
     def record_and_transcribe(self) -> Dict[str, Any]:
         """
         Record audio from microphone and transcribe it
@@ -456,11 +631,25 @@ def main():
         action="store_true",
         help="Translate non-English speech to English"
     )
+    parser.add_argument(
+        "--analyze-emotions",
+        action="store_true",
+        help="Analyze emotions in speech"
+    )
+    parser.add_argument(
+        "--use-hume-ai",
+        action="store_true",
+        help="Use Hume AI for emotion analysis (requires API key)"
+    )
     
     args = parser.parse_args()
     
     # Initialize Whisper ASR
-    asr = WhisperASR(model_name=args.model)
+    asr = WhisperASR(
+        model_name=args.model,
+        analyze_emotions=args.analyze_emotions,
+        use_hume_ai=args.use_hume_ai
+    )
     
     # Configure ASR if needed
     config = {
@@ -469,19 +658,48 @@ def main():
     }
     asr.configure(config)
     
-    if args.file:
-        # Transcribe file
-        result = asr.process_audio_file(args.file)
+    # Use async function if emotion analysis is enabled
+    if args.analyze_emotions:
+        import asyncio
+        
+        async def run_with_emotion():
+            if args.file:
+                # Transcribe file with emotion analysis
+                result = await asr.process_audio_file_with_emotion(args.file)
+            else:
+                # Record and transcribe with emotion analysis
+                print(f"Using Whisper {args.model} model with emotion analysis")
+                result = await asr.record_and_transcribe_with_emotion()
+                
+            return result
+            
+        result = asyncio.run(run_with_emotion())
     else:
-        # Record and transcribe
-        print(f"Using Whisper {args.model} model")
-        result = asr.record_and_transcribe()
+        if args.file:
+            # Transcribe file
+            result = asr.process_audio_file(args.file)
+        else:
+            # Record and transcribe
+            print(f"Using Whisper {args.model} model")
+            result = asr.record_and_transcribe()
     
     if result["success"]:
         print("\nTranscription Result:")
         print(f"Text: {result['text']}")
         print(f"Language: {result.get('language', 'en')}")
         print(f"Time taken: {result.get('time_taken', 0):.2f} seconds")
+        
+        # Display emotion results if available
+        if "emotion" in result and result["emotion"]["success"]:
+            print("\nEmotion Analysis:")
+            print(f"Primary emotion: {result['emotion'].get('primary_emotion', 'unknown')}")
+            print(f"Confidence: {result['emotion'].get('confidence', 0):.2f}")
+            
+            # Display all emotions if available
+            if "emotions" in result["emotion"]:
+                print("\nEmotion Scores:")
+                for emotion, score in result["emotion"]["emotions"].items():
+                    print(f"- {emotion}: {score:.4f}")
     else:
         print(f"\nTranscription failed: {result.get('error', 'Unknown error')}")
 
