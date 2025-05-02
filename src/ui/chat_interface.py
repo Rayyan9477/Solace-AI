@@ -19,7 +19,8 @@ class ChatInterfaceComponent(BaseUIComponent):
                  process_message_callback: Callable[[str], Dict[str, Any]],
                  on_back: Optional[Callable] = None,
                  voice_enabled: bool = False,
-                 voice_component = None):
+                 voice_component = None,
+                 whisper_voice_input = None):
         """
         Initialize the chat interface component
         
@@ -28,12 +29,14 @@ class ChatInterfaceComponent(BaseUIComponent):
             on_back: Callback when user clicks back button
             voice_enabled: Whether voice interaction is enabled
             voice_component: Voice component for speech input/output (if enabled)
+            whisper_voice_input: Enhanced Whisper V3 Turbo voice input manager
         """
         super().__init__(name="ChatInterface", description="Empathetic chat interface for mental health support")
         self.process_message = process_message_callback
         self.on_back = on_back
         self.voice_enabled = voice_enabled
         self.voice_component = voice_component
+        self.whisper_voice_input = whisper_voice_input
         
         # Apply custom styling
         self.apply_chat_css()
@@ -46,7 +49,8 @@ class ChatInterfaceComponent(BaseUIComponent):
                 "last_user_input": "",
                 "spoken_messages": set(),
                 "auto_speak_responses": True if voice_enabled else False,
-                "show_emotions": True
+                "show_emotions": True,
+                "use_whisper": whisper_voice_input is not None
             }
     
     def render(self, **kwargs):
@@ -83,26 +87,62 @@ class ChatInterfaceComponent(BaseUIComponent):
                 self._reset_chat()
         
         # Display voice controls if enabled
-        if self.voice_enabled and self.voice_component:
+        if self.voice_enabled and (self.voice_component or self.whisper_voice_input):
             with st.expander("🎤 Voice Controls", expanded=False):
                 col_voice1, col_voice2 = st.columns(2)
                 
                 with col_voice1:
                     st.markdown("### 🎙️ Speak to Assistant")
-                    # Render voice input component
+                    
+                    # Render standard voice input component
                     if hasattr(self.voice_component, "render_voice_input"):
                         self.voice_component.render_voice_input(
                             on_input=self._handle_voice_input
                         )
+                    
+                    # Add Whisper V3 Turbo speech recognition
+                    if self.whisper_voice_input and st.session_state.chat_state.get("use_whisper", False):
+                        st.markdown("#### 🚀 Enhanced Speech Recognition")
+                        if st.button("🎙️ Speak with Whisper V3 Turbo", key="btn_whisper_speak"):
+                            with st.spinner("Listening..."):
+                                try:
+                                    result = self.whisper_voice_input.transcribe_once()
+                                    if result.get("success", False) and result.get("text"):
+                                        # Process the transcribed text
+                                        self._handle_voice_input(result["text"])
+                                        st.success(f"Transcribed: {result['text']}")
+                                    else:
+                                        st.error(f"Could not transcribe audio: {result.get('error', 'Unknown error')}")
+                                except Exception as e:
+                                    logger.error(f"Error with Whisper transcription: {str(e)}")
+                                    st.error(f"Error: {str(e)}")
                 
                 with col_voice2:
                     st.markdown("### 🔊 Voice Settings")
+                    
+                    # Regular voice selector for TTS
                     if hasattr(self.voice_component, "render_voice_selector"):
                         self.voice_component.render_voice_selector()
                     
                     # Test voice button
                     if st.button("Test Voice", key="btn_test_voice"):
                         self._test_voice()
+                    
+                    # Whisper ASR settings
+                    if self.whisper_voice_input:
+                        st.checkbox("Use Whisper V3 Turbo for speech recognition", 
+                                   value=st.session_state.chat_state.get("use_whisper", False),
+                                   key="cb_use_whisper",
+                                   on_change=self._on_whisper_changed)
+                        
+                        if st.session_state.chat_state.get("use_whisper", False):
+                            st.markdown("""
+                            <div style='background-color: #f0f7ff; padding: 10px; border-radius: 10px; margin-top: 10px;'>
+                                <p style='margin: 0; font-size: 0.9rem;'>
+                                    <b>📝 Whisper V3 Turbo</b>: Enhanced speech recognition for more accurate transcription
+                                </p>
+                            </div>
+                            """, unsafe_allow_html=True)
         
         # Message container
         message_container = st.container()
@@ -264,6 +304,10 @@ class ChatInterfaceComponent(BaseUIComponent):
     def _on_show_emotions_changed(self):
         """Handle change in show emotions setting"""
         st.session_state.chat_state["show_emotions"] = st.session_state.cb_show_emotions
+    
+    def _on_whisper_changed(self):
+        """Handle change in Whisper V3 Turbo setting"""
+        st.session_state.chat_state["use_whisper"] = st.session_state.cb_use_whisper
     
     def apply_chat_css(self):
         """Apply custom CSS for the chat interface"""

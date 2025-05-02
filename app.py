@@ -24,6 +24,9 @@ from src.utils.voice_ai import VoiceManager
 from src.components.voice_component import VoiceComponent
 from src.personality import PersonalityManager
 from src.utils.metrics import metrics_manager
+# Import Whisper ASR components
+from src.utils.whisper_asr import WhisperASR
+from src.utils.voice_input_manager import VoiceInputManager
 
 # Setup logging
 logging.basicConfig(
@@ -89,6 +92,22 @@ class MentalHealthApp:
                 self.voice_component = VoiceComponent(voice_ai=voice_result["voice_ai"])
                 components["voice_ai"] = voice_result["voice_ai"]
                 logger.info("Voice features initialized successfully")
+                
+                # Initialize Whisper V3 Turbo ASR
+                try:
+                    whisper_model = "turbo"  # Use turbo by default
+                    logger.info(f"Initializing Whisper {whisper_model} ASR...")
+                    
+                    # Initialize VoiceInputManager with Whisper ASR
+                    voice_input_manager = VoiceInputManager(model_name=whisper_model)
+                    components["voice_input_manager"] = voice_input_manager
+                    
+                    # Enhanced voice capability message
+                    st.session_state["whisper_asr_enabled"] = True
+                    logger.info(f"Whisper {whisper_model} ASR initialized successfully")
+                except Exception as whisper_error:
+                    logger.warning(f"Whisper ASR initialization failed: {str(whisper_error)}")
+                    st.session_state["whisper_asr_enabled"] = False
             else:
                 self.voice_enabled = False
                 logger.warning(f"Voice features not available: {voice_result.get('error', 'Unknown error')}")
@@ -135,7 +154,8 @@ class MentalHealthApp:
             assessment_agent=components.get("integrated_diagnosis"),
             on_complete=self._handle_assessment_complete,
             voice_enabled=self.voice_enabled,
-            voice_component=self.voice_component
+            voice_component=self.voice_component,
+            whisper_voice_input=components.get("voice_input_manager") if st.session_state.get("whisper_asr_enabled", False) else None
         )
         self.ui_manager.register_component("assessment", conversational_assessment)
         
@@ -151,7 +171,9 @@ class MentalHealthApp:
             process_message_callback=self._process_message,
             on_back=lambda: self.ui_manager.navigate_to("results"),
             voice_enabled=self.voice_enabled,
-            voice_component=self.voice_component
+            voice_component=self.voice_component,
+            # Add Whisper V3 Turbo voice input manager if available
+            whisper_voice_input=components.get("voice_input_manager") if st.session_state.get("whisper_asr_enabled", False) else None
         )
         self.ui_manager.register_component("chat", chat_interface)
     
@@ -260,6 +282,19 @@ class MentalHealthApp:
             if not st.session_state.app_initialized:
                 return
         
+        # Display a status indicator for Whisper ASR if enabled
+        if st.session_state.get("whisper_asr_enabled", False):
+            st.sidebar.success("🚀 Whisper V3 Turbo ASR Enabled")
+            st.sidebar.markdown("""
+            <div style='background-color: #f0f7ff; padding: 10px; border-radius: 10px; margin-top: 10px;'>
+                <p style='margin: 0; font-size: 0.85rem;'>
+                    <b>Enhanced Voice Recognition:</b> Whisper V3 Turbo provides state-of-the-art speech recognition accuracy.
+                    <br><br>
+                    Available in both chat interface and assessment components.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+        
         # Check if we're on the results page and have assessment results
         if (self.ui_manager.current_route == "results" or 
             st.session_state.ui_manager_state.get("current_route") == "results"):
@@ -294,6 +329,6 @@ class MentalHealthApp:
         self.ui_manager.render_current()
 
 # Application entry point
-if __name__ == "__main__":
+if __name____ == "__main__":
     app = MentalHealthApp()
     app.run()

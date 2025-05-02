@@ -86,7 +86,7 @@ class AgnoLLM(BaseLLM):
         try:
             api_key = self.config["api_key"]
             if not api_key:
-                raise ValueError("API key is empty or not set")
+                raise ValueError("GEMINI_API_KEY is not set or is empty")
                 
             # Configure Gemini client
             genai.configure(api_key=api_key)
@@ -112,17 +112,17 @@ class AgnoLLM(BaseLLM):
             
             # Test the model with a simple generation to verify it works
             test_response = self.model.generate_content("Hello")
-            if test_response:
-                logger.info(f"Successfully initialized {self.model_name}")
-            else:
-                raise ValueError("Model initialization test failed")
+            logger.info(f"Model initialization successful: {self.model_name}")
                 
         except ValueError as ve:
-            logger.error(f"Configuration error: {str(ve)}")
-            raise ValueError(f"Failed to initialize Gemini model: {str(ve)}")
+            logger.error(f"ValueError in model initialization: {str(ve)}")
+            self.model = None
+            raise ValueError(f"Failed to initialize model: {str(ve)}")
+            
         except Exception as e:
-            logger.error(f"Failed to initialize Gemini model: {str(e)}")
-            raise RuntimeError(f"Unexpected error initializing Gemini model: {str(e)}")
+            logger.error(f"Error in model initialization: {str(e)}")
+            self.model = None
+            raise RuntimeError(f"Failed to initialize model: {str(e)}")
     
     def _generate(
         self,
@@ -135,42 +135,29 @@ class AgnoLLM(BaseLLM):
         results = []
         for prompt in prompts:
             try:
-                if not self.model:
-                    response_text = "I apologize, but I'm having trouble generating a response right now. Model not initialized."
-                else:
-                    safe_prompt = self._apply_safety_filters(prompt)
-                    formatted_prompt = self._format_prompt(safe_prompt, None)
-                    
-                    try:
-                        generation_config = self.config.get("generation_config", {})
-                        response = self.model.generate_content(
-                            formatted_prompt,
-                            generation_config=generation_config,
-                        )
-                        
-                        if not response.parts:
-                            block_reason = response.prompt_feedback.block_reason if hasattr(response.prompt_feedback, 'block_reason') else 'Unknown'
-                            logger.warning(f"Generation blocked. Reason: {block_reason}")
-                            response_text = "I apologize, but I cannot generate that type of content."
-                        elif not response.text:
-                            logger.warning(f"Generation returned empty text. Parts: {response.parts}, Candidates: {response.candidates}")
-                            response_text = "I received an empty response from the model."
-                        else:
-                            processed_response = self._postprocess_response(response.text)
-                            safety_flags = self._check_safety(processed_response)
-                            if safety_flags:
-                                logger.warning(f"Response flagged for safety concerns: {safety_flags}")
-                            response_text = processed_response
-                            
-                    except Exception as gen_error:
-                        logger.error(f"Generation error: {str(gen_error)}")
-                        response_text = "I apologize, but I encountered an error during generation."
+                # Apply safety filters to input
+                safe_prompt = self._apply_safety_filters(prompt)
                 
-                results.append(response_text)
-
+                # Call the model
+                response = self.model.generate_content(safe_prompt)
+                
+                # Extract text from response
+                text = response.text
+                
+                # Post-process the response
+                processed_text = self._postprocess_response(text)
+                
+                # Run callback if provided
+                if run_manager:
+                    run_manager.on_llm_new_token(processed_text)
+                    
+                # Add to results
+                results.append(processed_text)
+                
             except Exception as e:
-                logger.error(f"Outer generation loop failed for prompt: {prompt[:50]}... Error: {str(e)}")
-                results.append("I apologize, but I'm having trouble processing your request right now.")
+                logger.error(f"Error generating response: {str(e)}")
+                # Provide a fallback response
+                results.append("I'm having trouble generating a response right now. Could you try rephrasing your question?")
         
         return results
 
@@ -178,10 +165,24 @@ class AgnoLLM(BaseLLM):
         self,
         prompts: List[str],
         stop: Optional[List[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
         **kwargs: Any
     ) -> List[str]:
-        logger.warning("Using synchronous _generate within _agenerate. Consider implementing true async call.")
-        return self._generate(prompts, stop, **kwargs)
+        """Generate response asynchronously for multiple prompts."""
+        try:
+            import asyncio
+            
+            # Use a thread pool to run the synchronous _generate method
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None, 
+                lambda: self._generate(prompts, stop, run_manager, **kwargs)
+            )
+            
+            return results
+        except Exception as e:
+            logger.error(f"Error in async generation: {str(e)}")
+            return ["I apologize, but I'm unable to process your request at the moment."] * len(prompts)
 
     def _format_prompt(self, prompt: str, context: Optional[Dict[str, Any]] = None) -> str:
         """Format prompt with context"""
@@ -203,10 +204,7 @@ Assistant: Let me help you with that."""
         filtered_text = text
         
         for category in safety_filters:
-            filtered_text = self.token_manager.filter_content(
-                filtered_text,
-                category
-            )
+            filtered_text = self.token_manager.filter_content(filtered_text, category)
             
         return filtered_text
     
@@ -223,13 +221,17 @@ Assistant: Let me help you with that."""
         flags = {}
         
         # Check toxicity
-        if self.token_manager.check_toxicity(text) > AppConfig.SAFETY_CONFIG.get("max_toxicity", 0.7):
-            flags['high_toxicity'] = True
+        toxicity_score = self.token_manager.check_toxicity(text)
+        if toxicity_score > AppConfig.SAFETY_CONFIG.get("max_toxicity", 0.7):
+            flags["toxicity"] = toxicity_score
             
         # Check for blocked content
         for category in AppConfig.SAFETY_CONFIG.get("blocked_categories", []):
-            if any(pattern in text.lower() for pattern in self.token_manager.blocked_patterns.get(category, [])):
-                flags[f'contains_{category}'] = True
+            original_text = text
+            filtered_text = self.token_manager.filter_content(text, category)
+            
+            if original_text != filtered_text:
+                flags[category] = True
                 
         return flags
 
@@ -239,5 +241,47 @@ Assistant: Let me help you with that."""
 
     @property
     def identifier(self) -> str:
-        """Get model identifier"""
-        return f"gemini-{self.model_name}"
+        """A unique identifier for this LLM."""
+        return f"AgnoLLM-{self.model_name}"
+        
+    def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Generate a response for a given prompt with context
+        
+        Args:
+            prompt: The user's prompt
+            context: Optional context information
+            
+        Returns:
+            Dictionary with the response and metadata
+        """
+        try:
+            # Format the prompt with context if provided
+            formatted_prompt = self._format_prompt(prompt, context)
+            
+            # Start timer
+            start_time = datetime.now()
+            
+            # Generate response
+            response = self._generate([formatted_prompt])[0]
+            
+            # End timer
+            end_time = datetime.now()
+            time_taken = (end_time - start_time).total_seconds()
+            
+            # Check safety
+            safety_flags = self._check_safety(response)
+            
+            return {
+                "response": response,
+                "time_taken": time_taken,
+                "safety_flags": safety_flags,
+                "timestamp": self.token_manager.get_timestamp()
+            }
+        except Exception as e:
+            logger.error(f"Error generating response: {str(e)}")
+            return {
+                "response": "I apologize, but I'm having trouble processing your request.",
+                "error": str(e),
+                "timestamp": self.token_manager.get_timestamp()
+            }

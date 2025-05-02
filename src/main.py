@@ -27,6 +27,8 @@ import google.generativeai as genai
 import torch
 # Voice AI imports
 from utils.voice_ai import VoiceAI, VoiceManager
+from utils.voice_input_manager import VoiceInputManager
+from utils.whisper_asr import WhisperASR
 from components.voice_component import VoiceComponent
 from components.integrated_assessment import IntegratedAssessmentComponent
 from components.diagnosis_results import DiagnosisResultsComponent
@@ -34,7 +36,7 @@ from components.diagnosis_results import DiagnosisResultsComponent
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name=s) - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name=s) - %(levelname=s) - %(message=s'
 )
 logger = logging.getLogger(__name__)
 
@@ -140,6 +142,20 @@ def initialize_components() -> Dict[str, Any]:
         voice_manager = VoiceManager()
         voice_result = asyncio.run(voice_manager.initialize())
 
+        # Initialize Whisper ASR for speech recognition
+        status_text.text("Initializing Whisper speech recognition...")
+        try:
+            whisper_voice_manager = VoiceInputManager(model_name="turbo")
+            whisper_available = True
+            logger.info("Whisper ASR initialized successfully")
+        except Exception as whisper_error:
+            whisper_voice_manager = None
+            whisper_available = False
+            logger.warning(f"Whisper ASR initialization failed: {str(whisper_error)}")
+            st.warning("Whisper speech recognition is not available. Falling back to standard voice features.")
+
+        progress_bar.progress(0.4)
+            
         if voice_result["success"]:
             voice_ai = voice_result["voice_ai"]
             logger.info("Voice AI initialized successfully")
@@ -205,6 +221,7 @@ def initialize_components() -> Dict[str, Any]:
                 "orchestrator": orchestrator,
                 "llm": llm,
                 "voice_ai": voice_ai,
+                "whisper_voice_manager": whisper_voice_manager if whisper_available else None,
                 "integrated_diagnosis": integrated_diagnosis
             }
         except Exception as agent_error:
@@ -1015,6 +1032,7 @@ def render_chat_interface(components: Dict[str, Any]):
 
     # Initialize voice component if available
     voice_enabled = components.get("voice_ai") is not None
+    whisper_enabled = components.get("whisper_voice_manager") is not None
 
     if voice_enabled:
         # Initialize voice component with callback for speech-to-text
@@ -1036,21 +1054,39 @@ def render_chat_interface(components: Dict[str, Any]):
                 st.session_state["voice_style"] = "warm"
 
     # Add voice controls in an expander
-    if voice_enabled:
+    if voice_enabled or whisper_enabled:
         with st.expander("🎤 Voice Interaction Settings", expanded=False):
+            if whisper_enabled:
+                st.checkbox("Enable Whisper V3 Turbo voice recognition", value=True, key="use_whisper")
+            
             col1, col2 = st.columns(2)
 
             with col1:
                 st.markdown("### 🎙️ Speech Input")
-                st.session_state["voice_component"].render_voice_input()
+                
+                # Standard voice input
+                if voice_enabled:
+                    st.session_state["voice_component"].render_voice_input()
+                
+                # Whisper voice input
+                if whisper_enabled and st.session_state.get("use_whisper", True):
+                    if st.button("🎙️ Whisper Voice Input"):
+                        with st.spinner("Listening..."):
+                            result = components["whisper_voice_manager"].transcribe_once()
+                            if result["success"] and result["text"]:
+                                st.session_state["voice_input"] = result["text"]
+                                st.rerun()
+                            else:
+                                st.error(f"Could not understand audio: {result.get('error', 'Unknown error')}")
 
             with col2:
                 st.markdown("### 🔊 Voice Settings")
-                st.session_state["voice_style"] = st.session_state["voice_component"].render_voice_selector()
+                if voice_enabled:
+                    st.session_state["voice_style"] = st.session_state["voice_component"].render_voice_selector()
                 st.checkbox("Automatically speak responses", value=True, key="auto_speak_responses")
 
                 # Test voice button
-                if st.button("Test Voice"):
+                if voice_enabled and st.button("Test Voice"):
                     test_text = "Hello! I'm your mental health assistant. I'm here to listen and support you with empathy and compassion."
                     st.session_state["voice_component"].render_voice_output(
                         test_text,

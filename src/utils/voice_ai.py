@@ -1,349 +1,486 @@
 """
-Voice AI module for speech-to-text and text-to-speech capabilities.
-Uses Whisper for STT and SpeechT5 for TTS.
+Voice AI component for the mental health chatbot.
+Handles speech-to-text and text-to-speech functionality.
 """
 
 import os
 import torch
-import numpy as np
-import asyncio
-import tempfile
-import soundfile as sf
-from transformers import pipeline, WhisperForConditionalGeneration, WhisperProcessor, SpeechT5Processor, SpeechT5ForTextToSpeech, SpeechT5HifiGan
-from typing import Dict, Any, Optional
 import logging
-from config.settings import AppConfig
+import asyncio
+from typing import Dict, Any, Optional, List, Union
+from datetime import datetime
+from transformers import (AutoProcessor, SpeechT5Processor, SpeechT5ForTextToSpeech, 
+                         SpeechT5HifiGan, AutoModelForSpeechSeq2Seq, 
+                         AutoFeatureExtractor, AutoTokenizer)
+import numpy as np
+import soundfile as sf
 import io
-import scipy.io.wavfile as wavfile
-import time
-from pathlib import Path
+import torchaudio
+from .audio_player import AudioPlayer
+from .dia_tts import DiaTTS
 
+# Configure logger
 logger = logging.getLogger(__name__)
 
 class VoiceAI:
-    """Voice AI module for speech processing"""
+    """Voice AI component handling speech recognition and synthesis"""
     
-    @staticmethod
-    def check_dependencies() -> Dict[str, bool]:
+    def __init__(self, 
+                 use_whisper: bool = True,
+                 use_speecht5: bool = True,
+                 use_dia: bool = True,
+                 cache_dir: Optional[str] = None,
+                 device: Optional[str] = None):
         """
-        Check if required dependencies for voice features are available
+        Initialize the Voice AI component
         
-        Returns:
-            Dict with dependency status
-        """
-        dependencies = {
-            "torch": False,
-            "transformers": False,
-            "streamlit_webrtc": False,
-            "soundfile": False,
-            "scipy": False
-        }
-        
-        try:
-            import torch
-            dependencies["torch"] = True
-        except ImportError:
-            pass
-            
-        try:
-            import transformers
-            dependencies["transformers"] = True
-        except ImportError:
-            pass
-            
-        try:
-            import streamlit_webrtc
-            dependencies["streamlit_webrtc"] = True
-        except ImportError:
-            pass
-            
-        try:
-            import soundfile
-            dependencies["soundfile"] = True
-        except ImportError:
-            pass
-            
-        try:
-            import scipy
-            dependencies["scipy"] = True
-        except ImportError:
-            pass
-            
-        return dependencies
-    
-    def __init__(self, stt_model: str = "openai/whisper-large-v3-turbo", tts_model: str = "microsoft/speecht5_tts"):
-        """
-        Initialize VoiceAI with specified models
-
         Args:
-            stt_model: Name of the speech-to-text model to use from HuggingFace
-            tts_model: Name of the text-to-speech model to use from HuggingFace
+            use_whisper: Whether to use OpenAI's Whisper for speech recognition
+            use_speecht5: Whether to use Microsoft's SpeechT5 for text-to-speech
+            use_dia: Whether to use Dia 1.6B for enhanced text-to-speech
+            cache_dir: Directory to cache models
+            device: Device to use ('cuda' or 'cpu')
         """
-        # Check dependencies first
-        self.dependencies = self.check_dependencies()
-        if not all(self.dependencies.values()):
-            missing = [dep for dep, status in self.dependencies.items() if not status]
-            logger.warning(f"Missing voice dependencies: {', '.join(missing)}")
-            raise ImportError(f"Required voice dependencies not available: {', '.join(missing)}")
-
-        self.stt_model_name = stt_model
-        self.tts_model_name = tts_model
-        self.stt_pipeline = None
-        self.tts_pipeline = None
-        self.tts_processor = None
-        self.tts_model = None
-        self.vocoder = None
-        
-        # Voice style configurations
-        self.voice_styles = {
-            "default": {"pitch_factor": 1.0, "speaking_rate": 1.0},
-            "male": {"pitch_factor": 0.85, "speaking_rate": 0.95},
-            "female": {"pitch_factor": 1.15, "speaking_rate": 1.0},
-            "child": {"pitch_factor": 1.3, "speaking_rate": 1.1},
-            "elder": {"pitch_factor": 0.75, "speaking_rate": 0.85},
-            "warm": {"pitch_factor": 1.05, "speaking_rate": 0.9}
-        }
-        
-        self.current_voice = "warm"
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        
-        # Create cache directory for model downloads
-        cache_dir = os.path.join(os.path.dirname(__file__), '..', 'models', 'cache')
-        os.makedirs(cache_dir, exist_ok=True)
-        
-        # Store cache_dir for model loading
+        # Set up device
+        if device is None:
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        else:
+            self.device = device
+            
+        # Set cache directory
         self.cache_dir = cache_dir
         
-        # Initialize models lazily (on first use)
-        logger.info(f"VoiceAI initialized. Device: {self.device}, Cache dir: {cache_dir}")
-
-    async def initialize_stt(self):
-        """Initialize speech-to-text model (if not already initialized)"""
-        if self.stt_pipeline is None:
-            try:
-                logger.info(f"Initializing STT model: {self.stt_model_name}")
-
-                # Initialize Whisper pipeline with specific configuration
-                self.stt_pipeline = pipeline(
-                    "automatic-speech-recognition",
-                    model=self.stt_model_name,
-                    device=self.device,
-                    torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                    model_kwargs={"cache_dir": self.cache_dir, "low_cpu_mem_usage": True}
-                )
-
-                logger.info(f"STT model initialized successfully on {self.device}")
-                return True
-            except Exception as e:
-                logger.error(f"Failed to initialize STT model: {str(e)}", exc_info=True)
-                return False
-        return True
-
-    async def initialize_tts(self):
-        """Initialize text-to-speech model (if not already initialized)"""
-        if self.tts_processor is None or self.tts_model is None:
-            try:
-                logger.info(f"Initializing TTS model: {self.tts_model_name}")
-
-                # Initialize SpeechT5 models directly instead of using pipeline
-                self.tts_processor = SpeechT5Processor.from_pretrained(
-                    self.tts_model_name,
-                    cache_dir=self.cache_dir
-                )
-                
-                self.tts_model = SpeechT5ForTextToSpeech.from_pretrained(
-                    self.tts_model_name,
-                    cache_dir=self.cache_dir,
-                    torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                    low_cpu_mem_usage=True
-                ).to(self.device)
-                
-                # Initialize vocoder
-                self.vocoder = SpeechT5HifiGan.from_pretrained(
-                    "microsoft/speecht5_hifigan",
-                    cache_dir=self.cache_dir
-                ).to(self.device)
-
-                logger.info(f"TTS model initialized successfully on {self.device}")
-                return True
-            except Exception as e:
-                logger.error(f"Failed to initialize TTS model: {str(e)}", exc_info=True)
-                return False
-        return True
-
-    async def speech_to_text(self, audio_data: bytes) -> Dict[str, Any]:
+        # Create audio player
+        self.audio_player = AudioPlayer()
+        
+        # Set up speech recognition (Whisper)
+        self.use_whisper = use_whisper
+        self.whisper_model = None
+        self.whisper_processor = None
+        
+        # Set up text-to-speech (SpeechT5)
+        self.use_speecht5 = use_speecht5
+        self.speecht5_processor = None
+        self.speecht5_model = None
+        self.speecht5_vocoder = None
+        self.speaker_embeddings = None
+        
+        # Set up Dia 1.6B for enhanced TTS
+        self.use_dia = use_dia
+        self.dia_tts = None if not use_dia else DiaTTS(cache_dir=cache_dir, use_gpu=(self.device == "cuda"))
+        
+        # Flag to track initialization status
+        self.initialized_stt = False
+        self.initialized_tts = False
+        self.initialized_dia = False
+        
+        # Set preferred TTS system
+        self.preferred_tts = "dia" if use_dia else "speecht5"
+        
+        logger.info(f"VoiceAI initialized. Device: {self.device}, Preferred TTS: {self.preferred_tts}")
+    
+    async def initialize_stt(self) -> bool:
         """
-        Convert speech to text
+        Initialize speech-to-text components
+        
+        Returns:
+            Whether initialization was successful
+        """
+        if self.initialized_stt:
+            return True
+            
+        if not self.use_whisper:
+            return False
+            
+        try:
+            logger.info("Initializing Whisper speech recognition")
+            
+            # Create a background task for model loading
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, self._load_whisper_model)
+            
+            if result["success"]:
+                self.whisper_processor = result["processor"]
+                self.whisper_model = result["model"]
+                self.initialized_stt = True
+                logger.info("Whisper speech recognition initialized successfully")
+                return True
+            else:
+                logger.error(f"Failed to initialize Whisper: {result['error']}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error initializing speech recognition: {str(e)}", exc_info=True)
+            return False
+    
+    async def initialize_tts(self) -> bool:
+        """
+        Initialize text-to-speech components
+        
+        Returns:
+            Whether initialization was successful
+        """
+        if self.initialized_tts:
+            return True
+            
+        if not self.use_speecht5:
+            return False
+            
+        try:
+            logger.info("Initializing SpeechT5 text-to-speech")
+            
+            # Create a background task for model loading
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, self._load_speecht5_model)
+            
+            if result["success"]:
+                self.speecht5_processor = result["processor"]
+                self.speecht5_model = result["model"]
+                self.speecht5_vocoder = result["vocoder"]
+                self.speaker_embeddings = result["speaker_embeddings"]
+                self.initialized_tts = True
+                logger.info("SpeechT5 text-to-speech initialized successfully")
+                return True
+            else:
+                logger.error(f"Failed to initialize SpeechT5: {result['error']}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error initializing text-to-speech: {str(e)}", exc_info=True)
+            return False
+            
+    async def initialize_dia(self) -> bool:
+        """
+        Initialize Dia 1.6B text-to-speech
+        
+        Returns:
+            Whether initialization was successful
+        """
+        if self.initialized_dia or not self.use_dia or self.dia_tts is None:
+            return self.initialized_dia
+            
+        try:
+            logger.info("Initializing Dia 1.6B text-to-speech")
+            success = await self.dia_tts.initialize()
+            self.initialized_dia = success
+            
+            if success:
+                logger.info("Dia 1.6B text-to-speech initialized successfully")
+            else:
+                logger.error(f"Failed to initialize Dia 1.6B: {self.dia_tts.initialization_error}")
+                
+            return success
+                
+        except Exception as e:
+            logger.error(f"Error initializing Dia 1.6B: {str(e)}", exc_info=True)
+            return False
+    
+    def _load_whisper_model(self) -> Dict[str, Any]:
+        """
+        Load Whisper model for speech recognition
+        
+        Returns:
+            Dictionary with model loading results
+        """
+        try:
+            # Load processor
+            processor = AutoProcessor.from_pretrained(
+                "openai/whisper-large-v3-turbo",
+                cache_dir=self.cache_dir
+            )
+            
+            # Load model
+            model = AutoModelForSpeechSeq2Seq.from_pretrained(
+                "openai/whisper-large-v3-turbo",
+                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                low_cpu_mem_usage=True,
+                cache_dir=self.cache_dir
+            ).to(self.device)
+            
+            return {
+                "success": True,
+                "processor": processor,
+                "model": model,
+                "error": None
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "processor": None,
+                "model": None,
+                "error": str(e)
+            }
+    
+    def _load_speecht5_model(self) -> Dict[str, Any]:
+        """
+        Load SpeechT5 model for text-to-speech
+        
+        Returns:
+            Dictionary with model loading results
+        """
+        try:
+            # Load processor, model and vocoder
+            processor = SpeechT5Processor.from_pretrained(
+                "microsoft/speecht5_tts", 
+                cache_dir=self.cache_dir
+            )
+            
+            model = SpeechT5ForTextToSpeech.from_pretrained(
+                "microsoft/speecht5_tts",
+                cache_dir=self.cache_dir
+            ).to(self.device)
+            
+            vocoder = SpeechT5HifiGan.from_pretrained(
+                "microsoft/speecht5_hifigan",
+                cache_dir=self.cache_dir
+            ).to(self.device)
+            
+            # Load speaker embeddings
+            if os.path.exists("speaker_embeddings.pt"):
+                speaker_embeddings = torch.load("speaker_embeddings.pt")
+            else:
+                # Default embeddings
+                speaker_embeddings = torch.randn((1, 512)).to(self.device)
+                torch.save(speaker_embeddings, "speaker_embeddings.pt")
+            
+            return {
+                "success": True,
+                "processor": processor,
+                "model": model,
+                "vocoder": vocoder,
+                "speaker_embeddings": speaker_embeddings,
+                "error": None
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "processor": None,
+                "model": None,
+                "vocoder": None,
+                "speaker_embeddings": None,
+                "error": str(e)
+            }
+    
+    async def transcribe_audio(self, audio_file: str) -> Dict[str, Any]:
+        """
+        Transcribe speech from audio file
         
         Args:
-            audio_data: Audio data as bytes
+            audio_file: Path to audio file
             
         Returns:
             Dictionary with transcription results
         """
-        try:
-            # Initialize the model if not already done
+        if not self.initialized_stt:
             if not await self.initialize_stt():
-                return {"success": False, "text": "", "error": "Failed to initialize STT model"}
+                return {
+                    "success": False,
+                    "text": "",
+                    "error": "Speech recognition not initialized"
+                }
+        
+        try:
+            # Load audio
+            if not os.path.exists(audio_file):
+                return {
+                    "success": False,
+                    "text": "",
+                    "error": f"Audio file not found: {audio_file}"
+                }
             
-            # Save audio data to a temporary file
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-                temp_filename = temp_file.name
-                temp_file.write(audio_data)
+            speech_array, sampling_rate = torchaudio.load(audio_file)
             
-            # Process audio file
-            start_time = time.time()
+            # Resample if needed
+            if sampling_rate != 16000:
+                resampler = torchaudio.transforms.Resample(sampling_rate, 16000)
+                speech_array = resampler(speech_array)
+                sampling_rate = 16000
             
-            # Call the pipeline on the audio file
-            transcription = self.stt_pipeline(
-                temp_filename,
-                chunk_length_s=30,
-                batch_size=16,
-                return_timestamps=False
+            # Convert to mono if needed
+            if speech_array.shape[0] > 1:
+                speech_array = torch.mean(speech_array, dim=0, keepdim=True)
+            
+            # Create a background task for transcription
+            loop = asyncio.get_event_loop()
+            
+            # Process audio in a separate thread to avoid blocking
+            result = await loop.run_in_executor(
+                None, 
+                lambda: self._transcribe_audio_whisper(speech_array.squeeze().numpy())
             )
             
-            # Remove the temporary file
-            os.unlink(temp_filename)
-            
-            end_time = time.time()
-            logger.info(f"Transcription completed in {end_time - start_time:.2f} seconds")
-            
-            text = transcription.get("text", "")
-            
-            return {
-                "success": True,
-                "text": text,
-                "time_taken": end_time - start_time
-            }
-            
+            return result
+        
         except Exception as e:
-            logger.error(f"Error in speech-to-text conversion: {str(e)}")
+            logger.error(f"Error transcribing audio: {str(e)}", exc_info=True)
             return {
                 "success": False,
                 "text": "",
                 "error": str(e)
             }
     
-    async def text_to_speech(self, text: str, voice_style: Optional[str] = None) -> Dict[str, Any]:
+    def _transcribe_audio_whisper(self, speech_array: np.ndarray) -> Dict[str, Any]:
+        """
+        Transcribe speech using Whisper model
+        
+        Args:
+            speech_array: Audio data as numpy array
+            
+        Returns:
+            Dictionary with transcription results
+        """
+        try:
+            # Process audio through Whisper
+            input_features = self.whisper_processor(
+                speech_array, 
+                sampling_rate=16000, 
+                return_tensors="pt"
+            ).input_features.to(self.device)
+            
+            # Generate token ids
+            predicted_ids = self.whisper_model.generate(
+                input_features, 
+                max_length=256
+            )
+            
+            # Decode token ids to text
+            transcription = self.whisper_processor.batch_decode(
+                predicted_ids, 
+                skip_special_tokens=True
+            )[0]
+            
+            return {
+                "success": True,
+                "text": transcription
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in Whisper transcription: {str(e)}")
+            return {
+                "success": False,
+                "text": "",
+                "error": str(e)
+            }
+            
+    async def text_to_speech(self, text: str, voice_style: str = "default") -> Dict[str, Any]:
         """
         Convert text to speech
         
         Args:
             text: Text to convert to speech
-            voice_style: Voice style to use (default/male/female/child/elder/warm)
+            voice_style: Voice style to use
             
         Returns:
-            Dictionary with audio data
+            Dictionary with TTS results including audio bytes
         """
-        try:
-            # Initialize the model if not already done
-            if not await self.initialize_tts():
-                return {"success": False, "audio_bytes": b"", "error": "Failed to initialize TTS model"}
-            
-            # Get voice style settings
-            style = self.voice_styles.get(voice_style or self.current_voice, self.voice_styles["default"])
-            
-            # Add emotionally appropriate phrasing for mental health context
-            enhanced_text = self._enhance_text_for_empathy(text)
-            
-            start_time = time.time()
-            
-            # Process the text with the TTS model
-            inputs = self.tts_processor(text=enhanced_text, return_tensors="pt").to(self.device)
-            
-            # Get speaker embeddings (we'll use a zero vector for a neutral voice)
-            speaker_embeddings = torch.zeros((1, 512)).to(self.device)
-            
-            # Generate speech
-            speech = self.tts_model.generate_speech(
-                inputs["input_ids"], 
-                speaker_embeddings, 
-                vocoder=self.vocoder
-            ).cpu().numpy()
-            
-            # Apply voice style modifications (pitch, rate)
-            modified_speech = self._apply_voice_style(speech, style)
-            
-            # Convert to WAV format
-            audio_bytes = self._speech_to_wav(modified_speech)
-            
-            end_time = time.time()
-            logger.info(f"Speech generation completed in {end_time - start_time:.2f} seconds")
-            
+        if not text:
             return {
-                "success": True,
-                "audio_bytes": audio_bytes,
-                "time_taken": end_time - start_time
+                "success": False,
+                "audio_bytes": b"",
+                "error": "No text provided"
             }
             
+        # Choose TTS system based on preference and availability
+        if self.preferred_tts == "dia" and self.use_dia:
+            # Try Dia 1.6B first
+            if not self.initialized_dia:
+                await self.initialize_dia()
+                
+            if self.initialized_dia:
+                result = await self.dia_tts.generate_speech(text, style=voice_style)
+                
+                # If successful, return the result
+                if result["success"]:
+                    return result
+                    
+                # Otherwise, log error and fall back to SpeechT5
+                logger.warning(f"Dia TTS failed: {result.get('error', 'Unknown error')}. Falling back to SpeechT5.")
+        
+        # Fall back to SpeechT5 or if it's the preferred system
+        if not self.initialized_tts:
+            if not await self.initialize_tts():
+                return {
+                    "success": False,
+                    "audio_bytes": b"",
+                    "error": "Text-to-speech not initialized"
+                }
+                
+        # Use SpeechT5
+        try:
+            # Create a background task for synthesis
+            loop = asyncio.get_event_loop()
+            
+            # Process text in a separate thread to avoid blocking
+            result = await loop.run_in_executor(
+                None, 
+                lambda: self._synthesize_speech_speecht5(text, voice_style)
+            )
+            
+            return result
+            
         except Exception as e:
-            logger.error(f"Error in text-to-speech conversion: {str(e)}")
+            logger.error(f"Error in text-to-speech: {str(e)}", exc_info=True)
             return {
                 "success": False,
                 "audio_bytes": b"",
                 "error": str(e)
             }
     
-    def _enhance_text_for_empathy(self, text: str) -> str:
+    def _synthesize_speech_speecht5(self, text: str, voice_style: str = "default") -> Dict[str, Any]:
         """
-        Enhance text with SSML or other markers for more empathetic speech
+        Synthesize speech using SpeechT5
         
         Args:
-            text: Original text
+            text: Text to convert to speech
+            voice_style: Voice style to use
             
         Returns:
-            Enhanced text
+            Dictionary with synthesis results
         """
-        # For Dia-1.6B, we can use simple techniques to enhance empathy
-        # Add slight breaks for pacing
-        text = text.replace(". ", ". <break time='300ms'/> ")
-        text = text.replace("? ", "? <break time='300ms'/> ")
-        text = text.replace("! ", "! <break time='300ms'/> ")
-        
-        # Emphasize key empathetic phrases
-        empathy_phrases = [
-            "understand", "feel", "support", "help",
-            "there for you", "listen", "care", "important"
-        ]
-        
-        for phrase in empathy_phrases:
-            if phrase in text.lower():
-                # Replace with emphasis, being careful about case
-                pattern = phrase
-                replacement = f"<emphasis level='moderate'>{phrase}</emphasis>"
-                text = text.replace(pattern, replacement)
-        
-        return text
-    
-    def _apply_voice_style(self, speech_array: np.ndarray, style: Dict[str, float]) -> np.ndarray:
-        """Apply voice style modifications (pitch, rate)"""
         try:
-            from scipy import signal
+            # Prepare speaker embedding based on voice style
+            speaker_embedding = self.speaker_embeddings
             
-            # Apply pitch modification
-            pitch_factor = style.get("pitch_factor", 1.0)
-            if pitch_factor != 1.0:
-                # Simple pitch shifting using resampling
-                speech_array = signal.resample(speech_array, int(len(speech_array) / pitch_factor))
+            # Process text through SpeechT5
+            inputs = self.speecht5_processor(text=text, return_tensors="pt").to(self.device)
             
-            # Apply speaking rate modification
-            speaking_rate = style.get("speaking_rate", 1.0)
-            if speaking_rate != 1.0:
-                # Simple rate modification using resampling
-                speech_array = signal.resample(speech_array, int(len(speech_array) * speaking_rate))
+            # Generate speech
+            speech = self.speecht5_model.generate_speech(
+                inputs["input_ids"], 
+                speaker_embedding,
+                vocoder=self.speecht5_vocoder
+            ).cpu().numpy()
             
-            return speech_array
+            # Convert to WAV format
+            sample_rate = 16000  # SpeechT5 uses 16kHz
+            audio_bytes = self._convert_to_wav(speech, sample_rate)
+            
+            return {
+                "success": True,
+                "audio_bytes": audio_bytes,
+                "sample_rate": sample_rate
+            }
             
         except Exception as e:
-            logger.warning(f"Failed to apply voice style, using unmodified audio: {str(e)}")
-            return speech_array
+            logger.error(f"Error in SpeechT5 synthesis: {str(e)}")
+            return {
+                "success": False,
+                "audio_bytes": b"",
+                "error": str(e)
+            }
     
-    def _speech_to_wav(self, speech_array: np.ndarray, sample_rate: int = 16000) -> bytes:
-        """Convert speech array to WAV format bytes"""
-        try:
-            import io
-            import soundfile as sf
+    def _convert_to_wav(self, speech_array: np.ndarray, sample_rate: int) -> bytes:
+        """
+        Convert speech array to WAV format bytes
+        
+        Args:
+            speech_array: Audio data as numpy array
+            sample_rate: Audio sample rate
             
+        Returns:
+            WAV audio bytes
+        """
+        try:
             # Create in-memory buffer
             wav_buffer = io.BytesIO()
             
@@ -360,12 +497,91 @@ class VoiceAI:
             logger.error(f"Failed to convert speech to WAV: {str(e)}")
             return b""
     
-    def set_voice_style(self, style: str):
-        """Set the voice style to use for TTS"""
-        if style in self.voice_styles:
-            self.current_voice = style
+    async def speak_text(self, text: str, voice_style: str = "default", blocking: bool = False) -> Dict[str, Any]:
+        """
+        Convert text to speech and play it
+        
+        Args:
+            text: Text to speak
+            voice_style: Voice style to use
+            blocking: Whether to block until audio finishes playing
+            
+        Returns:
+            Dictionary with TTS results
+        """
+        try:
+            # Generate speech
+            result = await self.text_to_speech(text, voice_style)
+            
+            if not result["success"]:
+                return result
+                
+            # Play the audio
+            audio_bytes = result["audio_bytes"]
+            sample_rate = result.get("sample_rate", 24000)
+            
+            if blocking:
+                playback_result = self.audio_player.play_audio(audio_bytes, sample_rate)
+            else:
+                playback_result = self.audio_player.play_audio_nonblocking(audio_bytes, sample_rate)
+                
+            if not playback_result["success"]:
+                return {
+                    "success": False,
+                    "error": f"Playback failed: {playback_result.get('error', 'Unknown error')}"
+                }
+                
+            return {
+                "success": True
+            }
+            
+        except Exception as e:
+            logger.error(f"Error speaking text: {str(e)}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    def set_preferred_tts(self, tts_system: str) -> bool:
+        """
+        Set preferred TTS system
+        
+        Args:
+            tts_system: TTS system to use ("dia" or "speecht5")
+            
+        Returns:
+            Whether the system was successfully set
+        """
+        if tts_system in ["dia", "speecht5"]:
+            self.preferred_tts = tts_system
+            logger.info(f"Preferred TTS system set to {tts_system}")
             return True
         return False
+    
+    def set_voice_style(self, style: str) -> bool:
+        """
+        Set voice style for Dia TTS
+        
+        Args:
+            style: Voice style name
+            
+        Returns:
+            Whether the style was successfully set
+        """
+        if self.dia_tts is not None:
+            return self.dia_tts.set_style(style)
+        return False
+    
+    def get_available_voice_styles(self) -> List[str]:
+        """
+        Get list of available voice styles
+        
+        Returns:
+            List of style names
+        """
+        if self.dia_tts is not None:
+            return self.dia_tts.get_available_styles()
+        return ["default"]
 
 class VoiceManager:
     """Manager class for handling voice feature initialization and fallback"""
@@ -374,6 +590,8 @@ class VoiceManager:
         self.voice_ai = None
         self.voice_enabled = False
         self.initialization_error = None
+        self.dia_tts = None
+        self.use_dia = True  # Default to using Dia 1.6B for TTS if available
         
     async def initialize(self) -> Dict[str, Any]:
         """
@@ -396,33 +614,166 @@ class VoiceManager:
                     "missing_dependencies": missing_deps
                 }
             
-            # Initialize VoiceAI
+            # Initialize VoiceAI for speech-to-text capabilities
             self.voice_ai = VoiceAI()
             
             # Test STT initialization
             stt_success = await self.voice_ai.initialize_stt()
             if not stt_success:
-                raise Exception("Failed to initialize speech-to-text model")
-                
-            # Test TTS initialization
-            tts_success = await self.voice_ai.initialize_tts()
-            if not tts_success:
-                raise Exception("Failed to initialize text-to-speech model")
+                logger.warning("Failed to initialize speech-to-text model, only text-to-speech will be available")
+            
+            # Initialize Dia 1.6B TTS for enhanced speech synthesis
+            try:
+                cache_dir = AppConfig.VOICE_CONFIG.get("cache_dir", os.path.join(os.path.dirname(__file__), '..', 'models', 'cache'))
+                self.dia_tts = DiaTTS(cache_dir=cache_dir)
+                dia_init_success = await self.dia_tts.initialize()
+                if not dia_init_success:
+                    logger.warning("Failed to initialize Dia 1.6B TTS, falling back to standard TTS")
+                    self.use_dia = False
+                else:
+                    logger.info("Dia 1.6B TTS initialized successfully")
+                    self.use_dia = True
+            except Exception as dia_error:
+                logger.warning(f"Failed to initialize Dia 1.6B TTS: {str(dia_error)}")
+                self.use_dia = False
+            
+            # If Dia failed and we have no backup, try standard TTS
+            if not self.use_dia:
+                tts_success = await self.voice_ai.initialize_tts()
+                if not tts_success:
+                    logger.warning("Failed to initialize backup text-to-speech model")
+                    # We can still proceed if STT works, so don't raise an exception
             
             self.voice_enabled = True
             return {
                 "success": True,
                 "voice_ai": self.voice_ai,
+                "dia_tts": self.dia_tts if self.use_dia else None,
                 "error": None
             }
             
         except Exception as e:
             self.initialization_error = str(e)
+            logger.error(f"Voice initialization error: {str(e)}", exc_info=True)
             return {
                 "success": False,
                 "error": self.initialization_error,
-                "voice_ai": None
+                "voice_ai": None,
+                "dia_tts": None
             }
+    
+    async def text_to_speech(self, text: str, style: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Convert text to speech using the best available TTS system
+        
+        Args:
+            text: Text to convert to speech
+            style: Voice style to use
+            
+        Returns:
+            Dictionary with results including audio bytes
+        """
+        if not text:
+            return {"success": False, "error": "No text provided", "audio_bytes": b""}
+        
+        # First try Dia 1.6B if available and enabled
+        if self.use_dia and self.dia_tts and self.dia_tts.initialized:
+            try:
+                logger.info(f"Using Dia 1.6B TTS for text ({len(text)} chars)")
+                result = await self.dia_tts.generate_speech(text, style)
+                if result["success"]:
+                    return result
+                
+                # If Dia fails, log the error and fall back to standard TTS
+                logger.warning(f"Dia TTS failed: {result.get('error', 'Unknown error')}, falling back to standard TTS")
+            except Exception as e:
+                logger.warning(f"Error using Dia TTS: {str(e)}, falling back to standard TTS")
+        
+        # Fall back to standard TTS
+        if self.voice_ai:
+            try:
+                logger.info(f"Using standard TTS for text ({len(text)} chars)")
+                return await self.voice_ai.text_to_speech(text, style)
+            except Exception as e:
+                logger.error(f"Error in text-to-speech conversion: {str(e)}")
+                return {
+                    "success": False,
+                    "error": f"TTS failed: {str(e)}",
+                    "audio_bytes": b""
+                }
+        
+        return {
+            "success": False,
+            "error": "No TTS system available",
+            "audio_bytes": b""
+        }
+    
+    async def play_audio(self, audio_bytes: bytes) -> bool:
+        """
+        Play audio bytes directly using system audio
+        
+        Args:
+            audio_bytes: WAV audio data as bytes
+            
+        Returns:
+            Whether playback was successful
+        """
+        if not audio_bytes:
+            logger.warning("No audio data to play")
+            return False
+            
+        try:
+            import sounddevice as sd
+            from scipy.io import wavfile
+            import io
+            
+            # Read WAV data from bytes
+            buffer = io.BytesIO(audio_bytes)
+            sample_rate, data = wavfile.read(buffer)
+            
+            # Ensure data is in float format
+            if data.dtype != np.float32:
+                data = data.astype(np.float32) / np.iinfo(data.dtype).max
+                
+            # Play audio
+            sd.play(data, sample_rate)
+            sd.wait()  # Wait until audio finishes playing
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to play audio: {str(e)}")
+            return False
+    
+    async def speak_text(self, text: str, style: Optional[str] = None) -> bool:
+        """
+        Convert text to speech and play it
+        
+        Args:
+            text: Text to speak
+            style: Voice style to use
+            
+        Returns:
+            Whether TTS and playback was successful
+        """
+        try:
+            # Convert text to speech
+            result = await self.text_to_speech(text, style)
+            
+            if not result["success"]:
+                logger.error(f"Failed to convert text to speech: {result.get('error', 'Unknown error')}")
+                return False
+                
+            # Play the audio
+            audio_bytes = result.get("audio_bytes", b"")
+            if not audio_bytes:
+                logger.error("No audio data generated")
+                return False
+                
+            return await self.play_audio(audio_bytes)
+            
+        except Exception as e:
+            logger.error(f"Error in speak_text: {str(e)}")
+            return False
     
     def get_initialization_status(self) -> Dict[str, Any]:
         """
@@ -434,5 +785,23 @@ class VoiceManager:
         return {
             "enabled": self.voice_enabled,
             "error": self.initialization_error,
-            "voice_ai": self.voice_ai
+            "voice_ai": self.voice_ai,
+            "dia_tts_available": self.use_dia and self.dia_tts and self.dia_tts.initialized
         }
+    
+    def toggle_dia_tts(self, use_dia: bool) -> bool:
+        """
+        Toggle between Dia 1.6B TTS and standard TTS
+        
+        Args:
+            use_dia: Whether to use Dia 1.6B TTS
+            
+        Returns:
+            Current status of Dia TTS usage
+        """
+        # Only allow enabling if Dia is actually available
+        if use_dia and not (self.dia_tts and self.dia_tts.initialized):
+            return False
+            
+        self.use_dia = use_dia
+        return self.use_dia

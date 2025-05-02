@@ -17,7 +17,9 @@ class ConversationalAssessmentComponent(BaseComponent):
     def __init__(self, 
                  assessment_agent,
                  on_complete: Optional[Callable[[Dict[str, Any]], None]] = None,
-                 voice_enabled: bool = False):
+                 voice_enabled: bool = False,
+                 voice_component = None,
+                 whisper_voice_input = None):
         """
         Initialize the conversational assessment component
         
@@ -25,11 +27,15 @@ class ConversationalAssessmentComponent(BaseComponent):
             assessment_agent: Agent to process assessment responses
             on_complete: Callback for when assessment is complete
             voice_enabled: Whether voice interaction is enabled
+            voice_component: Voice component instance for voice interaction
+            whisper_voice_input: Enhanced Whisper V3 Turbo voice input manager
         """
         super().__init__(key="conversational_assessment")
         self.assessment_agent = assessment_agent
         self.on_complete = on_complete
         self.voice_enabled = voice_enabled
+        self.voice_component = voice_component
+        self.whisper_voice_input = whisper_voice_input
         self.questions = self._load_questions()
         
         # Apply custom CSS
@@ -44,6 +50,7 @@ class ConversationalAssessmentComponent(BaseComponent):
             self.set_state("messages", [])
             self.set_state("responses", {})
             self.set_state("typing_delay", 0.03)  # Seconds per character for typing effect
+            self.set_state("use_whisper", self.whisper_voice_input is not None)
         
         # Get current state
         current_step = self.get_state("current_step")
@@ -82,11 +89,36 @@ class ConversationalAssessmentComponent(BaseComponent):
             if current_step not in ["intro", "processing", "complete"]:
                 self._handle_user_input()
                 
-                # Voice input (if enabled)
-                if self.voice_enabled and self.has_state("voice_component"):
-                    voice_component = self.get_state("voice_component")
-                    if hasattr(voice_component, "render_voice_input"):
-                        voice_component.render_voice_input()
+                # Standard voice input (if enabled)
+                if self.voice_enabled and self.voice_component:
+                    st.markdown("#### 🎙️ Voice Input")
+                    if hasattr(self.voice_component, "render_voice_input"):
+                        self.voice_component.render_voice_input(
+                            on_input=lambda text: self._handle_voice_transcription(text)
+                        )
+                
+                # Whisper V3 Turbo voice input (if enabled)
+                if self.whisper_voice_input and self.get_state("use_whisper", False):
+                    st.markdown("#### 🚀 Enhanced Voice Recognition (Whisper V3 Turbo)")
+                    if st.button("🎙️ Speak with Whisper V3", key="btn_whisper_assessment"):
+                        with st.spinner("Listening..."):
+                            try:
+                                result = self.whisper_voice_input.transcribe_once()
+                                if result.get("success", False) and result.get("text"):
+                                    # Process the transcribed text as a response
+                                    self._handle_voice_transcription(result["text"])
+                                    st.success(f"Transcribed: {result['text']}")
+                                else:
+                                    st.error(f"Could not transcribe audio: {result.get('error', 'Unknown error')}")
+                            except Exception as e:
+                                st.error(f"Error with voice recognition: {str(e)}")
+                
+                # Toggle for Whisper V3 Turbo
+                if self.whisper_voice_input:
+                    st.checkbox("Use Whisper V3 Turbo for speech recognition", 
+                               value=self.get_state("use_whisper", False),
+                               key="cb_assessment_whisper",
+                               on_change=self._on_whisper_changed)
     
     def _render_message(self, message):
         """Render a single message in the conversation"""
@@ -459,3 +491,33 @@ class ConversationalAssessmentComponent(BaseComponent):
         """
         
         self.apply_custom_css(assessment_css)
+    
+    def _handle_voice_transcription(self, text: str):
+        """Handle voice transcription from voice component or Whisper"""
+        if not text:
+            return
+            
+        # Get the current question
+        current_step = self.get_state("current_step")
+        
+        if current_step == "mental_health":
+            index = self.get_state("mental_health_index", 0)
+            questions = self.questions.get("mental_health", [])
+        elif current_step == "personality":
+            index = self.get_state("personality_index", 0)
+            questions = self.questions.get("personality", [])
+        else:
+            return
+            
+        # Check if we have questions and the index is valid
+        if not questions or index >= len(questions):
+            return
+            
+        question = questions[index]
+        
+        # Process the transcribed text as an answer
+        self._process_answer(question, text)
+    
+    def _on_whisper_changed(self):
+        """Handle change in Whisper V3 Turbo setting"""
+        self.set_state("use_whisper", st.session_state.cb_assessment_whisper)
