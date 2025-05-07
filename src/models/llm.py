@@ -1,287 +1,293 @@
-from __future__ import annotations
-from typing import Optional, List, Dict, Any, Union, Callable, ClassVar
-from langchain_core.language_models.llms import BaseLLM
-from langchain_core.callbacks.manager import CallbackManagerForLLMRun
-import google.generativeai as genai
-from datetime import datetime
-import logging
-from config.settings import AppConfig
+"""
+LLM module for the Contextual-Chatbot.
+Provides language model implementations and wrappers.
+"""
+
 import os
+import logging
+from typing import Dict, Any, List, Optional, Union
+from langchain.schema.language_model import BaseLanguageModel
+from langchain.schema.output import LLMResult, Generation
+from langchain.callbacks.manager import CallbackManagerForLLMRun
 
-# Only Gemini 2.0 Flash is supported
+# Import Gemini API
+import google.generativeai as genai
+from google.generativeai.types import GenerationConfig
+from google.generativeai.types.generation_types import StopReason
 
+# Configure logger
 logger = logging.getLogger(__name__)
 
-class TokenManager:
-    """Manages token usage and content filtering"""
+class GeminiLLM(BaseLanguageModel):
+    """
+    Wrapper for Google's Gemini 2.0 API
+    """
     
-    def __init__(self):
-        self.blocked_patterns = {
-            'harmful': ['hack', 'exploit', 'vulnerability'],
-            'unsafe': ['password', 'credential', 'secret'],
-            'toxic': ['hate', 'slur', 'offensive']
-        }
-    
-    def filter_content(self, text: str, category: str) -> str:
-        """Filter content based on category"""
-        if category not in self.blocked_patterns:
-            return text
-            
-        filtered_text = text
-        for pattern in self.blocked_patterns[category]:
-            filtered_text = filtered_text.replace(pattern, '[FILTERED]')
-        return filtered_text
-    
-    def check_toxicity(self, text: str) -> float:
-        """Simple toxicity check"""
-        toxic_words = set(self.blocked_patterns['toxic'])
-        words = set(text.lower().split())
-        toxicity_score = len(words.intersection(toxic_words)) / len(words) if words else 0
-        return toxicity_score
-    
-    def get_timestamp(self) -> str:
-        """Get current timestamp"""
-        return datetime.now().isoformat()
-
-class AgnoLLM(BaseLLM):
-    """Custom LLM provider using Google Gemini 2.0 Flash"""
-    
-    # Add type annotations to class attributes
-    model_name: str = "gemini-2.0-flash"
-    temperature: float = 0.7
-    top_p: float = 0.9
-    top_k: int = 50
-    max_tokens: int = 2000
-    config: Dict[str, Any] = {}
-    token_manager: TokenManager = None
-    model: Any = None # Declare model field (will hold the genai.GenerativeModel instance)
-    
-    def __init__(self, model_config: Dict[str, Any] = None, **kwargs):
-        """Initialize the LLM with configuration"""
-        # Get default config if not provided
-        config_data = model_config or AppConfig.LLM_CONFIG
-        
-        # Validate API key
-        if not config_data.get("api_key"):
-            raise ValueError("GEMINI_API_KEY environment variable is not set")
-        
-        # Always use AppConfig.GEMINI_API_KEY (set in settings.py)
-        config_data["api_key"] = AppConfig.GEMINI_API_KEY
-        
-        # Set default values from config_data for BaseLLM fields
-        kwargs.setdefault("model_name", config_data.get("model", "gemini-2.0-flash"))
-        kwargs.setdefault("temperature", config_data.get("temperature", 0.7))
-        kwargs.setdefault("top_p", config_data.get("top_p", 0.9))
-        kwargs.setdefault("top_k", config_data.get("top_k", 50))
-        kwargs.setdefault("max_tokens", config_data.get("max_tokens", 2000))
-        
-        # Initialize parent class (BaseLLM fields)
-        super().__init__(**kwargs)
-        
-        # Store the full configuration in the declared field
-        self.config = config_data
-        self.token_manager = TokenManager()
-        
-        # Initialize Gemini with proper configuration
-        try:
-            api_key = self.config["api_key"]
-            if not api_key:
-                raise ValueError("GEMINI_API_KEY is not set or is empty")
-                
-            # Configure Gemini client
-            genai.configure(api_key=api_key)
-            
-            # Configure model with generation settings
-            generation_config = genai.GenerationConfig(
-                temperature=self.temperature,
-                top_p=self.top_p,
-                top_k=self.top_k,
-                max_output_tokens=self.max_tokens,
-                candidate_count=1
-            )
-            
-            # Set safety settings
-            safety_settings = []
-            
-            # Initialize the model
-            self.model = genai.GenerativeModel(
-                model_name=self.model_name,
-                generation_config=generation_config,
-                safety_settings=safety_settings
-            )
-            
-            # Test the model with a simple generation to verify it works
-            test_response = self.model.generate_content("Hello")
-            logger.info(f"Model initialization successful: {self.model_name}")
-                
-        except ValueError as ve:
-            logger.error(f"ValueError in model initialization: {str(ve)}")
-            self.model = None
-            raise ValueError(f"Failed to initialize model: {str(ve)}")
-            
-        except Exception as e:
-            logger.error(f"Error in model initialization: {str(e)}")
-            self.model = None
-            raise RuntimeError(f"Failed to initialize model: {str(e)}")
-    
-    def _generate(
-        self,
-        prompts: List[str],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
-        **kwargs: Any
-    ) -> List[str]:
-        """Generate response synchronously for multiple prompts."""
-        results = []
-        for prompt in prompts:
-            try:
-                # Apply safety filters to input
-                safe_prompt = self._apply_safety_filters(prompt)
-                
-                # Call the model
-                response = self.model.generate_content(safe_prompt)
-                
-                # Extract text from response
-                text = response.text
-                
-                # Post-process the response
-                processed_text = self._postprocess_response(text)
-                
-                # Run callback if provided
-                if run_manager:
-                    run_manager.on_llm_new_token(processed_text)
-                    
-                # Add to results
-                results.append(processed_text)
-                
-            except Exception as e:
-                logger.error(f"Error generating response: {str(e)}")
-                # Provide a fallback response
-                results.append("I'm having trouble generating a response right now. Could you try rephrasing your question?")
-        
-        return results
-
-    async def _agenerate(
-        self,
-        prompts: List[str],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
-        **kwargs: Any
-    ) -> List[str]:
-        """Generate response asynchronously for multiple prompts."""
-        try:
-            import asyncio
-            
-            # Use a thread pool to run the synchronous _generate method
-            loop = asyncio.get_event_loop()
-            results = await loop.run_in_executor(
-                None, 
-                lambda: self._generate(prompts, stop, run_manager, **kwargs)
-            )
-            
-            return results
-        except Exception as e:
-            logger.error(f"Error in async generation: {str(e)}")
-            return ["I apologize, but I'm unable to process your request at the moment."] * len(prompts)
-
-    def _format_prompt(self, prompt: str, context: Optional[Dict[str, Any]] = None) -> str:
-        """Format prompt with context"""
-        if not context:
-            return prompt
-            
-        template = """Context: {context}
-User Query: {prompt}
-Assistant: Let me help you with that."""
-        
-        return template.format(
-            context=context.get('context', ''),
-            prompt=prompt
-        )
-    
-    def _apply_safety_filters(self, text: str) -> str:
-        """Apply input safety filters"""
-        safety_filters = AppConfig.SAFETY_CONFIG.get("blocked_categories", [])
-        filtered_text = text
-        
-        for category in safety_filters:
-            filtered_text = self.token_manager.filter_content(filtered_text, category)
-            
-        return filtered_text
-    
-    def _postprocess_response(self, text: str) -> str:
-        """Clean and validate response"""
-        # Remove any incomplete sentences
-        text = text.rsplit('.', 1)[0] + '.' if '.' in text else text
-        
-        # Apply safety filters
-        return self._apply_safety_filters(text.strip())
-    
-    def _check_safety(self, text: str) -> Dict[str, Any]:
-        """Check response for safety concerns"""
-        flags = {}
-        
-        # Check toxicity
-        toxicity_score = self.token_manager.check_toxicity(text)
-        if toxicity_score > AppConfig.SAFETY_CONFIG.get("max_toxicity", 0.7):
-            flags["toxicity"] = toxicity_score
-            
-        # Check for blocked content
-        for category in AppConfig.SAFETY_CONFIG.get("blocked_categories", []):
-            original_text = text
-            filtered_text = self.token_manager.filter_content(text, category)
-            
-            if original_text != filtered_text:
-                flags[category] = True
-                
-        return flags
-
-    def _llm_type(self) -> str:
-        """Return the type of LLM"""
-        return "agno-llm"
-
-    @property
-    def identifier(self) -> str:
-        """A unique identifier for this LLM."""
-        return f"AgnoLLM-{self.model_name}"
-        
-    def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def __init__(self, 
+                api_key: str,
+                model_name: str = "gemini-2.0-pro",
+                temperature: float = 0.7,
+                max_output_tokens: int = 1024,
+                top_p: float = 0.95,
+                top_k: int = 40):
         """
-        Generate a response for a given prompt with context
+        Initialize the Gemini LLM
         
         Args:
-            prompt: The user's prompt
-            context: Optional context information
+            api_key: Google API key for Gemini
+            model_name: Gemini model name to use
+            temperature: Temperature for generation
+            max_output_tokens: Maximum tokens to generate
+            top_p: Top-p sampling parameter
+            top_k: Top-k sampling parameter
+        """
+        super().__init__()
+        
+        # Configure Gemini API
+        genai.configure(api_key=api_key)
+        
+        self.model_name = model_name
+        
+        # Create generation config
+        self.generation_config = GenerationConfig(
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+            top_p=top_p,
+            top_k=top_k
+        )
+        
+        # Initialize the model
+        try:
+            self.model = genai.GenerativeModel(
+                model_name=model_name,
+                generation_config=self.generation_config
+            )
+            logger.info(f"Initialized Gemini model: {model_name}")
+        except Exception as e:
+            logger.error(f"Failed to initialize Gemini model: {str(e)}")
+            raise
+    
+    def _generate(self, 
+                 prompts: List[str],
+                 stop: Optional[List[str]] = None,
+                 run_manager: Optional[CallbackManagerForLLMRun] = None) -> LLMResult:
+        """
+        Generate text completions for the provided prompts
+        
+        Args:
+            prompts: List of prompts to generate from
+            stop: Optional list of stop sequences
+            run_manager: Optional callback manager
             
         Returns:
-            Dictionary with the response and metadata
+            LLMResult with generations
+        """
+        generations = []
+        
+        for prompt in prompts:
+            try:
+                # Generate response from Gemini
+                response = self.model.generate_content(
+                    prompt,
+                    generation_config=self.generation_config,
+                    safety_settings=None  # Safety handled by our SafetyAgent
+                )
+                
+                # Process response
+                if hasattr(response, 'candidates') and response.candidates:
+                    text = response.text
+                    
+                    # Extract stop reason if available
+                    stop_reason = None
+                    if hasattr(response.candidates[0], 'finish_reason'):
+                        stop_reason = response.candidates[0].finish_reason
+                    
+                    # Create Generation object
+                    gen = Generation(
+                        text=text,
+                        generation_info={
+                            "finish_reason": stop_reason
+                        }
+                    )
+                    generations.append([gen])
+                else:
+                    # Empty response - return empty generation
+                    generations.append([Generation(text="")])
+                    
+            except Exception as e:
+                logger.error(f"Error generating with Gemini: {str(e)}")
+                # Return empty generation on error
+                generations.append([Generation(text="", generation_info={"error": str(e)})])
+        
+        return LLMResult(generations=generations)
+    
+    async def _agenerate(self, 
+                       prompts: List[str],
+                       stop: Optional[List[str]] = None,
+                       run_manager: Optional[CallbackManagerForLLMRun] = None) -> LLMResult:
+        """
+        Asynchronously generate text completions for the provided prompts
+        
+        Args:
+            prompts: List of prompts to generate from
+            stop: Optional list of stop sequences
+            run_manager: Optional callback manager
+            
+        Returns:
+            LLMResult with generations
         """
         try:
-            # Format the prompt with context if provided
-            formatted_prompt = self._format_prompt(prompt, context)
+            # For now, we use the synchronous version
+            # Gemini Python SDK currently doesn't have full async support
+            # This could be updated in the future when supported
+            return self._generate(prompts, stop, run_manager)
+        except Exception as e:
+            logger.error(f"Error in async generation with Gemini: {str(e)}")
+            return LLMResult(generations=[[Generation(text="", generation_info={"error": str(e)})]])
+
+    async def agenerate_messages(self, messages, **kwargs):
+        """
+        Generate text from a list of messages for chat models.
+        
+        Args:
+            messages: List of message objects
             
-            # Start timer
-            start_time = datetime.now()
+        Returns:
+            LLMResult with generations
+        """
+        # Convert message format to text prompt compatible with Gemini
+        prompt = self._messages_to_prompt(messages)
+        
+        # Generate using the text prompt
+        result = await self._agenerate([prompt], **kwargs)
+        return result
+    
+    def _messages_to_prompt(self, messages) -> str:
+        """
+        Convert message objects to a text prompt for Gemini
+        
+        Args:
+            messages: List of message objects
             
-            # Generate response
-            response = self._generate([formatted_prompt])[0]
+        Returns:
+            Formatted text prompt
+        """
+        prompt_parts = []
+        
+        for message in messages:
+            # Extract role and content from message
+            if hasattr(message, "type") and hasattr(message, "content"):
+                role = message.type
+                content = message.content
+            elif hasattr(message, "role") and hasattr(message, "content"):
+                role = message.role
+                content = message.content
+            else:
+                # Try to get content directly
+                content = str(message)
+                role = "user"
             
-            # End timer
-            end_time = datetime.now()
-            time_taken = (end_time - start_time).total_seconds()
+            # Format based on role
+            if role == "system" or role == "SystemMessage":
+                prompt_parts.append(f"System: {content}")
+            elif role == "human" or role == "user" or role == "HumanMessage":
+                prompt_parts.append(f"User: {content}")
+            elif role == "ai" or role == "assistant" or role == "AIMessage":
+                prompt_parts.append(f"Assistant: {content}")
+            else:
+                prompt_parts.append(f"{role}: {content}")
+        
+        # Join into a single string
+        return "\n\n".join(prompt_parts)
+    
+    @property
+    def _llm_type(self) -> str:
+        """Return the type of LLM"""
+        return "gemini"
+
+# Factory function to create an LLM based on configuration
+def get_llm(config: Dict[str, Any] = None) -> BaseLanguageModel:
+    """
+    Create a language model instance based on configuration
+    
+    Args:
+        config: Configuration dictionary
+        
+    Returns:
+        LLM instance
+    """
+    config = config or {}
+    
+    # Check for Gemini configuration
+    if config.get("provider", "").lower() == "gemini":
+        # Get API key from config or environment
+        api_key = config.get("api_key") or os.getenv("GEMINI_API_KEY")
+        
+        if not api_key:
+            raise ValueError("Gemini API key not found in config or environment")
+        
+        # Create Gemini LLM
+        return GeminiLLM(
+            api_key=api_key,
+            model_name=config.get("model_name", "gemini-2.0-pro"),
+            temperature=config.get("temperature", 0.7),
+            max_output_tokens=config.get("max_output_tokens", 1024),
+            top_p=config.get("top_p", 0.95),
+            top_k=config.get("top_k", 40)
+        )
+    
+    # Default fallback (should be extended with other providers as needed)
+    logger.warning(f"Unknown LLM provider: {config.get('provider')}. Using default.")
+    
+    # Import a default model (you may want to update this based on your needs)
+    from langchain.llms import OpenAI
+    return OpenAI()
+
+# AgnoLLM class that wraps LLM for use with Agno framework
+class AgnoLLM:
+    """LLM wrapper for use with Agno framework"""
+    
+    def __init__(self, config: Dict[str, Any] = None):
+        """Initialize with configuration"""
+        self.config = config or {}
+        
+        # Use environment variables for API keys if not in config
+        if "api_key" not in self.config:
+            # Check for Gemini API key
+            if os.getenv("GEMINI_API_KEY"):
+                self.config["provider"] = "gemini"
+                self.config["api_key"] = os.getenv("GEMINI_API_KEY")
+        
+        # Initialize the LLM
+        self.llm = get_llm(self.config)
+    
+    async def generate(self, prompt: str) -> Dict[str, Any]:
+        """
+        Generate a response to the prompt
+        
+        Args:
+            prompt: Prompt text
             
-            # Check safety
-            safety_flags = self._check_safety(response)
+        Returns:
+            Dictionary with generated response
+        """
+        try:
+            # Generate with LLM
+            if hasattr(self.llm, "agenerate"):
+                result = await self.llm.agenerate([prompt])
+                response = result.generations[0][0].text
+            else:
+                # Fallback for non-async LLMs
+                result = self.llm.generate([prompt])
+                response = result.generations[0][0].text
             
             return {
                 "response": response,
-                "time_taken": time_taken,
-                "safety_flags": safety_flags,
-                "timestamp": self.token_manager.get_timestamp()
+                "success": True
             }
         except Exception as e:
-            logger.error(f"Error generating response: {str(e)}")
+            logger.error(f"Error generating with LLM: {str(e)}")
             return {
-                "response": "I apologize, but I'm having trouble processing your request.",
                 "error": str(e),
-                "timestamp": self.token_manager.get_timestamp()
+                "success": False
             }

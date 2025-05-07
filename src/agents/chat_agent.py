@@ -1,5 +1,5 @@
 from typing import Optional, Dict, Any, List
-# Only Gemini 2.0 Flash is supported. Remove Anthropic/Claude imports.
+# Import Gemini integration
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import SystemMessage, HumanMessage
 from langchain.schema.language_model import BaseLanguageModel
@@ -7,21 +7,28 @@ from langchain.memory import ConversationBufferMemory
 from agno.memory import Memory
 from agno.knowledge import AgentKnowledge
 from .base_agent import BaseAgent
-import anthropic
-import httpx
 import logging
 from datetime import datetime
 
+# Import the Gemini LLM
+from src.models.gemini_llm import create_gemini_llm, GeminiChatModel
+# Import for therapy integration
+from src.agents.therapy_agent import TherapyAgent
+
 logger = logging.getLogger(__name__)
 
-class CustomHTTPClient(httpx.Client):
-    def __init__(self, *args, **kwargs):
-        # Remove proxies argument if present
-        kwargs.pop("proxies", None)
-        super().__init__(*args, **kwargs)
-
 class ChatAgent(BaseAgent):
-    def __init__(self, model: BaseLanguageModel):
+    def __init__(self, model: BaseLanguageModel = None):
+        # If no model is provided, create a Gemini Chat Model
+        if model is None:
+            model = create_gemini_llm({
+                "model_type": "chat",
+                "model_name": "gemini-2.0-flash",
+                "temperature": 0.7,
+                "max_output_tokens": 2048
+            })
+            logger.info("Created default Gemini Chat Model for ChatAgent")
+
         # Create a langchain memory instance
         langchain_memory = ConversationBufferMemory(
             memory_key="chat_history",
@@ -32,8 +39,8 @@ class ChatAgent(BaseAgent):
 
         # Create memory dict for agno Memory
         memory_dict = {
-            "memory": "chat_memory",  # Memory parameter should be a string
-            "storage": "local_storage",  # Storage parameter should be a string
+            "memory": "chat_memory",
+            "storage": "local_storage",
             "memory_key": "chat_history",
             "chat_memory": langchain_memory,
             "input_key": "input",
@@ -47,35 +54,53 @@ class ChatAgent(BaseAgent):
         super().__init__(
             model=model,
             name="chat_assistant",
-            description="Supportive mental health chat assistant",
+            description="Supportive mental health chat assistant with Gemini AI",
             tools=[],
             memory=memory,
             knowledge=AgentKnowledge()
         )
+        
+        # Create therapy agent for accessing therapeutic techniques
+        self.therapy_agent = None
 
         self.chat_prompt = ChatPromptTemplate.from_messages([
-            SystemMessage(content="""You are a supportive mental health assistant.
-Your role is to provide empathetic, non-judgmental support while:
-1. Maintaining professional boundaries
-2. Offering evidence-based information
-3. Encouraging professional help when appropriate
-4. Avoiding diagnostic statements
-5. Focusing on emotional support and coping strategies
-6. Personalizing your approach based on the user's personality profile
+            SystemMessage(content="""You are a supportive mental health assistant powered by Google Gemini 2.0 AI.
+Your role is to provide empathetic, culturally sensitive, and non-judgmental support while:
+1. Creating a safe, empathetic space through your responses
+2. Validating emotions and experiences with genuine understanding
+3. Offering evidence-based coping strategies appropriate to the user's situation
+4. Encouraging professional help when appropriate without being pushy
+5. Avoiding diagnostic statements or medical advice
+6. Personalizing your approach based on the user's personality profile and cultural background
+7. Responding with cultural sensitivity and awareness
 
-Guidelines:
-- Be warm and empathetic
-- Validate feelings without reinforcing negative patterns
-- Suggest practical coping strategies
-- Encourage professional help when appropriate
-- Maintain a supportive, non-judgmental tone"""),
+Guidelines for Empathetic Responses:
+- Mirror the user's emotional state appropriately in your tone
+- Validate their feelings and experiences without reinforcing negative patterns
+- Use a warm, conversational style that feels human and authentic
+- Suggest practical and culturally relevant coping strategies
+- Adapt your responses based on personality assessment data
+- Maintain appropriate professional boundaries while being genuinely supportive
+- Recognize cultural nuances in emotional expression and mental health perspectives
+- Ensure responses are sensitive to different cultural backgrounds and values
+
+In every response:
+1. Show that you understand the user's emotions
+2. Validate their experiences
+3. Provide helpful perspective or coping strategies
+4. End with a supportive statement or gentle question
+
+When therapeutic techniques are included, integrate them naturally into your response, 
+emphasizing how these evidence-based strategies can help with their specific situation."""),
             HumanMessage(content="""User Message: {message}
 Emotional Context: {emotion_data}
 Safety Context: {safety_data}
-Diagnosis: {diagnosis_data}
+Diagnosis Context: {diagnosis_data}
+Personality Profile: {personality_data}
 Previous Conversation: {history}
+Therapeutic Techniques: {therapeutic_data}
 
-Provide a supportive, empathetic response that addresses the user's emotional needs and current diagnosis while maintaining appropriate boundaries and suggesting coping strategies.""")
+Provide a supportive, empathetic response that addresses the user's emotional needs and current context while being culturally sensitive. Tailor your response to their personality profile and emotional state. When therapeutic techniques are provided, integrate them naturally as actionable steps.""")
         ])
 
     async def generate_response(self, message: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
@@ -100,6 +125,11 @@ Provide a supportive, empathetic response that addresses the user's emotional ne
             diagnosis_data = context.get("diagnosis", "No diagnosis available")
             # Include personality context
             personality_data = self._format_personality_data(context.get("personality", {})) if context else "No personality data available"
+            
+            # Get therapeutic techniques if available in context
+            therapeutic_data = "No therapeutic techniques available"
+            if context and "therapeutic_techniques" in context:
+                therapeutic_data = context.get("therapeutic_techniques", {}).get("formatted_techniques", "")
 
             # Generate response
             try:
@@ -111,6 +141,7 @@ Provide a supportive, empathetic response that addresses the user's emotional ne
                         safety_data=safety_data,
                         diagnosis_data=diagnosis_data,
                         personality_data=personality_data,
+                        therapeutic_data=therapeutic_data,
                         history=self._format_history(history)
                     )[0]
                 ])
@@ -126,12 +157,28 @@ Provide a supportive, empathetic response that addresses the user's emotional ne
                     safety_data=safety_data,
                     diagnosis_data=diagnosis_data,
                     personality_data=personality_data,
+                    therapeutic_data=therapeutic_data,
                     history=self._format_history(history)
                 )
                 prompt_text = "\n".join(m.content for m in rendered_msgs)
                 # Use a synchronous approach as fallback
                 sync_result = self.llm.generate([prompt_text])
                 response_text = sync_result.generations[0][0].text
+
+            # Check if we need to enhance the response with therapeutic techniques
+            if context and "workflow_id" in context and context["workflow_id"] == "therapeutic_chat":
+                # Check if therapy agent exists, create if not
+                if self.therapy_agent is None:
+                    logger.info("Creating therapy agent for therapeutic chat workflow")
+                    self.therapy_agent = TherapyAgent(model_provider=self.llm)
+                
+                # Process the message with therapy agent
+                if "therapeutic_techniques" not in context:
+                    therapy_result = await self.therapy_agent.process(message, context)
+                    
+                    # Enhance response with therapeutic techniques if available
+                    if therapy_result and therapy_result.get("formatted_techniques"):
+                        response_text = self.therapy_agent.enhance_response(response_text, therapy_result)
 
             # Attempt to update memory, but don't let it break response
             try:

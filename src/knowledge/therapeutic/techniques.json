@@ -1,0 +1,183 @@
+{
+  "techniques": [
+    {
+      "id": "cbt_cognitive_restructuring",
+      "name": "Cognitive Restructuring",
+      "category": "CBT",
+      "description": "A technique to identify, challenge, and modify negative thought patterns that contribute to emotional distress.",
+      "steps": [
+        "Identify the negative thought or belief",
+        "Recognize the cognitive distortion (e.g., all-or-nothing thinking, catastrophizing)",
+        "Challenge the thought with evidence",
+        "Reframe with a more balanced, realistic perspective",
+        "Practice the new thought pattern regularly"
+      ],
+      "examples": [
+        "Instead of 'I always fail', try 'I've had successes and failures, and can learn from both'"
+      ],
+      "emotions": ["anxiety", "depression", "frustration", "hopelessness"],
+      "difficulty": "moderate"
+    },
+    {
+      "id": "mindfulness_breathing",
+      "name": "Mindful Breathing",
+      "category": "Mindfulness",
+      "description": "A foundational mindfulness practice that uses breath awareness to anchor attention to the present moment.",
+      "steps": [
+        "Find a comfortable seated position",
+        "Focus your attention on your breath",
+        "Notice the sensation of breathing without changing it",
+        "When your mind wanders, gently return focus to your breath",
+        "Practice for 5-10 minutes daily, gradually increasing time"
+      ],
+      "examples": [
+        "Count breaths from 1 to 10, then start over"
+      ],
+      "emotions": ["anxiety", "stress", "overwhelm", "anger"],
+      "difficulty": "beginner"
+    },
+    {
+      "id": "act_values_clarification",
+      "name": "Values Clarification",
+      "category": "ACT",
+      "description": "An Acceptance and Commitment Therapy technique to identify personal values to guide meaningful action.",
+      "steps": [
+        "Reflect on what truly matters to you in different life domains",
+        "Identify specific values that resonate with you (e.g., connection, growth, health)",
+        "Distinguish between values and goals",
+        "Create concrete actions aligned with these values",
+        "Use values as a compass when making decisions"
+      ],
+      "examples": [
+        "If 'connection' is a value, a concrete step might be 'Call one friend weekly'"
+      ],
+      "emotions": ["confusion", "purposelessness", "indecision"],
+      "difficulty": "moderate"
+    },
+    {
+      "id": "dbt_distress_tolerance",
+      "name": "TIPP Skills for Distress Tolerance",
+      "category": "DBT",
+      "description": "A set of Dialectical Behavior Therapy skills designed to help manage overwhelming emotions in the moment.",
+      "steps": [
+        "Temperature: Change body temperature by splashing cold water on face",
+        "Intense exercise: Engage in brief, intense physical activity",
+        "Paced breathing: Slow your breathing to 5-6 breaths per minute",
+        "Progressive muscle relaxation: Tense and release muscles systematically"
+      ],
+      "examples": [
+        "Hold ice cube in hand or against forehead when feeling overwhelmed"
+      ],
+      "emotions": ["intense anger", "anxiety", "urges", "overwhelm"],
+      "difficulty": "beginner"
+    },
+    {
+      "id": "behavioral_activation",
+      "name": "Behavioral Activation",
+      "category": "CBT",
+      "description": "A technique to increase engagement in positive activities to improve mood and combat depression.",
+      "steps": [
+        "Track daily activities and mood to identify patterns",
+        "Identify values and activities that bring meaning or pleasure",
+        "Schedule small, achievable activities daily",
+        "Gradually increase difficulty of activities",
+        "Notice and record improvements in mood after activities"
+      ],
+      "examples": [
+        "Start with 5-minute walks, gradually increasing to longer walks"
+      ],
+      "emotions": ["depression", "apathy", "low motivation", "isolation"],
+      "difficulty": "moderate"
+    },
+    {
+      "id": "gratitude_practice",
+      "name": "Gratitude Practice",
+      "category": "Positive Psychology",
+      "description": "A regular practice of noticing and appreciating positive aspects of life to increase well-being.",
+      "steps": [
+        "Set aside time daily (often morning or evening)",
+        "Write down 3-5 things you're grateful for",
+        "Include specific details about why you're grateful",
+        "Include both small everyday things and larger life aspects",
+        "Review your gratitude journal regularly"
+      ],
+      "examples": [
+        "I'm grateful for my morning coffee because it gives me a peaceful start to the day"
+      ],
+      "emotions": ["depression", "negativity bias", "pessimism"],
+      "difficulty": "beginner"
+    },
+    {
+      "id": "progressive_muscle_relaxation",
+      "name": "Progressive Muscle Relaxation",
+      "category": "Relaxation Techniques",
+      "description": "A practice of tensing and releasing muscle groups to reduce physical tension and anxiety.",
+      "steps": [
+        "Find a quiet, comfortable space to sit or lie down",
+        "Starting with your feet, tense the muscles for 5-10 seconds",
+        "Release the tension and notice the feeling of relaxation",
+        "Progress through all muscle groups (legs, abdomen, chest, arms, shoulders, face)",
+        "Practice daily for best results"
+      ],
+      "examples": [
+        "For hands: make a tight fist, hold, then release completely"
+      ],
+      "emotions": ["anxiety", "physical tension", "stress", "insomnia"],
+      "difficulty": "beginner"
+    },
+    {
+      "id": "imagery_rescripting",
+      "name": "Imagery Rescripting",
+      "category": "Schema Therapy",
+      "description": "A technique to transform distressing mental images or memories into more benign or empowering ones.",
+      "steps": [
+        "Identify a troubling image or memory",
+        "Observe details and associated emotions",
+        "Introduce changes to the image (e.g., adding resources, changing perspective)",
+        "Develop a new, preferred outcome or scenario",
+        "Practice visualizing the rescripted image regularly"
+      ],
+      "examples": [
+        "If recalling a time you felt powerless, imagine your adult self entering the scene to provide support"
+      ],
+      "emotions": ["trauma responses", "fear", "shame", "helplessness"],
+      "difficulty": "advanced"
+    },
+    {
+      "id": "self_compassion_practice",
+      "name": "Self-Compassion Practice",
+      "category": "Compassion-Focused Therapy",
+      "description": "Developing a kind, understanding attitude toward oneself during times of suffering or failure.",
+      "steps": [
+        "Notice moments of struggle or self-criticism",
+        "Acknowledge that suffering is part of shared human experience",
+        "Speak to yourself as you would to a good friend",
+        "Place a hand on your heart and offer self-kindness",
+        "Repeat self-compassion phrases (e.g., 'May I be kind to myself')"
+      ],
+      "examples": [
+        "When making a mistake, say 'This is a moment of suffering. Many others have felt this way too.'"
+      ],
+      "emotions": ["shame", "self-criticism", "guilt", "perfectionism"],
+      "difficulty": "moderate"
+    },
+    {
+      "id": "worry_time",
+      "name": "Scheduled Worry Time",
+      "category": "CBT",
+      "description": "A technique to contain excessive worry by allocating a specific time period for focused worry.",
+      "steps": [
+        "Designate 15-30 minutes daily as 'worry time'",
+        "When worries arise outside worry time, note them down",
+        "During worry time, review and reflect on noted concerns",
+        "Problem-solve what can be addressed",
+        "End worry time decisively when the allocated time is up"
+      ],
+      "examples": [
+        "Set aside 7:00-7:20pm each evening to review worry notes from the day"
+      ],
+      "emotions": ["anxiety", "rumination", "overwhelm", "insomnia"],
+      "difficulty": "moderate"
+    }
+  ]
+}

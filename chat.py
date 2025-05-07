@@ -142,8 +142,47 @@ class VoiceChat:
             Response dictionary
         """
         try:
-            result = await self.orchestrator.process_message(message)
-            return result
+            # First, analyze emotions in the message
+            emotion_result = await self.orchestrator.emotion.generate_response(message)
+            logger.debug(f"Emotion analysis: {emotion_result}")
+            
+            # Then, run safety check
+            safety_result = await self.orchestrator.safety.generate_response(
+                message, 
+                {"emotion": emotion_result}
+            )
+            logger.debug(f"Safety check: {safety_result}")
+            
+            # Build context from previous results
+            context = {
+                "emotion": emotion_result,
+                "safety": safety_result
+            }
+            
+            # Add personality context if available from history
+            if self.conversation_history and len(self.conversation_history) > 2:
+                # Extract any personality data from previous interactions
+                for entry in reversed(self.conversation_history):
+                    if "metadata" in entry and "personality" in entry["metadata"]:
+                        context["personality"] = entry["metadata"]["personality"]
+                        break
+            
+            # Add cultural context if we have detected it
+            # This would come from previous interactions
+            for entry in reversed(self.conversation_history):
+                if "metadata" in entry and "cultural_context" in entry["metadata"]:
+                    context["culture"] = entry["metadata"]["cultural_context"]
+                    break
+            
+            # Generate chat response with all context
+            response_result = await self.orchestrator.chat.generate_response(message, context)
+            
+            # Add emotion analysis to response metadata
+            response_result["emotion_analysis"] = emotion_result
+            response_result["safety_check"] = safety_result
+            
+            return response_result
+            
         except Exception as e:
             logger.error(f"Error processing message: {str(e)}")
             return {

@@ -6,7 +6,7 @@ This serves as the main entry point for the application, integrating all compone
 import streamlit as st
 import asyncio
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import os
 import time
 
@@ -101,33 +101,36 @@ class MentalHealthApp:
                     )
             
             # Initialize core agents
-            from src.models.llm import LLMProvider
-            llm_provider = LLMProvider()
+            # Use our new Gemini LLM implementation instead of the generic LLMProvider
+            from src.models.gemini_llm import GeminiLLM
             
-            # Initialize the diagnosis agent
+            # Create a shared Gemini LLM instance for consistency across agents
+            gemini_llm = GeminiLLM(api_key=api_key)
+            
+            # Initialize the diagnosis agent with Gemini
             diagnosis_agent = IntegratedDiagnosisAgent(
-                model=llm_provider.get_model(),
+                model=gemini_llm,
                 temperature=0.2
             )
             components["integrated_diagnosis"] = diagnosis_agent
             
-            # Initialize the chat agent
+            # Initialize the chat agent with Gemini
             chat_agent = ChatAgent(
-                model=llm_provider.get_model(),
+                model=gemini_llm,
                 temperature=0.7
             )
             components["chat"] = chat_agent
             
-            # Initialize the emotion agent
+            # Initialize the emotion agent with Gemini
             emotion_agent = EmotionAgent(
-                model=llm_provider.get_model(),
+                model=gemini_llm,
                 temperature=0.2
             )
             components["emotion"] = emotion_agent
             
-            # Initialize the safety agent
+            # Initialize the safety agent with Gemini
             safety_agent = SafetyAgent(
-                model=llm_provider.get_model(),
+                model=gemini_llm,
                 temperature=0.1
             )
             components["safety"] = safety_agent
@@ -253,7 +256,56 @@ class MentalHealthApp:
             }
         }
     
-    def run(self):
+    def _generate_recommended_actions(self, assessment_results: Dict[str, Any]) -> List[str]:
+        """
+        Generate personalized recommended actions based on assessment results
+        
+        Args:
+            assessment_results: Dictionary containing assessment results
+            
+        Returns:
+            List of recommended actions
+        """
+        actions = []
+        
+        # Get mental health data
+        mental_health = assessment_results.get("mental_health", {})
+        severity_levels = mental_health.get("severity_levels", {})
+        
+        # Add general action for everyone
+        actions.append("Continue the conversation to explore specific areas of concern")
+        
+        # Add journaling recommendation for most people
+        actions.append("Consider trying a daily journaling practice to track your mood and thoughts")
+        
+        # Add specific recommendations based on assessment
+        if severity_levels.get("stress", "mild") in ["moderate", "severe"]:
+            actions.append("Explore stress management techniques like deep breathing or progressive muscle relaxation")
+        
+        if severity_levels.get("sleep", "mild") in ["moderate", "severe"]:
+            actions.append("Set a consistent sleep schedule to help address sleep difficulties")
+        
+        if severity_levels.get("anxiety", "mild") in ["moderate", "severe"]:
+            actions.append("Practice mindfulness or meditation to help manage anxiety")
+        
+        if severity_levels.get("depression", "mild") in ["moderate", "severe"]:
+            actions.append("Create a daily structure with small, achievable goals")
+        
+        if severity_levels.get("social", "mild") in ["moderate", "severe"]:
+            actions.append("Reach out to a friend or family member for a brief conversation today")
+        
+        # Add self-care recommendation for everyone
+        actions.append("Make time for a small self-care activity that you enjoy today")
+        
+        # If many severe indicators, suggest professional support
+        severe_count = sum(1 for severity in severity_levels.values() if severity == "severe")
+        if severe_count >= 2:
+            actions.append("Consider speaking with a mental health professional for additional support")
+        
+        # Return maximum 5 actions
+        return actions[:5]
+    
+    async def run(self):
         """Run the application"""
         # Run async initialization if not already done
         if not st.session_state.app_initialized:
@@ -268,24 +320,20 @@ class MentalHealthApp:
             st.session_state.ui_manager_state.get("current_route") == "results"):
             
             if st.session_state.assessment_results:
-                # Generate empathy response and immediate actions
-                empathy_response = (
-                    "Based on your responses, I can see that you're experiencing some moderate levels of "
-                    "stress and sleep challenges, while showing resilience in other areas. Your personality "
-                    "profile indicates someone who is generally sociable, compassionate, and open to new "
-                    "experiences, which can be valuable strengths in managing your well-being."
-                )
-                
-                immediate_actions = [
-                    "Continue the conversation to explore specific areas of concern",
-                    "Consider trying a simple daily journaling practice to track your mood",
-                    "Explore stress management techniques like deep breathing or progressive muscle relaxation",
-                    "Set a consistent sleep schedule to help address sleep difficulties"
-                ]
-                
-                # Render results page with the data
+                # Get the results component
                 results_component = self.ui_manager.components.get("results")
                 if results_component:
+                    # Use Gemini to generate empathetic response
+                    empathy_response = await results_component.generate_empathetic_response(
+                        st.session_state.assessment_results
+                    )
+                    
+                    # Generate recommended actions based on assessment results
+                    immediate_actions = self._generate_recommended_actions(
+                        st.session_state.assessment_results
+                    )
+                    
+                    # Render results page with personalized Gemini-generated response
                     results_component.render(
                         assessment_results=st.session_state.assessment_results,
                         empathy_response=empathy_response,
@@ -299,4 +347,4 @@ class MentalHealthApp:
 # Main entry point
 if __name__ == "__main__":
     app = MentalHealthApp()
-    app.run()
+    asyncio.run(app.run())

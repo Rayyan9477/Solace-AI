@@ -29,6 +29,9 @@ class AgentOrchestrator(Module):
         self.current_workflows = {}
         self.workflow_history = {}
         
+        # Initialize context store for shared context between agents
+        self.context_store = {}
+        
     async def initialize(self) -> bool:
         """Initialize the orchestrator and register available agents"""
         await super().initialize()
@@ -42,6 +45,8 @@ class AgentOrchestrator(Module):
         self.expose_service("execute_workflow", self.execute_workflow)
         self.expose_service("register_agent", self.register_agent)
         self.expose_service("send_message", self.send_message)
+        self.expose_service("get_context", self.get_context)
+        self.expose_service("update_context", self.update_context)
         
         return True
     
@@ -87,19 +92,29 @@ class AgentOrchestrator(Module):
             }
         )
         
+        # Register enhanced chat workflow with Gemini 2.0
+        self.register_workflow(
+            "enhanced_empathetic_chat",
+            ["safety_agent", "emotion_agent", "personality_agent", "chat_agent"],
+            {
+                "description": "Enhanced chat workflow with emotion analysis and personalized empathetic responses using Gemini 2.0",
+                "default_timeout": 45
+            }
+        )
+        
+        # Register therapeutic chat workflow with actionable steps
+        self.register_workflow(
+            "therapeutic_chat",
+            ["safety_agent", "emotion_agent", "personality_agent", "therapy_agent", "chat_agent"],
+            {
+                "description": "Therapeutic chat workflow with practical actionable steps based on evidence-based techniques",
+                "default_timeout": 60
+            }
+        )
+        
         self.logger.debug(f"Registered {len(self.workflows)} standard workflows")
     
     def register_agent(self, agent_id: str, agent_module: Module) -> bool:
-        """
-        Register an agent module with the orchestrator.
-        
-        Args:
-            agent_id: Identifier for the agent
-            agent_module: Agent module instance
-            
-        Returns:
-            True if registration succeeded, False otherwise
-        """
         if agent_id in self.agent_modules:
             self.logger.warning(f"Agent {agent_id} already registered")
             return False
@@ -159,12 +174,19 @@ class AgentOrchestrator(Module):
         workflow = self.workflows[workflow_id]
         agent_sequence = workflow["agent_sequence"]
         
+        # Update context store with initial context
+        if context:
+            await self.update_context(session_id, context)
+        
+        # Get full context for this session
+        full_context = await self.get_context(session_id)
+        
         # Prepare workflow state
         workflow_state = {
             "workflow_id": workflow_id,
             "session_id": session_id,
             "input": input_data,
-            "context": context or {},
+            "context": full_context,
             "results": {},
             "start_time": time.time(),
             "current_step": 0,
@@ -211,11 +233,23 @@ class AgentOrchestrator(Module):
                     workflow_state["error"] = error_msg
                     break
                 
-                # Execute agent's process method
+                # Refresh context before processing
+                workflow_state["context"] = await self.get_context(session_id)
+                
+                # Execute agent's process method with updated context
                 result = await agent_process(current_data, context=workflow_state["context"])
                 
-                # Store result
+                # Store result in workflow state
                 workflow_state["results"][agent_id] = result
+                
+                # Extract and store context updates from the result if available
+                if isinstance(result, dict) and "context_updates" in result:
+                    # Update context with agent's new information
+                    context_updates = result.pop("context_updates")
+                    if context_updates:
+                        await self.update_context(session_id, context_updates)
+                        self.logger.debug(f"Updated context from {agent_id}", 
+                                      {"session_id": session_id, "context_keys": list(context_updates.keys())})
                 
                 # Update data for next agent
                 current_data = result
@@ -249,6 +283,9 @@ class AgentOrchestrator(Module):
         self.workflow_history[session_id] = workflow_state
         self.current_workflows.pop(session_id, None)
         
+        # Add final context to the return data
+        final_context = await self.get_context(session_id)
+        
         # Return the final output
         return {
             "output": current_data,
@@ -256,7 +293,8 @@ class AgentOrchestrator(Module):
             "workflow_id": workflow_id,
             "status": workflow_state["status"],
             "duration": workflow_state["duration"],
-            "steps_completed": workflow_state["steps_completed"]
+            "steps_completed": workflow_state["steps_completed"],
+            "context": final_context
         }
     
     async def send_message(self, sender_id: str, recipient_id: str, 
@@ -350,6 +388,79 @@ class AgentOrchestrator(Module):
             "status": "not_found",
             "error": f"No workflow found for session {session_id}"
         }
+    
+    async def get_context(self, session_id: str, context_type: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get context data for a session
+        
+        Args:
+            session_id: Session identifier
+            context_type: Optional specific context type to retrieve (emotion, safety, personality, etc.)
+            
+        Returns:
+            Context data for the session
+        """
+        # Initialize context if not exists
+        if session_id not in self.context_store:
+            self.context_store[session_id] = {}
+            
+        # Return specific context type if requested
+        if context_type:
+            return {
+                context_type: self.context_store[session_id].get(context_type, {})
+            }
+            
+        # Return all context
+        return self.context_store[session_id]
+        
+    async def update_context(self, session_id: str, context_data: Dict[str, Any], merge: bool = True) -> bool:
+        """
+        Update context data for a session
+        
+        Args:
+            session_id: Session identifier
+            context_data: New context data to update
+            merge: If True, merge with existing context; if False, replace it
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Initialize context if not exists
+            if session_id not in self.context_store:
+                self.context_store[session_id] = {}
+                
+            # Update context based on merge strategy
+            if merge:
+                # Recursively merge nested dictionaries
+                self._deep_merge(self.context_store[session_id], context_data)
+            else:
+                # Replace context entirely
+                self.context_store[session_id] = context_data
+                
+            self.logger.debug(f"Updated context for session {session_id}", 
+                          {"session_id": session_id, "context_keys": list(context_data.keys())})
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error updating context for session {session_id}: {str(e)}")
+            return False
+            
+    def _deep_merge(self, target: Dict[str, Any], source: Dict[str, Any]) -> None:
+        """
+        Recursively merge source dict into target dict
+        
+        Args:
+            target: Target dictionary to merge into
+            source: Source dictionary to merge from
+        """
+        for key, value in source.items():
+            if key in target and isinstance(target[key], dict) and isinstance(value, dict):
+                # Recursively merge nested dictionaries
+                self._deep_merge(target[key], value)
+            else:
+                # Update or add non-dictionary items
+                target[key] = value
     
     async def shutdown(self) -> bool:
         """Shutdown the orchestrator"""

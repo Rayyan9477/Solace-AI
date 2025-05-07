@@ -434,6 +434,126 @@ class ResultsDisplayComponent(BaseComponent):
         else:
             st.info("No mental health score data available.")
     
+    async def generate_empathetic_response(self, assessment_results: Dict[str, Any]) -> str:
+        """
+        Generate an empathetic response based on assessment results using Gemini 2.0
+        
+        Args:
+            assessment_results: Dictionary containing assessment results
+            
+        Returns:
+            Empathetic response text
+        """
+        try:
+            # Import Gemini LLM
+            from src.models.gemini_llm import GeminiLLM
+            from src.config.settings import AppConfig
+            import os
+            
+            # Get API key
+            api_key = AppConfig.GEMINI_API_KEY or os.environ.get("GEMINI_API_KEY")
+            if not api_key:
+                logger.warning("No Gemini API key found, using default response")
+                return self._get_default_empathetic_response(assessment_results)
+            
+            # Create Gemini LLM instance
+            gemini_llm = GeminiLLM(api_key=api_key)
+            
+            # Extract personality data
+            personality = assessment_results.get("personality", {})
+            traits = personality.get("traits", {})
+            
+            # Extract mental health data
+            mental_health = assessment_results.get("mental_health", {})
+            overall_status = mental_health.get("overall_status", "mild")
+            severity_levels = mental_health.get("severity_levels", {})
+            
+            # Create prompt for Gemini
+            prompt = f"""Based on a mental health and personality assessment, I need to generate an empathetic, supportive response for the user. 
+Here are their results:
+
+## Personality Profile:
+"""
+
+            # Add personality traits to prompt
+            if traits:
+                for trait_name, trait_data in traits.items():
+                    score = trait_data.get("score", 50)
+                    category = trait_data.get("category", "average")
+                    prompt += f"- {trait_name.capitalize()}: {category} ({score}/100)\n"
+            else:
+                prompt += "- No detailed personality data available\n"
+                
+            prompt += "\n## Mental Health Assessment:\n"
+            prompt += f"- Overall status: {overall_status}\n"
+            
+            # Add specific mental health dimensions
+            if severity_levels:
+                for category, severity in severity_levels.items():
+                    if category != "suicidal":  # Exclude sensitive categories
+                        prompt += f"- {category.capitalize()}: {severity}\n"
+            else:
+                prompt += "- No detailed mental health data available\n"
+            
+            prompt += """
+Please generate a compassionate, empathetic response that:
+1. Validates their experiences and emotions
+2. Highlights their personal strengths based on their personality profile
+3. Acknowledges any challenges they might be facing
+4. Offers genuine hope and encouragement
+5. Feels warm and personalized, not clinical or generic
+6. Uses a conversational, supportive tone
+7. Is culturally sensitive and inclusive
+8. Avoids diagnostic language or making promises
+
+The response should be 2-3 paragraphs and feel like it's coming from a supportive mental health professional.
+"""
+            
+            # Generate response with Gemini
+            result = await gemini_llm.generate_text(prompt, {})
+            
+            # Extract response text
+            if "text" in result and result["text"]:
+                return result["text"]
+            else:
+                logger.warning("Empty response from Gemini, using default")
+                return self._get_default_empathetic_response(assessment_results)
+                
+        except Exception as e:
+            logger.error(f"Error generating empathetic response: {str(e)}")
+            return self._get_default_empathetic_response(assessment_results)
+    
+    def _get_default_empathetic_response(self, assessment_results: Dict[str, Any]) -> str:
+        """Generate a default empathetic response if Gemini fails"""
+        # Extract basic severity information
+        mental_health = assessment_results.get("mental_health", {})
+        overall_status = mental_health.get("overall_status", "mild")
+        
+        # Return appropriate default response based on severity
+        if overall_status == "severe":
+            return (
+                "I can see from your responses that you're facing some significant challenges right now. "
+                "It's important to recognize the strength it takes to acknowledge these difficulties. "
+                "Your assessment suggests you're experiencing considerable distress in several areas, but please "
+                "remember that seeking help is a sign of courage, not weakness. "
+                "While these feelings can be overwhelming, there are effective ways to address them with proper support."
+            )
+        elif overall_status == "moderate":
+            return (
+                "Based on your responses, I can see that you're experiencing some moderate challenges in several areas. "
+                "Your personality profile shows both strengths and opportunities for growth. It's important to "
+                "acknowledge that what you're feeling is valid, and many people go through similar experiences. "
+                "With the right support and strategies, these difficulties can become more manageable over time."
+            )
+        else:  # mild or default
+            return (
+                "Based on your responses, I can see that you're experiencing some mild challenges while showing "
+                "resilience in many areas. Your personality profile indicates several strengths that can help you "
+                "navigate life's difficulties. While everyone faces struggles at times, your assessment suggests "
+                "you have a good foundation to build upon. Remember that taking care of your mental wellbeing "
+                "is always valuable, even when things are generally going well."
+            )
+    
     def apply_results_css(self):
         """Apply custom CSS for the results display"""
         results_css = """
