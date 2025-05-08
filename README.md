@@ -141,7 +141,66 @@ Ensure you have the following installed on your machine:
 - **Model Checkpoints**: The trained model and tokenizer configurations are saved in the `fine_tuned_model_checkpoint` directory.
 - **Fine-Tuning**: You can further fine-tune the model by modifying the training scripts and re-running the training process.
 
-- ## Contact
+## Celebrity Voice Cloning Feature
+
+This repo now includes a celebrity voice cloning feature that allows the chatbot to speak in the voices of popular personalities. This feature leverages the Dia 1.6B model's voice cloning capabilities.
+
+### Features
+
+- Search for celebrities by name
+- Fetch voice samples automatically
+- Generate speech in a celebrity's voice style
+- Easy integration with the main chatbot
+
+### Demo Usage
+
+You can test the celebrity voice cloning feature using the provided demo script:
+
+```bash
+# Run the interactive demo
+python celebrity_voice_clone_demo.py
+
+# Or specify a celebrity and text directly
+python celebrity_voice_clone_demo.py --celebrity "Morgan Freeman" --text "Hello, I am speaking to you with my iconic voice."
+```
+
+### Integration
+
+The feature is designed to be easily integrated into the main system:
+
+```python
+from src.utils.voice_clone_integration import VoiceCloneIntegration
+
+# Initialize the integration
+voice_clone = VoiceCloneIntegration()
+await voice_clone.initialize()
+
+# Search for a celebrity
+results = await voice_clone.search_celebrity("Morgan Freeman")
+if results:
+    # Set the celebrity voice
+    await voice_clone.set_celebrity_voice(results[0]["id"])
+    
+    # Speak text with the celebrity voice
+    await voice_clone.speak_text("Hello, I am now speaking in a celebrity voice.")
+    
+    # Later, switch back to normal voice
+    await voice_clone.disable_celebrity_mode()
+```
+
+### Technical Notes
+
+- The feature requires the official Dia package for voice cloning functionality
+- For demonstration purposes, the current implementation uses simulated voice samples
+- In a production environment, you would need to implement a proper voice sample retrieval system
+
+### Requirements
+
+- All the requirements of the main system
+- `librosa` for audio processing
+- The official Dia package (optional, but recommended for best results)
+
+## Contact
 
 - **GitHub**: Rayyan9477 (https://github.com/Rayyan9477)
 - **LinkedIn**: Rayyan Ahmed (https://www.linkedin.com/in/rayyan-ahmed9477/)

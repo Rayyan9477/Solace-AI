@@ -14,7 +14,9 @@ import io
 import soundfile as sf
 import time
 import soundfile
-
+import importlib.util
+import subprocess
+import sys
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -39,6 +41,11 @@ class DiaTTS:
         self.model = None
         self.initialized = False
         self.initialization_error = None
+        self.use_official_package = False
+        self.dia_package = None
+        
+        # Try to import official Dia package if available
+        self._check_dia_package()
         
         # Create cache directory if specified
         self.cache_dir = cache_dir
@@ -56,12 +63,74 @@ class DiaTTS:
             "calm": {"speaker_id": 0, "prompt": "In a calm and soothing tone: "},
             "excited": {"speaker_id": 1, "prompt": "In an enthusiastic and encouraging tone: "},
             "sad": {"speaker_id": 2, "prompt": "In a gentle, compassionate tone: "},
-            "professional": {"speaker_id": 0, "prompt": "In a clear and professional tone: "}
+            "professional": {"speaker_id": 0, "prompt": "In a clear and professional tone: "},
+            "gentle": {"speaker_id": 2, "prompt": "In a gentle and supportive tone: "},
+            "cheerful": {"speaker_id": 1, "prompt": "In a cheerful and positive tone: "},
+            "empathetic": {"speaker_id": 0, "prompt": "In an empathetic and understanding tone: "}
         }
         
         self.current_style = "warm"
         
         logger.info(f"DiaTTS initialized (not yet loaded). Using device: {self.device}")
+        
+    def _check_dia_package(self):
+        """Check if the official Dia package is available and import it"""
+        try:
+            # Check if dia module is installed
+            if importlib.util.find_spec("dia") is not None:
+                import dia
+                from dia.model import Dia
+                self.dia_package = dia
+                self.use_official_package = True
+                logger.info("Using official Dia package for enhanced TTS capabilities")
+            else:
+                # Check if the repository is cloned but not installed
+                repo_path = os.path.join(os.path.expanduser("~"), "dia")
+                if os.path.exists(repo_path) and os.path.isdir(repo_path):
+                    sys.path.append(repo_path)
+                    try:
+                        import dia
+                        from dia.model import Dia
+                        self.dia_package = dia
+                        self.use_official_package = True
+                        logger.info("Using cloned Dia repository for enhanced TTS capabilities")
+                    except ImportError:
+                        logger.warning("Dia repository exists but module cannot be imported")
+                        self.use_official_package = False
+                else:
+                    logger.info("Official Dia package not found, using Transformers implementation")
+                    self.use_official_package = False
+        except Exception as e:
+            logger.warning(f"Error checking for Dia package: {str(e)}")
+            self.use_official_package = False
+            
+    @staticmethod
+    def install_dia_package():
+        """Install the official Dia package"""
+        try:
+            logger.info("Attempting to install Dia package...")
+            
+            # Clone the repository
+            subprocess.run(
+                ["git", "clone", "https://github.com/nari-labs/dia.git"],
+                check=True
+            )
+            
+            # Change to the repository directory
+            repo_path = os.path.join(os.getcwd(), "dia")
+            
+            # Install dependencies
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-e", "."],
+                cwd=repo_path,
+                check=True
+            )
+            
+            logger.info("Dia package installed successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to install Dia package: {str(e)}")
+            return False
         
     async def initialize(self) -> bool:
         """
@@ -74,7 +143,26 @@ class DiaTTS:
             return True
             
         try:
-            logger.info(f"Loading Dia 1.6B model: {self.model_name}")
+            if self.use_official_package:
+                logger.info("Initializing with official Dia package...")
+                
+                # Use a background task for model loading
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(None, self._load_official_model)
+                
+                if result["success"]:
+                    self.model = result["model"]
+                    self.initialized = True
+                    logger.info("Official Dia 1.6B model loaded successfully")
+                    return True
+                else:
+                    self.initialization_error = result["error"]
+                    logger.error(f"Failed to load official Dia model: {self.initialization_error}")
+                    logger.info("Falling back to Transformers implementation...")
+                    self.use_official_package = False
+            
+            # Fall back to Transformers implementation
+            logger.info(f"Loading Dia 1.6B model using Transformers: {self.model_name}")
             
             # Create a background task for model loading since it can be time-consuming
             loop = asyncio.get_event_loop()
@@ -97,10 +185,35 @@ class DiaTTS:
             self.initialization_error = str(e)
             logger.error(f"Error initializing Dia 1.6B model: {str(e)}", exc_info=True)
             return False
+    
+    def _load_official_model(self) -> Dict[str, Any]:
+        """
+        Load the model using the official Dia package
+        
+        Returns:
+            Dict with loading results
+        """
+        try:
+            from dia.model import Dia
+            
+            # Load the model from Hugging Face
+            model = Dia.from_pretrained(self.model_name)
+            
+            return {
+                "success": True,
+                "model": model,
+                "error": None
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "model": None,
+                "error": str(e)
+            }
             
     def _load_model(self) -> Dict[str, Any]:
         """
-        Load the model and processor (runs in a separate thread)
+        Load the model and processor using Transformers (runs in a separate thread)
         
         Returns:
             Dict with loading results
@@ -170,45 +283,12 @@ class DiaTTS:
             }
             
         try:
-            # Prepare text with style
-            style_config = self.voice_styles.get(
-                style or self.current_style, 
-                self.voice_styles["default"]
-            )
-            
-            # Apply style prompt if available
-            prompt = style_config.get("prompt", "")
-            input_text = f"{prompt}{text}" if prompt else text
-            
-            # Get speaker ID for this style
-            speaker_id = style_config.get("speaker_id", 0)
-            
-            # Process text
-            start_time = time.time()
-            
-            # Create a background task for generation since it can be time-consuming
-            loop = asyncio.get_event_loop()
-            
-            # Process text in a separate thread to avoid blocking
-            result = await loop.run_in_executor(
-                None, 
-                lambda: self._generate_audio(input_text, speaker_id)
-            )
-            
-            end_time = time.time()
-            
-            if not result["success"]:
-                return result
+            # Branch based on which implementation to use
+            if self.use_official_package:
+                return await self._generate_speech_official(text, style)
+            else:
+                return await self._generate_speech_transformers(text, style)
                 
-            logger.info(f"Speech generated in {end_time - start_time:.2f} seconds")
-            
-            return {
-                "success": True,
-                "audio_bytes": result["audio_bytes"],
-                "sample_rate": result.get("sample_rate", 24000),
-                "time_taken": end_time - start_time
-            }
-            
         except Exception as e:
             logger.error(f"Error generating speech: {str(e)}", exc_info=True)
             return {
@@ -216,6 +296,137 @@ class DiaTTS:
                 "error": str(e),
                 "audio_bytes": b""
             }
+    
+    async def _generate_speech_official(self, text: str, style: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Generate speech using the official Dia package
+        
+        Args:
+            text: Text to convert to speech
+            style: Voice style to use
+            
+        Returns:
+            Dictionary containing audio data and metadata
+        """
+        # Prepare text with style
+        style_config = self.voice_styles.get(
+            style or self.current_style, 
+            self.voice_styles["default"]
+        )
+        
+        # Apply style prompt if available
+        prompt = style_config.get("prompt", "")
+        input_text = f"{prompt}{text}" if prompt else text
+        
+        # Format text for dialogue if it doesn't have speaker tags
+        if "[S1]" not in input_text and "[S2]" not in input_text:
+            input_text = f"[S1] {input_text}"
+        
+        start_time = time.time()
+        
+        # Run generation in a separate thread
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: self._run_official_generation(input_text)
+        )
+        
+        end_time = time.time()
+        
+        if not result["success"]:
+            return result
+            
+        logger.info(f"Speech generated with official Dia package in {end_time - start_time:.2f} seconds")
+        
+        return {
+            "success": True,
+            "audio_bytes": result["audio_bytes"],
+            "sample_rate": result.get("sample_rate", 44100),
+            "time_taken": end_time - start_time
+        }
+    
+    def _run_official_generation(self, text: str) -> Dict[str, Any]:
+        """
+        Run the official Dia generation (in a separate thread)
+        
+        Args:
+            text: Text to convert to speech
+            
+        Returns:
+            Dictionary with results and audio data
+        """
+        try:
+            # Generate audio data using the official model
+            audio_array = self.model.generate(text)
+            
+            # Convert to WAV format
+            wav_buffer = io.BytesIO()
+            sf.write(wav_buffer, audio_array, 44100, format='WAV')
+            wav_buffer.seek(0)
+            audio_bytes = wav_buffer.read()
+            
+            return {
+                "success": True,
+                "audio_bytes": audio_bytes,
+                "sample_rate": 44100
+            }
+        except Exception as e:
+            logger.error(f"Error in official Dia generation: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "audio_bytes": b""
+            }
+    
+    async def _generate_speech_transformers(self, text: str, style: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Generate speech using the Transformers implementation
+        
+        Args:
+            text: Text to convert to speech
+            style: Voice style to use
+            
+        Returns:
+            Dictionary containing audio data and metadata
+        """
+        # Prepare text with style
+        style_config = self.voice_styles.get(
+            style or self.current_style, 
+            self.voice_styles["default"]
+        )
+        
+        # Apply style prompt if available
+        prompt = style_config.get("prompt", "")
+        input_text = f"{prompt}{text}" if prompt else text
+        
+        # Get speaker ID for this style
+        speaker_id = style_config.get("speaker_id", 0)
+        
+        # Process text
+        start_time = time.time()
+        
+        # Create a background task for generation since it can be time-consuming
+        loop = asyncio.get_event_loop()
+        
+        # Process text in a separate thread to avoid blocking
+        result = await loop.run_in_executor(
+            None, 
+            lambda: self._generate_audio(input_text, speaker_id)
+        )
+        
+        end_time = time.time()
+        
+        if not result["success"]:
+            return result
+            
+        logger.info(f"Speech generated in {end_time - start_time:.2f} seconds")
+        
+        return {
+            "success": True,
+            "audio_bytes": result["audio_bytes"],
+            "sample_rate": result.get("sample_rate", 24000),
+            "time_taken": end_time - start_time
+        }
             
     def _generate_audio(self, text: str, speaker_id: int = 0) -> Dict[str, Any]:
         """
@@ -311,3 +522,105 @@ class DiaTTS:
             List of style names
         """
         return list(self.voice_styles.keys())
+        
+    async def clone_voice(self, reference_audio_path: str, reference_text: str, target_text: str) -> Dict[str, Any]:
+        """
+        Clone a voice from reference audio and generate speech with the cloned voice
+        
+        Args:
+            reference_audio_path: Path to reference audio file
+            reference_text: Text content of the reference audio
+            target_text: Text to convert to speech using the cloned voice
+            
+        Returns:
+            Dictionary containing audio data and metadata
+        """
+        if not self.use_official_package:
+            return {
+                "success": False,
+                "error": "Voice cloning is only available with the official Dia package",
+                "audio_bytes": b""
+            }
+            
+        if not self.initialized:
+            if not await self.initialize():
+                return {
+                    "success": False,
+                    "error": f"Model not initialized: {self.initialization_error}",
+                    "audio_bytes": b""
+                }
+                
+        if not os.path.exists(reference_audio_path):
+            return {
+                "success": False,
+                "error": f"Reference audio file not found: {reference_audio_path}",
+                "audio_bytes": b""
+            }
+            
+        try:
+            logger.info(f"Attempting voice cloning from {reference_audio_path}")
+            
+            # Create input text with the reference transcript as a prompt
+            if "[S1]" not in target_text and "[S2]" not in target_text:
+                target_text = f"[S1] {target_text}"
+                
+            # Create the full prompt text with reference
+            full_prompt = f"{reference_text}\n{target_text}"
+            
+            # Run generation in a separate thread
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: self._run_voice_cloning(reference_audio_path, full_prompt)
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in voice cloning: {str(e)}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "audio_bytes": b""
+            }
+    
+    def _run_voice_cloning(self, reference_audio_path: str, prompt_text: str) -> Dict[str, Any]:
+        """
+        Run voice cloning with the official Dia package (in a separate thread)
+        
+        Args:
+            reference_audio_path: Path to reference audio file
+            prompt_text: Text prompt with reference and target text
+            
+        Returns:
+            Dictionary with results and audio data
+        """
+        try:
+            # Load audio file
+            import librosa
+            audio_array, _ = librosa.load(reference_audio_path, sr=44100)
+            
+            # Generate audio with voice cloning
+            output_audio = self.model.voice_clone(
+                audio_array,
+                prompt_text
+            )
+            
+            # Convert to WAV format
+            wav_buffer = io.BytesIO()
+            sf.write(wav_buffer, output_audio, 44100, format='WAV')
+            wav_buffer.seek(0)
+            audio_bytes = wav_buffer.read()
+            
+            return {
+                "success": True,
+                "audio_bytes": audio_bytes,
+                "sample_rate": 44100
+            }
+        except Exception as e:
+            logger.error(f"Error in voice cloning: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "audio_bytes": b""
+            }
