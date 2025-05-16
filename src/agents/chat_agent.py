@@ -22,6 +22,8 @@ from src.agents.therapy_agent import TherapyAgent
 # Import the enhanced memory components
 from src.utils.context_aware_memory import ContextAwareMemoryAdapter
 from src.memory.semantic_memory import SemanticMemoryManager
+# Import vector database integration
+from src.utils.vector_db_integration import add_user_data, get_user_data
 
 logger = logging.getLogger(__name__)
 
@@ -290,6 +292,9 @@ Provide a supportive, empathetic response that addresses the user's emotional ne
                 except Exception as e:
                     logger.error(f"Failed to update semantic memory with response: {str(e)}")
 
+            # Store chat messages in the central vector database
+            await self.store_to_vector_db(message, {"response": response_text}, context)
+
             # Return the generated response with metadata
             return {
                 "response": response_text,
@@ -300,6 +305,47 @@ Provide a supportive, empathetic response that addresses the user's emotional ne
         except Exception as e:
             logger.error(f"Error in chat response generation, returning fallback: {e}")
             return {"response": "I'm having trouble generating a response right now. Please try again later."}
+    
+    async def store_to_vector_db(self, query: str, response: Dict[str, Any], context: Dict[str, Any]) -> None:
+        """
+        Store chat messages in the central vector database
+        
+        Args:
+            query: User's query
+            response: Agent's response
+            context: Processing context
+        """
+        try:
+            # Check if we have a valid response
+            if isinstance(response, dict) and 'response' in response:
+                chat_data = {
+                    "user_message": query,
+                    "assistant_response": response.get('response', ''),
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                # Add emotion data if available in the context
+                if context and 'emotion_analysis' in context:
+                    chat_data['emotion_data'] = context['emotion_analysis']
+                    
+                # Add personality data if available in the context
+                if context and 'personality' in context:
+                    chat_data['personality_context'] = context['personality']
+                
+                # Add user ID if available in context
+                if context and "user_id" in context:
+                    chat_data["user_id"] = context["user_id"]
+                
+                # Store in vector database
+                doc_id = add_user_data("conversation", chat_data)
+                
+                if doc_id:
+                    logger.info(f"Stored chat message in vector DB: {doc_id}")
+                else:
+                    logger.warning("Failed to store chat message in vector DB")
+            
+        except Exception as e:
+            logger.error(f"Error storing chat data in vector DB: {str(e)}")
     
     def _update_conversation_metrics(self, message: str, context: Dict[str, Any]) -> None:
         """Update conversation metrics based on current exchange"""

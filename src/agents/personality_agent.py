@@ -1,5 +1,8 @@
+import os
+import sys
 from typing import Dict, Any, Optional, List
 from .base_agent import BaseAgent
+
 from agno.tools import tool
 from agno.memory import Memory
 from agno.knowledge import AgentKnowledge
@@ -9,8 +12,9 @@ from langchain.schema.language_model import BaseLanguageModel
 import logging
 from datetime import datetime
 import json
-import os
-import sys
+
+# Add vector database integration
+from utils.vector_db_integration import add_user_data, get_user_data
 
 # Add the project root to the path to import the personality modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -664,3 +668,36 @@ Provide an interpretation of these results, focusing on:
                 "low_correlations": [],
                 "interesting_patterns": []
             }
+    
+    async def store_to_vector_db(self, query: str, response: Dict[str, Any], context: Dict[str, Any]) -> None:
+        """
+        Store personality assessment results in the central vector database
+        
+        Args:
+            query: User's query
+            response: Agent's response
+            context: Processing context
+        """
+        try:
+            # Check if this is a personality assessment result
+            if isinstance(response, dict) and "personality" in response:
+                # Extract personality data
+                personality_data = response["personality"]
+                
+                # Add additional metadata
+                personality_data["timestamp"] = datetime.now().isoformat()
+                personality_data["query"] = query
+                
+                # Add user ID if available in context
+                if context and "user_id" in context:
+                    personality_data["user_id"] = context["user_id"]
+                
+                # Store in vector database
+                doc_id = add_user_data("personality", personality_data)
+                
+                if doc_id:
+                    logger.info(f"Stored personality assessment in vector DB: {doc_id}")
+                else:
+                    logger.warning("Failed to store personality assessment in vector DB")
+        except Exception as e:
+            logger.error(f"Error storing personality data in vector DB: {str(e)}")

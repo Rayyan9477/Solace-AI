@@ -11,6 +11,9 @@ from langchain.memory import ConversationBufferMemory
 import logging
 from datetime import datetime
 
+# Import vector database integration
+from src.utils.vector_db_integration import add_user_data
+
 # Initialize VADER sentiment analyzer
 sentiment_analyzer = SentimentIntensityAnalyzer()
 
@@ -533,3 +536,50 @@ Congruence: [match between voice tone and text content]""")
             'pattern_changes': [],
             'confidence': 0.4  # Low confidence for fallback
         }
+    
+    async def store_to_vector_db(self, query: str, response: Dict[str, Any], context: Dict[str, Any]) -> None:
+        """
+        Store emotion analysis data in the central vector database
+        
+        Args:
+            query: User's query
+            response: Agent's response
+            context: Processing context
+        """
+        try:
+            # Check if this contains emotion analysis data
+            if isinstance(response, dict) and 'emotion_analysis' in response:
+                emotion_data = response['emotion_analysis']
+                
+                # Add metadata
+                emotion_data["timestamp"] = datetime.now().isoformat()
+                emotion_data["user_message"] = query
+                
+                # Add user ID if available in context
+                if context and "user_id" in context:
+                    emotion_data["user_id"] = context["user_id"]
+                
+                # Store in vector database
+                doc_id = add_user_data("emotion", emotion_data)
+                
+                if doc_id:
+                    logger.info(f"Stored emotion data in vector DB: {doc_id}")
+                else:
+                    logger.warning("Failed to store emotion data in vector DB")
+            
+        except Exception as e:
+            logger.error(f"Error storing emotion data in vector DB: {str(e)}")
+            
+    def generate_response_sync(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Generate a response synchronously
+        
+        Args:
+            query: User's query
+            context: Optional processing context
+            
+        Returns:
+            Dictionary containing the response
+        """
+        # Placeholder for synchronous response generation logic
+        return {}

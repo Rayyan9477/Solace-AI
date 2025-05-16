@@ -145,6 +145,16 @@ class Application:
             config=AppConfig.VECTOR_DB_CONFIG
         )
         
+        # Create central vector database module
+        self.module_manager.create_module(
+            type_id="CentralVectorDBModule",
+            module_id="central_vector_db",
+            config={
+                "user_id": AppConfig.USER_ID if hasattr(AppConfig, 'USER_ID') else "default_user",
+                **AppConfig.VECTOR_DB_CONFIG
+            }
+        )
+        
         # Create agent modules with dependencies
         agent_configs = {
             "safety": {},
@@ -202,6 +212,58 @@ class Application:
                             {"modules": len(health_info["modules"]), "initialized": health_info["initialized_modules"]})
         
         return health_info
+
+    def run(self):
+        """Run the application"""
+        try:
+            # Check if we need to migrate data
+            if "--migrate-data" in sys.argv:
+                self.migrate_data()
+                return
+            
+            # Initialize asyncio loop
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # Initialize application
+            if not loop.run_until_complete(self.initialize()):
+                self.logger.critical("Failed to initialize application")
+                return
+
+            # Start the UI
+            self.start_ui()
+            
+        except Exception as e:
+            self.logger.critical(f"Fatal error in application: {str(e)}")
+            raise
+    
+    def migrate_data(self):
+        """Migrate data to the central vector database"""
+        from utils.migration_utils import migrate_all_user_data
+        
+        self.logger.info("Starting data migration to central vector database...")
+        
+        # Get user ID from command line or use default
+        user_id = next((arg.split('=')[1] for arg in sys.argv if arg.startswith("--user-id=")), "default_user")
+        
+        try:
+            # Run migration
+            results = migrate_all_user_data(user_id=user_id)
+            
+            # Log results
+            total = sum(results.values())
+            self.logger.info(f"Migration complete: {total} total items migrated.")
+            for data_type, count in results.items():
+                self.logger.info(f"  - {data_type}: {count} items")
+                
+        except Exception as e:
+            self.logger.error(f"Error during migration: {str(e)}")
+            
+        self.logger.info("Migration process finished.")
+
+    def start_ui(self):
+        """Start the user interface"""
+        main()
 
 def main():
     """Main entry point for the application"""

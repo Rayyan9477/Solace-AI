@@ -14,6 +14,7 @@ class AppConfig:
     APP_NAME = "Mental Health Support Bot"
     APP_VERSION = "1.0.0"
     DEBUG = os.getenv("DEBUG", "False").lower() == "true"
+    USER_ID = os.getenv("USER_ID", "default_user")
 
     # Paths
     BASE_DIR = Path(__file__).resolve().parent.parent
@@ -63,7 +64,19 @@ class AppConfig:
         "index_type": "L2",
         "metric_type": "cosine",
         "index_path": str(VECTOR_STORE_PATH),
-        "collection_name": "mental_health_kb"
+        "collection_name": "mental_health_kb",
+        "central_data_enabled": True,  # Enable central vector DB
+        "retention_days": 180,  # Store data for 180 days
+        "embedder_model": "all-MiniLM-L6-v2",  # Sentence transformer model for embeddings
+        "namespaces": [
+            "user_profile",
+            "conversation",
+            "knowledge",
+            "therapy_resource",
+            "diagnostic_data",
+            "personality_assessment",
+            "emotion_record"
+        ]
     }
 
     # Safety settings

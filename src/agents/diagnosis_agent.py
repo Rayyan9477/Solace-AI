@@ -10,6 +10,10 @@ import spacy
 from transformers import pipeline
 from datetime import datetime
 import logging
+
+# Add vector database integration
+from utils.vector_db_integration import add_user_data, get_user_data
+
 logger = logging.getLogger(__name__)
 # Load models
 try:
@@ -463,6 +467,39 @@ Additional Considerations: [important factors to consider]""")
 - Conditions: {', '.join(history.get('potential_conditions', []))}
 - Severity: {history.get('severity_level', 'unknown')}"""
 
+    async def store_to_vector_db(self, query: str, response: Dict[str, Any], context: Dict[str, Any]) -> None:
+        """
+        Store diagnostic results in the central vector database
+        
+        Args:
+            query: User's query
+            response: Agent's response
+            context: Processing context
+        """
+        try:
+            # Check if this contains diagnostic data
+            if isinstance(response, dict) and 'response' in response and isinstance(response['response'], dict):
+                diagnosis_data = response['response']
+                
+                # Add metadata
+                diagnosis_data["timestamp"] = datetime.now().isoformat()
+                diagnosis_data["query"] = query
+                
+                # Add user ID if available in context
+                if context and "user_id" in context:
+                    diagnosis_data["user_id"] = context["user_id"]
+                
+                # Store in vector database
+                doc_id = add_user_data("diagnosis", diagnosis_data)
+                
+                if doc_id:
+                    logger.info(f"Stored diagnostic assessment in vector DB: {doc_id}")
+                else:
+                    logger.warning("Failed to store diagnostic assessment in vector DB")
+            
+        except Exception as e:
+            logger.error(f"Error storing diagnostic data in vector DB: {str(e)}")
+    
     def _fallback_analysis(self, text: str) -> Dict[str, Any]:
         """Conservative fallback analysis"""
         return {

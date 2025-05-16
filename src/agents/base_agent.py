@@ -97,6 +97,13 @@ class BaseAgent(Agent):
                     context=full_context
                 )
             
+            # Store result in central vector DB if it has metadata related to assessments
+            try:
+                if hasattr(self, 'store_to_vector_db') and callable(self.store_to_vector_db):
+                    await self.store_to_vector_db(query, response, context)
+            except Exception as store_error:
+                logger.error(f"Error storing data in vector DB: {str(store_error)}")
+            
             # Update memory
             try:
                 await self._update_memory(query, response)
@@ -188,4 +195,4 @@ class BaseAgent(Agent):
                 return "I'm having trouble generating a response right now."
         except Exception as e:
             logger.error(f"Error in sync response generation: {str(e)}")
-            return "I'm having trouble generating a response right now." 
+            return "I'm having trouble generating a response right now."

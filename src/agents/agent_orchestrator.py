@@ -9,9 +9,11 @@ import asyncio
 from typing import Dict, Any, List, Optional, Callable, Union
 import time
 import json
+from datetime import datetime
 
 from components.base_module import Module, get_module_manager
 from utils.logger import get_logger
+from utils.vector_db_integration import get_conversation_tracker, search_relevant_data
 
 class AgentOrchestrator(Module):
     """
@@ -31,6 +33,11 @@ class AgentOrchestrator(Module):
         
         # Initialize context store for shared context between agents
         self.context_store = {}
+        
+        # Store user_id for conversation tracking
+        self.user_id = config.get("user_id", "default_user") if config else "default_user"
+        self.conversation_tracker = None  # Will be initialized when needed
+        self.logger.info(f"Agent orchestrator configured for user {self.user_id}")
         
     async def initialize(self) -> bool:
         """Initialize the orchestrator and register available agents"""
@@ -479,3 +486,110 @@ class AgentOrchestrator(Module):
         self.current_workflows.clear()
         
         return await super().shutdown()
+
+    async def process_message(self, message: str, user_id: str = None, workflow_id: str = "enhanced_empathetic_chat") -> Dict[str, Any]:
+        """
+        Process a user message through the appropriate workflow and track the conversation
+        
+        Args:
+            message: The user message to process
+            user_id: User identifier (optional, uses the default from initialization if not provided)
+            workflow_id: ID of the workflow to use for processing
+        
+        Returns:
+            Result of processing the message
+        """
+        # Generate session ID for this interaction
+        session_id = f"session_{int(time.time())}"
+        
+        self.logger.info(f"Processing message with workflow {workflow_id}", 
+                      {"session_id": session_id, "message_length": len(message)})
+        
+        # Set up initial context
+        initial_context = {
+            "timestamp": datetime.now().isoformat(),
+            "session_id": session_id,
+            "user_id": user_id or self.user_id
+        }
+        
+        # Enhance context with relevant data from vector database
+        try:
+            # Add relevant past conversations
+            past_conversations = search_relevant_data(message, ["conversation"], limit=3)
+            if past_conversations:
+                initial_context["relevant_conversations"] = past_conversations
+                self.logger.debug(f"Added {len(past_conversations)} relevant conversations to context")
+                
+            # Add most recent diagnosis if available
+            from utils.vector_db_integration import get_user_data
+            latest_diagnosis = get_user_data("diagnosis")
+            if latest_diagnosis:
+                initial_context["latest_diagnosis"] = latest_diagnosis
+                self.logger.debug("Added latest diagnosis to context")
+                
+            # Add most recent personality assessment if available
+            latest_personality = get_user_data("personality")
+            if latest_personality:
+                initial_context["personality"] = latest_personality
+                self.logger.debug("Added personality profile to context")
+                
+        except Exception as e:
+            self.logger.warning(f"Error enhancing context from vector DB: {str(e)}")
+        
+        # Execute the workflow
+        result = await self.execute_workflow(
+            workflow_id=workflow_id,
+            input_data={"message": message},
+            session_id=session_id,
+            context=initial_context
+        )
+        
+        # Extract response and emotion data
+        response = ""
+        emotion_data = None
+        
+        if isinstance(result, dict):
+            # Extract the main response text
+            if "output" in result and isinstance(result["output"], dict):
+                response = result["output"].get("response", "")
+            elif "response" in result:
+                response = result["response"]
+            
+            # Extract emotion data if available
+            if "emotion_agent" in result.get("steps_completed", []):
+                emotion_result = result.get("results", {}).get("emotion_agent", {})
+                if emotion_result and isinstance(emotion_result, dict):
+                    emotion_data = emotion_result.get("emotion_analysis")
+        
+        # Track the conversation in our central vector DB
+        metadata = {
+            "workflow_id": workflow_id,
+            "session_id": session_id,
+            "duration": result.get("duration") if isinstance(result, dict) else None,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Add the conversation to the tracker
+        if response:
+            try:
+                # Get conversation tracker from central vector DB
+                if self.conversation_tracker is None:
+                    self.conversation_tracker = get_conversation_tracker()
+                
+                if self.conversation_tracker:
+                    conversation_id = self.conversation_tracker.add_conversation(
+                        user_message=message,
+                        assistant_response=response,
+                        emotion_data=emotion_data,
+                        metadata=metadata
+                    )
+                    if conversation_id:
+                        self.logger.info(f"Tracked conversation: {conversation_id}")
+                        if isinstance(result, dict):
+                            result["conversation_id"] = conversation_id
+                else:
+                    self.logger.warning("Conversation tracker not available")
+            except Exception as e:
+                self.logger.error(f"Error tracking conversation: {str(e)}")
+        
+        return result
