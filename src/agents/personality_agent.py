@@ -14,12 +14,12 @@ from datetime import datetime
 import json
 
 # Add vector database integration
-from utils.vector_db_integration import add_user_data, get_user_data
+from src.utils.vector_db_integration import add_user_data, get_user_data
 
 # Add the project root to the path to import the personality modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from personality.big_five import BigFiveAssessment
-from personality.mbti import MBTIAssessment
+from src.personality.big_five import BigFiveAssessment
+from src.personality.mbti import MBTIAssessment
 
 # Initialize logger
 logger = logging.getLogger(__name__)

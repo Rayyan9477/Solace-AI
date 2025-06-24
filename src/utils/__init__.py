@@ -5,7 +5,7 @@ from .helpers import (
     FileHelper,
     ValidationHelper
 )
-from .logger import get_logger, configure_logging, LogManager
+from .logger import get_logger, configure_logger
 
 __all__ = [
     'MetricsManager',
@@ -13,7 +13,5 @@ __all__ = [
     'DocumentHelper',
     'FileHelper',
     'ValidationHelper',
-    'get_logger',
-    'configure_logging',
-    'LogManager'
+    'get_logger',    'configure_logger'
 ]

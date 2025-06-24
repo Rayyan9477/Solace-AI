@@ -5,7 +5,7 @@ from datetime import datetime
 import logging
 # from agno.metrics import MetricsCollector
 # from agno.utils import TokenManager
-from config.settings import AppConfig
+from src.config.settings import AppConfig
 
 logger = logging.getLogger(__name__)
 

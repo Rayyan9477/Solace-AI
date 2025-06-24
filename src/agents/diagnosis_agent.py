@@ -12,7 +12,7 @@ from datetime import datetime
 import logging
 
 # Add vector database integration
-from utils.vector_db_integration import add_user_data, get_user_data
+from src.utils.vector_db_integration import add_user_data, get_user_data
 
 logger = logging.getLogger(__name__)
 # Load models

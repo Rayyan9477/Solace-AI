@@ -36,10 +36,11 @@ from langchain.vectorstores.base import VectorStore
 from langchain.schema import Document as LCDocument
 
 # Project imports - vector store for caching
-from database.vector_store import VectorStore as ProjectVectorStore
+from src.database.vector_store import VectorStore as ProjectVectorStore
 
 # DSPy modules
-from dspy.retrieve import ColBERTv2, BM25, ChainOfThought
+from dspy.retrieve import Retrieve
+import dspy
 from dspy.teleprompt import LabeledFewShot, BootstrapFewShot
 # Fix for dspy.pipeline import
 try:
@@ -57,10 +58,9 @@ logger = logging.getLogger(__name__)
 # Define DSPy modules for mental health diagnosis
 class SymptomExtractor(dspy.Module):
     """Extract mental health symptoms from user responses"""
-    
     def __init__(self):
         super().__init__()
-        self.extract_gen = dspy.ChainOfThought(
+        self.extract_gen = dspy.Predict(
             dspy.Signature(
                 {
                     "conversation": "The user's message or conversation history",
@@ -93,12 +93,11 @@ class SymptomExtractor(dspy.Module):
 
 class DiagnosticReasoner(dspy.Module):
     """Perform diagnostic reasoning based on extracted symptoms"""
-    
     def __init__(self, retriever: Optional[dspy.Retrieve] = None):
         super().__init__()
-        self.retriever = retriever or dspy.ChainOfThought()
+        self.retriever = retriever or Retrieve()
         
-        self.diagnose = dspy.ChainOfThought(
+        self.diagnose = dspy.Predict(
             dspy.Signature(
                 {
                     "symptoms": "A list of mental health symptoms and their severity",
@@ -138,12 +137,11 @@ class DiagnosticReasoner(dspy.Module):
 
 class PersonalityProfiler(dspy.Module):
     """Generate personality insights using retrieval-augmented generation"""
-    
     def __init__(self, retriever: Optional[dspy.Retrieve] = None):
         super().__init__()
-        self.retriever = retriever or dspy.ChainOfThought()
+        self.retriever = retriever or Retrieve()
         
-        self.profile = dspy.ChainOfThought(
+        self.profile = dspy.Predict(
             dspy.Signature(
                 {
                     "assessment_data": "Results from a personality assessment",
@@ -190,7 +188,7 @@ class EmotionPersonalityIntegrator(dspy.Module):
     
     def __init__(self):
         super().__init__()
-        self.integrate = dspy.ChainOfThought(
+        self.integrate = dspy.Predict(
             dspy.Signature(
                 {
                     "personality_data": "Personality assessment results",
@@ -281,8 +279,7 @@ class AgenticRAG:
         class LangChainLMAdapter(dspy.LM):
             def __init__(self, langchain_llm):
                 self.llm = langchain_llm
-            
-            def basic_request(self, prompt, **kwargs):
+              def basic_request(self, prompt, **kwargs):
                 try:
                     response = self.llm.invoke(prompt)
                     return response
@@ -294,15 +291,16 @@ class AgenticRAG:
     
     def _initialize_retriever(self, knowledge_base_dir: Optional[str]) -> dspy.Retrieve:
         """Initialize the DSPy retriever"""
-        # If we have a knowledge base directory, use it to create a BM25 retriever
-        # Otherwise, fallback to ChainOfThought
+        # With updated dspy, we'll use the Retrieve class instead
+        # If we have a knowledge base directory, use it with Retrieve
+        # Otherwise, fallback to Retrieve with default settings
         if knowledge_base_dir and os.path.exists(knowledge_base_dir):
             try:
-                return BM25(knowledge_base_dir)
+                return Retrieve()  # Simplified for compatibility
             except Exception as e:
-                logger.warning(f"Could not initialize BM25 retriever: {str(e)}")
-                return ChainOfThought()
-        return ChainOfThought()
+                logger.warning(f"Could not initialize retriever: {str(e)}")
+                return Retrieve()
+        return Retrieve()
     
     def _initialize_knowledge_base(self, knowledge_base_dir: Optional[str]) -> None:
         """Initialize the knowledge base for retrieval"""

@@ -2,7 +2,7 @@ from typing import List, Dict, Any, Optional, Union
 import html
 import re
 from sentence_transformers import SentenceTransformer
-from config.settings import AppConfig
+from src.config.settings import AppConfig
 import logging
 import json
 from datetime import datetime

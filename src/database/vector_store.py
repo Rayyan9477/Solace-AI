@@ -13,7 +13,7 @@ from qdrant_client import QdrantClient
 from pymilvus import connections, Collection, utility
 from sentence_transformers import SentenceTransformer
 
-from config.settings import AppConfig
+from src.config.settings import AppConfig
 
 logger = logging.getLogger(__name__)
 

@@ -21,7 +21,7 @@ from langchain_core.messages import (
     SystemMessage,
 )
 
-from config.settings import AppConfig
+from src.config.settings import AppConfig
 
 logger = logging.getLogger(__name__)
 
