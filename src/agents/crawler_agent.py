@@ -16,8 +16,8 @@ import asyncio
 from urllib.parse import urlparse
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from config.settings import AppConfig
-from utils.helpers import TextHelper, DocumentHelper
+from src.config.settings import AppConfig
+from src.utils.helpers import TextHelper, DocumentHelper
 from langchain.memory import ConversationBufferMemory
 from langchain.schema.language_model import BaseLanguageModel
 

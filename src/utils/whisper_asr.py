@@ -16,7 +16,7 @@ from pathlib import Path
 import huggingface_hub
 import json
 import asyncio
-from config.settings import AppConfig
+from src.config.settings import AppConfig
 from .voice_emotion_analyzer import VoiceEmotionAnalyzer
 
 logger = logging.getLogger(__name__)

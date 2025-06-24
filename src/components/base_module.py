@@ -16,7 +16,7 @@ import pkgutil
 import sys
 from pathlib import Path
 
-from utils.logger import get_logger
+from src.utils.logger import get_logger
 
 # Singleton module manager instance
 _module_manager = None

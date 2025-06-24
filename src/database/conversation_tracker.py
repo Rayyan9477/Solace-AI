@@ -17,7 +17,7 @@ from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 
 from src.database.vector_store import FaissVectorStore
-from config.settings import AppConfig
+from src.config.settings import AppConfig
 
 logger = logging.getLogger(__name__)
 

@@ -24,9 +24,9 @@ from pathlib import Path
 import faiss
 
 # Project imports
-from database.vector_store import VectorStore
-from utils.agentic_rag import AgenticRAG
-from config.settings import AppConfig
+from src.database.vector_store import VectorStore
+from src.utils.agentic_rag import AgenticRAG
+from src.config.settings import AppConfig
 from .integrated_diagnosis import DiagnosisModule, CONDITION_DEFINITIONS
 
 # Configure logging

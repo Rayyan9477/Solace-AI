@@ -29,7 +29,7 @@ import faiss
 
 from src.database.vector_store import FaissVectorStore
 from src.database.conversation_tracker import ConversationTracker
-from config.settings import AppConfig
+from src.config.settings import AppConfig
 
 logger = logging.getLogger(__name__)
 

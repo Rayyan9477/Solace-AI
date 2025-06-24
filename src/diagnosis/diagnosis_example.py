@@ -11,8 +11,8 @@ from pathlib import Path
 import logging
 
 # Project imports
-from diagnosis import DiagnosisModule
-from utils.agentic_rag import AgenticRAG
+from src.diagnosis import DiagnosisModule
+from src.utils.agentic_rag import AgenticRAG
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 

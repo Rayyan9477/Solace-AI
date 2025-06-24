@@ -9,8 +9,8 @@ from typing import Dict, Any, List, Optional, Union
 import json
 import logging
 
-from components.base_module import Module
-from database.central_vector_db import CentralVectorDB, DocumentType
+from src.components.base_module import Module
+from src.database.central_vector_db import CentralVectorDB, DocumentType
 
 class CentralVectorDBModule(Module):
     """

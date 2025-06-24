@@ -11,6 +11,13 @@ import dspy
 from typing import Dict, Any, List, Optional, Tuple, Union
 from pathlib import Path
 from datetime import datetime
+import torch
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 # LlamaIndex imports
 from llama_index.core import Document, VectorStoreIndex, SimpleDirectoryReader
@@ -37,6 +44,27 @@ from langchain.schema import Document as LCDocument
 
 # Project imports - vector store for caching
 from src.database.vector_store import VectorStore as ProjectVectorStore
+
+# Configure CUDA/CPU device
+def setup_device():
+    """Configure and return the appropriate device (CUDA or CPU)"""
+    if torch.cuda.is_available():
+        try:
+            # Test CUDA initialization
+            torch.cuda.init()
+            device = torch.device("cuda")
+            logger.info("CUDA is available and initialized successfully")
+        except Exception as e:
+            device = torch.device("cpu")
+            logger.warning(f"CUDA initialization failed, falling back to CPU: {str(e)}")
+    else:
+        device = torch.device("cpu")
+        logger.info("CUDA is not available, using CPU")
+    
+    return device
+
+# Set up device
+DEVICE = setup_device()
 
 # DSPy modules
 from dspy.retrieve import Retrieve
@@ -226,7 +254,8 @@ class AgenticRAG:
         vector_store: Optional[VectorStore] = None,
         knowledge_base_dir: Optional[str] = None,
         dspy_model_name: Optional[str] = None,
-        use_result_caching: bool = True
+        use_result_caching: bool = True,
+        device: Optional[torch.device] = None
     ):
         """
         Initialize the Agentic RAG system
@@ -238,11 +267,15 @@ class AgenticRAG:
             knowledge_base_dir: Directory containing knowledge base documents
             dspy_model_name: Name of the DSPy-compatible model to use
             use_result_caching: Whether to use result caching with FAISS
+            device: Device to use (CUDA or CPU)
         """
         self.llm = llm
         self.embedding_model = embedding_model
         self.vector_store = vector_store
         self.use_result_caching = use_result_caching
+        self.device = device if device is not None else DEVICE
+        
+        logger.info(f"AgenticRAG initialized with device: {self.device}")
         
         # Initialize FAISS vector store for result caching
         if self.use_result_caching:
@@ -279,7 +312,8 @@ class AgenticRAG:
         class LangChainLMAdapter(dspy.LM):
             def __init__(self, langchain_llm):
                 self.llm = langchain_llm
-              def basic_request(self, prompt, **kwargs):
+            
+            def basic_request(self, prompt, **kwargs):
                 try:
                     response = self.llm.invoke(prompt)
                     return response

@@ -18,12 +18,12 @@ import torch
 sys.path.append(str(Path(__file__).resolve().parent))
 
 # Import settings first to ensure configuration is loaded
-from config.settings import AppConfig
+from src.config.settings import AppConfig
 
 # Import core modules
-from components.base_module import Module, ModuleManager, get_module_manager
-from utils.logger import get_logger, configure_logging
-from utils.metrics import track_metric
+from src.components.base_module import Module, ModuleManager, get_module_manager
+from src.utils.logger import get_logger, configure_logging
+from src.utils.metrics import track_metric
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -347,6 +347,25 @@ def reset_session():
         }
     })
     logger.info("Session reset")
+
+def initialize_components(config=None):
+    """
+    Initialize application components
+
+    Args:
+        config: Optional configuration override
+
+    Returns:
+        Application instance
+    """
+    try:
+        # Create and initialize the application
+        app = Application()
+        asyncio.run(app.initialize())
+        return app
+    except Exception as e:
+        logger.error(f"Error initializing components: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     try:

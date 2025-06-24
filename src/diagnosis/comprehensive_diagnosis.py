@@ -24,9 +24,9 @@ import faiss
 from collections import defaultdict
 
 # Project imports
-from database.vector_store import VectorStore
-from utils.agentic_rag import AgenticRAG
-from config.settings import AppConfig
+from src.database.vector_store import VectorStore
+from src.utils.agentic_rag import AgenticRAG
+from src.config.settings import AppConfig
 from src.models.llm import get_llm
 
 # Configure logging

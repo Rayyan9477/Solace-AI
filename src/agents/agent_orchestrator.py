@@ -11,9 +11,9 @@ import time
 import json
 from datetime import datetime
 
-from components.base_module import Module, get_module_manager
-from utils.logger import get_logger
-from utils.vector_db_integration import get_conversation_tracker, search_relevant_data
+from src.components.base_module import Module, get_module_manager
+from src.utils.logger import get_logger
+from src.utils.vector_db_integration import get_conversation_tracker, search_relevant_data
 
 class AgentOrchestrator(Module):
     """

@@ -226,5 +226,60 @@ def get_all_loggers() -> List[str]:
     return list(_loggers.keys())
 
 
+def configure_logging(log_level: Optional[str] = None, log_file: Optional[str] = None) -> None:
+    """
+    Configure application-wide logging settings
+    
+    Args:
+        log_level: Optional log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        log_file: Optional log file path
+    """
+    # Determine log level
+    level = getattr(logging, log_level.upper()) if log_level else DEFAULT_LOG_LEVEL
+    
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+    
+    # Remove existing handlers
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # Create console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(level)
+    console_handler.setFormatter(logging.Formatter(DEFAULT_LOG_FORMAT))
+    root_logger.addHandler(console_handler)
+    
+    # Create file handler if requested
+    if log_file:
+        log_path = os.path.join(DEFAULT_LOG_DIR, log_file)
+        file_handler = RotatingFileHandler(
+            log_path, 
+            maxBytes=10*1024*1024,  # 10 MB
+            backupCount=5
+        )
+        file_handler.setLevel(level)
+        file_handler.setFormatter(logging.Formatter(DEFAULT_LOG_FORMAT))
+        root_logger.addHandler(file_handler)
+    
+    # Configure default application log file
+    app_log_path = os.path.join(DEFAULT_LOG_DIR, "contextual_chatbot.log")
+    app_file_handler = RotatingFileHandler(
+        app_log_path, 
+        maxBytes=10*1024*1024,  # 10 MB
+        backupCount=5
+    )
+    app_file_handler.setLevel(level)
+    app_file_handler.setFormatter(logging.Formatter(DEFAULT_LOG_FORMAT))
+    root_logger.addHandler(app_file_handler)
+    
+    # Suppress noisy loggers
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    
+    logging.info(f"Logging configured with level: {logging.getLevelName(level)}")
+
+
 # Create the root application logger
 app_logger = get_logger("contextual_chatbot")

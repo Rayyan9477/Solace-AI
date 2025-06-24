@@ -50,9 +50,7 @@ class DiaTTS:
         # Create cache directory if specified
         self.cache_dir = cache_dir
         if self.cache_dir:
-            os.makedirs(self.cache_dir, exist_ok=True)
-            
-        # Set device
+            os.makedirs(self.cache_dir, exist_ok=True)        # Set device
         self.use_gpu = use_gpu and torch.cuda.is_available()
         self.device = "cuda" if self.use_gpu else "cpu"
         

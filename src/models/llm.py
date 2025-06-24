@@ -13,7 +13,16 @@ from langchain.callbacks.manager import CallbackManagerForLLMRun
 # Import Gemini API
 import google.generativeai as genai
 from google.generativeai.types import GenerationConfig
-from google.generativeai.types.generation_types import StopReason
+try:
+    from google.generativeai.types.generation_types import StopReason
+except ImportError:
+    # Define a fallback if the import isn't available
+    class StopReason:
+        STOP = "STOP"
+        MAX_TOKENS = "MAX_TOKENS"
+        SAFETY = "SAFETY"
+        RECITATION = "RECITATION"
+        OTHER = "OTHER"
 
 # Configure logger
 logger = logging.getLogger(__name__)
