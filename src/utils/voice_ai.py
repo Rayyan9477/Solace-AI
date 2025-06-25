@@ -26,6 +26,48 @@ logger = logging.getLogger(__name__)
 class VoiceAI:
     """Voice AI component handling speech recognition and synthesis"""
     
+    @staticmethod
+    def check_dependencies() -> Dict[str, bool]:
+        """
+        Check if all required dependencies for voice AI are available
+        
+        Returns:
+            Dictionary mapping dependency names to availability status
+        """
+        dependencies = {}
+        
+        try:
+            import torch
+            dependencies["torch"] = True
+        except ImportError:
+            dependencies["torch"] = False
+            
+        try:
+            import transformers
+            dependencies["transformers"] = True
+        except ImportError:
+            dependencies["transformers"] = False
+            
+        try:
+            import soundfile
+            dependencies["soundfile"] = True
+        except ImportError:
+            dependencies["soundfile"] = False
+            
+        try:
+            import torchaudio
+            dependencies["torchaudio"] = True
+        except ImportError:
+            dependencies["torchaudio"] = False
+            
+        try:
+            import numpy
+            dependencies["numpy"] = True
+        except ImportError:
+            dependencies["numpy"] = False
+            
+        return dependencies
+    
     def __init__(self, 
                  use_whisper: bool = True,
                  use_speecht5: bool = True,

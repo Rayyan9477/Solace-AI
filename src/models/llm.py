@@ -209,6 +209,43 @@ class GeminiLLM(BaseLanguageModel):
         # Join into a single string
         return "\n\n".join(prompt_parts)
     
+    def _call(self, 
+              prompt: str, 
+              stop: Optional[List[str]] = None,
+              run_manager: Optional[CallbackManagerForLLMRun] = None,
+              **kwargs) -> str:
+        """
+        Call the model with a single prompt and return a string response
+        
+        Args:
+            prompt: The prompt to send to the model
+            stop: Optional list of stop sequences
+            run_manager: Optional callback manager
+            **kwargs: Additional parameters
+            
+        Returns:
+            Generated text response
+        """
+        try:
+            # Generate response from Gemini
+            response = self.model.generate_content(
+                prompt,
+                generation_config=self.generation_config,
+                safety_settings=None  # Safety handled by our SafetyAgent
+            )
+            
+            # Process response
+            if hasattr(response, 'candidates') and response.candidates:
+                text = response.text
+                return text if text else ""
+            else:
+                # Empty response
+                return ""
+                
+        except Exception as e:
+            logger.error(f"Error calling Gemini: {str(e)}")
+            return ""
+    
     @property
     def _llm_type(self) -> str:
         """Return the type of LLM"""

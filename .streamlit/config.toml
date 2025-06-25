@@ -1,3 +1,2 @@
 [server]
-enableWatchdog = false
 enableXsrfProtection = false

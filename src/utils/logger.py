@@ -226,14 +226,21 @@ def get_all_loggers() -> List[str]:
     return list(_loggers.keys())
 
 
-def configure_logging(log_level: Optional[str] = None, log_file: Optional[str] = None) -> None:
+def configure_logging(log_config, log_file: Optional[str] = None) -> None:
     """
     Configure application-wide logging settings
     
     Args:
-        log_level: Optional log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        log_config: Log configuration - can be a string (log level) or dict with config
         log_file: Optional log file path
     """
+    # Handle different input types
+    if isinstance(log_config, dict):
+        log_level = log_config.get("log_level")
+        log_file = log_file or log_config.get("log_file")
+    else:
+        log_level = log_config
+    
     # Determine log level
     level = getattr(logging, log_level.upper()) if log_level else DEFAULT_LOG_LEVEL
     
