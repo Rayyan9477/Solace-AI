@@ -17,6 +17,7 @@ import huggingface_hub
 import json
 import asyncio
 from src.config.settings import AppConfig
+from .device_utils import get_device, is_cuda_available
 from .voice_emotion_analyzer import VoiceEmotionAnalyzer
 
 logger = logging.getLogger(__name__)
@@ -54,7 +55,7 @@ class WhisperASR:
         # Map to standard whisper model name if HF path provided
         self.whisper_model_name = MODEL_MAPPINGS.get(model_name.lower(), "large-v3")
         self.model = None
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = get_device()
         
         # Define model download path
         if hasattr(AppConfig, 'VOICE_CONFIG') and 'cache_dir' in AppConfig.VOICE_CONFIG:
@@ -96,7 +97,7 @@ class WhisperASR:
             "patience": None,
             "temperature": 0.0,  # 0 = greedy decoding
             "initial_prompt": None,
-            "fp16": torch.cuda.is_available()
+            "fp16": is_cuda_available()
         }
         
         logger.info(f"Initializing WhisperASR with model '{model_name}' (using {self.whisper_model_name}) on {self.device}")

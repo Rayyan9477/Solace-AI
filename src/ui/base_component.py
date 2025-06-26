@@ -1,11 +1,14 @@
 """
 Base UI component for the mental health chatbot application.
 All UI components should inherit from this class.
+Note: This is now a non-UI base class for future UI service integration.
 """
 
-import streamlit as st
+import logging
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 class BaseUIComponent(ABC):
     """Base class for all UI components in the application"""
@@ -20,6 +23,7 @@ class BaseUIComponent(ABC):
         """
         self.name = name
         self.description = description
+        self.logger = logging.getLogger(f"{__name__}.{name}")
     
     @abstractmethod
     def render(self, **kwargs):
@@ -28,55 +32,58 @@ class BaseUIComponent(ABC):
         
         Args:
             **kwargs: Additional parameters for rendering
+        
+        Returns:
+            Dict containing component data for external UI service
         """
         pass
     
     def show_loading(self, message: str = "Loading..."):
-        """Show a loading spinner with message"""
-        return st.spinner(message)
+        """Log a loading message"""
+        self.logger.info(f"Loading: {message}")
+        return {"type": "loading", "message": message}
     
     def show_success(self, message: str):
-        """Show a success message"""
-        return st.success(message)
+        """Log a success message"""
+        self.logger.info(f"Success: {message}")
+        return {"type": "success", "message": message}
     
     def show_error(self, message: str):
-        """Show an error message"""
-        return st.error(message)
+        """Log an error message"""
+        self.logger.error(f"Error: {message}")
+        return {"type": "error", "message": message}
     
     def show_warning(self, message: str):
-        """Show a warning message"""
-        return st.warning(message)
+        """Log a warning message"""
+        self.logger.warning(f"Warning: {message}")
+        return {"type": "warning", "message": message}
     
     def show_info(self, message: str):
-        """Show an info message"""
-        return st.info(message)
+        """Log an info message"""
+        self.logger.info(f"Info: {message}")
+        return {"type": "info", "message": message}
     
     def create_styled_container(self, border_radius: int = 10, 
                                bg_color: str = "#f8f9fa", 
                                padding: int = 20,
                                margin_bottom: int = 20):
         """
-        Create a styled container with custom CSS
+        Create a styled container configuration for external UI service
         
         Returns:
-            A Streamlit container with custom CSS
+            Dict containing container styling configuration
         """
-        container = st.container()
-        
-        # Apply custom CSS
-        container_style = f"""
-        <style>
-        [data-testid="stContainer"] {{
-            background-color: {bg_color};
-            padding: {padding}px;
-            border-radius: {border_radius}px;
-            margin-bottom: {margin_bottom}px;
-        }}
-        </style>
-        """
-        
-        container.markdown(container_style, unsafe_allow_html=True)
-        return container
+        return {
+            "type": "container",
+            "style": {
+                "background_color": bg_color,
+                "padding": padding,
+                "border_radius": border_radius,
+                "margin_bottom": margin_bottom
+            }
+        }
 
+# Add alias for backward compatibility
+BaseComponent = BaseUIComponent
 # Add alias for backward compatibility
 BaseComponent = BaseUIComponent

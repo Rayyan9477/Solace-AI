@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 import json
 import io
+from .device_utils import get_device, is_cuda_available
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -71,7 +72,7 @@ class VoiceEmotionAnalyzer:
         """
         # Set up device
         if device is None:
-            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            self.device = get_device()
         else:
             self.device = device
             

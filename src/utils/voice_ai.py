@@ -18,6 +18,7 @@ import io
 import torchaudio
 from .audio_player import AudioPlayer
 from .dia_tts import DiaTTS
+from .device_utils import get_device, is_cuda_available
 from ..config.settings import AppConfig  # Import AppConfig from settings
 
 # Configure logger
@@ -86,7 +87,7 @@ class VoiceAI:
         """
         # Set up device
         if device is None:
-            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            self.device = get_device()
         else:
             self.device = device
             

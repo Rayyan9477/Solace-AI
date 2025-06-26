@@ -44,27 +44,10 @@ from langchain.schema import Document as LCDocument
 
 # Project imports - vector store for caching
 from src.database.vector_store import VectorStore as ProjectVectorStore
-
-# Configure CUDA/CPU device
-def setup_device():
-    """Configure and return the appropriate device (CUDA or CPU)"""
-    if torch.cuda.is_available():
-        try:
-            # Test CUDA initialization
-            torch.cuda.init()
-            device = torch.device("cuda")
-            logger.info("CUDA is available and initialized successfully")
-        except Exception as e:
-            device = torch.device("cpu")
-            logger.warning(f"CUDA initialization failed, falling back to CPU: {str(e)}")
-    else:
-        device = torch.device("cpu")
-        logger.info("CUDA is not available, using CPU")
-    
-    return device
+from .device_utils import get_device, is_cuda_available, get_device_info
 
 # Set up device
-DEVICE = setup_device()
+DEVICE = get_device()
 
 # DSPy modules
 from dspy.retrieve import Retrieve
