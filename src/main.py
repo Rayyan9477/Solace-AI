@@ -26,6 +26,10 @@ from components.base_module import Module, ModuleManager, get_module_manager
 from utils.logger import get_logger, configure_logging
 from utils.metrics import track_metric
 from utils.device_utils import get_device, get_device_info, is_cuda_available
+from utils.console_utils import setup_console, safe_print, emoji_to_ascii
+
+# Set up console for Unicode
+setup_console()
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -87,25 +91,121 @@ class Application:
         self.logger.info("Starting application initialization")
         
         # Discover module types in packages
-        module_count = self.module_manager.discover_module_types("src.agents")
-        self.logger.info(f"Discovered {module_count} agent modules")
+        try:
+            module_count = self.module_manager.discover_module_types("src.agents")
+            self.logger.info(f"Discovered {module_count} agent modules")
+            
+            module_count += self.module_manager.discover_module_types("src.components")
+            self.logger.info(f"Discovered {module_count} total modules")
+            
+            # Manual registration of core modules as a fallback
+            self._register_core_module_types()
+            
+            # Create core modules with configurations from AppConfig
+            self._create_core_modules()
+            
+            # Initialize all modules, with graceful degradation
+            success = await self._initialize_modules_with_fallback()
+            self.initialized = success
+            
+            if success:
+                self.logger.info("Application initialization complete")
+            else:
+                self.logger.error("Application initialization failed")
+            
+            return success
+        except Exception as e:
+            self.logger.error(f"Error during application initialization: {str(e)}")
+            self.initialized = False
+            return False
+    
+    def _register_core_module_types(self):
+        """Manually register core module types as a fallback"""
+        try:
+            # Try to import the modules
+            try:
+                from components.llm_module import LLMModule
+                self.module_manager.register_module_type(LLMModule)
+                self.logger.debug("Registered LLMModule type")
+            except ImportError:
+                self.logger.warning("Could not import LLMModule")
+                
+            try:
+                from components.voice_module import VoiceModule
+                self.module_manager.register_module_type(VoiceModule)
+                self.logger.debug("Registered VoiceModule type")
+            except ImportError:
+                self.logger.warning("Could not import VoiceModule")
+                
+            try:
+                from components.vector_store_module import VectorStoreModule
+                self.module_manager.register_module_type(VectorStoreModule)
+                self.logger.debug("Registered VectorStoreModule type")
+            except ImportError:
+                self.logger.warning("Could not import VectorStoreModule")
+                
+            try:
+                from components.central_vector_db_module import CentralVectorDBModule
+                self.module_manager.register_module_type(CentralVectorDBModule)
+                self.logger.debug("Registered CentralVectorDBModule type")
+            except ImportError:
+                self.logger.warning("Could not import CentralVectorDBModule")
+                
+            try:
+                from components.ui_manager import UIManager
+                self.module_manager.register_module_type(UIManager)
+                self.logger.debug("Registered UIManager type")
+            except ImportError:
+                self.logger.warning("Could not import UIManager")
+                
+        except Exception as e:
+            self.logger.error(f"Error registering core module types: {str(e)}")
+    
+    async def _initialize_modules_with_fallback(self):
+        """Initialize modules with fallback for non-critical modules"""
+        # First, initialize essential modules
+        essential_modules = ["llm", "central_vector_db", "vector_store"]
+        optional_modules = ["voice", "ui_manager"]
         
-        module_count += self.module_manager.discover_module_types("src.components")
-        self.logger.info(f"Discovered {module_count} total modules")
+        # Try to initialize essential modules
+        all_success = True
+        for module_id in essential_modules:
+            module = self.module_manager.get_module(module_id)
+            if module:
+                try:
+                    success = await module.initialize()
+                    if not success:
+                        self.logger.error(f"Failed to initialize essential module: {module_id}")
+                        all_success = False
+                except Exception as e:
+                    self.logger.error(f"Error initializing module {module_id}: {str(e)}")
+                    all_success = False
+            else:
+                self.logger.error(f"Essential module not found: {module_id}")
+                all_success = False
         
-        # Create core modules with configurations from AppConfig
-        self._create_core_modules()
+        # Try to initialize optional modules
+        for module_id in optional_modules:
+            module = self.module_manager.get_module(module_id)
+            if module:
+                try:
+                    success = await module.initialize()
+                    if not success:
+                        self.logger.warning(f"Failed to initialize optional module: {module_id}")
+                except Exception as e:
+                    self.logger.warning(f"Error initializing optional module {module_id}: {str(e)}")
         
-        # Initialize all modules
-        success = await self.module_manager.initialize_all()
-        self.initialized = success
+        # Initialize remaining modules
+        for module_id, module in self.module_manager.modules.items():
+            if module_id not in essential_modules and module_id not in optional_modules:
+                try:
+                    success = await module.initialize()
+                    if not success:
+                        self.logger.warning(f"Failed to initialize module: {module_id}")
+                except Exception as e:
+                    self.logger.warning(f"Error initializing module {module_id}: {str(e)}")
         
-        if success:
-            self.logger.info("Application initialization complete")
-        else:
-            self.logger.error("Application initialization failed")
-        
-        return success
+        return all_success
     
     def _create_core_modules(self):
         """Create core system modules"""
@@ -305,6 +405,47 @@ def initialize_components(config=None):
         Application instance
     """
     try:
+        # Get module manager
+        module_manager = get_module_manager()
+        
+        # Discover module types in components and agents packages
+        comp_count = module_manager.discover_module_types("src.components")
+        agent_count = module_manager.discover_module_types("src.agents")
+        
+        logger.info(f"Discovered {comp_count} component modules and {agent_count} agent modules")
+        
+        # Ensure we're discovering modules correctly - manually register core modules
+        try:
+            from components.llm_module import LLMModule
+            from components.voice_module import VoiceModule
+            from components.vector_store_module import VectorStoreModule
+            from components.central_vector_db_module import CentralVectorDBModule
+            from components.ui_manager import UIManager
+            
+            module_manager.register_module_type(LLMModule)
+            module_manager.register_module_type(VoiceModule)
+            module_manager.register_module_type(VectorStoreModule)
+            module_manager.register_module_type(CentralVectorDBModule)
+            module_manager.register_module_type(UIManager)
+            
+            # Register any agent types that may have been missed
+            try:
+                from agents.chat_agent import ChatAgent
+                from agents.emotion_agent import EmotionAgent
+                from agents.diagnosis_agent import DiagnosisAgent
+                from agents.therapy_agent import TherapyAgent
+                from agents.safety_agent import SafetyAgent
+                
+                module_manager.register_module_type(ChatAgent)
+                module_manager.register_module_type(EmotionAgent)
+                module_manager.register_module_type(DiagnosisAgent)
+                module_manager.register_module_type(TherapyAgent)
+                module_manager.register_module_type(SafetyAgent)
+            except ImportError as e:
+                logger.warning(f"Some agent modules could not be imported: {e}")
+        except ImportError as e:
+            logger.warning(f"Some core modules could not be imported: {e}")
+        
         # Create and initialize the application
         app = Application()
         asyncio.run(app.initialize())

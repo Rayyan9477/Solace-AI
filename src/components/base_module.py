@@ -165,10 +165,18 @@ class ModuleManager:
             package = importlib.import_module(package_name)
             discovered_count = 0
             
+            # Handle case where package doesn't have __path__
+            if not hasattr(package, '__path__'):
+                self.logger.error(f"Package {package_name} does not have a __path__ attribute")
+                return 0
+                
             for _, name, is_pkg in pkgutil.iter_modules(package.__path__, package.__name__ + "."):
                 if is_pkg:
                     # Recursively scan subpackages
-                    discovered_count += self.discover_module_types(name)
+                    try:
+                        discovered_count += self.discover_module_types(name)
+                    except Exception as e:
+                        self.logger.error(f"Error scanning subpackage {name}: {str(e)}")
                 else:
                     try:
                         # Import the module
@@ -176,21 +184,30 @@ class ModuleManager:
                         
                         # Find Module subclasses in the module
                         for attr_name in dir(module):
-                            attr = getattr(module, attr_name)
-                            
-                            # Check if it's a class and a Module subclass (but not Module itself)
-                            if (inspect.isclass(attr) and 
-                                issubclass(attr, Module) and 
-                                attr is not Module):
-                                self.register_module_type(attr)
-                                discovered_count += 1
-                                self.logger.debug(f"Discovered module type: {attr.__name__} in {name}")
+                            try:
+                                attr = getattr(module, attr_name)
+                                
+                                # Check if it's a class and a Module subclass (but not Module itself)
+                                if (inspect.isclass(attr) and 
+                                    issubclass(attr, Module) and 
+                                    attr is not Module):
+                                    self.register_module_type(attr)
+                                    discovered_count += 1
+                                    self.logger.debug(f"Discovered module type: {attr.__name__} in {name}")
+                            except Exception as e:
+                                self.logger.error(f"Error processing attribute {attr_name} in {name}: {str(e)}")
                     except Exception as e:
                         self.logger.error(f"Error discovering modules in {name}: {str(e)}")
             
             return discovered_count
+        except ModuleNotFoundError:
+            self.logger.warning(f"Package {package_name} not found")
+            return 0
         except ImportError as e:
             self.logger.error(f"Could not import package {package_name}: {str(e)}")
+            return 0
+        except Exception as e:
+            self.logger.error(f"Unexpected error discovering modules in {package_name}: {str(e)}")
             return 0
     
     def create_module(self, type_id: str, module_id: str, 
@@ -328,33 +345,57 @@ class ModuleManager:
         Initialize all modules in dependency order.
         
         Returns:
-            True if all modules initialized successfully, False otherwise
+            True if all critical modules initialized successfully, False otherwise
         """
         initialization_order = self._get_initialization_order()
         self.logger.info(f"Initializing {len(initialization_order)} modules in dependency order")
         
-        all_success = True
+        # Track critical and optional modules
+        critical_modules = ["llm", "central_vector_db", "vector_store"]
+        optional_modules = ["voice", "ui_manager"]
+        
+        all_critical_success = True
         initialized_count = 0
+        failed_modules = []
         
         for module_id in initialization_order:
             module = self.modules[module_id]
+            is_critical = module_id in critical_modules
             
             try:
                 self.logger.debug(f"Initializing module: {module_id}")
                 success = await module.initialize()
                 
                 if not success:
-                    self.logger.error(f"Module {module_id} initialization failed")
-                    all_success = False
+                    if is_critical:
+                        self.logger.error(f"Critical module {module_id} initialization failed")
+                        all_critical_success = False
+                        failed_modules.append(module_id)
+                    else:
+                        self.logger.warning(f"Optional module {module_id} initialization failed")
                 else:
                     initialized_count += 1
+                    self.logger.debug(f"Module {module_id} initialized successfully")
                     
             except Exception as e:
-                self.logger.error(f"Error initializing module {module_id}: {str(e)}")
-                all_success = False
+                if is_critical:
+                    self.logger.error(f"Error initializing critical module {module_id}: {str(e)}")
+                    all_critical_success = False
+                    failed_modules.append(module_id)
+                else:
+                    self.logger.warning(f"Error initializing optional module {module_id}: {str(e)}")
         
-        self.logger.info(f"Initialized {initialized_count}/{len(initialization_order)} modules")
-        return all_success
+        # Log initialization summary
+        if failed_modules:
+            self.logger.warning(f"Failed modules: {', '.join(failed_modules)}")
+        
+        success_rate = f"{initialized_count}/{len(initialization_order)}"
+        if all_critical_success:
+            self.logger.info(f"All critical modules initialized successfully. Overall: {success_rate} modules")
+        else:
+            self.logger.error(f"Some critical modules failed. Overall: {success_rate} modules")
+        
+        return all_critical_success
     
     async def shutdown_all(self, reverse_order: bool = True) -> bool:
         """

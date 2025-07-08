@@ -7,8 +7,144 @@ import matplotlib.pyplot as plt
 import numpy as np
 from typing import Dict, Any, List, Optional
 import logging
+import json
+from pathlib import Path
+import os
 
 logger = logging.getLogger(__name__)
+
+class DiagnosisResults:
+    """
+    Manager for diagnosis results, handling storage, formatting, and retrieval.
+    Provides a consistent interface for working with diagnosis data.
+    """
+    
+    def __init__(self, storage_path: Optional[str] = None):
+        """
+        Initialize the diagnosis results manager
+        
+        Args:
+            storage_path: Optional path to store diagnosis results
+        """
+        self.storage_path = storage_path or os.path.join(
+            Path(__file__).parents[2], "data", "diagnostic_data"
+        )
+        os.makedirs(self.storage_path, exist_ok=True)
+        self.logger = logging.getLogger(__name__)
+    
+    def save_results(self, user_id: str, results: Dict[str, Any]) -> bool:
+        """
+        Save diagnosis results for a user
+        
+        Args:
+            user_id: Unique identifier for the user
+            results: Dictionary of diagnosis results
+            
+        Returns:
+            bool: True if save was successful
+        """
+        try:
+            file_path = os.path.join(self.storage_path, f"{user_id}_diagnosis.json")
+            with open(file_path, "w") as f:
+                json.dump(results, f, indent=2)
+            self.logger.info(f"Saved diagnosis results for user {user_id}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error saving diagnosis results: {str(e)}")
+            return False
+    
+    def load_results(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Load diagnosis results for a user
+        
+        Args:
+            user_id: Unique identifier for the user
+            
+        Returns:
+            Optional[Dict[str, Any]]: Diagnosis results or None if not found
+        """
+        try:
+            file_path = os.path.join(self.storage_path, f"{user_id}_diagnosis.json")
+            if not os.path.exists(file_path):
+                return None
+                
+            with open(file_path, "r") as f:
+                results = json.load(f)
+            return results
+        except Exception as e:
+            self.logger.error(f"Error loading diagnosis results: {str(e)}")
+            return None
+    
+    def format_results(self, results: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Format diagnosis results for display
+        
+        Args:
+            results: Raw diagnosis results
+            
+        Returns:
+            Dict[str, Any]: Formatted results
+        """
+        formatted = {}
+        
+        # Format mental health section
+        if "mental_health" in results:
+            formatted["mental_health"] = self._format_mental_health(results["mental_health"])
+        
+        # Format personality section
+        if "personality" in results:
+            formatted["personality"] = self._format_personality(results["personality"])
+        
+        # Format recommendations
+        if "recommendations" in results:
+            formatted["recommendations"] = results["recommendations"]
+        
+        return formatted
+    
+    def _format_mental_health(self, mental_health: Dict[str, Any]) -> Dict[str, Any]:
+        """Format mental health section"""
+        formatted = {
+            "overall_status": mental_health.get("overall_status", "mild"),
+            "areas_of_concern": [],
+            "strengths": []
+        }
+        
+        # Format areas of concern
+        for area in mental_health.get("areas_of_concern", []):
+            formatted["areas_of_concern"].append({
+                "name": area.get("name", ""),
+                "severity": area.get("severity", "mild"),
+                "description": area.get("description", ""),
+                "score": area.get("score", 0)
+            })
+        
+        # Format strengths
+        for strength in mental_health.get("strengths", []):
+            formatted["strengths"].append({
+                "name": strength.get("name", ""),
+                "description": strength.get("description", ""),
+                "score": strength.get("score", 0)
+            })
+        
+        return formatted
+    
+    def _format_personality(self, personality: Dict[str, Any]) -> Dict[str, Any]:
+        """Format personality section"""
+        formatted = {
+            "traits": [],
+            "summary": personality.get("summary", "")
+        }
+        
+        # Format traits
+        for trait in personality.get("traits", []):
+            formatted["traits"].append({
+                "name": trait.get("name", ""),
+                "score": trait.get("score", 0),
+                "description": trait.get("description", "")
+            })
+        
+        return formatted
+
 
 class DiagnosisResultsComponent:
     """Component for rendering diagnosis results"""

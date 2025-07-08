@@ -20,6 +20,10 @@ from src.main import Application, initialize_components
 from src.config.settings import AppConfig
 from src.utils.logger import get_logger, configure_logging
 from src.utils.device_utils import get_device_info, is_cuda_available
+from src.utils.console_utils import setup_console, safe_print, emoji_to_ascii
+
+# Set up console for Unicode
+setup_console()
 
 # Configure logging
 configure_logging(AppConfig.LOG_LEVEL)
@@ -34,20 +38,21 @@ class ChatbotCLI:
         
     async def start_interactive_session(self):
         """Start an interactive chat session"""
-        print(f"\n🌟 Welcome to {AppConfig.APP_NAME}")
-        print("Your Empathetic Digital Confidant")
-        print("-" * 50)
+        welcome_msg = emoji_to_ascii(f"\n** Welcome to {AppConfig.APP_NAME}")
+        safe_print(welcome_msg)
+        safe_print("Your Empathetic Digital Confidant")
+        safe_print("-" * 50)
         
         # Display system information
         device_info = get_device_info()
-        print(f"Device: {device_info['device']}")
-        print(f"CUDA Available: {device_info['cuda_available']}")
+        safe_print(f"Device: {device_info['device']}")
+        safe_print(f"CUDA Available: {device_info['cuda_available']}")
         if device_info['using_cuda']:
-            print(f"GPU: {device_info.get('gpu_name', 'Unknown')}")
-            print(f"GPU Memory: {device_info.get('gpu_memory_total', 0):.2f} GB")
-        print("-" * 50)
+            safe_print(f"GPU: {device_info.get('gpu_name', 'Unknown')}")
+            safe_print(f"GPU Memory: {device_info.get('gpu_memory_total', 0):.2f} GB")
+        safe_print("-" * 50)
         
-        print("\nType 'quit', 'exit', or 'bye' to end the conversation.")
+        safe_print("\nType 'quit', 'exit', or 'bye' to end the conversation.")
         print("Type 'help' for available commands.\n")
         
         # Get chat agent from module manager
