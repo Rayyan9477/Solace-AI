@@ -296,27 +296,26 @@ For containerized deployment:
 
 ## 🚀 Getting Started
 
-### Web Interface
+### API Server for Mobile App Integration
 
-Start the Streamlit web application:
+Start the API server for mobile app integration:
 
 ```bash
-streamlit run app.py
+python launch_api.py
 ```
 
-This launches a user-friendly interface with:
-- Personality assessment wizard
-- Mental health screening tools
-- Voice and text conversation options
-- Results visualization and insights
-- Therapeutic resource access
+This launches the REST API server with:
+- Complete API documentation at `/docs`
+- Endpoints for chat, assessment, voice processing
+- Mobile app integration capabilities
+- User profile management
 
 ### Command Line Interface
 
-For a simpler command-line experience:
+For a simple command-line experience:
 
 ```bash
-python chat.py
+python start.py
 ```
 
 Optional flags:

@@ -3,17 +3,16 @@ Integrated assessment component for the mental health app.
 Combines mental health and personality assessment in a single interface.
 """
 
-import streamlit as st
 import json
 import os
 import logging
-from typing import Dict, Any, Callable, Optional
+from typing import Dict, Any, Callable, Optional, List
 import asyncio
 
 logger = logging.getLogger(__name__)
 
 class IntegratedAssessmentComponent:
-    """Component for rendering the integrated assessment interface"""
+    """Component for integrated assessment interaction with clients"""
     
     def __init__(self, on_complete: Optional[Callable[[Dict[str, Any]], None]] = None):
         """
@@ -24,6 +23,11 @@ class IntegratedAssessmentComponent:
         """
         self.on_complete = on_complete
         self.questions = self._load_questions()
+        self.assessment_state = {
+            "step": 1,  # 1: Mental Health, 2: Personality, 3: Results
+            "mental_health_responses": {},
+            "personality_responses": {}
+        }
         
     def _load_questions(self) -> Dict[str, Any]:
         """Load assessment questions from file"""
@@ -41,151 +45,94 @@ class IntegratedAssessmentComponent:
             # Return empty questions as fallback
             return {"mental_health": [], "personality": []}
     
-    def render(self):
-        """Render the integrated assessment interface"""
-        st.header("Comprehensive Mental Health Assessment")
-        
-        # Initialize session state for assessment
-        if "assessment_step" not in st.session_state:
-            st.session_state["assessment_step"] = 1  # 1: Mental Health, 2: Personality, 3: Results
-            
-        if "mental_health_responses" not in st.session_state:
-            st.session_state["mental_health_responses"] = {}
-            
-        if "personality_responses" not in st.session_state:
-            st.session_state["personality_responses"] = {}
-        
-        # Render the appropriate step
-        if st.session_state["assessment_step"] == 1:
-            self._render_mental_health_assessment()
-        elif st.session_state["assessment_step"] == 2:
-            self._render_personality_assessment()
-        elif st.session_state["assessment_step"] == 3:
-            self._render_assessment_complete()
+    def get_mental_health_questions(self) -> List[Dict[str, Any]]:
+        """Get mental health assessment questions"""
+        return self.questions.get("mental_health", [])
     
-    def _render_mental_health_assessment(self):
-        """Render the mental health assessment step"""
-        st.subheader("Mental Health Check-In")
-        st.markdown("""
-        Please answer the following questions about how you've been feeling recently.
-        Your responses will help us understand your current mental health status.
-        """)
-        
-        with st.form("mental_health_form"):
-            responses = {}
-            
-            for question in self.questions.get("mental_health", []):
-                q_id = str(question["id"])
-                q_text = question["text"]
-                options = question.get("options", [])
-                
-                # Create a radio button for each question
-                option_texts = [opt["text"] for opt in options]
-                option_values = [opt["value"] for opt in options]
-                
-                # Use previous response if available
-                default_idx = 0
-                if q_id in st.session_state.get("mental_health_responses", {}):
-                    prev_value = st.session_state["mental_health_responses"][q_id]
-                    if prev_value in option_values:
-                        default_idx = option_values.index(prev_value)
-                
-                response = st.radio(
-                    f"{q_text}",
-                    options=option_texts,
-                    index=default_idx,
-                    key=f"mh_{q_id}"
-                )
-                
-                # Store the selected value
-                selected_idx = option_texts.index(response)
-                responses[q_id] = option_values[selected_idx]
-            
-            # Submit button
-            if st.form_submit_button("Continue to Personality Assessment"):
-                # Store responses in session state
-                st.session_state["mental_health_responses"] = responses
-                
-                # Move to next step
-                st.session_state["assessment_step"] = 2
-                st.rerun()
+    def get_personality_questions(self) -> List[Dict[str, Any]]:
+        """Get personality assessment questions"""
+        return self.questions.get("personality", [])
     
-    def _render_personality_assessment(self):
-        """Render the personality assessment step"""
-        st.subheader("Personality Assessment")
-        st.markdown("""
-        Please indicate how accurately each statement describes you.
-        Your personality traits can help us provide more personalized support.
-        """)
+    def process_mental_health_responses(self, responses: Dict[str, Any]) -> bool:
+        """
+        Process mental health assessment responses
         
-        with st.form("personality_form"):
-            responses = {}
+        Args:
+            responses: Dict of question IDs to response values
             
-            for question in self.questions.get("personality", []):
-                q_id = str(question["id"])
-                q_text = question["text"]
-                options = question.get("options", [])
-                
-                # Create a radio button for each question
-                option_texts = [opt["text"] for opt in options]
-                option_values = [opt["value"] for opt in options]
-                
-                # Use previous response if available
-                default_idx = 2  # Default to neutral
-                if q_id in st.session_state.get("personality_responses", {}):
-                    prev_value = st.session_state["personality_responses"][q_id]
-                    if prev_value in option_values:
-                        default_idx = option_values.index(prev_value)
-                
-                response = st.radio(
-                    f"{q_text}",
-                    options=option_texts,
-                    index=default_idx,
-                    key=f"p_{q_id}"
-                )
-                
-                # Store the selected value
-                selected_idx = option_texts.index(response)
-                responses[q_id] = option_values[selected_idx]
+        Returns:
+            Success status
+        """
+        try:
+            # Store responses
+            self.assessment_state["mental_health_responses"] = responses
             
-            # Submit button
-            if st.form_submit_button("Complete Assessment"):
-                # Store responses in session state
-                st.session_state["personality_responses"] = responses
-                
-                # Move to next step
-                st.session_state["assessment_step"] = 3
-                
-                # Call the callback if provided
-                if self.on_complete:
-                    assessment_data = {
-                        "mental_health_responses": st.session_state["mental_health_responses"],
-                        "personality_responses": st.session_state["personality_responses"]
-                    }
-                    self.on_complete(assessment_data)
-                
-                st.rerun()
+            # Move to next step
+            self.assessment_state["step"] = 2
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error processing mental health responses: {str(e)}")
+            return False
     
-    def _render_assessment_complete(self):
-        """Render the assessment complete step"""
-        st.success("Assessment completed successfully!")
-        st.markdown("""
-        Thank you for completing the assessment. Your responses will help us provide
-        more personalized support tailored to your needs.
-        """)
+    def process_personality_responses(self, responses: Dict[str, Any]) -> bool:
+        """
+        Process personality assessment responses
         
-        # Show a spinner while processing results
-        with st.spinner("Processing your results..."):
-            # This would normally be handled by the callback
-            pass
+        Args:
+            responses: Dict of question IDs to response values
+            
+        Returns:
+            Success status
+        """
+        try:
+            # Store responses
+            self.assessment_state["personality_responses"] = responses
+            
+            # Move to next step
+            self.assessment_state["step"] = 3
+            
+            # Call the callback if provided
+            if self.on_complete:
+                assessment_data = {
+                    "mental_health_responses": self.assessment_state["mental_health_responses"],
+                    "personality_responses": self.assessment_state["personality_responses"]
+                }
+                self.on_complete(assessment_data)
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error processing personality responses: {str(e)}")
+            return False
+    
+    def reset_assessment(self) -> bool:
+        """
+        Reset the assessment to the beginning
         
-        # Option to retake assessment
-        if st.button("Retake Assessment"):
+        Returns:
+            Success status
+        """
+        try:
             # Reset responses
-            st.session_state["mental_health_responses"] = {}
-            st.session_state["personality_responses"] = {}
-            st.session_state["assessment_step"] = 1
-            st.rerun()
+            self.assessment_state = {
+                "step": 1,
+                "mental_health_responses": {},
+                "personality_responses": {}
+            }
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error resetting assessment: {str(e)}")
+            return False
+    
+    def get_assessment_state(self) -> Dict[str, Any]:
+        """
+        Get the current assessment state
+        
+        Returns:
+            Current assessment state
+        """
+        return self.assessment_state.copy()
 
 class IntegratedAssessment:
     """Class for managing integrated mental health assessments"""
