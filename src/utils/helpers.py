@@ -1,7 +1,6 @@
 from typing import List, Dict, Any, Optional, Union
 import html
 import re
-from sentence_transformers import SentenceTransformer
 from src.config.settings import AppConfig
 import logging
 import json
@@ -136,7 +135,9 @@ class DocumentHelper:
     
     def __init__(self):
         self.text_helper = TextHelper()
-        self.embedding_model = SentenceTransformer(AppConfig.EMBEDDING_MODEL)
+        # Lazy import to avoid transformers/keras compatibility issues
+        from sentence_transformers import SentenceTransformer
+        self.embedding_model = SentenceTransformer(AppConfig.EMBEDDING_CONFIG["model_name"])
         
     async def create_document(
         self,

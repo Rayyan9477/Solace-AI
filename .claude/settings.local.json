@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm:*)",
+      "Bash(del:*)",
+      "Bash(python:*)",
+      "Bash(timeout:*)"
+    ],
+    "deny": []
+  }
+}

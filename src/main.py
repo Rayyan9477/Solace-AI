@@ -14,19 +14,17 @@ from pathlib import Path
 import torch
 import logging
 
-# Configure import paths
-sys.path.append(str(Path(__file__).resolve().parent))
-sys.path.append(str(Path(__file__).resolve().parent.parent))
+# Import paths configured through package structure
 
 # Import settings first to ensure configuration is loaded
-from src.config.settings import AppConfig
+from .config.settings import AppConfig
 
 # Import core modules
-from src.components.base_module import Module, ModuleManager, get_module_manager
-from src.utils.logger import get_logger, configure_logging
-from src.utils.metrics import track_metric
-from src.utils.device_utils import get_device, get_device_info, is_cuda_available
-from src.utils.console_utils import setup_console, safe_print, emoji_to_ascii
+from .components.base_module import Module, ModuleManager, get_module_manager
+from .utils.logger import get_logger, configure_logging
+from .utils.metrics import track_metric
+from .utils.device_utils import get_device, get_device_info, is_cuda_available
+from .utils.console_utils import setup_console, safe_print, emoji_to_ascii
 
 # Set up console for Unicode
 setup_console()
@@ -325,7 +323,7 @@ class Application:
     
     def migrate_data(self):
         """Migrate data to the central vector database"""
-        from src.utils.migration_utils import migrate_all_user_data
+        from .utils.migration_utils import migrate_all_user_data
         
         self.logger.info("Starting data migration to central vector database...")
         
@@ -416,11 +414,11 @@ def initialize_components(config=None):
         
         # Ensure we're discovering modules correctly - manually register core modules
         try:
-            from src.components.llm_module import LLMModule
-            from src.components.voice_module import VoiceModule
-            from src.components.vector_store_module import VectorStoreModule
-            from src.components.central_vector_db_module import CentralVectorDBModule
-            from src.components.ui_manager import UIManager
+            from .components.llm_module import LLMModule
+            from .components.voice_module import VoiceModule
+            from .components.vector_store_module import VectorStoreModule
+            from .components.central_vector_db_module import CentralVectorDBModule
+            from .components.ui_manager import UIManager
             
             module_manager.register_module_type(LLMModule)
             module_manager.register_module_type(VoiceModule)
@@ -430,11 +428,11 @@ def initialize_components(config=None):
             
             # Register any agent types that may have been missed
             try:
-                from src.agents.chat_agent import ChatAgent
-                from src.agents.emotion_agent import EmotionAgent
-                from src.agents.diagnosis_agent import DiagnosisAgent
-                from src.agents.therapy_agent import TherapyAgent
-                from src.agents.safety_agent import SafetyAgent
+                from .agents.chat_agent import ChatAgent
+                from .agents.emotion_agent import EmotionAgent
+                from .agents.diagnosis_agent import DiagnosisAgent
+                from .agents.therapy_agent import TherapyAgent
+                from .agents.safety_agent import SafetyAgent
                 
                 module_manager.register_module_type(ChatAgent)
                 module_manager.register_module_type(EmotionAgent)

@@ -1,28 +1,24 @@
-import streamlit as st
 import time
 import random
-import sys
-import os
 import logging
+from typing import Dict, Any, List, Optional, Callable
 
-# Add path to import personality assessment modules
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from personality.big_five import BigFiveAssessment
-from personality.mbti import MBTIAssessment
+# Import personality assessment modules using relative imports
+from ..personality.big_five import BigFiveAssessment
+from ..personality.mbti import MBTIAssessment
 
 logger = logging.getLogger(__name__)
 
-class DynamicPersonalityAssessmentComponent:
+class DynamicPersonalityAssessment:
     """
     Component for conducting dynamic, conversational personality assessments
-    with voice and emotion integration
+    with voice and emotion integration - refactored for API/CLI use
     """
     
     def __init__(
         self, 
         personality_agent,
-        voice_ai=None,
-        whisper_voice_manager=None,
+        voice_component=None,
         emotion_agent=None,
         on_complete=None
     ):
@@ -31,14 +27,12 @@ class DynamicPersonalityAssessmentComponent:
         
         Args:
             personality_agent: PersonalityAgent instance for assessment logic
-            voice_ai: Optional VoiceAI instance for TTS integration
-            whisper_voice_manager: Optional WhisperASR instance for STT integration
+            voice_component: Optional VoiceComponent instance
             emotion_agent: Optional EmotionAgent for emotional analysis
             on_complete: Callback function to call when assessment is complete
         """
         self.personality_agent = personality_agent
-        self.voice_ai = voice_ai
-        self.whisper_voice_manager = whisper_voice_manager
+        self.voice_component = voice_component
         self.emotion_agent = emotion_agent
         self.on_complete_callback = on_complete
         

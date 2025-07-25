@@ -6,14 +6,10 @@ Main entry point for the command-line and API application
 import asyncio
 import logging
 import argparse
-import sys
 from typing import Dict, Any, Optional
 import os
 import time
 from pathlib import Path
-
-# Add src to path
-sys.path.append(str(Path(__file__).parent / "src"))
 
 # Import application components
 from src.main import Application, initialize_components
