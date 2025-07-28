@@ -13,7 +13,7 @@ from typing import Dict, Any, List, Optional, Union, Tuple
 from pathlib import Path
 from datetime import datetime, timedelta
 import uuid
-from sentence_transformers import SentenceTransformer
+# from sentence_transformers import SentenceTransformer  # Lazy import when needed
 from tqdm import tqdm
 
 from src.database.vector_store import FaissVectorStore

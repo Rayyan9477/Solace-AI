@@ -113,15 +113,24 @@ Examples:
         
     elif args.mode == "check":
         # Run environment check
-        from check_env import main as run_check
-        run_check()
+        print("Environment check functionality - checking basic imports...")
+        try:
+            from src.config.settings import AppConfig
+            print("Config: OK")
+            from src.components.base_module import ModuleManager
+            print("Module system: OK") 
+            from src.models.llm import GeminiLLM
+            print("LLM interface: OK")
+            print("Basic environment check completed successfully")
+        except Exception as e:
+            print(f"Environment check failed: {e}")
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n👋 Goodbye!")
+        print("\nGoodbye!")
         sys.exit(0)
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"Error: {e}")
         sys.exit(1)

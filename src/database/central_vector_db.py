@@ -24,7 +24,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 import numpy as np
 
-from sentence_transformers import SentenceTransformer
+# from sentence_transformers import SentenceTransformer  # Lazy import when needed
 import faiss
 
 from src.database.vector_store import FaissVectorStore

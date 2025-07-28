@@ -4,7 +4,8 @@
       "Bash(rm:*)",
       "Bash(del:*)",
       "Bash(python:*)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "Bash(grep:*)"
     ],
     "deny": []
   }
