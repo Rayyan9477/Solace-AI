@@ -41,8 +41,12 @@ def print_header(text):
 def print_result(name, status, message=""):
     """Print a check result with appropriate coloring"""
     color = Colors.GREEN if status else Colors.RED
-    status_text = "✓ PASS" if status else "✗ FAIL"
-    print(f"{name:<40} {color}{status_text}{Colors.END} {message}")
+    status_text = "PASS" if status else "FAIL"
+    try:
+        print(f"{name:<40} {color}{status_text}{Colors.END} {message}")
+    except UnicodeEncodeError:
+        # Fallback for Windows console encoding issues
+        print(f"{name:<40} {status_text} {message}")
 
 def check_python_version():
     """Check Python version"""
@@ -238,11 +242,17 @@ def run_all_checks():
         print_result(check, result)
     
     if all_pass:
-        print(f"\n{Colors.GREEN}{Colors.BOLD}✓ All checks passed! The environment is correctly configured.{Colors.END}")
+        try:
+            print(f"\n{Colors.GREEN}{Colors.BOLD}All checks passed! The environment is correctly configured.{Colors.END}")
+        except UnicodeEncodeError:
+            print(f"\nAll checks passed! The environment is correctly configured.")
         print("\nYou can now run the application with:")
-        print(f"{Colors.BOLD}python start.py{Colors.END}")
+        print(f"{Colors.BOLD}python main.py{Colors.END}")
     else:
-        print(f"\n{Colors.RED}{Colors.BOLD}✗ Some checks failed. Please fix the issues before running the application.{Colors.END}")
+        try:
+            print(f"\n{Colors.RED}{Colors.BOLD}Some checks failed. Please fix the issues before running the application.{Colors.END}")
+        except UnicodeEncodeError:
+            print(f"\nSome checks failed. Please fix the issues before running the application.")
         print("\nRefer to the documentation for troubleshooting steps.")
     
     return all_pass
