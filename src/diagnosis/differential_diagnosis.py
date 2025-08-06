@@ -355,7 +355,7 @@ class DifferentialDiagnosisEngine:
                                       criteria_met: List[DiagnosticCriterion],
                                       criteria_not_met: List[DiagnosticCriterion],
                                       total_symptoms: int) -> float:
-        """Calculate confidence in the condition assessment"""
+        """Calculate confidence in the condition assessment with uncertainty quantification"""
         
         if not criteria_met:
             return 0.0
@@ -370,7 +370,58 @@ class DifferentialDiagnosisEngine:
         # Factor in symptom coverage
         symptom_factor = min(1.0, total_symptoms / 3)  # Ideal: 3+ symptoms
         
-        return avg_confidence * coverage_factor * symptom_factor
+        # Enhanced uncertainty quantification
+        uncertainty_factors = self._calculate_uncertainty_factors(
+            criteria_met, criteria_not_met, total_symptoms
+        )
+        
+        base_confidence = avg_confidence * coverage_factor * symptom_factor
+        
+        # Apply uncertainty reduction
+        confidence_with_uncertainty = base_confidence * (1.0 - uncertainty_factors['total_uncertainty'])
+        
+        return max(0.0, min(1.0, confidence_with_uncertainty))
+    
+    def _calculate_uncertainty_factors(self,
+                                     criteria_met: List[DiagnosticCriterion],
+                                     criteria_not_met: List[DiagnosticCriterion],
+                                     total_symptoms: int) -> Dict[str, float]:
+        """Calculate various uncertainty factors for confidence adjustment"""
+        
+        uncertainty_factors = {}
+        
+        # Data sparsity uncertainty
+        total_criteria = len(criteria_met) + len(criteria_not_met)
+        sparsity_uncertainty = max(0.0, (5 - total_criteria) / 5 * 0.3)  # Up to 30% uncertainty
+        uncertainty_factors['data_sparsity'] = sparsity_uncertainty
+        
+        # Criteria variability uncertainty (how consistent are the criteria confidences)
+        if len(criteria_met) > 1:
+            confidences = [c.confidence for c in criteria_met]
+            variability = np.std(confidences)
+            variability_uncertainty = min(0.25, variability * 0.5)  # Up to 25% uncertainty
+        else:
+            variability_uncertainty = 0.2  # Default uncertainty for single criterion
+        uncertainty_factors['criteria_variability'] = variability_uncertainty
+        
+        # Contradictory evidence uncertainty
+        strong_contradictions = [c for c in criteria_not_met if c.weight > 0.7]
+        contradiction_uncertainty = min(0.3, len(strong_contradictions) * 0.1)  # Up to 30% uncertainty
+        uncertainty_factors['contradictory_evidence'] = contradiction_uncertainty
+        
+        # Symptom-criteria mismatch uncertainty
+        symptom_criteria_ratio = total_symptoms / max(total_criteria, 1)
+        if symptom_criteria_ratio > 2 or symptom_criteria_ratio < 0.5:
+            mismatch_uncertainty = 0.15  # 15% uncertainty for poor symptom-criteria ratio
+        else:
+            mismatch_uncertainty = 0.0
+        uncertainty_factors['symptom_criteria_mismatch'] = mismatch_uncertainty
+        
+        # Calculate total uncertainty (not simple sum to prevent over-penalization)
+        total_uncertainty = 1.0 - np.prod([1.0 - u for u in uncertainty_factors.values()])
+        uncertainty_factors['total_uncertainty'] = min(0.6, total_uncertainty)  # Cap at 60%
+        
+        return uncertainty_factors
     
     def _determine_severity(self,
                           criteria_met: List[DiagnosticCriterion],
@@ -508,63 +559,573 @@ class DifferentialDiagnosisEngine:
     # Helper methods for loading and matching criteria
     
     def _load_dsm5_criteria(self) -> Dict[str, Any]:
-        """Load DSM-5 diagnostic criteria"""
-        # This would typically load from a comprehensive database
-        # For now, return a sample structure
+        """Load comprehensive DSM-5 diagnostic criteria"""
         return {
             "Major Depressive Disorder": {
+                "code": "296.2x",
                 "criteria": [
                     {
                         "id": "A1",
-                        "description": "Depressed mood most of the day",
+                        "description": "Depressed mood most of the day, nearly every day",
                         "weight": 0.9,
-                        "keywords": ["depressed", "sad", "hopeless", "empty"],
-                        "source": "DSM-5"
+                        "keywords": ["depressed", "sad", "hopeless", "empty", "tearful"],
+                        "source": "DSM-5",
+                        "temporal": {"duration": "at least 2 weeks", "frequency": "nearly every day"}
                     },
                     {
                         "id": "A2", 
-                        "description": "Diminished interest or pleasure",
+                        "description": "Markedly diminished interest or pleasure in activities",
                         "weight": 0.9,
-                        "keywords": ["anhedonia", "no interest", "no pleasure", "apathy"],
-                        "source": "DSM-5"
+                        "keywords": ["anhedonia", "no interest", "no pleasure", "apathy", "withdrawn"],
+                        "source": "DSM-5",
+                        "temporal": {"duration": "at least 2 weeks", "frequency": "nearly every day"}
                     },
                     {
                         "id": "A3",
-                        "description": "Significant weight loss or gain",
+                        "description": "Significant weight loss or gain, or decrease/increase in appetite",
+                        "weight": 0.7,
+                        "keywords": ["weight loss", "weight gain", "appetite loss", "appetite increase"],
+                        "source": "DSM-5",
+                        "temporal": {"frequency": "nearly every day"}
+                    },
+                    {
+                        "id": "A4",
+                        "description": "Insomnia or hypersomnia",
                         "weight": 0.6,
-                        "keywords": ["weight loss", "weight gain", "appetite"],
-                        "source": "DSM-5"
+                        "keywords": ["insomnia", "can't sleep", "sleep too much", "hypersomnia"],
+                        "source": "DSM-5",
+                        "temporal": {"frequency": "nearly every day"}
+                    },
+                    {
+                        "id": "A5",
+                        "description": "Psychomotor agitation or retardation",
+                        "weight": 0.7,
+                        "keywords": ["restless", "slowed down", "agitated", "psychomotor"],
+                        "source": "DSM-5",
+                        "temporal": {"frequency": "nearly every day"}
+                    },
+                    {
+                        "id": "A6",
+                        "description": "Fatigue or loss of energy",
+                        "weight": 0.8,
+                        "keywords": ["fatigue", "tired", "exhausted", "no energy", "drained"],
+                        "source": "DSM-5",
+                        "temporal": {"frequency": "nearly every day"}
+                    },
+                    {
+                        "id": "A7",
+                        "description": "Feelings of worthlessness or inappropriate guilt",
+                        "weight": 0.8,
+                        "keywords": ["worthless", "guilty", "guilt", "self-blame", "shame"],
+                        "source": "DSM-5",
+                        "temporal": {"frequency": "nearly every day"}
+                    },
+                    {
+                        "id": "A8",
+                        "description": "Diminished ability to think or concentrate",
+                        "weight": 0.7,
+                        "keywords": ["can't concentrate", "forgetful", "indecisive", "brain fog"],
+                        "source": "DSM-5",
+                        "temporal": {"frequency": "nearly every day"}
+                    },
+                    {
+                        "id": "A9",
+                        "description": "Recurrent thoughts of death or suicidal ideation",
+                        "weight": 0.95,
+                        "keywords": ["death", "suicide", "suicidal", "ending it", "not worth living"],
+                        "source": "DSM-5",
+                        "risk_factors": ["high_risk"]
                     }
                 ],
                 "required_criteria": 5,
-                "duration": "2 weeks"
+                "duration": "2 weeks",
+                "exclusions": ["substance_use", "medical_condition", "manic_episode"],
+                "severity_specifiers": ["mild", "moderate", "severe"],
+                "episode_specifiers": ["single_episode", "recurrent"]
             },
             "Generalized Anxiety Disorder": {
+                "code": "300.02",
                 "criteria": [
                     {
                         "id": "A",
-                        "description": "Excessive anxiety and worry",
+                        "description": "Excessive anxiety and worry about various events/activities",
                         "weight": 0.9,
-                        "keywords": ["anxiety", "worry", "anxious", "nervous"],
-                        "source": "DSM-5"
+                        "keywords": ["anxiety", "worry", "anxious", "nervous", "on edge"],
+                        "source": "DSM-5",
+                        "temporal": {"duration": "at least 6 months", "frequency": "more days than not"}
                     },
                     {
                         "id": "B",
-                        "description": "Difficulty controlling worry",
+                        "description": "Difficulty controlling the worry",
                         "weight": 0.8,
-                        "keywords": ["can't control", "persistent worry", "uncontrollable"],
+                        "keywords": ["can't control", "persistent worry", "uncontrollable", "can't stop"],
+                        "source": "DSM-5"
+                    },
+                    {
+                        "id": "C1",
+                        "description": "Restlessness or feeling keyed up or on edge",
+                        "weight": 0.6,
+                        "keywords": ["restless", "keyed up", "on edge", "jumpy"],
+                        "source": "DSM-5"
+                    },
+                    {
+                        "id": "C2",
+                        "description": "Being easily fatigued",
+                        "weight": 0.6,
+                        "keywords": ["easily tired", "fatigued", "exhausted"],
+                        "source": "DSM-5"
+                    },
+                    {
+                        "id": "C3",
+                        "description": "Difficulty concentrating or mind going blank",
+                        "weight": 0.7,
+                        "keywords": ["can't concentrate", "mind blank", "distracted"],
+                        "source": "DSM-5"
+                    },
+                    {
+                        "id": "C4",
+                        "description": "Irritability",
+                        "weight": 0.6,
+                        "keywords": ["irritable", "snappy", "short-tempered", "impatient"],
+                        "source": "DSM-5"
+                    },
+                    {
+                        "id": "C5",
+                        "description": "Muscle tension",
+                        "weight": 0.5,
+                        "keywords": ["muscle tension", "tight", "aches", "stiff"],
+                        "source": "DSM-5"
+                    },
+                    {
+                        "id": "C6",
+                        "description": "Sleep disturbance",
+                        "weight": 0.6,
+                        "keywords": ["sleep problems", "insomnia", "restless sleep"],
                         "source": "DSM-5"
                     }
                 ],
                 "required_criteria": 3,
-                "duration": "6 months"
+                "duration": "6 months",
+                "exclusions": ["substance_use", "medical_condition", "other_mental_disorder"],
+                "severity_specifiers": ["mild", "moderate", "severe"]
+            },
+            "Panic Disorder": {
+                "code": "300.01",
+                "criteria": [
+                    {
+                        "id": "A",
+                        "description": "Recurrent unexpected panic attacks",
+                        "weight": 0.95,
+                        "keywords": ["panic attack", "sudden fear", "terror", "dread"],
+                        "source": "DSM-5",
+                        "temporal": {"frequency": "recurrent"}
+                    },
+                    {
+                        "id": "B",
+                        "description": "Persistent concern or worry about additional panic attacks",
+                        "weight": 0.8,
+                        "keywords": ["worry about attacks", "fear of panic", "anticipatory anxiety"],
+                        "source": "DSM-5",
+                        "temporal": {"duration": "at least 1 month"}
+                    },
+                    {
+                        "id": "B2",
+                        "description": "Significant maladaptive change in behavior",
+                        "weight": 0.7,
+                        "keywords": ["avoiding places", "behavioral changes", "agoraphobia"],
+                        "source": "DSM-5",
+                        "temporal": {"duration": "at least 1 month"}
+                    }
+                ],
+                "panic_symptoms": [
+                    {"symptom": "palpitations", "keywords": ["heart racing", "palpitations"]},
+                    {"symptom": "sweating", "keywords": ["sweating", "perspiration"]},
+                    {"symptom": "trembling", "keywords": ["shaking", "trembling"]},
+                    {"symptom": "shortness_of_breath", "keywords": ["can't breathe", "shortness of breath"]},
+                    {"symptom": "choking", "keywords": ["choking", "throat closing"]},
+                    {"symptom": "chest_pain", "keywords": ["chest pain", "heart attack"]},
+                    {"symptom": "nausea", "keywords": ["nausea", "sick to stomach"]},
+                    {"symptom": "dizziness", "keywords": ["dizzy", "lightheaded", "faint"]},
+                    {"symptom": "chills_heat", "keywords": ["chills", "hot flashes"]},
+                    {"symptom": "numbness", "keywords": ["numbness", "tingling"]},
+                    {"symptom": "derealization", "keywords": ["unreal", "detached", "derealization"]},
+                    {"symptom": "fear_losing_control", "keywords": ["losing control", "going crazy"]},
+                    {"symptom": "fear_dying", "keywords": ["going to die", "fear of death"]}
+                ],
+                "required_criteria": 2,
+                "required_panic_symptoms": 4,
+                "exclusions": ["substance_use", "medical_condition", "other_anxiety_disorder"]
+            },
+            "Social Anxiety Disorder": {
+                "code": "300.23",
+                "criteria": [
+                    {
+                        "id": "A",
+                        "description": "Marked fear or anxiety about social situations",
+                        "weight": 0.9,
+                        "keywords": ["social anxiety", "fear of judgment", "embarrassment", "humiliation"],
+                        "source": "DSM-5"
+                    },
+                    {
+                        "id": "B",
+                        "description": "Fear of acting in a way that will be negatively evaluated",
+                        "weight": 0.8,
+                        "keywords": ["fear of judgment", "embarrassment", "rejection", "scrutiny"],
+                        "source": "DSM-5"
+                    },
+                    {
+                        "id": "C",
+                        "description": "Social situations almost always provoke fear or anxiety",
+                        "weight": 0.8,
+                        "keywords": ["always anxious", "consistently fearful", "predictable anxiety"],
+                        "source": "DSM-5"
+                    },
+                    {
+                        "id": "D",
+                        "description": "Social situations are avoided or endured with intense fear",
+                        "weight": 0.8,
+                        "keywords": ["avoid social", "endure with fear", "social avoidance"],
+                        "source": "DSM-5"
+                    }
+                ],
+                "required_criteria": 4,
+                "duration": "6 months",
+                "exclusions": ["substance_use", "medical_condition", "other_mental_disorder"],
+                "severity_specifiers": ["performance_only", "generalized"]
+            },
+            "Attention-Deficit/Hyperactivity Disorder": {
+                "code": "314.01",
+                "criteria": [
+                    {
+                        "id": "A1_inattention",
+                        "description": "Inattention symptoms",
+                        "weight": 0.8,
+                        "keywords": ["can't focus", "distracted", "forgetful", "careless mistakes"],
+                        "source": "DSM-5",
+                        "subcriteria": [
+                            "fails to give close attention to details",
+                            "difficulty sustaining attention",
+                            "does not seem to listen",
+                            "does not follow through on instructions",
+                            "difficulty organizing tasks",
+                            "avoids tasks requiring sustained mental effort",
+                            "loses things necessary for tasks",
+                            "easily distracted by extraneous stimuli",
+                            "forgetful in daily activities"
+                        ]
+                    },
+                    {
+                        "id": "A2_hyperactivity",
+                        "description": "Hyperactivity-impulsivity symptoms",
+                        "weight": 0.8,
+                        "keywords": ["hyperactive", "restless", "impulsive", "can't sit still"],
+                        "source": "DSM-5",
+                        "subcriteria": [
+                            "fidgets with hands or feet",
+                            "leaves seat when remaining seated is expected",
+                            "runs about or climbs excessively",
+                            "unable to play quietly",
+                            "on the go as if driven by motor",
+                            "talks excessively",
+                            "blurts out answers",
+                            "difficulty waiting turn",
+                            "interrupts or intrudes on others"
+                        ]
+                    }
+                ],
+                "required_inattention_symptoms": 6,
+                "required_hyperactivity_symptoms": 6,
+                "onset_age": 12,
+                "duration": "6 months",
+                "settings": "two or more settings",
+                "severity_specifiers": ["mild", "moderate", "severe"],
+                "presentation_specifiers": ["combined", "predominantly_inattentive", "predominantly_hyperactive_impulsive"]
+            },
+            "Bipolar I Disorder": {
+                "code": "296.4x",  
+                "criteria": [
+                    {
+                        "id": "A_manic",
+                        "description": "Manic episode criteria",
+                        "weight": 0.95,
+                        "keywords": ["manic", "elevated mood", "euphoric", "grandiose"],
+                        "source": "DSM-5",
+                        "temporal": {"duration": "at least 1 week", "frequency": "most of the day"},
+                        "subcriteria": [
+                            "inflated self-esteem or grandiosity",
+                            "decreased need for sleep",
+                            "more talkative than usual",
+                            "flight of ideas or racing thoughts",
+                            "distractibility",
+                            "increased goal-directed activity",
+                            "excessive involvement in risky activities"
+                        ]
+                    }
+                ],
+                "required_manic_symptoms": 3,
+                "severity_levels": ["mild", "moderate", "severe", "with_psychotic_features"],
+                "episode_specifiers": ["current_manic", "current_depressed", "current_mixed"]
             }
         }
     
     def _load_icd11_criteria(self) -> Dict[str, Any]:
         """Load ICD-11 diagnostic criteria"""
-        # Similar structure to DSM-5 but with ICD-11 criteria
-        return {}
+        return {
+            "Single Episode Depressive Disorder": {
+                "code": "6A70",
+                "criteria": [
+                    {
+                        "id": "ICD11_A1",
+                        "description": "Depressed mood to a degree that is abnormal for the individual",
+                        "weight": 0.9,
+                        "keywords": ["depressed", "sad", "hopeless", "low mood"],
+                        "source": "ICD-11",
+                        "temporal": {"duration": "at least 2 weeks", "frequency": "most of the day"}
+                    },
+                    {
+                        "id": "ICD11_A2",
+                        "description": "Markedly diminished interest or pleasure in activities",
+                        "weight": 0.9,
+                        "keywords": ["no interest", "no pleasure", "anhedonia", "apathy"],
+                        "source": "ICD-11",
+                        "temporal": {"duration": "at least 2 weeks", "frequency": "most of the day"}
+                    },
+                    {
+                        "id": "ICD11_B1",
+                        "description": "Reduced energy or fatigue",
+                        "weight": 0.8,
+                        "keywords": ["fatigue", "low energy", "tired", "exhausted"],
+                        "source": "ICD-11"
+                    },
+                    {
+                        "id": "ICD11_B2",
+                        "description": "Reduced self-confidence and self-esteem",
+                        "weight": 0.7,
+                        "keywords": ["low confidence", "low self-esteem", "worthless"],
+                        "source": "ICD-11"
+                    },
+                    {
+                        "id": "ICD11_B3",
+                        "description": "Unreasonable feelings of self-reproach or guilt",
+                        "weight": 0.7,
+                        "keywords": ["guilt", "self-blame", "self-reproach"],
+                        "source": "ICD-11"
+                    },
+                    {
+                        "id": "ICD11_B4",
+                        "description": "Recurrent thoughts of death or suicide",
+                        "weight": 0.95,
+                        "keywords": ["death thoughts", "suicide", "suicidal ideation"],
+                        "source": "ICD-11",
+                        "risk_factors": ["high_risk"]
+                    },
+                    {
+                        "id": "ICD11_B5",
+                        "description": "Diminished ability to think or concentrate",
+                        "weight": 0.7,
+                        "keywords": ["concentration problems", "thinking difficulties", "indecisive"],
+                        "source": "ICD-11"
+                    },
+                    {
+                        "id": "ICD11_B6",
+                        "description": "Psychomotor agitation or retardation",
+                        "weight": 0.6,
+                        "keywords": ["agitation", "restless", "slowed down", "psychomotor"],
+                        "source": "ICD-11"
+                    },
+                    {
+                        "id": "ICD11_B7",
+                        "description": "Sleep disturbances",
+                        "weight": 0.6,
+                        "keywords": ["sleep problems", "insomnia", "early waking", "hypersomnia"],
+                        "source": "ICD-11"
+                    },
+                    {
+                        "id": "ICD11_B8",
+                        "description": "Changes in appetite or weight",
+                        "weight": 0.6,
+                        "keywords": ["appetite changes", "weight loss", "weight gain"],
+                        "source": "ICD-11"
+                    }
+                ],
+                "required_core_symptoms": 2,  # At least 2 from A1, A2, B1
+                "required_total_symptoms": 4,
+                "duration": "2 weeks",
+                "severity_qualifiers": ["mild", "moderate", "severe"]
+            },
+            "Generalized Anxiety Disorder": {
+                "code": "6B00",
+                "criteria": [
+                    {
+                        "id": "ICD11_GAD_A",
+                        "description": "Marked symptoms of anxiety that are not restricted to particular environmental circumstances",
+                        "weight": 0.9,
+                        "keywords": ["generalized anxiety", "persistent worry", "free-floating anxiety"],
+                        "source": "ICD-11",
+                        "temporal": {"duration": "several months"}
+                    },
+                    {
+                        "id": "ICD11_GAD_B1",
+                        "description": "Apprehension (worries about future misfortunes)",
+                        "weight": 0.8,
+                        "keywords": ["apprehension", "worry", "fear of future"],
+                        "source": "ICD-11"
+                    },
+                    {
+                        "id": "ICD11_GAD_B2",
+                        "description": "Motor tension (restless fidgeting, tension headaches)",
+                        "weight": 0.6,
+                        "keywords": ["muscle tension", "restless", "fidgeting", "tension headaches"],
+                        "source": "ICD-11"
+                    },
+                    {
+                        "id": "ICD11_GAD_B3",
+                        "description": "Autonomic overactivity (lightheadedness, sweating, tachycardia)",
+                        "weight": 0.7,
+                        "keywords": ["lightheaded", "sweating", "heart racing", "autonomic"],
+                        "source": "ICD-11"
+                    }
+                ],
+                "required_criteria": 2,
+                "duration": "several months",
+                "severity_qualifiers": ["mild", "moderate", "severe"]
+            },
+            "Panic Disorder": {
+                "code": "6B01",
+                "criteria": [
+                    {
+                        "id": "ICD11_PD_A",
+                        "description": "Recurrent panic attacks that are not consistently associated with specific stimuli",
+                        "weight": 0.95,
+                        "keywords": ["panic attacks", "recurrent panic", "unexpected panic"],
+                        "source": "ICD-11"
+                    },
+                    {
+                        "id": "ICD11_PD_B",
+                        "description": "Persistent worry about the occurrence or consequences of panic attacks",
+                        "weight": 0.8,
+                        "keywords": ["worry about panic", "fear of attacks", "anticipatory anxiety"],
+                        "source": "ICD-11",
+                        "temporal": {"duration": "at least 1 month"}
+                    }
+                ],
+                "panic_attack_features": [
+                    "discrete episode of intense fear/apprehension",
+                    "abrupt onset reaching peak within minutes",
+                    "palpitations or increased heart rate",
+                    "sweating",
+                    "trembling or shaking", 
+                    "shortness of breath",
+                    "feeling of choking",
+                    "chest pain or discomfort",
+                    "nausea or abdominal distress",
+                    "dizziness or faintness",
+                    "chills or heat sensations",
+                    "numbness or tingling",
+                    "derealization or depersonalization",
+                    "fear of losing control or going crazy",
+                    "fear of dying"
+                ],
+                "required_panic_features": 4,
+                "duration": "at least 1 month"
+            },
+            "Social Anxiety Disorder": {
+                "code": "6B04",
+                "criteria": [
+                    {
+                        "id": "ICD11_SAD_A",
+                        "description": "Marked and excessive fear or anxiety in social situations",
+                        "weight": 0.9,
+                        "keywords": ["social fear", "social anxiety", "performance anxiety"],
+                        "source": "ICD-11"
+                    },
+                    {
+                        "id": "ICD11_SAD_B",
+                        "description": "Fear of acting in a way that will be humiliating or embarrassing",
+                        "weight": 0.8,
+                        "keywords": ["fear of embarrassment", "humiliation", "negative evaluation"],
+                        "source": "ICD-11"
+                    },
+                    {
+                        "id": "ICD11_SAD_C",
+                        "description": "Avoidance of social situations",
+                        "weight": 0.8,
+                        "keywords": ["social avoidance", "avoiding people", "isolation"],
+                        "source": "ICD-11"
+                    }
+                ],
+                "required_criteria": 3,
+                "duration": "several months",
+                "severity_qualifiers": ["mild", "moderate", "severe"]
+            },
+            "Attention Deficit Hyperactivity Disorder": {
+                "code": "6A05",
+                "criteria": [
+                    {
+                        "id": "ICD11_ADHD_A",
+                        "description": "Persistent pattern of inattention and/or hyperactivity-impulsivity",
+                        "weight": 0.9,
+                        "keywords": ["inattention", "hyperactivity", "impulsivity", "ADHD"],
+                        "source": "ICD-11",
+                        "temporal": {"onset": "before age 12", "duration": "at least 6 months"}
+                    }
+                ],
+                "inattention_symptoms": [
+                    "failure to give close attention to details",
+                    "difficulty sustaining attention",
+                    "does not appear to listen",
+                    "fails to follow through on instructions",
+                    "difficulty organizing tasks and activities",
+                    "avoids tasks requiring sustained mental effort",
+                    "loses things necessary for tasks",
+                    "easily distracted",
+                    "forgetful in daily activities"
+                ],
+                "hyperactivity_impulsivity_symptoms": [
+                    "fidgets with hands or feet",
+                    "leaves seat inappropriately",
+                    "runs about or climbs excessively",
+                    "difficulty playing quietly",
+                    "on the go as if driven by motor",
+                    "talks excessively",
+                    "blurts out answers",
+                    "difficulty waiting turn",
+                    "interrupts or intrudes on others"
+                ],
+                "required_symptoms": 6,
+                "onset_age": 12,
+                "duration": "6 months",
+                "presentation_patterns": ["predominantly_inattentive", "predominantly_hyperactive_impulsive", "combined"]
+            },
+            "Bipolar Type I Disorder": {
+                "code": "6A60",
+                "criteria": [
+                    {
+                        "id": "ICD11_BP1_A",
+                        "description": "At least one manic or mixed episode",
+                        "weight": 0.95,
+                        "keywords": ["manic episode", "mania", "elevated mood", "mixed episode"],
+                        "source": "ICD-11"
+                    }
+                ],
+                "manic_episode_criteria": [
+                    "abnormally elevated, expansive, or irritable mood",
+                    "abnormally increased activity or energy",
+                    "duration at least 1 week or severe enough to require hospitalization"
+                ],
+                "manic_symptoms": [
+                    "inflated self-esteem or grandiosity",
+                    "decreased need for sleep",
+                    "more talkative than usual",
+                    "flight of ideas or racing thoughts",
+                    "distractibility",
+                    "increased goal-directed activity or psychomotor agitation",
+                    "excessive involvement in activities with high potential for negative consequences"
+                ],
+                "required_manic_symptoms": 3,
+                "episode_types": ["manic", "hypomanic", "depressive", "mixed"]
+            }
+        }
     
     def _load_comorbidity_patterns(self) -> Dict[str, Any]:
         """Load known comorbidity patterns"""

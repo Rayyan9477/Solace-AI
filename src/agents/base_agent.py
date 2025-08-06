@@ -78,7 +78,9 @@ class BaseAgent(Agent):
         query: str,
         context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Process a query and return response"""
+        """Process a query and return response with supervision support"""
+        processing_start_time = datetime.now()
+        
         try:
             # Get context from memory and knowledge
             full_context = await self._get_context(query, context or {})
@@ -97,6 +99,25 @@ class BaseAgent(Agent):
                     context=full_context
                 )
             
+            # Calculate processing time
+            processing_time = (datetime.now() - processing_start_time).total_seconds()
+            
+            # Prepare result with supervision metadata
+            result = {
+                'response': response,
+                'metadata': {
+                    'timestamp': datetime.now().isoformat(),
+                    'agent_name': self.name,
+                    'confidence': self._calculate_confidence(response),
+                    'processing_time': processing_time
+                }
+            }
+            
+            # Add context updates for supervisor tracking
+            context_updates = self._generate_context_updates(query, response, full_context)
+            if context_updates:
+                result['context_updates'] = context_updates
+            
             # Store result in central vector DB if it has metadata related to assessments
             try:
                 if hasattr(self, 'store_to_vector_db') and callable(self.store_to_vector_db):
@@ -110,20 +131,17 @@ class BaseAgent(Agent):
             except Exception as e:
                 logger.warning(f"Failed to update memory: {str(e)}")
             
-            return {
-                'response': response,
-                'metadata': {
-                    'timestamp': datetime.now().isoformat(),
-                    'agent_name': self.name,
-                    'confidence': self._calculate_confidence(response)
-                }
-            }
+            return result
             
         except Exception as e:
             logger.error(f"Error processing query: {str(e)}")
             return {
                 'error': str(e),
-                'timestamp': datetime.now().isoformat()
+                'timestamp': datetime.now().isoformat(),
+                'metadata': {
+                    'agent_name': self.name,
+                    'processing_time': (datetime.now() - processing_start_time).total_seconds()
+                }
             }
             
     async def _get_context(
@@ -178,7 +196,27 @@ class BaseAgent(Agent):
         if isinstance(response.get('response'), str) and len(response['response']) < 50:
             confidence *= 0.7
             
-        return confidence 
+        return confidence
+    
+    def _generate_context_updates(self, query: str, response: Any, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate context updates for supervisor tracking"""
+        context_updates = {}
+        
+        # Add agent-specific context information
+        context_updates[f"{self.name}_last_interaction"] = {
+            "timestamp": datetime.now().isoformat(),
+            "query_length": len(str(query)),
+            "response_length": len(str(response)) if response else 0,
+            "confidence": self._calculate_confidence(response) if isinstance(response, dict) else 0.5
+        }
+        
+        # Add any agent-specific context updates
+        if hasattr(self, '_get_agent_specific_context'):
+            agent_context = self._get_agent_specific_context(query, response, context)
+            if agent_context:
+                context_updates.update(agent_context)
+        
+        return context_updates 
 
     def generate_response_sync(
         self,

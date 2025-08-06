@@ -86,6 +86,58 @@ class UserProfileRequest(BaseModel):
     preferences: Optional[Dict[str, Any]] = None
     metadata: Optional[Dict[str, Any]] = None
 
+# Supervision API models
+class SupervisionStatusResponse(BaseModel):
+    supervision_enabled: bool
+    supervisor_agent_active: bool
+    metrics_collector_active: bool
+    audit_trail_active: bool
+    active_workflows: int
+    total_agents: int
+    status_timestamp: str
+
+class SupervisionSummaryResponse(BaseModel):
+    supervision_status: str
+    time_window_hours: int
+    timestamp: str
+    real_time_metrics: Optional[Dict[str, Any]] = None
+    supervisor_metrics: Optional[Dict[str, Any]] = None
+    audit_summary: Optional[Dict[str, Any]] = None
+
+class AgentQualityReportResponse(BaseModel):
+    agent_name: str
+    time_window: str
+    performance_summary: Dict[str, Any]
+    quality_indicators: Dict[str, Any]
+    top_issues: List[str]
+    recommendations: List[str]
+
+class SessionAnalysisResponse(BaseModel):
+    session_id: str
+    analysis_timestamp: str
+    audit_events_count: int
+    event_summary: Dict[str, int]
+    critical_issues: int
+    critical_details: List[Dict[str, Any]]
+    supervisor_summary: Optional[Dict[str, Any]] = None
+
+class ComplianceReportRequest(BaseModel):
+    compliance_standard: str
+    start_date: str
+    end_date: str
+
+class ComplianceReportResponse(BaseModel):
+    compliance_report: Dict[str, Any]
+    export_path: str
+    generated_timestamp: str
+
+class SupervisionConfigRequest(BaseModel):
+    config: Dict[str, Any]
+
+class SupervisionConfigResponse(BaseModel):
+    configured: List[str]
+    errors: List[str]
+
 # Startup event
 @app.on_event("startup")
 async def startup_event():
@@ -434,6 +486,300 @@ async def get_therapy_resources(category: Optional[str] = None):
         return response
     except Exception as e:
         logger.error(f"Error getting therapy resources: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Supervision and Quality Assurance Endpoints
+@app.get("/api/supervision/status", response_model=SupervisionStatusResponse)
+async def get_supervision_status():
+    """Get current supervision system status"""
+    if not app_state["initialized"] or not app_state["app_manager"]:
+        raise HTTPException(status_code=503, detail="Application not fully initialized")
+    
+    try:
+        # Get agent orchestrator from module manager
+        module_manager = app_state["app_manager"].module_manager
+        agent_orchestrator = module_manager.get_module("agent_orchestrator")
+        
+        if not agent_orchestrator:
+            raise HTTPException(status_code=503, detail="Agent orchestrator not available")
+        
+        # Get supervision status
+        status = agent_orchestrator.get_supervision_status()
+        
+        return SupervisionStatusResponse(**status)
+        
+    except Exception as e:
+        logger.error(f"Error getting supervision status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/supervision/summary", response_model=SupervisionSummaryResponse)
+async def get_supervision_summary(time_window_hours: int = 24):
+    """Get comprehensive supervision summary"""
+    if not app_state["initialized"] or not app_state["app_manager"]:
+        raise HTTPException(status_code=503, detail="Application not fully initialized")
+    
+    try:
+        # Get agent orchestrator from module manager
+        module_manager = app_state["app_manager"].module_manager
+        agent_orchestrator = module_manager.get_module("agent_orchestrator")
+        
+        if not agent_orchestrator:
+            raise HTTPException(status_code=503, detail="Agent orchestrator not available")
+        
+        # Get supervision summary
+        summary = await agent_orchestrator.get_supervision_summary(time_window_hours)
+        
+        if "error" in summary:
+            raise HTTPException(status_code=400, detail=summary["error"])
+        
+        return SupervisionSummaryResponse(**summary)
+        
+    except Exception as e:
+        logger.error(f"Error getting supervision summary: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/supervision/agent-quality/{agent_name}", response_model=AgentQualityReportResponse)
+async def get_agent_quality_report(agent_name: str):
+    """Get quality report for specific agent"""
+    if not app_state["initialized"] or not app_state["app_manager"]:
+        raise HTTPException(status_code=503, detail="Application not fully initialized")
+    
+    try:
+        # Get agent orchestrator from module manager
+        module_manager = app_state["app_manager"].module_manager
+        agent_orchestrator = module_manager.get_module("agent_orchestrator")
+        
+        if not agent_orchestrator:
+            raise HTTPException(status_code=503, detail="Agent orchestrator not available")
+        
+        # Get agent quality report
+        report = await agent_orchestrator.get_agent_quality_report(agent_name)
+        
+        if "error" in report:
+            raise HTTPException(status_code=400, detail=report["error"])
+        
+        return AgentQualityReportResponse(**report)
+        
+    except Exception as e:
+        logger.error(f"Error getting agent quality report: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/supervision/session-analysis/{session_id}", response_model=SessionAnalysisResponse)
+async def get_session_analysis(session_id: str):
+    """Get comprehensive analysis for a specific session"""
+    if not app_state["initialized"] or not app_state["app_manager"]:
+        raise HTTPException(status_code=503, detail="Application not fully initialized")
+    
+    try:
+        # Get agent orchestrator from module manager
+        module_manager = app_state["app_manager"].module_manager
+        agent_orchestrator = module_manager.get_module("agent_orchestrator")
+        
+        if not agent_orchestrator:
+            raise HTTPException(status_code=503, detail="Agent orchestrator not available")
+        
+        # Get session analysis
+        analysis = await agent_orchestrator.get_session_analysis(session_id)
+        
+        if "error" in analysis:
+            raise HTTPException(status_code=400, detail=analysis["error"])
+        
+        return SessionAnalysisResponse(**analysis)
+        
+    except Exception as e:
+        logger.error(f"Error getting session analysis: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/supervision/compliance-report", response_model=ComplianceReportResponse)
+async def export_compliance_report(request: ComplianceReportRequest):
+    """Export compliance report for regulatory purposes"""
+    if not app_state["initialized"] or not app_state["app_manager"]:
+        raise HTTPException(status_code=503, detail="Application not fully initialized")
+    
+    try:
+        # Get agent orchestrator from module manager
+        module_manager = app_state["app_manager"].module_manager
+        agent_orchestrator = module_manager.get_module("agent_orchestrator")
+        
+        if not agent_orchestrator:
+            raise HTTPException(status_code=503, detail="Agent orchestrator not available")
+        
+        # Export compliance report
+        result = await agent_orchestrator.export_compliance_report(
+            compliance_standard=request.compliance_standard,
+            start_date=request.start_date,
+            end_date=request.end_date
+        )
+        
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        return ComplianceReportResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"Error exporting compliance report: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/supervision/configure", response_model=SupervisionConfigResponse)
+async def configure_supervision(request: SupervisionConfigRequest):
+    """Configure supervision system parameters"""
+    if not app_state["initialized"] or not app_state["app_manager"]:
+        raise HTTPException(status_code=503, detail="Application not fully initialized")
+    
+    try:
+        # Get agent orchestrator from module manager
+        module_manager = app_state["app_manager"].module_manager
+        agent_orchestrator = module_manager.get_module("agent_orchestrator")
+        
+        if not agent_orchestrator:
+            raise HTTPException(status_code=503, detail="Agent orchestrator not available")
+        
+        # Configure supervision system
+        result = await agent_orchestrator.configure_supervision(request.config)
+        
+        return SupervisionConfigResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"Error configuring supervision system: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/supervision/metrics/export")
+async def export_supervision_metrics(format: str = "json", time_window_hours: int = 24):
+    """Export supervision metrics data"""
+    if not app_state["initialized"] or not app_state["app_manager"]:
+        raise HTTPException(status_code=503, detail="Application not fully initialized")
+    
+    try:
+        # Get agent orchestrator from module manager
+        module_manager = app_state["app_manager"].module_manager
+        agent_orchestrator = module_manager.get_module("agent_orchestrator")
+        
+        if not agent_orchestrator:
+            raise HTTPException(status_code=503, detail="Agent orchestrator not available")
+        
+        # Check if supervision is enabled
+        if not agent_orchestrator.supervision_enabled or not agent_orchestrator.metrics_collector:
+            raise HTTPException(status_code=400, detail="Supervision metrics not available")
+        
+        # Export metrics
+        from src.monitoring.supervisor_metrics import MetricsExporter
+        from datetime import datetime, timedelta
+        import tempfile
+        
+        exporter = MetricsExporter(agent_orchestrator.metrics_collector)
+        
+        # Create temporary export file
+        with tempfile.NamedTemporaryFile(mode='w', suffix=f'.{format}', delete=False) as temp_file:
+            export_path = temp_file.name
+        
+        if format.lower() == "json":
+            time_window = timedelta(hours=time_window_hours)
+            exporter.export_to_json(export_path, time_window)
+        elif format.lower() == "csv":
+            time_window = timedelta(hours=time_window_hours)
+            exporter.export_to_csv(export_path, time_window=time_window)
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported format: {format}")
+        
+        # Read exported data
+        with open(export_path, 'r') as f:
+            exported_data = f.read()
+        
+        # Clean up temp file
+        import os
+        os.unlink(export_path)
+        
+        # Return appropriate response
+        from fastapi.responses import PlainTextResponse
+        
+        if format.lower() == "json":
+            return JSONResponse(content=json.loads(exported_data))
+        else:
+            return PlainTextResponse(content=exported_data, media_type="text/csv")
+        
+    except Exception as e:
+        logger.error(f"Error exporting supervision metrics: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/supervision/alerts")
+async def get_active_alerts():
+    """Get all active supervision alerts"""
+    if not app_state["initialized"] or not app_state["app_manager"]:
+        raise HTTPException(status_code=503, detail="Application not fully initialized")
+    
+    try:
+        # Get agent orchestrator from module manager
+        module_manager = app_state["app_manager"].module_manager
+        agent_orchestrator = module_manager.get_module("agent_orchestrator")
+        
+        if not agent_orchestrator:
+            raise HTTPException(status_code=503, detail="Agent orchestrator not available")
+        
+        # Check if supervision is enabled
+        if not agent_orchestrator.supervision_enabled or not agent_orchestrator.metrics_collector:
+            return {"alerts": [], "count": 0}
+        
+        # Get active alerts
+        alerts = agent_orchestrator.metrics_collector.get_active_alerts()
+        
+        # Convert alerts to serializable format
+        serializable_alerts = []
+        for alert in alerts:
+            alert_dict = {
+                "alert_id": alert.alert_id,
+                "level": alert.level.value,
+                "title": alert.title,
+                "description": alert.description,
+                "metric_name": alert.metric_name,
+                "current_value": alert.current_value,
+                "threshold_value": alert.threshold_value,
+                "timestamp": alert.timestamp.isoformat(),
+                "resolved": alert.resolved
+            }
+            if alert.resolution_timestamp:
+                alert_dict["resolution_timestamp"] = alert.resolution_timestamp.isoformat()
+            
+            serializable_alerts.append(alert_dict)
+        
+        return {
+            "alerts": serializable_alerts,
+            "count": len(serializable_alerts),
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting active alerts: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/supervision/alerts/{alert_id}/resolve")
+async def resolve_alert(alert_id: str):
+    """Resolve a specific alert"""
+    if not app_state["initialized"] or not app_state["app_manager"]:
+        raise HTTPException(status_code=503, detail="Application not fully initialized")
+    
+    try:
+        # Get agent orchestrator from module manager
+        module_manager = app_state["app_manager"].module_manager
+        agent_orchestrator = module_manager.get_module("agent_orchestrator")
+        
+        if not agent_orchestrator:
+            raise HTTPException(status_code=503, detail="Agent orchestrator not available")
+        
+        # Check if supervision is enabled
+        if not agent_orchestrator.supervision_enabled or not agent_orchestrator.metrics_collector:
+            raise HTTPException(status_code=400, detail="Supervision metrics not available")
+        
+        # Resolve alert
+        agent_orchestrator.metrics_collector.resolve_alert(alert_id)
+        
+        return {
+            "alert_id": alert_id,
+            "resolved": True,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error resolving alert: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Run the application
