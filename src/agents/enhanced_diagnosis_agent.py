@@ -17,6 +17,9 @@ import logging
 import os
 import sys
 from pathlib import Path
+import asyncio
+import time
+import uuid
 
 # Add the project root to the path
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -26,6 +29,11 @@ if project_root not in sys.path:
 
 # Import the AgenticRAG system
 from src.utils.agentic_rag import AgenticRAG
+
+# Import integration components
+from src.integration.event_bus import EventBus, Event, EventType, EventPriority, get_event_bus
+from src.integration.supervision_mesh import SupervisionMesh, QualityGateType
+from src.integration.friction_engine import FrictionEngine
 
 logger = logging.getLogger(__name__)
 
@@ -258,18 +266,49 @@ def _estimate_severity(confidence_score: float) -> str:
         return "mild"
 
 class EnhancedDiagnosisAgent(BaseAgent):
-    def __init__(self, model: BaseLanguageModel):
+    def __init__(
+        self, 
+        model: BaseLanguageModel,
+        event_bus: Optional[EventBus] = None,
+        supervision_mesh: Optional[SupervisionMesh] = None,
+        friction_engine: Optional[FrictionEngine] = None
+    ):
         super().__init__(
             model=model,
             name="enhanced_mental_health_diagnostician",
             role="Advanced system for mental health symptom analysis and diagnosis with AI reasoning",
             description="""An enhanced AI agent specialized in analyzing mental health symptoms and providing diagnostic insights.
             Uses evidence-based criteria, structured reasoning, and retrieval-augmented generation to maintain clinical accuracy 
-            while emphasizing the importance of professional evaluation.""",
+            while emphasizing the importance of professional evaluation. Integrated with event-driven communication, 
+            supervision validation, and therapeutic friction coordination.""",
             tools=[extract_symptoms, analyze_diagnostic_criteria, enhanced_diagnosis, phq9_assessment, gad7_assessment],
             memory=Memory(memory="diagnosis_memory", storage="local_storage"),
             knowledge=AgentKnowledge()
         )
+        
+        # Integration components
+        self.event_bus = event_bus or get_event_bus()
+        self.supervision_mesh = supervision_mesh
+        self.friction_engine = friction_engine
+        
+        # Agent state
+        self.agent_id = f"enhanced_diagnosis_{uuid.uuid4().hex[:8]}"
+        self.is_active = False
+        self.current_sessions: Dict[str, Dict[str, Any]] = {}
+        
+        # Metrics and monitoring
+        self.metrics = {
+            'diagnoses_performed': 0,
+            'supervision_validations': 0,
+            'friction_coordinations': 0,
+            'average_processing_time': 0.0,
+            'processing_times': [],
+            'validation_failures': 0,
+            'integration_errors': 0
+        }
+        
+        # Subscribe to relevant events
+        self._setup_event_subscriptions()
         
         # Initialize the Agentic RAG system
         try:
@@ -284,6 +323,68 @@ class EnhancedDiagnosisAgent(BaseAgent):
         except Exception as e:
             logger.error(f"Failed to initialize AgenticRAG: {str(e)}")
             self.rag_system = None
+    
+    def _setup_event_subscriptions(self) -> None:
+        """Set up event subscriptions for integration."""
+        try:
+            # Subscribe to diagnosis requests
+            self.event_bus.subscribe(
+                EventType.AGENT_REQUEST,
+                self._handle_diagnosis_request,
+                agent_id=self.agent_id,
+                filters={'target_agent': 'enhanced_diagnosis', 'request_type': 'diagnosis'}
+            )
+            
+            # Subscribe to validation results
+            self.event_bus.subscribe(
+                EventType.VALIDATION_RESULT,
+                self._handle_validation_result,
+                agent_id=self.agent_id
+            )
+            
+            # Subscribe to friction updates
+            self.event_bus.subscribe(
+                EventType.FRICTION_APPLICATION,
+                self._handle_friction_update,
+                agent_id=self.agent_id
+            )
+            
+            logger.info(f"Enhanced diagnosis agent {self.agent_id} subscribed to events")
+        except Exception as e:
+            logger.error(f"Failed to set up event subscriptions: {e}")
+            self.metrics['integration_errors'] += 1
+    
+    async def start(self) -> None:
+        """Start the enhanced diagnosis agent."""
+        if self.is_active:
+            return
+        
+        self.is_active = True
+        
+        # Publish startup event
+        await self.event_bus.publish(Event(
+            event_type=EventType.AGENT_STATUS,
+            source_agent=self.agent_id,
+            data={'status': 'active', 'agent_type': 'enhanced_diagnosis'}
+        ))
+        
+        logger.info(f"Enhanced diagnosis agent {self.agent_id} started")
+    
+    async def stop(self) -> None:
+        """Stop the enhanced diagnosis agent."""
+        if not self.is_active:
+            return
+        
+        self.is_active = False
+        
+        # Publish shutdown event
+        await self.event_bus.publish(Event(
+            event_type=EventType.AGENT_STATUS,
+            source_agent=self.agent_id,
+            data={'status': 'inactive', 'shutdown_reason': 'requested'}
+        ))
+        
+        logger.info(f"Enhanced diagnosis agent {self.agent_id} stopped")
         
         self.diagnosis_prompt = ChatPromptTemplate.from_messages([
             SystemMessage(content="""You are an expert in mental health diagnosis with advanced AI reasoning capabilities.
@@ -317,6 +418,104 @@ Recommendations: [professional and self-help suggestions]
 Additional Considerations: [important factors to consider]""")
         ])
 
+    async def diagnose_with_integration(
+        self,
+        symptoms: List[str],
+        context: Optional[Dict[str, Any]] = None,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        require_supervision: bool = True,
+        enable_friction: bool = True
+    ) -> Dict[str, Any]:
+        """Generate an enhanced diagnostic assessment with full integration support."""
+        start_time = time.time()
+        diagnosis_id = f"diag_{uuid.uuid4().hex[:8]}"
+        
+        try:
+            logger.info(f"Starting integrated diagnosis {diagnosis_id} for symptoms: {symptoms}")
+            
+            # Track session
+            if session_id:
+                self.current_sessions[session_id] = {
+                    'diagnosis_id': diagnosis_id,
+                    'user_id': user_id,
+                    'start_time': datetime.now(),
+                    'symptoms': symptoms,
+                    'context': context or {}
+                }
+            
+            # Perform core diagnosis
+            diagnosis_result = await self.diagnose(symptoms, context)
+            
+            if not diagnosis_result.get('success', False):
+                return diagnosis_result
+            
+            # Enhance with integration features
+            if require_supervision and self.supervision_mesh:
+                diagnosis_result = await self._validate_with_supervision(diagnosis_result, context or {})
+            
+            if enable_friction and self.friction_engine and user_id and session_id:
+                diagnosis_result = await self._coordinate_therapeutic_friction(
+                    diagnosis_result, user_id, session_id, context or {}
+                )
+            
+            # Publish diagnosis event
+            await self.event_bus.publish(Event(
+                event_type=EventType.CLINICAL_ASSESSMENT,
+                source_agent=self.agent_id,
+                user_id=user_id,
+                session_id=session_id,
+                priority=EventPriority.HIGH if diagnosis_result.get('severity') == 'severe' else EventPriority.NORMAL,
+                data={
+                    'diagnosis_id': diagnosis_id,
+                    'symptoms': symptoms,
+                    'diagnosis_result': diagnosis_result,
+                    'processing_time': time.time() - start_time
+                }
+            ))
+            
+            # Update metrics
+            processing_time = time.time() - start_time
+            self.metrics['diagnoses_performed'] += 1
+            self.metrics['processing_times'].append(processing_time)
+            self.metrics['average_processing_time'] = sum(self.metrics['processing_times']) / len(self.metrics['processing_times'])
+            
+            diagnosis_result.update({
+                'diagnosis_id': diagnosis_id,
+                'integration_features': {
+                    'supervision_validated': require_supervision and self.supervision_mesh is not None,
+                    'friction_coordinated': enable_friction and self.friction_engine is not None,
+                    'event_published': True
+                },
+                'processing_time': processing_time
+            })
+            
+            return diagnosis_result
+            
+        except Exception as e:
+            logger.error(f"Error in integrated diagnosis {diagnosis_id}: {str(e)}")
+            self.metrics['integration_errors'] += 1
+            
+            # Publish error event
+            await self.event_bus.publish(Event(
+                event_type=EventType.AGENT_ERROR,
+                source_agent=self.agent_id,
+                user_id=user_id,
+                session_id=session_id,
+                data={
+                    'diagnosis_id': diagnosis_id,
+                    'error': str(e),
+                    'symptoms': symptoms
+                }
+            ))
+            
+            return {
+                'success': False,
+                'error': f'Integrated diagnosis failed: {str(e)}',
+                'diagnosis_id': diagnosis_id,
+                'fallback_available': True
+            }
+    
     async def diagnose(self, symptoms: List[str], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Generate an enhanced diagnostic assessment for the given symptoms"""
         try:
@@ -497,6 +696,255 @@ Additional Considerations: [important factors to consider]""")
             "potential_diagnoses": potential_diagnoses,
             "severity": severity,
             "recommendations": recommendations
+        }
+    
+    async def _validate_with_supervision(
+        self,
+        diagnosis_result: Dict[str, Any],
+        context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Validate diagnosis through supervision mesh."""
+        try:
+            validation_result = await self.supervision_mesh.validate(
+                content={
+                    'diagnosis': diagnosis_result,
+                    'agent_type': 'enhanced_diagnosis'
+                },
+                context={
+                    'user_profile': context.get('user_profile', {}),
+                    'session_context': context.get('session_context', {}),
+                    'agent_response': diagnosis_result
+                },
+                required_gates={QualityGateType.CLINICAL_SAFETY, QualityGateType.RISK_ASSESSMENT},
+                requires_consensus=diagnosis_result.get('severity') == 'severe',
+                requesting_agent=self.agent_id
+            )
+            
+            self.metrics['supervision_validations'] += 1
+            
+            # Process validation result
+            if hasattr(validation_result, 'final_result'):
+                # Consensus result
+                if validation_result.final_result.value in ['CRITICAL', 'BLOCKED']:
+                    diagnosis_result['supervision_blocked'] = True
+                    diagnosis_result['supervision_message'] = "Diagnosis blocked by supervision validation"
+                    diagnosis_result['success'] = False
+                else:
+                    diagnosis_result['supervision_validated'] = True
+                    diagnosis_result['supervision_confidence'] = validation_result.confidence
+            else:
+                # Single validation result
+                if validation_result.result.value in ['CRITICAL', 'BLOCKED']:
+                    diagnosis_result['supervision_blocked'] = True
+                    diagnosis_result['supervision_message'] = validation_result.message
+                    diagnosis_result['success'] = False
+                else:
+                    diagnosis_result['supervision_validated'] = True
+                    diagnosis_result['supervision_confidence'] = validation_result.confidence
+            
+            return diagnosis_result
+            
+        except Exception as e:
+            logger.error(f"Supervision validation error: {e}")
+            self.metrics['validation_failures'] += 1
+            diagnosis_result['supervision_error'] = str(e)
+            return diagnosis_result
+    
+    async def _coordinate_therapeutic_friction(
+        self,
+        diagnosis_result: Dict[str, Any],
+        user_id: str,
+        session_id: str,
+        context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Coordinate therapeutic friction based on diagnosis."""
+        try:
+            # Assess if friction is appropriate
+            severity = diagnosis_result.get('severity', 'mild')
+            potential_diagnoses = diagnosis_result.get('potential_diagnoses', [])
+            
+            # Don't apply friction for severe conditions or crisis situations
+            if severity == 'severe' or any('crisis' in str(diag).lower() for diag in potential_diagnoses):
+                return diagnosis_result
+            
+            # Assess user readiness for friction
+            readiness_profile = await self.friction_engine.assess_user_readiness(
+                user_id,
+                session_id,
+                {
+                    'message': ' '.join(diagnosis_result.get('symptoms', [])),
+                    'user_profile': context.get('user_profile', {}),
+                    'session_context': context.get('session_context', {})
+                }
+            )
+            
+            # Select appropriate friction strategy
+            friction_context = {
+                'diagnosis_result': diagnosis_result,
+                'severity': severity,
+                'breakthrough_indicators': self._identify_breakthrough_indicators(diagnosis_result)
+            }
+            
+            strategy = await self.friction_engine.select_friction_strategy(
+                user_id,
+                session_id,
+                friction_context,
+                available_agents={self.agent_id}
+            )
+            
+            if strategy:
+                # Coordinate friction application
+                coordination_id = await self.friction_engine.coordinate_cross_agent_friction(
+                    user_id,
+                    session_id,
+                    strategy,
+                    {self.agent_id},
+                    friction_context
+                )
+                
+                if coordination_id:
+                    diagnosis_result['friction_coordination'] = {
+                        'coordination_id': coordination_id,
+                        'strategy_id': strategy.strategy_id,
+                        'intensity': strategy.intensity,
+                        'readiness_level': readiness_profile.overall_readiness.value
+                    }
+                    
+                    self.metrics['friction_coordinations'] += 1
+            
+            return diagnosis_result
+            
+        except Exception as e:
+            logger.error(f"Friction coordination error: {e}")
+            diagnosis_result['friction_error'] = str(e)
+            return diagnosis_result
+    
+    def _identify_breakthrough_indicators(self, diagnosis_result: Dict[str, Any]) -> List[str]:
+        """Identify potential breakthrough indicators from diagnosis."""
+        indicators = []
+        
+        symptoms = diagnosis_result.get('symptoms', [])
+        severity = diagnosis_result.get('severity', 'mild')
+        
+        # Look for patterns that suggest breakthrough opportunities
+        if severity in ['moderate', 'severe']:
+            indicators.append('emotional_vulnerability')
+        
+        symptom_text = ' '.join(str(s) for s in symptoms).lower()
+        
+        if any(phrase in symptom_text for phrase in ['pattern', 'always', 'keep doing']):
+            indicators.append('pattern_recognition')
+        
+        if any(phrase in symptom_text for phrase in ['confused', 'conflicted', 'torn']):
+            indicators.append('cognitive_dissonance')
+        
+        if any(phrase in symptom_text for phrase in ['ready', 'want to change', 'tired of']):
+            indicators.append('behavioral_readiness')
+        
+        return indicators
+    
+    async def _handle_diagnosis_request(self, event: Event) -> None:
+        """Handle incoming diagnosis requests."""
+        try:
+            request_data = event.data
+            symptoms = request_data.get('symptoms', [])
+            context = request_data.get('context', {})
+            
+            # Process diagnosis with full integration
+            result = await self.diagnose_with_integration(
+                symptoms=symptoms,
+                context=context,
+                user_id=event.user_id,
+                session_id=event.session_id,
+                require_supervision=request_data.get('require_supervision', True),
+                enable_friction=request_data.get('enable_friction', True)
+            )
+            
+            # Send response
+            if event.reply_to:
+                await self.event_bus.publish(Event(
+                    event_type=EventType.AGENT_RESPONSE,
+                    source_agent=self.agent_id,
+                    target_agent=event.reply_to,
+                    correlation_id=event.correlation_id,
+                    user_id=event.user_id,
+                    session_id=event.session_id,
+                    data={
+                        'request_id': event.event_id,
+                        'diagnosis_result': result
+                    }
+                ))
+        
+        except Exception as e:
+            logger.error(f"Error handling diagnosis request: {e}")
+            self.metrics['integration_errors'] += 1
+    
+    async def _handle_validation_result(self, event: Event) -> None:
+        """Handle validation results from supervision mesh."""
+        try:
+            result_data = event.data
+            request_id = result_data.get('request_id')
+            
+            # Update session with validation result
+            for session_id, session_data in self.current_sessions.items():
+                if session_data.get('diagnosis_id') == request_id:
+                    session_data['validation_result'] = result_data
+                    break
+        
+        except Exception as e:
+            logger.error(f"Error handling validation result: {e}")
+    
+    async def _handle_friction_update(self, event: Event) -> None:
+        """Handle friction coordination updates."""
+        try:
+            update_data = event.data
+            coordination_id = update_data.get('coordination_id')
+            
+            if 'intensity_update' in update_data:
+                # Adjust diagnostic approach based on friction intensity
+                new_intensity = update_data['intensity_update']
+                logger.info(f"Adjusted friction intensity to {new_intensity}")
+            
+            if update_data.get('action') == 'end_coordination':
+                # Clean up coordination resources
+                logger.info(f"Friction coordination {coordination_id} ended")
+        
+        except Exception as e:
+            logger.error(f"Error handling friction update: {e}")
+    
+    def get_metrics(self) -> Dict[str, Any]:
+        """Get agent metrics and status."""
+        return {
+            'agent_id': self.agent_id,
+            'is_active': self.is_active,
+            'active_sessions': len(self.current_sessions),
+            'performance_metrics': self.metrics.copy(),
+            'integration_status': {
+                'event_bus_connected': self.event_bus is not None,
+                'supervision_mesh_available': self.supervision_mesh is not None,
+                'friction_engine_available': self.friction_engine is not None
+            }
+        }
+    
+    def get_health_status(self) -> Dict[str, Any]:
+        """Get agent health status."""
+        error_rate = self.metrics['integration_errors'] / max(1, self.metrics['diagnoses_performed'])
+        avg_processing_time = self.metrics['average_processing_time']
+        
+        status = 'healthy'
+        if error_rate > 0.1:  # More than 10% error rate
+            status = 'degraded'
+        if error_rate > 0.25 or avg_processing_time > 30:  # More than 25% error rate or >30s processing
+            status = 'unhealthy'
+        
+        return {
+            'status': status,
+            'error_rate': error_rate,
+            'average_processing_time': avg_processing_time,
+            'active_sessions': len(self.current_sessions),
+            'last_activity': max((
+                session_data['start_time'] for session_data in self.current_sessions.values()
+            ), default=None)
         }
 
     async def _generate_response(

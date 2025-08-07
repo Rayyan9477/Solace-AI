@@ -6,10 +6,17 @@ using the module system with integrated SupervisorAgent oversight.
 """
 
 import asyncio
-from typing import Dict, Any, List, Optional, Callable, Union
+from typing import Dict, Any, List, Optional, Callable, Union, Set
 import time
 import json
-from datetime import datetime
+import uuid
+import threading
+from datetime import datetime, timedelta
+from abc import ABC, abstractmethod
+from enum import Enum
+from dataclasses import dataclass, asdict
+from collections import defaultdict, deque
+import weakref
 
 from src.components.base_module import Module, get_module_manager
 from src.utils.logger import get_logger
@@ -29,6 +36,477 @@ try:
 except ImportError:
     DIAGNOSIS_SERVICES_AVAILABLE = False
 
+# Enhanced orchestration components
+class MessageType(Enum):
+    """Types of messages in the event-driven system."""
+    AGENT_REQUEST = "agent_request"
+    AGENT_RESPONSE = "agent_response"
+    VALIDATION_REQUEST = "validation_request"
+    VALIDATION_RESPONSE = "validation_response"
+    ERROR_EVENT = "error_event"
+    METRICS_EVENT = "metrics_event"
+    CONTEXT_UPDATE = "context_update"
+    HEALTH_CHECK = "health_check"
+    CIRCUIT_BREAKER_EVENT = "circuit_breaker_event"
+
+class CircuitBreakerState(Enum):
+    """Circuit breaker states for fault tolerance."""
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+@dataclass
+class Message:
+    """Event message structure for agent communication."""
+    id: str
+    type: MessageType
+    sender: str
+    recipient: Optional[str]
+    payload: Dict[str, Any]
+    timestamp: datetime
+    session_id: Optional[str] = None
+    correlation_id: Optional[str] = None
+    reply_to: Optional[str] = None
+    ttl: Optional[int] = None  # Time to live in seconds
+    
+    def __post_init__(self):
+        if not self.id:
+            self.id = str(uuid.uuid4())
+        if not self.timestamp:
+            self.timestamp = datetime.now()
+
+@dataclass
+class ValidationRequest:
+    """Request for agent response validation."""
+    agent_name: str
+    input_data: Dict[str, Any]
+    output_data: Dict[str, Any]
+    session_id: str
+    validation_types: List[str] = None
+    priority: str = "normal"
+
+@dataclass
+class CircuitBreakerConfig:
+    """Configuration for circuit breaker pattern."""
+    failure_threshold: int = 5
+    reset_timeout: int = 60  # seconds
+    success_threshold: int = 2  # for half-open state
+    timeout: int = 30  # request timeout
+
+class MessageBus:
+    """Event-driven message bus for agent communication."""
+    
+    def __init__(self):
+        self.subscribers = defaultdict(list)
+        self.message_queue = asyncio.Queue(maxsize=10000)
+        self.lock = threading.RLock()
+        self.running = False
+        self.logger = get_logger(__name__ + ".MessageBus")
+        
+    async def start(self):
+        """Start the message bus processing."""
+        self.running = True
+        asyncio.create_task(self._process_messages())
+        self.logger.info("Message bus started")
+    
+    async def stop(self):
+        """Stop the message bus."""
+        self.running = False
+        self.logger.info("Message bus stopped")
+    
+    def subscribe(self, message_type: MessageType, handler: Callable):
+        """Subscribe to specific message types."""
+        with self.lock:
+            self.subscribers[message_type].append(handler)
+        self.logger.debug(f"Handler subscribed to {message_type.value}")
+    
+    def unsubscribe(self, message_type: MessageType, handler: Callable):
+        """Unsubscribe from message types."""
+        with self.lock:
+            if handler in self.subscribers[message_type]:
+                self.subscribers[message_type].remove(handler)
+        self.logger.debug(f"Handler unsubscribed from {message_type.value}")
+    
+    async def publish(self, message: Message):
+        """Publish a message to the bus."""
+        if not self.running:
+            self.logger.warning("Message bus not running, message dropped")
+            return
+        
+        try:
+            await self.message_queue.put(message)
+        except asyncio.QueueFull:
+            self.logger.error("Message queue full, message dropped")
+    
+    async def _process_messages(self):
+        """Process messages from the queue."""
+        while self.running:
+            try:
+                message = await asyncio.wait_for(self.message_queue.get(), timeout=1.0)
+                await self._route_message(message)
+                self.message_queue.task_done()
+            except asyncio.TimeoutError:
+                continue
+            except Exception as e:
+                self.logger.error(f"Error processing message: {str(e)}")
+    
+    async def _route_message(self, message: Message):
+        """Route message to appropriate handlers."""
+        handlers = []
+        with self.lock:
+            handlers = self.subscribers[message.type].copy()
+        
+        for handler in handlers:
+            try:
+                if asyncio.iscoroutinefunction(handler):
+                    await handler(message)
+                else:
+                    handler(message)
+            except Exception as e:
+                self.logger.error(f"Handler error for {message.type.value}: {str(e)}")
+
+class ValidatorRegistry:
+    """Registry for managing multiple validator agents in supervision mesh."""
+    
+    def __init__(self):
+        self.validators = {}
+        self.validator_configs = {}
+        self.lock = threading.RLock()
+        self.logger = get_logger(__name__ + ".ValidatorRegistry")
+        
+    def register_validator(self, validator_id: str, validator: Any, 
+                          validator_types: List[str] = None, weight: float = 1.0):
+        """Register a validator agent."""
+        with self.lock:
+            self.validators[validator_id] = validator
+            self.validator_configs[validator_id] = {
+                "types": validator_types or ["general"],
+                "weight": weight,
+                "enabled": True,
+                "success_count": 0,
+                "failure_count": 0
+            }
+        self.logger.info(f"Registered validator: {validator_id}")
+    
+    def get_validators_for_type(self, validation_type: str = "general") -> List[tuple]:
+        """Get appropriate validators for validation type."""
+        with self.lock:
+            valid_validators = []
+            for validator_id, config in self.validator_configs.items():
+                if (config["enabled"] and 
+                    (validation_type in config["types"] or "general" in config["types"])):
+                    validator = self.validators[validator_id]
+                    valid_validators.append((validator_id, validator, config["weight"]))
+            return valid_validators
+    
+    async def validate_with_consensus(self, request: ValidationRequest) -> Dict[str, Any]:
+        """Perform validation using multiple validators with consensus."""
+        validators = self.get_validators_for_type("general")
+        
+        if not validators:
+            self.logger.warning("No validators available")
+            return {"error": "No validators available"}
+        
+        validation_results = []
+        
+        for validator_id, validator, weight in validators:
+            try:
+                if hasattr(validator, 'validate_agent_response'):
+                    result = await validator.validate_agent_response(
+                        request.agent_name, request.input_data, 
+                        request.output_data, request.session_id
+                    )
+                    validation_results.append((validator_id, result, weight))
+                    
+                    # Update success count
+                    with self.lock:
+                        self.validator_configs[validator_id]["success_count"] += 1
+                        
+            except Exception as e:
+                self.logger.error(f"Validator {validator_id} failed: {str(e)}")
+                with self.lock:
+                    self.validator_configs[validator_id]["failure_count"] += 1
+        
+        return self._calculate_consensus(validation_results)
+    
+    def _calculate_consensus(self, results: List[tuple]) -> Dict[str, Any]:
+        """Calculate consensus from multiple validation results."""
+        if not results:
+            return {"error": "No validation results"}
+        
+        # Simple weighted voting for now
+        total_weight = sum(weight for _, _, weight in results)
+        weighted_scores = []
+        all_issues = set()
+        blocking_votes = 0
+        
+        for validator_id, result, weight in results:
+            if hasattr(result, 'accuracy_score'):
+                weighted_scores.append(result.accuracy_score * weight)
+            
+            if hasattr(result, 'critical_issues'):
+                all_issues.update(result.critical_issues)
+            
+            if hasattr(result, 'validation_level') and result.validation_level == ValidationLevel.BLOCKED:
+                blocking_votes += weight
+        
+        consensus_score = sum(weighted_scores) / total_weight if weighted_scores else 0.5
+        is_blocked = blocking_votes > total_weight * 0.5  # More than 50% vote to block
+        
+        return {
+            "consensus_score": consensus_score,
+            "is_blocked": is_blocked,
+            "validator_count": len(results),
+            "critical_issues": list(all_issues),
+            "individual_results": [(vid, asdict(result) if hasattr(result, '__dict__') else str(result)) 
+                                  for vid, result, _ in results]
+        }
+
+class CircuitBreaker:
+    """Circuit breaker implementation for fault tolerance."""
+    
+    def __init__(self, agent_id: str, config: CircuitBreakerConfig):
+        self.agent_id = agent_id
+        self.config = config
+        self.state = CircuitBreakerState.CLOSED
+        self.failure_count = 0
+        self.success_count = 0
+        self.last_failure_time = None
+        self.lock = threading.RLock()
+        self.logger = get_logger(__name__ + f".CircuitBreaker.{agent_id}")
+    
+    async def execute(self, func: Callable, *args, **kwargs):
+        """Execute function with circuit breaker protection."""
+        with self.lock:
+            if self.state == CircuitBreakerState.OPEN:
+                if self._should_attempt_reset():
+                    self.state = CircuitBreakerState.HALF_OPEN
+                    self.logger.info(f"Circuit breaker {self.agent_id} moving to HALF_OPEN")
+                else:
+                    raise Exception(f"Circuit breaker {self.agent_id} is OPEN")
+        
+        try:
+            # Execute with timeout
+            result = await asyncio.wait_for(func(*args, **kwargs), 
+                                          timeout=self.config.timeout)
+            await self._on_success()
+            return result
+            
+        except Exception as e:
+            await self._on_failure()
+            raise
+    
+    def _should_attempt_reset(self) -> bool:
+        """Check if circuit breaker should attempt reset."""
+        return (self.last_failure_time and 
+                time.time() - self.last_failure_time > self.config.reset_timeout)
+    
+    async def _on_success(self):
+        """Handle successful execution."""
+        with self.lock:
+            if self.state == CircuitBreakerState.HALF_OPEN:
+                self.success_count += 1
+                if self.success_count >= self.config.success_threshold:
+                    self.state = CircuitBreakerState.CLOSED
+                    self.failure_count = 0
+                    self.success_count = 0
+                    self.logger.info(f"Circuit breaker {self.agent_id} CLOSED")
+            elif self.state == CircuitBreakerState.CLOSED:
+                self.failure_count = max(0, self.failure_count - 1)
+    
+    async def _on_failure(self):
+        """Handle failed execution."""
+        with self.lock:
+            self.failure_count += 1
+            self.last_failure_time = time.time()
+            
+            if (self.state == CircuitBreakerState.CLOSED and 
+                self.failure_count >= self.config.failure_threshold):
+                self.state = CircuitBreakerState.OPEN
+                self.logger.error(f"Circuit breaker {self.agent_id} OPENED")
+                
+            elif self.state == CircuitBreakerState.HALF_OPEN:
+                self.state = CircuitBreakerState.OPEN
+                self.success_count = 0
+                self.logger.error(f"Circuit breaker {self.agent_id} back to OPEN")
+
+class ContextManager:
+    """Enhanced context management with propagation and versioning."""
+    
+    def __init__(self):
+        self.contexts = {}
+        self.context_versions = defaultdict(int)
+        self.context_locks = defaultdict(threading.RLock)
+        self.context_cache = {}
+        self.inheritance_map = defaultdict(set)
+        self.logger = get_logger(__name__ + ".ContextManager")
+        
+    async def get_context(self, session_id: str, include_inherited: bool = True) -> Dict[str, Any]:
+        """Get context with optional inheritance."""
+        with self.context_locks[session_id]:
+            context = self.contexts.get(session_id, {}).copy()
+            
+            if include_inherited:
+                # Add inherited contexts
+                for parent_session in self.inheritance_map[session_id]:
+                    parent_context = self.contexts.get(parent_session, {})
+                    # Merge parent context (child values take precedence)
+                    for key, value in parent_context.items():
+                        if key not in context:
+                            context[key] = value
+            
+            return context
+    
+    async def update_context(self, session_id: str, updates: Dict[str, Any], 
+                           merge: bool = True, increment_version: bool = True):
+        """Update context with versioning."""
+        with self.context_locks[session_id]:
+            if session_id not in self.contexts:
+                self.contexts[session_id] = {}
+            
+            if merge:
+                self._deep_merge(self.contexts[session_id], updates)
+            else:
+                self.contexts[session_id] = updates
+            
+            if increment_version:
+                self.context_versions[session_id] += 1
+            
+            # Clear cache for this session
+            self.context_cache.pop(session_id, None)
+            
+            self.logger.debug(f"Context updated for {session_id}, version {self.context_versions[session_id]}")
+    
+    def add_inheritance(self, child_session: str, parent_session: str):
+        """Add context inheritance relationship."""
+        self.inheritance_map[child_session].add(parent_session)
+        self.logger.debug(f"Added inheritance: {child_session} inherits from {parent_session}")
+    
+    def get_context_version(self, session_id: str) -> int:
+        """Get current context version."""
+        return self.context_versions[session_id]
+    
+    def _deep_merge(self, target: Dict[str, Any], source: Dict[str, Any]):
+        """Deep merge dictionaries."""
+        for key, value in source.items():
+            if key in target and isinstance(target[key], dict) and isinstance(value, dict):
+                self._deep_merge(target[key], value)
+            else:
+                target[key] = value
+
+class PerformanceMonitor:
+    """Real-time performance monitoring for agents."""
+    
+    def __init__(self, metrics_collector: MetricsCollector):
+        self.metrics_collector = metrics_collector
+        self.agent_stats = defaultdict(lambda: {
+            "requests": 0,
+            "errors": 0,
+            "avg_response_time": 0.0,
+            "last_request_time": None,
+            "health_status": "unknown"
+        })
+        self.performance_alerts = deque(maxlen=100)
+        self.lock = threading.RLock()
+        self.logger = get_logger(__name__ + ".PerformanceMonitor")
+    
+    async def record_agent_performance(self, agent_name: str, response_time: float, 
+                                     success: bool, session_id: str = None):
+        """Record agent performance metrics."""
+        with self.lock:
+            stats = self.agent_stats[agent_name]
+            stats["requests"] += 1
+            stats["last_request_time"] = datetime.now()
+            
+            if not success:
+                stats["errors"] += 1
+            
+            # Update average response time (exponential moving average)
+            alpha = 0.1  # Smoothing factor
+            if stats["avg_response_time"] == 0:
+                stats["avg_response_time"] = response_time
+            else:
+                stats["avg_response_time"] = (alpha * response_time + 
+                                            (1 - alpha) * stats["avg_response_time"])
+            
+            # Update health status
+            error_rate = stats["errors"] / stats["requests"]
+            if error_rate > 0.1:  # More than 10% errors
+                stats["health_status"] = "unhealthy"
+            elif error_rate > 0.05:  # More than 5% errors
+                stats["health_status"] = "degraded"
+            else:
+                stats["health_status"] = "healthy"
+        
+        # Record in metrics collector
+        self.metrics_collector.record_metric(
+            f"agent_response_time_{agent_name}", response_time,
+            metadata={"agent": agent_name, "session_id": session_id, "success": success}
+        )
+        
+        # Check for performance alerts
+        await self._check_performance_alerts(agent_name, stats)
+    
+    async def _check_performance_alerts(self, agent_name: str, stats: Dict[str, Any]):
+        """Check and generate performance alerts."""
+        alerts = []
+        
+        # High error rate alert
+        error_rate = stats["errors"] / stats["requests"]
+        if error_rate > 0.15:
+            alerts.append(f"High error rate for {agent_name}: {error_rate:.2%}")
+        
+        # Slow response time alert
+        if stats["avg_response_time"] > 5.0:
+            alerts.append(f"Slow response time for {agent_name}: {stats['avg_response_time']:.2f}s")
+        
+        # Add alerts to queue
+        for alert in alerts:
+            self.performance_alerts.append({
+                "timestamp": datetime.now(),
+                "agent": agent_name,
+                "message": alert,
+                "stats": stats.copy()
+            })
+            self.logger.warning(alert)
+    
+    def get_agent_health(self, agent_name: str = None) -> Dict[str, Any]:
+        """Get agent health status."""
+        with self.lock:
+            if agent_name:
+                return self.agent_stats.get(agent_name, {"health_status": "unknown"})
+            return {name: stats for name, stats in self.agent_stats.items()}
+    
+    def get_performance_alerts(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get recent performance alerts."""
+        return list(self.performance_alerts)[-limit:]
+
+class RetryManager:
+    """Manages retry logic with exponential backoff."""
+    
+    def __init__(self, max_retries: int = 3, base_delay: float = 1.0, max_delay: float = 60.0):
+        self.max_retries = max_retries
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+        self.logger = get_logger(__name__ + ".RetryManager")
+    
+    async def execute_with_retry(self, func: Callable, *args, 
+                               retry_exceptions: tuple = (Exception,), **kwargs):
+        """Execute function with exponential backoff retry."""
+        for attempt in range(self.max_retries + 1):
+            try:
+                return await func(*args, **kwargs)
+            except retry_exceptions as e:
+                if attempt == self.max_retries:
+                    self.logger.error(f"Max retries exceeded for {func.__name__}: {str(e)}")
+                    raise
+                
+                delay = min(self.base_delay * (2 ** attempt), self.max_delay)
+                self.logger.warning(f"Retry {attempt + 1}/{self.max_retries} for {func.__name__} after {delay}s: {str(e)}")
+                await asyncio.sleep(delay)
+        
+        raise Exception("Should not reach here")
+
 class AgentOrchestrator(Module):
     """
     Orchestrates interactions between multiple specialized agents.
@@ -45,8 +523,18 @@ class AgentOrchestrator(Module):
         self.current_workflows = {}
         self.workflow_history = {}
         
-        # Initialize context store for shared context between agents
-        self.context_store = {}
+        # Configuration flags for enhanced features
+        self.enhanced_features_enabled = config.get("enhanced_features_enabled", True) if config else True
+        self.event_driven_enabled = config.get("event_driven_enabled", True) if config else True
+        self.supervision_mesh_enabled = config.get("supervision_mesh_enabled", True) if config else True
+        self.circuit_breaker_enabled = config.get("circuit_breaker_enabled", True) if config else True
+        self.performance_monitoring_enabled = config.get("performance_monitoring_enabled", True) if config else True
+        
+        # Initialize context management (enhanced)
+        if self.enhanced_features_enabled:
+            self.context_manager = ContextManager()
+        else:
+            self.context_store = {}  # Backward compatibility
         
         # Store user_id for conversation tracking
         self.user_id = config.get("user_id", "default_user") if config else "default_user"
@@ -65,6 +553,13 @@ class AgentOrchestrator(Module):
         self.metrics_collector = None
         self.audit_trail = None
         
+        # Enhanced components
+        self.message_bus = None
+        self.validator_registry = None
+        self.circuit_breakers = {}
+        self.performance_monitor = None
+        self.retry_manager = None
+        
         if self.supervision_enabled:
             try:
                 # Initialize SupervisorAgent
@@ -82,13 +577,65 @@ class AgentOrchestrator(Module):
                 self.logger.error(f"Failed to initialize supervision system: {str(e)}")
                 self.supervision_enabled = False
         
-        self.logger.info(f"Agent orchestrator configured for user {self.user_id} with supervision {'enabled' if self.supervision_enabled else 'disabled'}")
+        # Initialize enhanced features
+        if self.enhanced_features_enabled:
+            self._initialize_enhanced_features()
         
+        self.logger.info(f"Agent orchestrator configured for user {self.user_id} with supervision {'enabled' if self.supervision_enabled else 'disabled'} and enhanced features {'enabled' if self.enhanced_features_enabled else 'disabled'}")
+        
+    def _initialize_enhanced_features(self):
+        """Initialize enhanced orchestration features."""
+        try:
+            # Initialize message bus for event-driven communication
+            if self.event_driven_enabled:
+                self.message_bus = MessageBus()
+                self.logger.info("Message bus initialized")
+            
+            # Initialize validator registry for supervision mesh
+            if self.supervision_mesh_enabled:
+                self.validator_registry = ValidatorRegistry()
+                # Register the main supervisor as a validator
+                if self.supervisor_agent:
+                    self.validator_registry.register_validator(
+                        "main_supervisor", self.supervisor_agent, 
+                        ["safety", "ethics", "clinical"], weight=1.0
+                    )
+                self.logger.info("Validator registry initialized")
+            
+            # Initialize performance monitoring
+            if self.performance_monitoring_enabled and self.metrics_collector:
+                self.performance_monitor = PerformanceMonitor(self.metrics_collector)
+                self.logger.info("Performance monitor initialized")
+            
+            # Initialize retry manager
+            config = self.config or {}
+            retry_config = config.get("retry_config", {})
+            self.retry_manager = RetryManager(
+                max_retries=retry_config.get("max_retries", 3),
+                base_delay=retry_config.get("base_delay", 1.0),
+                max_delay=retry_config.get("max_delay", 60.0)
+            )
+            self.logger.info("Retry manager initialized")
+            
+            self.logger.info("Enhanced features initialized successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize enhanced features: {str(e)}")
+            self.enhanced_features_enabled = False
+
     async def initialize(self) -> bool:
         """Initialize the orchestrator and register available agents"""
         await super().initialize()
         
         self.logger.info("Initializing Agent Orchestrator")
+        
+        # Start enhanced components
+        if self.enhanced_features_enabled and self.message_bus:
+            await self.message_bus.start()
+            # Subscribe to events
+            self.message_bus.subscribe(MessageType.VALIDATION_REQUEST, self._handle_validation_request)
+            self.message_bus.subscribe(MessageType.ERROR_EVENT, self._handle_error_event)
+            self.message_bus.subscribe(MessageType.METRICS_EVENT, self._handle_metrics_event)
         
         # Register workflow patterns
         self._register_workflows()
@@ -96,12 +643,20 @@ class AgentOrchestrator(Module):
         # Initialize diagnosis system integration
         await self._initialize_diagnosis_integration()
         
-        # Expose services
+        # Expose services (existing)
         self.expose_service("execute_workflow", self.execute_workflow)
         self.expose_service("register_agent", self.register_agent)
         self.expose_service("send_message", self.send_message)
         self.expose_service("get_context", self.get_context)
         self.expose_service("update_context", self.update_context)
+        
+        # Expose enhanced services
+        if self.enhanced_features_enabled:
+            self.expose_service("execute_workflow_enhanced", self.execute_workflow_enhanced)
+            self.expose_service("register_validator", self.register_validator)
+            self.expose_service("send_event", self.send_event)
+            self.expose_service("get_agent_health", self.get_agent_health)
+            self.expose_service("get_performance_metrics", self.get_performance_metrics)
         
         # Expose diagnosis service if available
         if self.diagnosis_integration_enabled:
@@ -461,8 +1016,10 @@ class AgentOrchestrator(Module):
                         # Handle validation results
                         if validation_result.validation_level == ValidationLevel.BLOCKED:
                             # Block the response and use alternative
+                            blocking_issues = getattr(validation_result, 'blocking_issues', 
+                                                   getattr(validation_result, 'critical_issues', ['Safety concerns']))
                             self.logger.warning(f"Response blocked for {agent_id}", 
-                                              {"session_id": session_id, "reason": validation_result.blocking_issues})
+                                              {"session_id": session_id, "reason": blocking_issues})
                             
                             if validation_result.alternative_response:
                                 result = {"response": validation_result.alternative_response}
@@ -479,7 +1036,7 @@ class AgentOrchestrator(Module):
                                     user_id=self.user_id,
                                     agent_name=agent_id,
                                     blocked_content=str(result.get("response", "")),
-                                    reason="; ".join(validation_result.blocking_issues),
+                                    reason="; ".join(blocking_issues) if isinstance(blocking_issues, list) else str(blocking_issues),
                                     alternative_provided=bool(validation_result.alternative_response)
                                 )
                         
@@ -490,11 +1047,16 @@ class AgentOrchestrator(Module):
                         
                         # Store validation result in workflow state
                         workflow_state["validation_results"] = workflow_state.get("validation_results", {})
+                        overall_score = getattr(validation_result, 'overall_score', 
+                                              getattr(validation_result, 'accuracy_score', 0.5))
+                        critical_issues = getattr(validation_result, 'critical_issues', [])
+                        recommendations = getattr(validation_result, 'recommendations', [])
+                        
                         workflow_state["validation_results"][agent_id] = {
                             "validation_level": validation_result.validation_level.value,
-                            "overall_score": validation_result.overall_score,
-                            "critical_issues": validation_result.critical_issues,
-                            "recommendations": validation_result.recommendations
+                            "overall_score": overall_score,
+                            "critical_issues": critical_issues,
+                            "recommendations": recommendations
                         }
                         
                     except Exception as validation_error:
@@ -656,18 +1218,27 @@ class AgentOrchestrator(Module):
         Returns:
             Context data for the session
         """
-        # Initialize context if not exists
-        if session_id not in self.context_store:
-            self.context_store[session_id] = {}
+        if self.enhanced_features_enabled and self.context_manager:
+            # Use enhanced context manager
+            context = await self.context_manager.get_context(session_id, include_inherited=True)
             
-        # Return specific context type if requested
-        if context_type:
-            return {
-                context_type: self.context_store[session_id].get(context_type, {})
-            }
-            
-        # Return all context
-        return self.context_store[session_id]
+            if context_type:
+                return {context_type: context.get(context_type, {})}
+            return context
+        else:
+            # Legacy context handling
+            # Initialize context if not exists
+            if session_id not in self.context_store:
+                self.context_store[session_id] = {}
+                
+            # Return specific context type if requested
+            if context_type:
+                return {
+                    context_type: self.context_store[session_id].get(context_type, {})
+                }
+                
+            # Return all context
+            return self.context_store[session_id]
         
     async def update_context(self, session_id: str, context_data: Dict[str, Any], merge: bool = True) -> bool:
         """
@@ -682,17 +1253,39 @@ class AgentOrchestrator(Module):
             True if successful, False otherwise
         """
         try:
-            # Initialize context if not exists
-            if session_id not in self.context_store:
-                self.context_store[session_id] = {}
+            if self.enhanced_features_enabled and self.context_manager:
+                # Use enhanced context manager
+                await self.context_manager.update_context(session_id, context_data, merge)
                 
-            # Update context based on merge strategy
-            if merge:
-                # Recursively merge nested dictionaries
-                self._deep_merge(self.context_store[session_id], context_data)
+                # Publish context update event
+                if self.message_bus:
+                    update_message = Message(
+                        id=str(uuid.uuid4()),
+                        type=MessageType.CONTEXT_UPDATE,
+                        sender="orchestrator",
+                        recipient=None,
+                        payload={
+                            "session_id": session_id,
+                            "context_keys": list(context_data.keys()),
+                            "merge": merge
+                        },
+                        session_id=session_id
+                    )
+                    await self.message_bus.publish(update_message)
+                
             else:
-                # Replace context entirely
-                self.context_store[session_id] = context_data
+                # Legacy context handling
+                # Initialize context if not exists
+                if session_id not in self.context_store:
+                    self.context_store[session_id] = {}
+                    
+                # Update context based on merge strategy
+                if merge:
+                    # Recursively merge nested dictionaries
+                    self._deep_merge(self.context_store[session_id], context_data)
+                else:
+                    # Replace context entirely
+                    self.context_store[session_id] = context_data
                 
             self.logger.debug(f"Updated context for session {session_id}", 
                           {"session_id": session_id, "context_keys": list(context_data.keys())})
@@ -754,6 +1347,11 @@ class AgentOrchestrator(Module):
             except Exception as e:
                 self.logger.error(f"Error during supervision system shutdown: {str(e)}")
         
+        # Shutdown enhanced components
+        if self.enhanced_features_enabled:
+            if self.message_bus:
+                await self.message_bus.stop()
+                
         return await super().shutdown()
 
     async def process_message(self, message: str, user_id: str = None, workflow_id: str = "enhanced_empathetic_chat") -> Dict[str, Any]:
@@ -1177,5 +1775,504 @@ class AgentOrchestrator(Module):
             "diagnosis_services_available": DIAGNOSIS_SERVICES_AVAILABLE,
             "diagnosis_orchestrator_active": self.diagnosis_orchestrator is not None,
             "diagnosis_adapter_active": self.diagnosis_adapter is not None,
+            "status_timestamp": datetime.now().isoformat()
+        }
+    
+    # Enhanced Orchestration Methods
+    
+    async def execute_workflow_enhanced(self, workflow_id: str, input_data: Dict[str, Any],
+                                      session_id: str = None, context: Dict[str, Any] = None,
+                                      use_circuit_breaker: bool = True, 
+                                      use_supervision_mesh: bool = True) -> Dict[str, Any]:
+        """
+        Execute workflow with enhanced features: circuit breakers, mesh validation, event-driven communication.
+        
+        Args:
+            workflow_id: ID of the workflow to execute
+            input_data: Input data for the workflow
+            session_id: Optional session identifier for tracking
+            context: Additional context for the workflow
+            use_circuit_breaker: Whether to use circuit breaker protection
+            use_supervision_mesh: Whether to use supervision mesh validation
+            
+        Returns:
+            Results of the enhanced workflow execution
+        """
+        if not self.enhanced_features_enabled:
+            return await self.execute_workflow(workflow_id, input_data, session_id, context)
+        
+        if workflow_id not in self.workflows:
+            self.logger.error(f"Workflow {workflow_id} not found")
+            return {"error": f"Workflow {workflow_id} not found"}
+        
+        # Generate session ID if not provided
+        if session_id is None:
+            session_id = f"enhanced_session_{int(time.time())}"
+        
+        # Get workflow definition
+        workflow = self.workflows[workflow_id]
+        agent_sequence = workflow["agent_sequence"]
+        
+        # Update context store with initial context
+        if context:
+            await self.update_context(session_id, context)
+        
+        # Get full context for this session
+        full_context = await self.get_context(session_id)
+        
+        # Prepare enhanced workflow state
+        workflow_state = {
+            "workflow_id": workflow_id,
+            "session_id": session_id,
+            "input": input_data,
+            "context": full_context,
+            "results": {},
+            "start_time": time.time(),
+            "current_step": 0,
+            "steps_completed": 0,
+            "agent_sequence": agent_sequence,
+            "status": "in_progress",
+            "enhanced_features": {
+                "circuit_breaker": use_circuit_breaker,
+                "supervision_mesh": use_supervision_mesh,
+                "event_driven": True
+            },
+            "performance_metrics": {},
+            "validation_results": {}
+        }
+        
+        # Store current workflow
+        self.current_workflows[session_id] = workflow_state
+        
+        # Log workflow start
+        self.logger.info(f"Starting enhanced workflow: {workflow_id}", 
+                      {"session_id": session_id, "workflow": workflow_id})
+        
+        # Execute each agent in sequence with enhanced features
+        current_data = input_data
+        
+        for idx, agent_id in enumerate(agent_sequence):
+            # Update workflow state
+            workflow_state["current_step"] = idx
+            workflow_state["current_agent"] = agent_id
+            
+            try:
+                # Check if this step should use the diagnosis service
+                if (agent_id == "unified_diagnosis_service" and 
+                    workflow["config"].get("use_diagnosis_service", False) and 
+                    self.diagnosis_integration_enabled and 
+                    self.diagnosis_orchestrator):
+                    
+                    # Use unified diagnosis service instead of agent
+                    agent_start_time = time.time()
+                    
+                    result = await self._execute_diagnosis_service_enhanced(
+                        current_data, workflow_state, workflow["config"]
+                    )
+                    
+                    agent_processing_time = time.time() - agent_start_time
+                    
+                else:
+                    # Process with enhanced agent execution
+                    result, agent_processing_time = await self._execute_agent_enhanced(
+                        agent_id, current_data, workflow_state, 
+                        use_circuit_breaker, use_supervision_mesh
+                    )
+                
+                # Record performance metrics
+                if self.performance_monitor:
+                    await self.performance_monitor.record_agent_performance(
+                        agent_id, agent_processing_time, True, session_id
+                    )
+                
+                # Store result in workflow state
+                workflow_state["results"][agent_id] = result
+                workflow_state["performance_metrics"][agent_id] = {
+                    "processing_time": agent_processing_time,
+                    "success": True
+                }
+                
+                # Extract and store context updates from the result if available
+                if isinstance(result, dict) and "context_updates" in result:
+                    context_updates = result.pop("context_updates")
+                    if context_updates:
+                        await self.update_context(session_id, context_updates)
+                        self.logger.debug(f"Updated context from {agent_id}", 
+                                      {"session_id": session_id, "context_keys": list(context_updates.keys())})
+                
+                # Update data for next agent
+                current_data = result
+                workflow_state["steps_completed"] += 1
+                
+            except Exception as e:
+                # Enhanced error handling
+                await self._handle_agent_error(agent_id, e, workflow_state, session_id)
+                
+                # Record failed performance
+                if self.performance_monitor:
+                    await self.performance_monitor.record_agent_performance(
+                        agent_id, time.time() - workflow_state.get("agent_start_time", time.time()), 
+                        False, session_id
+                    )
+                break
+        
+        # Complete workflow
+        workflow_state["end_time"] = time.time()
+        workflow_state["duration"] = workflow_state["end_time"] - workflow_state["start_time"]
+        
+        # Set final status
+        if workflow_state["status"] != "failed":
+            workflow_state["status"] = "completed"
+        
+        # Log workflow completion
+        log_level = "info" if workflow_state["status"] == "completed" else "error"
+        getattr(self.logger, log_level)(
+            f"Enhanced workflow {workflow_id} {workflow_state['status']} in {workflow_state['duration']:.2f}s",
+            {"session_id": session_id, "workflow": workflow_id, "status": workflow_state["status"]}
+        )
+        
+        # Store in history and remove from current
+        self.workflow_history[session_id] = workflow_state
+        self.current_workflows.pop(session_id, None)
+        
+        # Add final context to the return data
+        final_context = await self.get_context(session_id)
+        
+        # Return the enhanced output
+        return {
+            "output": current_data,
+            "session_id": session_id,
+            "workflow_id": workflow_id,
+            "status": workflow_state["status"],
+            "duration": workflow_state["duration"],
+            "steps_completed": workflow_state["steps_completed"],
+            "context": final_context,
+            "enhanced_metrics": {
+                "performance_metrics": workflow_state["performance_metrics"],
+                "validation_results": workflow_state["validation_results"],
+                "features_used": workflow_state["enhanced_features"]
+            }
+        }
+    
+    async def _execute_agent_enhanced(self, agent_id: str, current_data: Dict[str, Any], 
+                                    workflow_state: Dict[str, Any], 
+                                    use_circuit_breaker: bool, 
+                                    use_supervision_mesh: bool) -> tuple:
+        """Execute agent with enhanced features."""
+        # Check if agent is available
+        if agent_id not in self.agent_modules:
+            error_msg = f"Agent {agent_id} not found, workflow cannot continue"
+            self.logger.error(error_msg, {"session_id": workflow_state["session_id"]})
+            workflow_state["status"] = "failed"
+            workflow_state["error"] = error_msg
+            raise Exception(error_msg)
+        
+        agent = self.agent_modules[agent_id]
+        agent_process = getattr(agent, "process", None)
+        
+        if not agent_process or not callable(agent_process):
+            error_msg = f"Agent {agent_id} does not have a valid process method"
+            self.logger.error(error_msg, {"session_id": workflow_state["session_id"]})
+            workflow_state["status"] = "failed"
+            workflow_state["error"] = error_msg
+            raise Exception(error_msg)
+        
+        # Refresh context before processing
+        workflow_state["context"] = await self.get_context(workflow_state["session_id"])
+        
+        # Record agent interaction start
+        agent_start_time = time.time()
+        workflow_state["agent_start_time"] = agent_start_time
+        
+        # Execute with circuit breaker if enabled
+        if use_circuit_breaker and self.circuit_breaker_enabled:
+            circuit_breaker = self._get_or_create_circuit_breaker(agent_id)
+            result = await circuit_breaker.execute(
+                agent_process, current_data, context=workflow_state["context"]
+            )
+        else:
+            # Execute agent's process method with retry if available
+            if self.retry_manager:
+                result = await self.retry_manager.execute_with_retry(
+                    agent_process, current_data, context=workflow_state["context"]
+                )
+            else:
+                result = await agent_process(current_data, context=workflow_state["context"])
+        
+        # Calculate processing time
+        agent_processing_time = time.time() - agent_start_time
+        
+        # Enhanced validation with supervision mesh
+        if use_supervision_mesh and self.supervision_mesh_enabled and self.validator_registry:
+            validation_request = ValidationRequest(
+                agent_name=agent_id,
+                input_data=current_data,
+                output_data=result,
+                session_id=workflow_state["session_id"]
+            )
+            
+            mesh_validation_result = await self.validator_registry.validate_with_consensus(validation_request)
+            workflow_state["validation_results"][agent_id] = mesh_validation_result
+            
+            # Handle mesh validation results
+            if mesh_validation_result.get("is_blocked", False):
+                error_msg = f"Agent {agent_id} response blocked by supervision mesh"
+                workflow_state["status"] = "failed"
+                workflow_state["error"] = error_msg
+                self.logger.warning(error_msg, {"session_id": workflow_state["session_id"]})
+                raise Exception(error_msg)
+        
+        elif self.supervision_enabled and self.supervisor_agent:
+            # Fallback to single supervisor validation
+            validation_result = await self.supervisor_agent.validate_agent_response(
+                agent_name=agent_id,
+                input_data=current_data,
+                output_data=result,
+                session_id=workflow_state["session_id"]
+            )
+            
+            workflow_state["validation_results"][agent_id] = {
+                "validation_level": validation_result.validation_level.value,
+                "overall_score": validation_result.accuracy_score,
+                "critical_issues": validation_result.critical_issues,
+                "recommendations": validation_result.recommendations
+            }
+            
+            # Handle single validation results
+            if validation_result.validation_level == ValidationLevel.BLOCKED:
+                if validation_result.alternative_response:
+                    result = {"response": validation_result.alternative_response}
+                else:
+                    error_msg = f"Agent {agent_id} response blocked due to safety concerns"
+                    workflow_state["status"] = "failed"
+                    workflow_state["error"] = error_msg
+                    raise Exception(error_msg)
+        
+        return result, agent_processing_time
+    
+    def _get_or_create_circuit_breaker(self, agent_id: str) -> CircuitBreaker:
+        """Get or create circuit breaker for agent."""
+        if agent_id not in self.circuit_breakers:
+            config = self.config or {}
+            cb_config = config.get("circuit_breaker_config", {})
+            
+            self.circuit_breakers[agent_id] = CircuitBreaker(
+                agent_id, 
+                CircuitBreakerConfig(
+                    failure_threshold=cb_config.get("failure_threshold", 5),
+                    reset_timeout=cb_config.get("reset_timeout", 60),
+                    success_threshold=cb_config.get("success_threshold", 2),
+                    timeout=cb_config.get("timeout", 30)
+                )
+            )
+        
+        return self.circuit_breakers[agent_id]
+    
+    async def _execute_diagnosis_service_enhanced(self, current_data: Dict[str, Any], 
+                                                workflow_state: Dict[str, Any], 
+                                                workflow_config: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute diagnosis service with enhanced features."""
+        # Use retry manager for diagnosis service
+        if self.retry_manager:
+            return await self.retry_manager.execute_with_retry(
+                self._execute_diagnosis_service, current_data, workflow_state, workflow_config
+            )
+        else:
+            return await self._execute_diagnosis_service(current_data, workflow_state, workflow_config)
+    
+    async def _handle_agent_error(self, agent_id: str, error: Exception, 
+                                workflow_state: Dict[str, Any], session_id: str):
+        """Enhanced error handling for agent failures."""
+        error_msg = f"Error processing agent {agent_id}: {str(error)}"
+        self.logger.error(error_msg, {"session_id": session_id, "exception": str(error)})
+        
+        # Publish error event
+        if self.message_bus:
+            error_message = Message(
+                id=str(uuid.uuid4()),
+                type=MessageType.ERROR_EVENT,
+                sender="orchestrator",
+                recipient=None,
+                payload={
+                    "agent_id": agent_id,
+                    "error": error_msg,
+                    "session_id": session_id,
+                    "workflow_id": workflow_state["workflow_id"]
+                },
+                session_id=session_id
+            )
+            await self.message_bus.publish(error_message)
+        
+        # Update workflow state
+        workflow_state["status"] = "failed"
+        workflow_state["error"] = error_msg
+        workflow_state["failed_agent"] = agent_id
+    
+    # Event Handlers
+    
+    async def _handle_validation_request(self, message: Message):
+        """Handle validation request messages."""
+        try:
+            payload = message.payload
+            if self.validator_registry:
+                request = ValidationRequest(**payload)
+                result = await self.validator_registry.validate_with_consensus(request)
+                
+                # Send response if reply_to is specified
+                if message.reply_to and self.message_bus:
+                    response = Message(
+                        id=str(uuid.uuid4()),
+                        type=MessageType.VALIDATION_RESPONSE,
+                        sender="orchestrator",
+                        recipient=message.reply_to,
+                        payload=result,
+                        session_id=message.session_id,
+                        correlation_id=message.id
+                    )
+                    await self.message_bus.publish(response)
+        
+        except Exception as e:
+            self.logger.error(f"Error handling validation request: {str(e)}")
+    
+    async def _handle_error_event(self, message: Message):
+        """Handle error event messages."""
+        payload = message.payload
+        self.logger.error(f"Error event received: {payload}")
+        
+        # Additional error handling logic can be added here
+        # For example, triggering fallback workflows or alerting
+    
+    async def _handle_metrics_event(self, message: Message):
+        """Handle metrics event messages."""
+        try:
+            payload = message.payload
+            if self.metrics_collector:
+                # Record the metric
+                self.metrics_collector.record_metric(
+                    payload.get("metric_name", "unknown"),
+                    payload.get("value", 0),
+                    metadata=payload.get("metadata", {})
+                )
+        except Exception as e:
+            self.logger.error(f"Error handling metrics event: {str(e)}")
+    
+    # Enhanced Service Methods
+    
+    async def register_validator(self, validator_id: str, validator: Any, 
+                               validator_types: List[str] = None, weight: float = 1.0) -> Dict[str, Any]:
+        """Register a new validator in the supervision mesh."""
+        if not self.supervision_mesh_enabled or not self.validator_registry:
+            return {"error": "Supervision mesh not enabled"}
+        
+        try:
+            self.validator_registry.register_validator(validator_id, validator, validator_types, weight)
+            return {"success": True, "validator_id": validator_id}
+        except Exception as e:
+            return {"error": str(e)}
+    
+    async def send_event(self, event_type: str, payload: Dict[str, Any], 
+                        recipient: str = None, session_id: str = None) -> Dict[str, Any]:
+        """Send an event through the message bus."""
+        if not self.event_driven_enabled or not self.message_bus:
+            return {"error": "Event-driven communication not enabled"}
+        
+        try:
+            message_type = MessageType(event_type)
+            message = Message(
+                id=str(uuid.uuid4()),
+                type=message_type,
+                sender="orchestrator",
+                recipient=recipient,
+                payload=payload,
+                session_id=session_id
+            )
+            
+            await self.message_bus.publish(message)
+            return {"success": True, "message_id": message.id}
+            
+        except Exception as e:
+            return {"error": str(e)}
+    
+    async def get_agent_health(self, agent_name: str = None) -> Dict[str, Any]:
+        """Get agent health status from performance monitor."""
+        if not self.performance_monitoring_enabled or not self.performance_monitor:
+            return {"error": "Performance monitoring not enabled"}
+        
+        try:
+            health_data = self.performance_monitor.get_agent_health(agent_name)
+            alerts = self.performance_monitor.get_performance_alerts()
+            
+            return {
+                "health_status": health_data,
+                "recent_alerts": alerts,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            return {"error": str(e)}
+    
+    async def get_performance_metrics(self, time_window_hours: int = 1) -> Dict[str, Any]:
+        """Get comprehensive performance metrics."""
+        if not self.performance_monitoring_enabled or not self.performance_monitor:
+            return {"error": "Performance monitoring not enabled"}
+        
+        try:
+            metrics = {
+                "agent_health": self.performance_monitor.get_agent_health(),
+                "recent_alerts": self.performance_monitor.get_performance_alerts(),
+                "circuit_breaker_status": {
+                    cb_id: {
+                        "state": cb.state.value,
+                        "failure_count": cb.failure_count,
+                        "success_count": cb.success_count
+                    }
+                    for cb_id, cb in self.circuit_breakers.items()
+                },
+                "message_bus_status": {
+                    "running": self.message_bus.running if self.message_bus else False,
+                    "queue_size": self.message_bus.message_queue.qsize() if self.message_bus else 0
+                } if self.message_bus else None,
+                "validator_registry_status": {
+                    "validators_registered": len(self.validator_registry.validators) if self.validator_registry else 0
+                } if self.validator_registry else None,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            return metrics
+            
+        except Exception as e:
+            return {"error": str(e)}
+    
+    def get_enhanced_features_status(self) -> Dict[str, Any]:
+        """Get status of all enhanced features."""
+        return {
+            "enhanced_features_enabled": self.enhanced_features_enabled,
+            "event_driven_enabled": self.event_driven_enabled,
+            "supervision_mesh_enabled": self.supervision_mesh_enabled,
+            "circuit_breaker_enabled": self.circuit_breaker_enabled,
+            "performance_monitoring_enabled": self.performance_monitoring_enabled,
+            "components_status": {
+                "message_bus": {
+                    "initialized": self.message_bus is not None,
+                    "running": self.message_bus.running if self.message_bus else False
+                },
+                "validator_registry": {
+                    "initialized": self.validator_registry is not None,
+                    "validator_count": len(self.validator_registry.validators) if self.validator_registry else 0
+                },
+                "context_manager": {
+                    "initialized": hasattr(self, 'context_manager') and self.context_manager is not None
+                },
+                "performance_monitor": {
+                    "initialized": self.performance_monitor is not None
+                },
+                "retry_manager": {
+                    "initialized": self.retry_manager is not None
+                },
+                "circuit_breakers": {
+                    "count": len(self.circuit_breakers),
+                    "agents": list(self.circuit_breakers.keys())
+                }
+            },
             "status_timestamp": datetime.now().isoformat()
         }
