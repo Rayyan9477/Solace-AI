@@ -301,7 +301,7 @@ class TherapeuticTechniqueService:
     
     def _merge_friction_and_traditional_techniques(self, friction_recommendations: List[Dict[str, Any]],
                                                  traditional_techniques: List[Dict[str, Any]],
-                                                 user_context: Dict[str, Any]]) -> List[Dict[str, Any]]:
+                                                 user_context: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Merge friction-specific and traditional techniques."""
         merged_results = []
         

@@ -1,3 +1,31 @@
+"""Setup helper to optionally install the official Dia package for enhanced TTS (voice cloning)."""
+import subprocess
+import sys
+import os
+
+
+def main():
+    try:
+        print("Checking for official Dia package...")
+        import dia  # noqa: F401
+        print("Dia package already installed.")
+        return
+    except Exception:
+        pass
+
+    try:
+        print("Cloning and installing dia from nari-labs/dia ...")
+        subprocess.check_call(["git", "clone", "https://github.com/nari-labs/dia.git"])  # nosec B603
+        repo = os.path.join(os.getcwd(), "dia")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "-e", "."], cwd=repo)
+        print("Dia installed successfully.")
+    except Exception as e:
+        print(f"Failed to install Dia: {e}")
+
+
+if __name__ == "__main__":
+    main()
+
 """
 Setup script to install and configure the official Dia 1.6B package from Nari Labs.
 This provides enhanced text-to-speech capabilities for the Contextual-Chatbot.

@@ -179,6 +179,3 @@ data/vector_store/
 # Logs
 logs/
 /log/
-
-# Local development
-.qodo

@@ -16,12 +16,12 @@ def check_pip():
         return False
 
 def install_requirements():
-    """Install voice feature requirements"""
+    """Install voice feature requirements if file exists; otherwise continue."""
     requirements_file = os.path.join(os.path.dirname(__file__), 'requirements_voice.txt')
     
     if not os.path.exists(requirements_file):
-        print("Error: requirements_voice.txt not found!")
-        return False
+        print("requirements_voice.txt not found. Skipping voice-specific pip install and continuing...")
+        return True
     
     print("Installing voice feature dependencies...")
     try:
@@ -39,12 +39,15 @@ def download_models():
         print("This may take some time depending on your internet connection.")
         
         # Import required libraries after installation
+        import os as _os
+        _os.environ.setdefault("TRANSFORMERS_NO_TORCHVISION", "1")
         import torch
         import huggingface_hub
-        from transformers import AutoProcessor, AutoModel, pipeline, WhisperProcessor
+        from transformers import AutoProcessor as HF_AutoProcessor, AutoModel, pipeline, WhisperProcessor
         
-        # Set cache directory
-        cache_dir = Path(__file__).resolve().parent / "src" / "models" / "cache"
+        # Set cache directory aligned with AppConfig
+        project_root = Path(__file__).resolve().parents[1]
+        cache_dir = project_root / "src" / "models" / "cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
         
         # Configure huggingface_hub to use the cache directory
@@ -106,7 +109,7 @@ def download_models():
                 # Special handling for Dia 1.6B
                 elif "dia" in model["repo_id"].lower():
                     print(f"Initializing {model['name']} processor and model... (this will download the complete model)")
-                    processor = AutoProcessor.from_pretrained(
+                    processor = HF_AutoProcessor.from_pretrained(
                         model["repo_id"],
                         cache_dir=cache_dir
                     )
@@ -126,7 +129,7 @@ def download_models():
                 else:
                     # For other models, initialize processor and/or model
                     print(f"Initializing {model['name']} processor and model...")
-                    processor = AutoProcessor.from_pretrained(
+                    processor = HF_AutoProcessor.from_pretrained(
                         model["repo_id"],
                         cache_dir=cache_dir
                     )
@@ -161,18 +164,15 @@ def main():
     if not check_pip():
         return
     
-    if install_requirements():
-        print("\nDependencies installed successfully!")
-        
-        # Download models
-        if download_models():
-            print("\nSetup completed successfully!")
-            print("You can now use voice features in the chatbot.")
-        else:
-            print("\nModel download failed. You may need to download models manually.")
+    if not install_requirements():
+        print("\nContinuing despite dependency installation issue. Ensure core deps are installed via requirements.txt.")
+    
+    # Download models
+    if download_models():
+        print("\nSetup completed successfully!")
+        print("You can now use voice features in the chatbot.")
     else:
-        print("\nSetup failed. Please try again or install dependencies manually:")
-        print("pip install -r requirements_voice.txt")
+        print("\nModel download failed. You may need to download models manually.")
 
 if __name__ == "__main__":
     main()

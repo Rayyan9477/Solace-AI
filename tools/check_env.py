@@ -90,7 +90,13 @@ def check_dependencies():
         "Core": core_dependencies,
         "Vector Store": ["faiss-cpu", "qdrant-client", "pymilvus"],
         "API": ["fastapi", "uvicorn"],
-        "Voice": ["pyttsx3", "SpeechRecognition"]
+        "Voice": [
+            "openai_whisper",  # openai-whisper
+            "sounddevice",
+            "soundfile",
+            "librosa",
+            "transformers"
+        ]
     }
     
     all_pass = True

@@ -32,11 +32,8 @@ class AppConfig:
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
     # Model settings
-    # Set your Gemini API key here if not using .env
-    # Only Gemini 2.0 Flash is supported
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-    if not GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY environment variable must be set in your .env file.")
+    # LLM API key (optional at app boot; modules that need it will validate)
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
     MODEL_NAME = "gemini-2.0-flash"
     USE_CPU = True  # Always true for cloud-based models
     MAX_RESPONSE_TOKENS = int(os.getenv("MAX_RESPONSE_TOKENS", "2000"))
@@ -228,8 +225,8 @@ class AppConfig:
 
     # Voice Configuration - using free models
     VOICE_CONFIG = {
-        "stt_model": "openai/whisper-large-v3-turbo",  # Free and lightweight Whisper model
-        "tts_model": "nari-labs/Dia-1.6B",  # Free multilingual TTS model
+        "stt_model": os.getenv("STT_MODEL", "openai/whisper-large-v3-turbo"),
+        "tts_model": os.getenv("TTS_MODEL", "nari-labs/Dia-1.6B"),
         "cache_dir": str(Path(__file__).resolve().parent.parent / 'models' / 'cache'),
         "use_gpu": os.getenv("USE_GPU", "True").lower() == "true",
         "voice_styles": {

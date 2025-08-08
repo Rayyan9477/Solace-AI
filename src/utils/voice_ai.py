@@ -2,6 +2,9 @@
 Voice AI component for the mental health chatbot.
 Handles speech-to-text and text-to-speech functionality.
 """
+import os as _os
+# Avoid optional torchvision import path inside transformers on environments without it
+_os.environ.setdefault("TRANSFORMERS_NO_TORCHVISION", "1")
 
 import os
 import torch
@@ -9,13 +12,14 @@ import logging
 import asyncio
 from typing import Dict, Any, Optional, List, Union
 from datetime import datetime
-from transformers import (AutoProcessor, SpeechT5Processor, SpeechT5ForTextToSpeech, 
-                         SpeechT5HifiGan, AutoModelForSpeechSeq2Seq, 
-                         AutoFeatureExtractor, AutoTokenizer)
+from transformers import (
+    AutoProcessor as HF_AutoProcessor,
+    SpeechT5Processor, SpeechT5ForTextToSpeech, SpeechT5HifiGan,
+    AutoModelForSpeechSeq2Seq,
+)
 import numpy as np
 import soundfile as sf
 import io
-import torchaudio
 from .audio_player import AudioPlayer
 from .dia_tts import DiaTTS
 from .device_utils import get_device, is_cuda_available
@@ -92,7 +96,7 @@ class VoiceAI:
             self.device = device
             
         # Set cache directory
-        self.cache_dir = cache_dir
+        self.cache_dir = cache_dir or AppConfig.VOICE_CONFIG.get("cache_dir")
         
         # Create audio player
         self.audio_player = AudioPlayer()
@@ -111,7 +115,11 @@ class VoiceAI:
         
         # Set up Dia 1.6B for enhanced TTS
         self.use_dia = use_dia
-        self.dia_tts = None if not use_dia else DiaTTS(cache_dir=cache_dir, use_gpu=(self.device == "cuda"))
+        self.dia_tts = None if not use_dia else DiaTTS(
+            model_name=AppConfig.VOICE_CONFIG.get("tts_model", "nari-labs/Dia-1.6B"),
+            cache_dir=self.cache_dir,
+            use_gpu=(self.device == "cuda")
+        )
         
         # Flag to track initialization status
         self.initialized_stt = False
@@ -228,14 +236,14 @@ class VoiceAI:
         """
         try:
             # Load processor
-            processor = AutoProcessor.from_pretrained(
-                "openai/whisper-large-v3-turbo",
+            processor = HF_AutoProcessor.from_pretrained(
+                AppConfig.VOICE_CONFIG.get("stt_model", "openai/whisper-large-v3-turbo"),
                 cache_dir=self.cache_dir
             )
             
             # Load model
             model = AutoModelForSpeechSeq2Seq.from_pretrained(
-                "openai/whisper-large-v3-turbo",
+                AppConfig.VOICE_CONFIG.get("stt_model", "openai/whisper-large-v3-turbo"),
                 torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
                 low_cpu_mem_usage=True,
                 cache_dir=self.cache_dir
@@ -279,13 +287,8 @@ class VoiceAI:
                 cache_dir=self.cache_dir
             ).to(self.device)
             
-            # Load speaker embeddings
-            if os.path.exists("speaker_embeddings.pt"):
-                speaker_embeddings = torch.load("speaker_embeddings.pt")
-            else:
-                # Default embeddings
-                speaker_embeddings = torch.randn((1, 512)).to(self.device)
-                torch.save(speaker_embeddings, "speaker_embeddings.pt")
+            # Speaker embeddings: avoid torch.load due to security gate; generate default
+            speaker_embeddings = torch.randn((1, 512)).to(self.device)
             
             return {
                 "success": True,
@@ -332,12 +335,35 @@ class VoiceAI:
                     "error": f"Audio file not found: {audio_file}"
                 }
             
-            speech_array, sampling_rate = torchaudio.load(audio_file)
+            # Prefer torchaudio if available for performance
+            try:
+                import torchaudio  # type: ignore
+                speech_array, sampling_rate = torchaudio.load(audio_file)
+            except Exception:
+                # Fallback to soundfile/librosa
+                import soundfile as _sf
+                data, sr = _sf.read(audio_file)
+                import numpy as _np
+                if data.ndim > 1:
+                    data = _np.mean(data, axis=1)
+                speech_array = torch.tensor(data).unsqueeze(0)
+                sampling_rate = sr
             
             # Resample if needed
             if sampling_rate != 16000:
-                resampler = torchaudio.transforms.Resample(sampling_rate, 16000)
-                speech_array = resampler(speech_array)
+                try:
+                    import torchaudio  # type: ignore
+                    resampler = torchaudio.transforms.Resample(sampling_rate, 16000)
+                    speech_array = resampler(speech_array)
+                except Exception:
+                    import librosa as _librosa
+                    speech_array = torch.tensor(
+                        _librosa.resample(
+                            speech_array.squeeze(0).numpy().astype(float),
+                            orig_sr=sampling_rate,
+                            target_sr=16000,
+                        )
+                    ).unsqueeze(0)
                 sampling_rate = 16000
             
             # Convert to mono if needed
@@ -362,6 +388,36 @@ class VoiceAI:
                 "text": "",
                 "error": str(e)
             }
+
+    async def speech_to_text(self, audio_bytes: bytes, sample_rate: int = 16000) -> Dict[str, Any]:
+        """
+        Transcribe in-memory PCM16 WAV/RAW audio bytes using Whisper.
+        """
+        if not self.initialized_stt:
+            if not await self.initialize_stt():
+                return {"success": False, "text": "", "error": "Speech recognition not initialized"}
+        try:
+            import numpy as np
+            import soundfile as sf
+            import io
+            # Try decode as WAV first
+            try:
+                data, sr = sf.read(io.BytesIO(audio_bytes))
+                if sr != 16000:
+                    import librosa
+                    data = librosa.resample(data.astype(float), orig_sr=sr, target_sr=16000)
+                if data.ndim > 1:
+                    data = np.mean(data, axis=1)
+            except Exception:
+                # Assume raw int16 mono at provided sample_rate
+                data = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+                if sample_rate != 16000:
+                    import librosa
+                    data = librosa.resample(data, orig_sr=sample_rate, target_sr=16000)
+            return self._transcribe_audio_whisper(data.astype(np.float32))
+        except Exception as e:
+            logger.error(f"Error in speech_to_text: {str(e)}", exc_info=True)
+            return {"success": False, "text": "", "error": str(e)}
     
     def _transcribe_audio_whisper(self, speech_array: np.ndarray) -> Dict[str, Any]:
         """
@@ -382,10 +438,11 @@ class VoiceAI:
             ).input_features.to(self.device)
             
             # Generate token ids
-            predicted_ids = self.whisper_model.generate(
-                input_features, 
-                max_length=256
-            )
+            with torch.no_grad():
+                predicted_ids = self.whisper_model.generate(
+                    input_features, 
+                    max_length=256
+                )
             
             # Decode token ids to text
             transcription = self.whisper_processor.batch_decode(

@@ -122,11 +122,14 @@ class VoiceChat:
                 
                 # Initialize voice input manager with Whisper V3 Turbo
                 if self.voice_only or self.model_name:
-                    print(f"🎙️ Setting up enhanced speech recognition (Whisper {self.model_name})...")
+                    from src.config.settings import AppConfig
+                    effective_model = self.model_name or AppConfig.VOICE_CONFIG.get("stt_model", "openai/whisper-large-v3-turbo")
+                    printable = effective_model.split("/")[-1]
+                    print(f"🎙️ Setting up enhanced speech recognition (Whisper {printable})...")
                     self.voice_input_manager = VoiceInputManager(
-                        model_name=self.model_name,
-                        analyze_emotions=True,  # Enable emotion analysis in speech
-                        use_audeering=True      # Use audeering for better emotion detection
+                        model_name=effective_model,
+                        analyze_emotions=True,
+                        use_audeering=True
                     )
                 
                 # Set voice style for TTS
