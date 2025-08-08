@@ -5,7 +5,10 @@ This module provides centralized device management for the application,
 ensuring consistent CUDA usage when available with proper fallback to CPU.
 """
 
-import torch
+try:
+    import torch
+except Exception:
+    torch = None  # Allow running without torch installed
 import logging
 import os
 from typing import Optional
@@ -32,8 +35,8 @@ class DeviceManager:
     def _initialize_device(self):
         """Initialize and configure the compute device"""
         try:
-            # Check if CUDA is available
-            if torch.cuda.is_available():
+            # Check if CUDA is available (when torch is present)
+            if torch is not None and hasattr(torch, 'cuda') and torch.cuda.is_available():
                 # Test CUDA initialization
                 try:
                     torch.cuda.init()
@@ -59,35 +62,38 @@ class DeviceManager:
                     logger.warning(f"CUDA initialization failed, falling back to CPU: {str(e)}")
                     self._device = torch.device("cpu")
             else:
-                logger.info("CUDA is not available, using CPU")
-                self._device = torch.device("cpu")
+                logger.info("CUDA/torch not available, using CPU")
+                self._device = "cpu" if torch is None else torch.device("cpu")
                 
         except Exception as e:
             logger.error(f"Error during device initialization: {str(e)}")
-            self._device = torch.device("cpu")
+            self._device = "cpu" if torch is None else torch.device("cpu")
         
         logger.info(f"Device configured: {self._device}")
     
     @property
-    def device(self) -> torch.device:
+    def device(self):
         """Get the configured device"""
         return self._device
     
     @property
     def is_cuda_available(self) -> bool:
         """Check if CUDA is available and being used"""
-        return self._device.type == "cuda"
+        try:
+            return getattr(self._device, 'type', str(self._device)) == "cuda"
+        except Exception:
+            return False
     
     def get_device_info(self) -> dict:
         """Get detailed device information"""
         info = {
             "device": str(self._device),
             "type": self._device.type,
-            "cuda_available": torch.cuda.is_available(),
+            "cuda_available": bool(torch and hasattr(torch, 'cuda') and torch.cuda.is_available()),
             "using_cuda": self.is_cuda_available
         }
         
-        if self.is_cuda_available:
+        if self.is_cuda_available and torch is not None:
             info.update({
                 "gpu_count": torch.cuda.device_count(),
                 "gpu_name": torch.cuda.get_device_name(0),
@@ -100,7 +106,7 @@ class DeviceManager:
     
     def clear_cache(self):
         """Clear GPU cache if using CUDA"""
-        if self.is_cuda_available:
+        if self.is_cuda_available and torch is not None:
             try:
                 torch.cuda.empty_cache()
                 logger.debug("GPU cache cleared")

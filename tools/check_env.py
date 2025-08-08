@@ -17,9 +17,13 @@ import traceback
 from pathlib import Path
 import platform
 
-# Add project root to path
+# Ensure both the tools directory and project root are on sys.path
 script_dir = Path(__file__).resolve().parent
-sys.path.append(str(script_dir))
+project_root = script_dir.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+if str(script_dir) not in sys.path:
+    sys.path.append(str(script_dir))
 
 # ASCII color codes for terminal output
 class Colors:

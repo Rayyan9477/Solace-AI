@@ -4,6 +4,13 @@ Run: python tools/verify_models.py
 """
 import asyncio
 import os
+import sys
+from pathlib import Path
+
+# Ensure project root is importable when invoked directly
+project_root = Path(__file__).resolve().parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 
 async def check_voice():

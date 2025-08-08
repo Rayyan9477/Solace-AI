@@ -14,6 +14,7 @@ from pathlib import Path
 
 from src.components.base_module import Module
 from src.config.settings import AppConfig
+from src.models.llm import get_llm
 
 class LLMModule(Module):
     """
@@ -51,7 +52,8 @@ class LLMModule(Module):
         if not self.config:
             return
             
-        self.model_name = self.config.get("model_name", "gemini-pro")
+        # Prefer configured model name from AppConfig for consistency
+        self.model_name = self.config.get("model_name", AppConfig.MODEL_NAME)
         self.api_key = self.config.get("api_key", os.environ.get("GEMINI_API_KEY"))
         self.max_tokens = self.config.get("max_tokens", 4096)
         self.cache_dir = self.config.get("cache_dir", os.path.join(
@@ -66,56 +68,35 @@ class LLMModule(Module):
         await super().initialize()
         
         try:
-            # Check if model is Gemini
-            if self.model_name.startswith("gemini"):
-                success = await self._initialize_gemini()
-            else:
-                # Default to Gemini if unspecified
-                self.model_name = "gemini-pro"
-                success = await self._initialize_gemini()
+            # Provider-agnostic initialization
+            provider_config = {
+                "provider": self.config.get("provider", AppConfig.LLM_CONFIG.get("provider", "gemini")),
+                "model_name": self.model_name,
+                "max_output_tokens": self.max_tokens,
+                "temperature": self.config.get("temperature", AppConfig.LLM_CONFIG.get("temperature", 0.7)),
+                "top_p": self.config.get("top_p", AppConfig.LLM_CONFIG.get("top_p", 0.95)),
+                "top_k": self.config.get("top_k", AppConfig.LLM_CONFIG.get("top_k", 64)),
+                "api_key": self.api_key or AppConfig.LLM_CONFIG.get("api_key", "")
+            }
+
+            self.llm = get_llm(provider_config)
+
+            # Capabilities
+            self.supports_streaming = True
+            self.supports_chat = True
+            if isinstance(self.model_name, str) and (self.model_name.endswith("vision") or "vision" in self.model_name):
+                self.has_vision_capabilities = True
             
-            if success:
-                self._register_services()
-                return True
-            else:
-                self.health_status = "degraded"
-                return False
-                
+            self.logger.info(
+                f"Initialized LLM provider={provider_config.get('provider')} model={provider_config.get('model_name')}"
+            )
+
+            self._register_services()
+            return True
+            
         except Exception as e:
-            self.logger.error(f"Failed to initialize LLM module: {str(e)}")
+            self.logger.error(f"Failed to initialize LLM: {str(e)}")
             self.health_status = "failed"
-            return False
-    
-    async def _initialize_gemini(self) -> bool:
-        """Initialize Gemini API"""
-        try:
-            # Attempt to import Gemini-specific modules
-            try:
-                from src.models.gemini_llm import GeminiLLM
-                
-                # Initialize Gemini
-                self.llm = GeminiLLM(
-                    api_key=self.api_key,
-                    model_name=self.model_name,
-                    cache_dir=self.cache_dir
-                )
-                
-                # Update capabilities based on model
-                if self.model_name == "gemini-pro-vision":
-                    self.has_vision_capabilities = True
-                
-                self.supports_streaming = True
-                self.supports_chat = True
-                
-                self.logger.info(f"Initialized Gemini LLM with model {self.model_name}")
-                return True
-                
-            except ImportError:
-                self.logger.error("Gemini modules not available")
-                return False
-                
-        except Exception as e:
-            self.logger.error(f"Failed to initialize Gemini: {str(e)}")
             return False
     
     def _register_services(self):
@@ -143,12 +124,16 @@ class LLMModule(Module):
             return "I'm sorry, but the language model is not available right now."
         
         try:
-            if hasattr(self.llm, "generate_text"):
-                response = await self.llm.generate_text(prompt, max_tokens or self.max_tokens)
-                return response
-            else:
-                self.logger.error("LLM does not support text generation")
-                return "I'm sorry, but the language model does not support this operation."
+            # Prefer async generation via LangChain interface
+            if hasattr(self.llm, "agenerate"):
+                result = await self.llm.agenerate([prompt])
+                return result.generations[0][0].text
+            # Fallback to sync generate if available
+            if hasattr(self.llm, "generate"):
+                result = self.llm.generate([prompt])
+                return result.generations[0][0].text
+            self.logger.error("LLM does not provide generate/agenerate methods")
+            return "I'm sorry, but the language model does not support this operation."
         except Exception as e:
             self.logger.error(f"Error in text generation: {str(e)}")
             return f"I'm sorry, but there was an error processing your request."
@@ -174,11 +159,14 @@ class LLMModule(Module):
             return await self._fallback_chat_to_text(messages, max_tokens)
         
         try:
-            if hasattr(self.llm, "generate_chat_response"):
-                response = await self.llm.generate_chat_response(messages, max_tokens or self.max_tokens)
-                return response
-            else:
-                return await self._fallback_chat_to_text(messages, max_tokens)
+            # If the model supports message-based generation, use it
+            if hasattr(self.llm, "agenerate_messages"):
+                # Convert list[dict] to a prompt string the wrapper understands
+                prompt = self._format_chat_as_text(messages)
+                result = await self.llm.agenerate([prompt])
+                return result.generations[0][0].text
+            # Fallback to formatted text prompt
+            return await self._fallback_chat_to_text(messages, max_tokens)
         except Exception as e:
             self.logger.error(f"Error in chat response generation: {str(e)}")
             return f"I'm sorry, but there was an error processing your request."

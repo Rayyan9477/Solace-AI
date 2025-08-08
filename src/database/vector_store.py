@@ -7,8 +7,11 @@ from datetime import datetime
 import logging
 from abc import ABC, abstractmethod
 
-# Vector store backends - using lazy imports to avoid dependency conflicts
-import faiss
+# Vector store backends - import faiss if available
+try:
+    import faiss  # type: ignore
+except Exception:  # Allow running without faiss installed
+    faiss = None
 # Optional backends - imported when needed to avoid Keras conflicts:
 # from qdrant_client import QdrantClient  
 # from pymilvus import connections, Collection, utility
@@ -47,42 +50,44 @@ class BaseVectorStore(ABC):
         pass
 
 class FaissVectorStore(BaseVectorStore):
-    """FAISS implementation of vector store with enhanced caching capabilities"""
-    
+    """FAISS implementation with graceful fallback when dependencies are missing"""
+
     def __init__(self, dimension: int = 1536):
         self.dimension = dimension
-        self.index = None
-        self.documents = {}  # Map IDs to documents
-        self.embedder = None
+        self.index = None  # faiss index if available
+        self.documents: Dict[str, Dict[str, Any]] = {}
+        self.embedder = None  # sentence-transformers if available
         self.is_connected = False
-        self.query_cache = {}  # Cache for query results
-        self.cache_expiry = {}  # Track when cached results should expire
-        self.cache_ttl = 3600  # Default cache TTL in seconds (1 hour)
+        self.query_cache: Dict[str, List[Dict[str, Any]]] = {}
+        self.cache_expiry: Dict[str, float] = {}
+        self.cache_ttl = 3600
+        self._embeddings_matrix: Optional[np.ndarray] = None  # fallback storage
         
     def connect(self) -> bool:
         """Initialize FAISS index and load existing data"""
         try:
-            # Initialize embedder
-            # Lazy import to avoid Keras compatibility issues
+            # Initialize embedder when available
             try:
-                from sentence_transformers import SentenceTransformer
+                from sentence_transformers import SentenceTransformer  # type: ignore
                 self.embedder = SentenceTransformer(AppConfig.EMBEDDING_CONFIG["model_name"])
+                logger.info("SentenceTransformer embedder initialized")
             except Exception as e:
-                logger.warning(f"Failed to load SentenceTransformer: {e}. Using fallback embedder.")
+                logger.warning(f"SentenceTransformer unavailable ({e}). Falling back to simple embedder.")
                 self.embedder = None
-            
-            # Initialize FAISS index
-            self.index = faiss.IndexFlatL2(self.dimension)
-            
-            # Load existing index if available
-            self._load_index()
-            
+
+            if faiss is not None:
+                self.index = faiss.IndexFlatL2(self.dimension)
+                self._load_index()
+                logger.info("FAISS backend initialized")
+            else:
+                self.index = None
+                self._embeddings_matrix = np.empty((0, self.dimension), dtype=np.float32)
+                logger.info("FAISS not available; using in-memory numpy backend")
+
             self.is_connected = True
-            logger.info("Successfully connected to FAISS vector store")
             return True
-            
         except Exception as e:
-            logger.error(f"Failed to connect to FAISS vector store: {str(e)}")
+            logger.error(f"Failed to initialize vector store: {str(e)}")
             self.is_connected = False
             return False
         
@@ -93,23 +98,35 @@ class FaissVectorStore(BaseVectorStore):
             
         try:
             # Generate embeddings
-            texts = [doc['content'] for doc in documents]
-            embeddings = self.embedder.encode(texts, normalize_embeddings=True)
-            
-            # Add to FAISS
-            self.index.add(embeddings)
-            
-            # Store documents
+            texts = [doc.get('content', '') for doc in documents]
+            if self.embedder is not None:
+                embeddings = self.embedder.encode(texts, normalize_embeddings=True)
+            else:
+                embeddings = self._simple_embed(texts)
+
+            if self.index is not None:
+                # FAISS path
+                self.index.add(embeddings.astype(np.float32))
+            else:
+                # Numpy fallback path
+                if self._embeddings_matrix is None:
+                    self._embeddings_matrix = embeddings.astype(np.float32)
+                else:
+                    self._embeddings_matrix = np.vstack([self._embeddings_matrix, embeddings.astype(np.float32)])
+
+            # Store documents and track embedding row id
+            start_row = len(self.documents)
             for i, doc in enumerate(documents):
-                doc_id = str(len(self.documents))
+                doc_id = str(start_row + i)
                 self.documents[doc_id] = {
                     **doc,
-                    'embedding_id': len(self.documents) + i,
+                    'embedding_row': start_row + i,
                     'timestamp': datetime.now().isoformat()
                 }
-                
-            # Save index
-            self._save_index()
+
+            # Save if FAISS backend
+            if self.index is not None:
+                self._save_index()
             return True
             
         except Exception as e:
@@ -145,21 +162,43 @@ class FaissVectorStore(BaseVectorStore):
             
         try:
             # Generate query embedding
-            query_embedding = self.embedder.encode([query], normalize_embeddings=True)
-            
-            # Search FAISS
-            distances, indices = self.index.search(query_embedding, k)
-            
-            # Get documents
-            results = []
-            for i, idx in enumerate(indices[0]):
-                doc_id = str(idx)
-                if doc_id in self.documents:
-                    doc = self.documents[doc_id]
-                    results.append({
-                        **doc,
-                        'score': float(distances[0][i])
-                    })
+            if self.embedder is not None:
+                query_embedding = self.embedder.encode([query], normalize_embeddings=True).astype(np.float32)
+            else:
+                query_embedding = self._simple_embed([query]).astype(np.float32)
+
+            results: List[Dict[str, Any]] = []
+            if self.index is not None:
+                # FAISS search
+                distances, indices = self.index.search(query_embedding, k)
+                for i, idx in enumerate(indices[0]):
+                    row_id = int(idx)
+                    doc_id = str(row_id)
+                    if doc_id in self.documents:
+                        doc = self.documents[doc_id]
+                        results.append({
+                            **doc,
+                            'score': float(distances[0][i])
+                        })
+            else:
+                # Numpy fallback: cosine similarity
+                if self._embeddings_matrix is None or self._embeddings_matrix.shape[0] == 0:
+                    return []
+                q = query_embedding[0]
+                # Normalize rows
+                A = self._embeddings_matrix
+                denom = (np.linalg.norm(A, axis=1) * np.linalg.norm(q) + 1e-8)
+                sims = (A @ q) / denom
+                # Highest similarity first
+                top_idx = np.argsort(-sims)[:k]
+                for idx in top_idx:
+                    doc_id = str(int(idx))
+                    if doc_id in self.documents:
+                        doc = self.documents[doc_id]
+                        results.append({
+                            **doc,
+                            'score': float(1.0 - sims[int(idx)])  # lower is better to match L2 semantics
+                        })
             
             # Cache results if enabled
             if use_cache:
@@ -314,11 +353,12 @@ class FaissVectorStore(BaseVectorStore):
         index_path = Path(AppConfig.VECTOR_DB_CONFIG["index_path"])
         index_path.mkdir(parents=True, exist_ok=True)
         
-        # Save FAISS index
-        faiss.write_index(
-            self.index,
-            str(index_path / "mental_health.index")
-        )
+        # Save FAISS index if backend available
+        if self.index is not None and faiss is not None:
+            faiss.write_index(
+                self.index,
+                str(index_path / "mental_health.index")
+            )
         
         # Save documents
         with open(index_path / "documents.json", "w") as f:
@@ -342,12 +382,13 @@ class FaissVectorStore(BaseVectorStore):
             index_path = Path(AppConfig.VECTOR_DB_CONFIG["index_path"])
             
             # Load FAISS index
-            if (index_path / "mental_health.index").exists():
-                self.index = faiss.read_index(
-                    str(index_path / "mental_health.index")
-                )
-            else:
-                self.index = faiss.IndexFlatL2(self.dimension)
+            if faiss is not None:
+                if (index_path / "mental_health.index").exists():
+                    self.index = faiss.read_index(
+                        str(index_path / "mental_health.index")
+                    )
+                else:
+                    self.index = faiss.IndexFlatL2(self.dimension)
                 
             # Load documents
             if (index_path / "documents.json").exists():
@@ -384,15 +425,34 @@ class FaissVectorStore(BaseVectorStore):
         if not self.is_connected:
             return
             
-        self.index = faiss.IndexFlatL2(self.dimension)
-        if self.documents:
-            embeddings = []
-            for doc in self.documents.values():
-                text = doc['content']
-                embedding = self.embedder.encode([text], normalize_embeddings=True)
-                embeddings.append(embedding[0])
-            self.index.add(np.array(embeddings))
-            self._save_index()
+        if faiss is not None:
+            self.index = faiss.IndexFlatL2(self.dimension)
+            if self.documents:
+                texts = [doc['content'] for doc in self.documents.values()]
+                if self.embedder is not None:
+                    embeddings = self.embedder.encode(texts, normalize_embeddings=True).astype(np.float32)
+                else:
+                    embeddings = self._simple_embed(texts).astype(np.float32)
+                self.index.add(embeddings)
+                self._save_index()
+        else:
+            # Fallback path already uses self._embeddings_matrix; rebuild not required
+            pass
+
+    def _simple_embed(self, texts: List[str]) -> np.ndarray:
+        """Lightweight hashing-based embedding fallback to avoid heavy deps.
+
+        Produces deterministic fixed-size vectors using token hashing.
+        """
+        vectors = np.zeros((len(texts), self.dimension), dtype=np.float32)
+        for i, text in enumerate(texts):
+            for tok in str(text).lower().split():
+                h = abs(hash(tok)) % self.dimension
+                vectors[i, h] += 1.0
+            # Normalize to unit length to mimic normalized embeddings
+            norm = np.linalg.norm(vectors[i]) + 1e-8
+            vectors[i] = vectors[i] / norm
+        return vectors
 
 class QdrantVectorStore(BaseVectorStore):
     """Qdrant implementation of vector store"""

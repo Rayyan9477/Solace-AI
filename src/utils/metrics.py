@@ -1,4 +1,8 @@
-from prometheus_client import Counter, Gauge, Histogram, Summary, REGISTRY
+try:
+    from prometheus_client import Counter, Gauge, Histogram, Summary, REGISTRY
+except ImportError:  # Allow running without prometheus_client installed
+    Counter = Gauge = Histogram = Summary = None
+    REGISTRY = None
 import time
 from typing import Dict, Any, List, Optional
 from datetime import datetime
@@ -110,9 +114,8 @@ class Metrics:
         """Get a summary of tracked metrics (for fallback mode)"""
         if not self.prometheus_enabled:
             return self.metrics_store
-        else:
-            # For prometheus mode, this would require more complex collection logic
-            return "Metrics available via Prometheus endpoint"
+        # For prometheus mode, this would require more complex collection logic
+        return {"status": "prometheus_enabled"}
 
 
 # Singleton instance for global access

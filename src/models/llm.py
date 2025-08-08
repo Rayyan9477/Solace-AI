@@ -24,6 +24,12 @@ except ImportError:
         RECITATION = "RECITATION"
         OTHER = "OTHER"
 
+# Optional OpenAI async client
+try:
+    from openai import AsyncOpenAI  # type: ignore
+except Exception:
+    AsyncOpenAI = None
+
 # Configure logger
 logger = logging.getLogger(__name__)
 
@@ -251,6 +257,61 @@ class GeminiLLM(BaseLanguageModel):
         """Return the type of LLM"""
         return "gemini"
 
+
+class OpenAILLM(BaseLanguageModel):
+    """Wrapper for OpenAI Chat Completions API compatible with LangChain BaseLanguageModel."""
+
+    def __init__(
+        self,
+        api_key: str,
+        model_name: str = "gpt-4o-mini",
+        temperature: float = 0.7,
+        max_output_tokens: int = 1024,
+        top_p: float = 0.95,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__()
+        if AsyncOpenAI is None:
+            raise RuntimeError("openai package not installed. pip install openai")
+        self.client = AsyncOpenAI(api_key=api_key)
+        self.model_name = model_name
+        self.temperature = temperature
+        self.max_output_tokens = max_output_tokens
+        self.top_p = top_p
+
+    def _generate(
+        self,
+        prompts: List[str],
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
+    ) -> LLMResult:
+        # Synchronous path via blocking call to async client is not provided; use empty result
+        generations = [[Generation(text="")] for _ in prompts]
+        return LLMResult(generations=generations)
+
+    async def _agenerate(
+        self,
+        prompts: List[str],
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
+    ) -> LLMResult:
+        generations: List[List[Generation]] = []
+        for prompt in prompts:
+            resp = await self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=self.temperature,
+                max_tokens=self.max_output_tokens,
+                top_p=self.top_p,
+            )
+            text = resp.choices[0].message.content or ""
+            generations.append([Generation(text=text)])
+        return LLMResult(generations=generations)
+
+    @property
+    def _llm_type(self) -> str:
+        return "openai"
+
 # Factory function to create an LLM based on configuration
 def get_llm(config: Dict[str, Any] = None) -> BaseLanguageModel:
     """
@@ -264,8 +325,10 @@ def get_llm(config: Dict[str, Any] = None) -> BaseLanguageModel:
     """
     config = config or {}
     
-    # Check for Gemini configuration
-    if config.get("provider", "").lower() == "gemini":
+    provider = config.get("provider", "").lower()
+
+    # Gemini
+    if provider == "gemini":
         # Get API key from config or environment
         api_key = config.get("api_key") or os.getenv("GEMINI_API_KEY")
         
@@ -281,13 +344,27 @@ def get_llm(config: Dict[str, Any] = None) -> BaseLanguageModel:
             top_p=config.get("top_p", 0.95),
             top_k=config.get("top_k", 40)
         )
+
+    # OpenAI
+    if provider == "openai":
+        api_key = config.get("api_key") or os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OpenAI API key not found in config or environment")
+        return OpenAILLM(
+            api_key=api_key,
+            model_name=config.get("model_name", "gpt-4o-mini"),
+            temperature=config.get("temperature", 0.7),
+            max_output_tokens=config.get("max_output_tokens", 1024),
+            top_p=config.get("top_p", 0.95),
+        )
     
     # Default fallback (should be extended with other providers as needed)
-    logger.warning(f"Unknown LLM provider: {config.get('provider')}. Using default.")
-    
-    # Import a default model (you may want to update this based on your needs)
-    from langchain.llms import OpenAI
-    return OpenAI()
+    logger.warning(f"Unknown LLM provider: {config.get('provider')}. Using Gemini as default if available.")
+    # Default to Gemini if key available, else raise
+    default_gemini_key = os.getenv("GEMINI_API_KEY")
+    if default_gemini_key:
+        return GeminiLLM(api_key=default_gemini_key)
+    raise ValueError("No known provider matched and no GEMINI_API_KEY present for default.")
 
 # AgnoLLM class that wraps LLM for use with Agno framework
 class AgnoLLM:
@@ -298,11 +375,13 @@ class AgnoLLM:
         self.config = config or {}
         
         # Use environment variables for API keys if not in config
-        if "api_key" not in self.config:
-            # Check for Gemini API key
+        if "provider" not in self.config:
             if os.getenv("GEMINI_API_KEY"):
                 self.config["provider"] = "gemini"
                 self.config["api_key"] = os.getenv("GEMINI_API_KEY")
+            elif os.getenv("OPENAI_API_KEY"):
+                self.config["provider"] = "openai"
+                self.config["api_key"] = os.getenv("OPENAI_API_KEY")
         
         # Initialize the LLM
         self.llm = get_llm(self.config)

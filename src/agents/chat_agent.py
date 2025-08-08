@@ -1,4 +1,5 @@
 from typing import Optional, Dict, Any, List
+import os
 # Import Gemini integration
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import SystemMessage, HumanMessage
@@ -15,8 +16,8 @@ from collections import deque
 from typing import Deque
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-# Import the Gemini LLM
-from src.models.gemini_llm import create_gemini_llm, GeminiChatModel
+# Use provider-agnostic factory
+from src.models.llm import get_llm
 # Import for therapy integration
 from src.agents.therapy_agent import TherapyAgent
 # Import the enhanced memory components
@@ -34,15 +35,19 @@ class ChatAgent(BaseAgent):
                  enable_semantic_memory: bool = True,
                  conversation_summary_threshold: int = 15,
                  memory_storage_dir: Optional[str] = None):
-        # If no model is provided, create a Gemini Chat Model
+        # If no model is provided, create model via provider-agnostic factory
         if model is None:
-            model = create_gemini_llm({
-                "model_type": "chat",
-                "model_name": "gemini-2.0-flash",
-                "temperature": 0.7,
-                "max_output_tokens": 2048
-            })
-            logger.info("Created default Gemini Chat Model for ChatAgent")
+            from src.config.settings import AppConfig
+            provider_config = {
+                "provider": AppConfig.LLM_CONFIG.get("provider", "gemini"),
+                "model_name": AppConfig.LLM_CONFIG.get("model", AppConfig.MODEL_NAME),
+                "api_key": AppConfig.LLM_CONFIG.get("api_key", os.environ.get("GEMINI_API_KEY", "")),
+                "temperature": AppConfig.LLM_CONFIG.get("temperature", 0.7),
+                "max_output_tokens": 2048,
+                "top_p": AppConfig.LLM_CONFIG.get("top_p", 0.95),
+            }
+            model = get_llm(provider_config)
+            logger.info(f"Created default LLM for ChatAgent provider={provider_config['provider']}")
 
         # Create a langchain memory instance
         langchain_memory = ConversationBufferMemory(
@@ -221,22 +226,21 @@ Provide a supportive, empathetic response that addresses the user's emotional ne
 
             # Generate response
             try:
-                # Try to use agenerate_messages if available
-                llm_response = await self.llm.agenerate_messages([
-                    self.chat_prompt.format_messages(
-                        message=message,
-                        emotion_data=emotion_data,
-                        safety_data=safety_data,
-                        diagnosis_data=diagnosis_data,
-                        personality_data=personality_data,
-                        therapeutic_data=therapeutic_data,
-                        history=self._format_history(history),
-                        memory_context=memory_context,
-                        personality_adaptations=personality_adaptations_str
-                    )[0]
-                ])
-
-                response_text = llm_response.generations[0][0].text
+                # Unified wrapper exposes agenerate for list of prompts; for messages we convert to prompt
+                rendered_msgs = self.chat_prompt.format_messages(
+                    message=message,
+                    emotion_data=emotion_data,
+                    safety_data=safety_data,
+                    diagnosis_data=diagnosis_data,
+                    personality_data=personality_data,
+                    therapeutic_data=therapeutic_data,
+                    history=self._format_history(history),
+                    memory_context=memory_context,
+                    personality_adaptations=personality_adaptations_str
+                )
+                prompt_text = "\n".join(m.content for m in rendered_msgs)
+                llm_result = await self.llm._agenerate([prompt_text])  # returns LLMResult
+                response_text = llm_result.generations[0][0].text
             except (AttributeError, TypeError):
                 # Fallback for LLMs that don't support agenerate_messages
                 logger.warning("LLM does not support agenerate_messages, using fallback method")

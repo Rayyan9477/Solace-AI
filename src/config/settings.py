@@ -32,16 +32,20 @@ class AppConfig:
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
     # Model settings
-    # LLM API key (optional at app boot; modules that need it will validate)
+    # LLM providers & API keys
+    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-    MODEL_NAME = "gemini-2.0-flash"
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+    MODEL_NAME = os.getenv("MODEL_NAME", "gemini-2.0-flash")
     USE_CPU = True  # Always true for cloud-based models
     MAX_RESPONSE_TOKENS = int(os.getenv("MAX_RESPONSE_TOKENS", "2000"))
 
-    # LLM Configuration
+    # LLM Configuration (provider can be switched via env LLM_PROVIDER)
     LLM_CONFIG = {
+        "provider": LLM_PROVIDER,
         "model": MODEL_NAME,
-        "api_key": GEMINI_API_KEY,
+        # api_key will be selected in module based on provider
+        "api_key": GEMINI_API_KEY if LLM_PROVIDER.lower() == "gemini" else OPENAI_API_KEY,
         "temperature": float(os.getenv("TEMPERATURE", "0.7")),
         "top_p": float(os.getenv("TOP_P", "0.9")),
         "top_k": int(os.getenv("TOP_K", "50")),
