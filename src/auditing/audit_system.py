@@ -249,9 +249,9 @@ class AuditTrail:
     
     def _store_event(self, event: AuditEvent):
         """Store audit event in database."""
-        with sqlite3.connect(self.db_path) as conn:
+        conn = sqlite3.connect(self.db_path)
+        try:
             event_dict = asdict(event)
-            
             # Serialize complex fields
             event_dict['event_data'] = json.dumps(event_dict['event_data'])
             event_dict['metadata'] = json.dumps(event_dict['metadata'])
@@ -259,16 +259,20 @@ class AuditTrail:
             event_dict['timestamp'] = event_dict['timestamp'].isoformat()
             event_dict['event_type'] = event_dict['event_type'].value
             event_dict['severity'] = event_dict['severity'].value
-            
             # Insert into database
             placeholders = ', '.join(['?' for _ in event_dict])
             columns = ', '.join(event_dict.keys())
-            
-            conn.execute(
-                f"INSERT INTO audit_events ({columns}) VALUES ({placeholders})",
-                list(event_dict.values())
-            )
-            conn.commit()
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    f"INSERT INTO audit_events ({columns}) VALUES ({placeholders})",
+                    list(event_dict.values())
+                )
+                conn.commit()
+            finally:
+                cur.close()
+        finally:
+            conn.close()
     
     def log_agent_interaction(self, session_id: str, user_id: str, agent_name: str,
                             user_input: str, agent_response: str, 
@@ -415,34 +419,36 @@ class AuditTrail:
                 return self.audit_cache[session_id].copy()
         
         # Query database
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute(
-                "SELECT * FROM audit_events WHERE session_id = ? ORDER BY timestamp",
-                (session_id,)
-            )
-            
-            events = []
-            for row in cursor:
-                event_dict = dict(row)
-                
-                # Deserialize complex fields
-                event_dict['event_data'] = json.loads(event_dict['event_data'])
-                event_dict['metadata'] = json.loads(event_dict['metadata'])
-                event_dict['compliance_flags'] = [
-                    ComplianceStandard(flag) 
-                    for flag in json.loads(event_dict['compliance_flags'])
-                ]
-                event_dict['timestamp'] = datetime.fromisoformat(event_dict['timestamp'])
-                event_dict['event_type'] = AuditEventType(event_dict['event_type'])
-                event_dict['severity'] = AuditSeverity(event_dict['severity'])
-                
-                # Remove database-specific fields
-                event_dict.pop('created_at', None)
-                
-                events.append(AuditEvent(**event_dict))
-            
-            return events
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    "SELECT * FROM audit_events WHERE session_id = ? ORDER BY timestamp",
+                    (session_id,)
+                )
+                events = []
+                for row in cur.fetchall():
+                    event_dict = dict(row)
+                    # Deserialize complex fields
+                    event_dict['event_data'] = json.loads(event_dict['event_data'])
+                    event_dict['metadata'] = json.loads(event_dict['metadata'])
+                    event_dict['compliance_flags'] = [
+                        ComplianceStandard(flag) 
+                        for flag in json.loads(event_dict['compliance_flags'])
+                    ]
+                    event_dict['timestamp'] = datetime.fromisoformat(event_dict['timestamp'])
+                    event_dict['event_type'] = AuditEventType(event_dict['event_type'])
+                    event_dict['severity'] = AuditSeverity(event_dict['severity'])
+                    # Remove database-specific fields
+                    event_dict.pop('created_at', None)
+                    events.append(AuditEvent(**event_dict))
+                return events
+            finally:
+                cur.close()
+        finally:
+            conn.close()
     
     def get_events_by_type(self, event_type: AuditEventType, 
                           start_time: datetime = None, 
@@ -451,34 +457,37 @@ class AuditTrail:
         start_time = start_time or (datetime.now() - timedelta(days=30))
         end_time = end_time or datetime.now()
         
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute(
-                """SELECT * FROM audit_events 
-                   WHERE event_type = ? AND timestamp BETWEEN ? AND ? 
-                   ORDER BY timestamp DESC""",
-                (event_type.value, start_time.isoformat(), end_time.isoformat())
-            )
-            
-            events = []
-            for row in cursor:
-                event_dict = dict(row)
-                
-                # Deserialize fields (same as above)
-                event_dict['event_data'] = json.loads(event_dict['event_data'])
-                event_dict['metadata'] = json.loads(event_dict['metadata'])
-                event_dict['compliance_flags'] = [
-                    ComplianceStandard(flag) 
-                    for flag in json.loads(event_dict['compliance_flags'])
-                ]
-                event_dict['timestamp'] = datetime.fromisoformat(event_dict['timestamp'])
-                event_dict['event_type'] = AuditEventType(event_dict['event_type'])
-                event_dict['severity'] = AuditSeverity(event_dict['severity'])
-                event_dict.pop('created_at', None)
-                
-                events.append(AuditEvent(**event_dict))
-            
-            return events
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    """SELECT * FROM audit_events 
+                       WHERE event_type = ? AND timestamp BETWEEN ? AND ? 
+                       ORDER BY timestamp DESC""",
+                    (event_type.value, start_time.isoformat(), end_time.isoformat())
+                )
+                events = []
+                for row in cur.fetchall():
+                    event_dict = dict(row)
+                    # Deserialize fields (same as above)
+                    event_dict['event_data'] = json.loads(event_dict['event_data'])
+                    event_dict['metadata'] = json.loads(event_dict['metadata'])
+                    event_dict['compliance_flags'] = [
+                        ComplianceStandard(flag) 
+                        for flag in json.loads(event_dict['compliance_flags'])
+                    ]
+                    event_dict['timestamp'] = datetime.fromisoformat(event_dict['timestamp'])
+                    event_dict['event_type'] = AuditEventType(event_dict['event_type'])
+                    event_dict['severity'] = AuditSeverity(event_dict['severity'])
+                    event_dict.pop('created_at', None)
+                    events.append(AuditEvent(**event_dict))
+                return events
+            finally:
+                cur.close()
+        finally:
+            conn.close()
     
     def generate_compliance_report(self, compliance_standard: ComplianceStandard,
                                  start_date: datetime, end_date: datetime) -> ComplianceReport:
@@ -486,14 +495,21 @@ class AuditTrail:
         report_id = str(uuid.uuid4())
         
         # Get all events in the reporting period
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                """SELECT * FROM audit_events 
-                   WHERE timestamp BETWEEN ? AND ?""",
-                (start_date.isoformat(), end_date.isoformat())
-            )
-            
-            all_events = cursor.fetchall()
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    """SELECT * FROM audit_events 
+                       WHERE timestamp BETWEEN ? AND ?""",
+                    (start_date.isoformat(), end_date.isoformat())
+                )
+                all_events = cur.fetchall()
+            finally:
+                cur.close()
+        finally:
+            conn.close()
         
         # Filter events relevant to compliance standard
         relevant_events = []
@@ -529,44 +545,44 @@ class AuditTrail:
             generated_by="audit_system"
         )
     
-    def _identify_violations(self, events: List[Dict], 
-                           compliance_standard: ComplianceStandard) -> List[Dict[str, Any]]:
+    def _identify_violations(self, events: List[Dict],
+                             compliance_standard: ComplianceStandard) -> List[Dict[str, Any]]:
         """Identify compliance violations in events."""
-        violations = []
-        
+        violations: List[Dict[str, Any]] = []
+
         # Check for missing required events
-        event_types = set(event['event_type'] for event in events)
+        event_types = {e['event_type'] for e in events}
         required_events = self.compliance_requirements[compliance_standard]["required_events"]
-        
+
         for required_event in required_events:
-            if required_event.value not in [et for et in event_types]:
+            if required_event.value not in event_types:
                 violations.append({
                     "type": "missing_required_event",
                     "description": f"Missing required event type: {required_event.value}",
-                    "severity": "high"
+                    "severity": "high",
                 })
-        
+
         # Check for high-severity events without proper follow-up
         high_severity_events = [e for e in events if e['severity'] in ['critical', 'emergency']]
-        
-        for event in high_severity_events:
+
+        for ev in high_severity_events:
             # Check if there's a follow-up event within reasonable time
-            event_time = datetime.fromisoformat(event['timestamp'])
+            event_time = datetime.fromisoformat(ev['timestamp'])
             followup_window = event_time + timedelta(hours=24)
-            
+
             followup_exists = any(
                 datetime.fromisoformat(e['timestamp']) <= followup_window and
-                e['correlation_id'] == event['event_id']
+                e.get('correlation_id') == ev.get('event_id')
                 for e in events
             )
-            
+
             if not followup_exists:
                 violations.append({
                     "type": "missing_followup",
-                    "description": f"High-severity event {event['event_id']} lacks proper follow-up",
-                    "severity": "moderate"
+                    "description": f"High-severity event {ev.get('event_id')} lacks proper follow-up",
+                    "severity": "moderate",
                 })
-        
+
         return violations
     
     def _generate_compliance_recommendations(self, violations: List[Dict[str, Any]],
@@ -606,11 +622,13 @@ class AuditTrail:
         query += " ORDER BY timestamp"
         
         # Execute query and export
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute(query, params)
-            
-            export_data = {
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            cur = conn.cursor()
+            try:
+                cur.execute(query, params)
+                export_data = {
                 "export_metadata": {
                     "export_timestamp": datetime.now().isoformat(),
                     "export_period": {
@@ -620,13 +638,15 @@ class AuditTrail:
                     "total_records": 0
                 },
                 "audit_events": []
-            }
-            
-            for row in cursor:
-                event_dict = dict(row)
-                export_data["audit_events"].append(event_dict)
-            
-            export_data["export_metadata"]["total_records"] = len(export_data["audit_events"])
+                }
+                for row in cur.fetchall():
+                    event_dict = dict(row)
+                    export_data["audit_events"].append(event_dict)
+                export_data["export_metadata"]["total_records"] = len(export_data["audit_events"])
+            finally:
+                cur.close()
+        finally:
+            conn.close()
         
         # Write to file
         if compress:
@@ -661,16 +681,25 @@ class AuditTrail:
             retention_period = requirements["retention_period"]
             cutoff_date = datetime.now() - retention_period
             
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.execute(
-                    """DELETE FROM audit_events 
-                       WHERE timestamp < ? AND compliance_flags LIKE ?""",
-                    (cutoff_date.isoformat(), f'%{standard.value}%')
-                )
-                cleaned_count += cursor.rowcount
-                conn.commit()
-        
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                try:
+                    cur.execute(
+                        """DELETE FROM audit_events 
+                           WHERE timestamp < ? AND compliance_flags LIKE ?""",
+                        (cutoff_date.isoformat(), f'%{standard.value}%')
+                    )
+                    cleaned_count += cur.rowcount
+                    conn.commit()
+                finally:
+                    cur.close()
+            finally:
+                conn.close()
         if cleaned_count > 0:
             logger.info(f"Cleaned up {cleaned_count} expired audit records")
-        
         return cleaned_count
+
+    def close(self):
+        """Explicit close hook for compatibility. No persistent connections are maintained."""
+        return None

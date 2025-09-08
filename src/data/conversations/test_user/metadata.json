@@ -1,0 +1,25 @@
+{
+  "conversations": {
+    "abfcfbd9-f673-4dd6-93f8-3b58855bce84": {
+      "timestamp": "2025-09-08T11:45:16.310036",
+      "primary_emotion": "anxiety",
+      "user_message": "I've been feeling anxious lately, especially at night when trying to sleep.",
+      "assistant_response": "I'm sorry to hear you're experiencing anxiety, particularly at night. This is common and there are s..."
+    },
+    "63ef2ede-5b2a-4a23-aa1d-814b11627b34": {
+      "timestamp": "2025-09-08T11:49:06.627203",
+      "primary_emotion": "anxiety",
+      "user_message": "I've been feeling anxious lately, especially at night when trying to sleep.",
+      "assistant_response": "I'm sorry to hear you're experiencing anxiety, particularly at night. This is common and there are s..."
+    }
+  },
+  "statistics": {
+    "total_conversations": 2,
+    "total_messages": 2,
+    "emotion_counts": {
+      "anxiety": 2
+    },
+    "first_conversation": "2025-09-08T11:45:16.310036",
+    "last_conversation": "2025-09-08T11:49:06.627203"
+  }
+}

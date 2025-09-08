@@ -244,8 +244,9 @@ class AdaptiveFusion(BaseModel):
         self.modality_importance = nn.Parameter(torch.ones(self.num_modalities))
         
         # Fusion gate to control information flow
+        # Use modality-agnostic gate operating on summed features to avoid shape mismatch
         self.fusion_gate = nn.Sequential(
-            nn.Linear(self.d_model * self.num_modalities, self.d_model),
+            nn.Linear(self.d_model, self.d_model),
             nn.Sigmoid()
         )
         
@@ -273,15 +274,12 @@ class AdaptiveFusion(BaseModel):
         
         # Weighted combination
         weighted_features = modality_features * importance_weights.view(1, -1, 1)
-        
-        # Flatten for gate computation
-        flattened = weighted_features.view(batch_size, -1)
-        
-        # Apply fusion gate
-        gate = self.fusion_gate(flattened)
-        
+
         # Sum across modalities
         summed_features = torch.sum(weighted_features, dim=1)
+
+        # Apply fusion gate on modality-agnostic representation
+        gate = self.fusion_gate(summed_features)
         
         # Apply gate
         gated_features = summed_features * gate

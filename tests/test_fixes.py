@@ -139,10 +139,12 @@ def test_config():
         # Print key configuration values
         print(f"App name: {AppConfig.APP_NAME}")
         print(f"Log level: {AppConfig.LOG_LEVEL}")
-        print(f"API key configured: {'Yes' if AppConfig.GEMINI_API_KEY else 'No'}")
-        
-        if not AppConfig.GEMINI_API_KEY:
-            print("Warning: GEMINI_API_KEY not set in environment variables or .env file")
+        print(f"API key configured: {'Yes' if (AppConfig.GEMINI_API_KEY or AppConfig.OPENAI_API_KEY) else 'No'}")
+        if not AppConfig.MODEL_NAME:
+            print("Warning: MODEL_NAME not set in environment variables or .env file")
+            return False
+        if not AppConfig.EMBEDDING_CONFIG["model_name"]:
+            print("Warning: EMBEDDING_MODEL_NAME not set in environment variables or .env file")
             return False
         
         return True

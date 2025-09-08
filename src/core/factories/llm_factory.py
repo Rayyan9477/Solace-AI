@@ -146,7 +146,7 @@ class LLMFactory:
         Example config:
         {
             "provider": "gemini",
-            "model_name": "gemini-2.0-flash",
+            "model_name": "<from env>",
             "api_key": "your-api-key",
             "temperature": 0.7,
             "max_tokens": 2000

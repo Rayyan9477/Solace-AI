@@ -15,7 +15,6 @@ from .integrated_diagnosis_agent import IntegratedDiagnosisAgent
 from .comprehensive_diagnosis_agent import ComprehensiveDiagnosisAgent
 from .search_agent import SearchAgent
 from .safety_agent import SafetyAgent
-from .crawler_agent import CrawlerAgent
 from .agent_orchestrator import AgentOrchestrator
 
 __all__ = [
@@ -29,6 +28,5 @@ __all__ = [
     'ComprehensiveDiagnosisAgent',
     'SearchAgent',
     'SafetyAgent',
-    'CrawlerAgent',
     'AgentOrchestrator'
 ]

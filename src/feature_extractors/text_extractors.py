@@ -109,16 +109,12 @@ class TextFeatureExtractor(BaseFeatureExtractor):
         """Clean and preprocess text"""
         # Remove extra whitespace
         text = re.sub(r'\s+', ' ', text).strip()
-        
-        # Remove URLs
-        text = re.sub(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', '', text)
-        
+        # Remove URLs (simplified)
+        text = re.sub(r'https?://\S+', '', text)
         # Remove email addresses
         text = re.sub(r'\S+@\S+', '', text)
-        
         # Remove extra punctuation
         text = re.sub(r'[^\w\s.,!?;:\-\'\"()]', '', text)
-        
         return text
     
     def _calculate_confidence(self, text: str, embeddings: np.ndarray) -> float:
@@ -289,7 +285,7 @@ class SentimentExtractor(BaseFeatureExtractor):
             try:
                 nltk.download('vader_lexicon', quiet=True)
                 self.analyzer = SentimentIntensityAnalyzer()
-            except:
+            except Exception:
                 logger.warning("Could not initialize NLTK sentiment analyzer")
                 
         # Fallback to transformers-based sentiment analysis
@@ -297,7 +293,7 @@ class SentimentExtractor(BaseFeatureExtractor):
             try:
                 self.analyzer = pipeline("sentiment-analysis", 
                                        model="cardiffnlp/twitter-roberta-base-sentiment-latest")
-            except:
+            except Exception:
                 logger.warning("Could not initialize transformers sentiment analyzer")
     
     def extract(self, data: Any, **kwargs) -> FeatureExtractionResult:

@@ -26,7 +26,7 @@ class DiaTTS:
     """Dia 1.6B Text-to-Speech module for high-quality speech synthesis"""
     
     def __init__(self, 
-                 model_name: str = "nari-labs/Dia-1.6B", 
+                 model_name: str = "", 
                  cache_dir: Optional[str] = None,
                  use_gpu: bool = True):
         """

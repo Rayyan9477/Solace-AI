@@ -6,6 +6,7 @@ using the module system with integrated SupervisorAgent oversight.
 """
 
 import asyncio
+import inspect
 from typing import Dict, Any, List, Optional, Callable, Union, Set
 import time
 import json
@@ -58,12 +59,13 @@ class CircuitBreakerState(Enum):
 @dataclass
 class Message:
     """Event message structure for agent communication."""
-    id: str
     type: MessageType
     sender: str
     recipient: Optional[str]
     payload: Dict[str, Any]
-    timestamp: datetime
+    # Optional fields follow to satisfy dataclass init rules
+    id: Optional[str] = None
+    timestamp: Optional[datetime] = None
     session_id: Optional[str] = None
     correlation_id: Optional[str] = None
     reply_to: Optional[str] = None
@@ -865,8 +867,18 @@ class AgentOrchestrator(Module):
             Results of the workflow execution
         """
         if workflow_id not in self.workflows:
-            self.logger.error(f"Workflow {workflow_id} not found")
-            return {"error": f"Workflow {workflow_id} not found"}
+            # Lazy-register standard workflows if none registered yet
+            if not self.workflows:
+                try:
+                    self._register_workflows()
+                    self.logger.info("Standard workflows lazily registered")
+                except Exception as e:
+                    self.logger.error(f"Failed lazy workflow registration: {str(e)}")
+            # Re-check after lazy registration
+            if workflow_id not in self.workflows:
+                self.logger.error(f"Workflow {workflow_id} not found")
+                # Ensure a consistent shape for callers expecting status
+                return {"error": f"Workflow {workflow_id} not found", "status": "failed"}
         
         # Generate session ID if not provided
         if session_id is None:
@@ -969,8 +981,8 @@ class AgentOrchestrator(Module):
                     # Record agent interaction start
                     agent_start_time = time.time()
                     
-                    # Execute agent's process method with updated context
-                    result = await agent_process(current_data, context=workflow_state["context"])
+                    # Execute agent's process method with updated context (supports sync/async)
+                    result = await self._call_agent_process(agent_process, current_data, workflow_state["context"])
                     
                     # Calculate processing time
                     agent_processing_time = time.time() - agent_start_time
@@ -1802,8 +1814,17 @@ class AgentOrchestrator(Module):
             return await self.execute_workflow(workflow_id, input_data, session_id, context)
         
         if workflow_id not in self.workflows:
-            self.logger.error(f"Workflow {workflow_id} not found")
-            return {"error": f"Workflow {workflow_id} not found"}
+            # Lazy-register standard workflows if none registered yet
+            if not self.workflows:
+                try:
+                    self._register_workflows()
+                    self.logger.info("Standard workflows lazily registered")
+                except Exception as e:
+                    self.logger.error(f"Failed lazy workflow registration: {str(e)}")
+            # Re-check after lazy registration
+            if workflow_id not in self.workflows:
+                self.logger.error(f"Workflow {workflow_id} not found")
+                return {"error": f"Workflow {workflow_id} not found", "status": "failed"}
         
         # Generate session ID if not provided
         if session_id is None:
@@ -1987,17 +2008,18 @@ class AgentOrchestrator(Module):
         # Execute with circuit breaker if enabled
         if use_circuit_breaker and self.circuit_breaker_enabled:
             circuit_breaker = self._get_or_create_circuit_breaker(agent_id)
-            result = await circuit_breaker.execute(
-                agent_process, current_data, context=workflow_state["context"]
-            )
+            async def _runner():
+                return await self._call_agent_process(agent_process, current_data, workflow_state["context"])
+            result = await circuit_breaker.execute(_runner)
         else:
             # Execute agent's process method with retry if available
             if self.retry_manager:
+                # Pass helper as the async callable for retries
                 result = await self.retry_manager.execute_with_retry(
-                    agent_process, current_data, context=workflow_state["context"]
+                    self._call_agent_process, agent_process, current_data, workflow_state["context"]
                 )
             else:
-                result = await agent_process(current_data, context=workflow_state["context"])
+                result = await self._call_agent_process(agent_process, current_data, workflow_state["context"])
         
         # Calculate processing time
         agent_processing_time = time.time() - agent_start_time
@@ -2049,6 +2071,16 @@ class AgentOrchestrator(Module):
                     raise Exception(error_msg)
         
         return result, agent_processing_time
+
+    async def _call_agent_process(self, agent_process: Callable, current_data: Dict[str, Any], context: Dict[str, Any]):
+        """Call an agent's process method whether it's sync or async, and resolve awaitables."""
+        if asyncio.iscoroutinefunction(agent_process):
+            return await agent_process(current_data, context=context)
+        # Call synchronously and await if needed
+        result = agent_process(current_data, context=context)
+        if inspect.isawaitable(result):
+            return await result
+        return result
     
     def _get_or_create_circuit_breaker(self, agent_id: str) -> CircuitBreaker:
         """Get or create circuit breaker for agent."""

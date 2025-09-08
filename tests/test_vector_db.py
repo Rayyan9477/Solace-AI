@@ -17,6 +17,7 @@ from datetime import datetime
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from src.database.central_vector_db import CentralVectorDB
+import pytest
 from src.utils.vector_db_integration import (
     add_user_data, 
     get_user_data, 
@@ -32,6 +33,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+@pytest.mark.asyncio
 async def test_central_vector_db():
     """Test all central vector database functionality"""
     

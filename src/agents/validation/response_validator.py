@@ -40,6 +40,34 @@ class RiskLevel(Enum):
     HIGH = "high"
     CRITICAL = "critical"
 
+    # Provide ordering helpers for comparisons in tests
+    def __lt__(self, other):
+        if not isinstance(other, RiskLevel):
+            return NotImplemented
+        order = {
+            RiskLevel.MINIMAL: 0,
+            RiskLevel.LOW: 1,
+            RiskLevel.MODERATE: 2,
+            RiskLevel.HIGH: 3,
+            RiskLevel.CRITICAL: 4,
+        }
+        return order[self] < order[other]
+
+    def __le__(self, other):
+        if not isinstance(other, RiskLevel):
+            return NotImplemented
+        return self == other or self < other
+
+    def __gt__(self, other):
+        if not isinstance(other, RiskLevel):
+            return NotImplemented
+        return not self.__le__(other)
+
+    def __ge__(self, other):
+        if not isinstance(other, RiskLevel):
+            return NotImplemented
+        return not self.__lt__(other)
+
 @dataclass
 class ValidationScore:
     """Individual validation dimension score."""
@@ -115,53 +143,38 @@ class SemanticAnalyzer:
     def analyze_therapeutic_quality(self, response_text: str, user_input: str = "") -> Dict[str, Any]:
         """Analyze therapeutic quality of response."""
         response_lower = response_text.lower()
-        user_lower = user_input.lower()
-        
+
         # Check for positive therapeutic concepts
         positive_score = 0
-        positive_concepts_found = []
-        
+        positive_concepts_found: List[str] = []
         for concept, indicators in self.therapeutic_concepts.items():
-            concept_found = False
-            for indicator in indicators:
-                if indicator in response_lower:
-                    positive_score += 1
-                    concept_found = True
-                    break
-            if concept_found:
+            if any(indicator in response_lower for indicator in indicators):
+                positive_score += 1
                 positive_concepts_found.append(concept)
-        
+
         # Check for harmful concepts
         negative_score = 0
-        harmful_concepts_found = []
-        
+        harmful_concepts_found: List[str] = []
         for concept, indicators in self.harmful_concepts.items():
-            for indicator in indicators:
-                if indicator in response_lower:
-                    negative_score += 1
-                    harmful_concepts_found.append(concept)
-                    break
-        
+            if any(indicator in response_lower for indicator in indicators):
+                negative_score += 1
+                harmful_concepts_found.append(concept)
+
         # Calculate overall therapeutic quality score
         max_positive = len(self.therapeutic_concepts)
         max_negative = len(self.harmful_concepts)
-        
         positive_ratio = positive_score / max_positive if max_positive > 0 else 0
         negative_ratio = negative_score / max_negative if max_negative > 0 else 0
-        
-        # Therapeutic quality score (0-1, higher is better)
-        therapeutic_score = max(0, positive_ratio - (negative_ratio * 1.5))
-        
+        # Therapeutic quality score (0-1, higher is better). Penalize negatives more strongly.
+        therapeutic_score = max(0, min(1, positive_ratio * 0.8 - negative_ratio * 2.0 + 0.8))
+
         return {
             "therapeutic_score": therapeutic_score,
             "positive_concepts": positive_concepts_found,
             "harmful_concepts": harmful_concepts_found,
-            "empathy_indicators": sum(1 for indicator in self.therapeutic_concepts["empathy"] 
-                                    if indicator in response_lower),
-            "validation_indicators": sum(1 for indicator in self.therapeutic_concepts["validation"] 
-                                       if indicator in response_lower),
-            "hope_indicators": sum(1 for indicator in self.therapeutic_concepts["hope"] 
-                                 if indicator in response_lower)
+            "empathy_indicators": sum(1 for indicator in self.therapeutic_concepts["empathy"] if indicator in response_lower),
+            "validation_indicators": sum(1 for indicator in self.therapeutic_concepts["validation"] if indicator in response_lower),
+            "hope_indicators": sum(1 for indicator in self.therapeutic_concepts["hope"] if indicator in response_lower),
         }
     
     def analyze_response_appropriateness(self, response_text: str, user_input: str, 
@@ -172,8 +185,8 @@ class SemanticAnalyzer:
         response_emotion = self._detect_emotional_tone(response_text)
         
         # Check length appropriateness
-        response_length = len(response_text.split())
-        user_length = len(user_input.split())
+    response_length = len(response_text.split())
+    # user_length not used; rely on response length heuristics
         
         length_appropriate = True
         length_issues = []

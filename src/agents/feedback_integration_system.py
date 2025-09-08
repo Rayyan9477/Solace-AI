@@ -22,7 +22,6 @@ from enum import Enum
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import DBSCAN
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.sentiment import SentimentAnalyzer
 import re
 
 from ..diagnosis.adaptive_learning import InterventionOutcome, UserProfile

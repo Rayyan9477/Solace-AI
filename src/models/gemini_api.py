@@ -18,6 +18,7 @@ from langchain_core.outputs import GenerationChunk
 
 # Configure logger
 logger = logging.getLogger(__name__)
+from src.config.settings import AppConfig
 
 class GeminiAPI(LLM, BaseLanguageModel):
     """
@@ -25,12 +26,13 @@ class GeminiAPI(LLM, BaseLanguageModel):
     Implements the LangChain BaseLanguageModel interface
     """
 
-    model_name: str = "models/gemini-pro"  # Default to Gemini Pro
+    # No hardcoded default; must be provided via env/config
+    model_name: str = ""
     temperature: float = 0.7
     top_p: float = 0.95
     top_k: int = 40
     max_tokens: int = 1024
-    api_key: str = None
+    api_key: Optional[str] = None
     
     def __init__(self, api_key: Optional[str] = None, model_name: Optional[str] = None, **kwargs):
         """
@@ -41,19 +43,21 @@ class GeminiAPI(LLM, BaseLanguageModel):
             model_name: Gemini model name/version
             **kwargs: Additional parameters for the LLM
         """
-        model_kwargs = kwargs.pop("model_kwargs", {})
+        kwargs.pop("model_kwargs", None)
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
-        self.model_name = model_name or self.model_name
-        
+        self.model_name = model_name or AppConfig.MODEL_NAME
+        if not self.model_name:
+            raise ValueError("MODEL_NAME must be set via environment or passed to GeminiAPI")
+
         # Extract parameters from kwargs or use defaults
         self.temperature = kwargs.pop("temperature", self.temperature)
         self.top_p = kwargs.pop("top_p", self.top_p)
         self.top_k = kwargs.pop("top_k", self.top_k)
         self.max_tokens = kwargs.pop("max_tokens", self.max_tokens)
-        
+
         # Initialize Gemini
         genai.configure(api_key=self.api_key)
-        
+
         # Configure the model
         self.model = genai.GenerativeModel(
             model_name=self.model_name,
@@ -64,11 +68,11 @@ class GeminiAPI(LLM, BaseLanguageModel):
                 "max_output_tokens": self.max_tokens,
             }
         )
-        
+
         # Initialize LLM base class
         super().__init__(**kwargs)
-        
-        logger.info(f"Initialized Gemini API with model: {self.model_name}")
+
+        logger.info("Initialized Gemini API with model: %s", self.model_name)
     
     @property
     def _llm_type(self) -> str:

@@ -116,7 +116,7 @@ class VoiceAI:
         # Set up Dia 1.6B for enhanced TTS
         self.use_dia = use_dia
         self.dia_tts = None if not use_dia else DiaTTS(
-            model_name=AppConfig.VOICE_CONFIG.get("tts_model", "nari-labs/Dia-1.6B"),
+            model_name=AppConfig.VOICE_CONFIG.get("tts_model", ""),
             cache_dir=self.cache_dir,
             use_gpu=(self.device == "cuda")
         )
@@ -236,14 +236,17 @@ class VoiceAI:
         """
         try:
             # Load processor
+            stt_model = AppConfig.VOICE_CONFIG.get("stt_model", "")
+            if not stt_model:
+                raise ValueError("STT_MODEL must be set via environment or AppConfig.VOICE_CONFIG")
             processor = HF_AutoProcessor.from_pretrained(
-                AppConfig.VOICE_CONFIG.get("stt_model", "openai/whisper-large-v3-turbo"),
+                stt_model,
                 cache_dir=self.cache_dir
             )
             
             # Load model
             model = AutoModelForSpeechSeq2Seq.from_pretrained(
-                AppConfig.VOICE_CONFIG.get("stt_model", "openai/whisper-large-v3-turbo"),
+                stt_model,
                 torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
                 low_cpu_mem_usage=True,
                 cache_dir=self.cache_dir

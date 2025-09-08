@@ -305,14 +305,15 @@ class UncertaintyQuantifier:
         return ece.item()
     
     @staticmethod
-    def get_prediction_intervals(predictions: torch.Tensor, 
-                               confidence_level: float = 0.95) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_prediction_intervals(predictions: torch.Tensor,
+                                 confidence_level: float = 0.95) -> Tuple[torch.Tensor, torch.Tensor]:
         """Calculate prediction intervals from Monte Carlo samples"""
         alpha = 1 - confidence_level
         lower_percentile = (alpha / 2) * 100
         upper_percentile = (1 - alpha / 2) * 100
-        
-        lower_bound = torch.percentile(predictions, lower_percentile, dim=0)
-        upper_bound = torch.percentile(predictions, upper_percentile, dim=0)
-        
+
+        # Use torch.quantile for broad compatibility
+        lower_bound = torch.quantile(predictions, lower_percentile / 100.0, dim=0)
+        upper_bound = torch.quantile(predictions, upper_percentile / 100.0, dim=0)
+
         return lower_bound, upper_bound

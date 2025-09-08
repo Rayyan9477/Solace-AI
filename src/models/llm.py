@@ -32,6 +32,7 @@ except Exception:
 
 # Configure logger
 logger = logging.getLogger(__name__)
+from src.config.settings import AppConfig
 
 class GeminiLLM(BaseLanguageModel):
     """
@@ -40,7 +41,7 @@ class GeminiLLM(BaseLanguageModel):
     
     def __init__(self, 
                 api_key: str,
-                model_name: str = "gemini-2.0-pro",
+                model_name: Optional[str] = None,
                 temperature: float = 0.7,
                 max_output_tokens: int = 1024,
                 top_p: float = 0.95,
@@ -50,7 +51,7 @@ class GeminiLLM(BaseLanguageModel):
         
         Args:
             api_key: Google API key for Gemini
-            model_name: Gemini model name to use
+            model_name: Gemini model name to use (if None, taken from AppConfig.MODEL_NAME)
             temperature: Temperature for generation
             max_output_tokens: Maximum tokens to generate
             top_p: Top-p sampling parameter
@@ -61,7 +62,9 @@ class GeminiLLM(BaseLanguageModel):
         # Configure Gemini API
         genai.configure(api_key=api_key)
         
-        self.model_name = model_name
+        self.model_name = model_name or AppConfig.MODEL_NAME
+        if not self.model_name:
+            raise ValueError("MODEL_NAME must be set via environment or passed explicitly for GeminiLLM")
         
         # Create generation config
         self.generation_config = GenerationConfig(
@@ -74,10 +77,10 @@ class GeminiLLM(BaseLanguageModel):
         # Initialize the model
         try:
             self.model = genai.GenerativeModel(
-                model_name=model_name,
+                model_name=self.model_name,
                 generation_config=self.generation_config
             )
-            logger.info(f"Initialized Gemini model: {model_name}")
+            logger.info(f"Initialized Gemini model: {self.model_name}")
         except Exception as e:
             logger.error(f"Failed to initialize Gemini model: {str(e)}")
             raise
@@ -101,37 +104,21 @@ class GeminiLLM(BaseLanguageModel):
         
         for prompt in prompts:
             try:
-                # Generate response from Gemini
                 response = self.model.generate_content(
                     prompt,
                     generation_config=self.generation_config,
-                    safety_settings=None  # Safety handled by our SafetyAgent
+                    safety_settings=None
                 )
-                
-                # Process response
+
                 if hasattr(response, 'candidates') and response.candidates:
-                    text = response.text
-                    
-                    # Extract stop reason if available
-                    stop_reason = None
-                    if hasattr(response.candidates[0], 'finish_reason'):
-                        stop_reason = response.candidates[0].finish_reason
-                    
-                    # Create Generation object
-                    gen = Generation(
-                        text=text,
-                        generation_info={
-                            "finish_reason": stop_reason
-                        }
-                    )
+                    text = response.text or ""
+                    gen = Generation(text=text)
                     generations.append([gen])
                 else:
-                    # Empty response - return empty generation
                     generations.append([Generation(text="")])
-                    
+
             except Exception as e:
                 logger.error(f"Error generating with Gemini: {str(e)}")
-                # Return empty generation on error
                 generations.append([Generation(text="", generation_info={"error": str(e)})])
         
         return LLMResult(generations=generations)
@@ -264,7 +251,7 @@ class OpenAILLM(BaseLanguageModel):
     def __init__(
         self,
         api_key: str,
-        model_name: str = "gpt-4o-mini",
+    model_name: Optional[str] = None,
         temperature: float = 0.7,
         max_output_tokens: int = 1024,
         top_p: float = 0.95,
@@ -274,7 +261,9 @@ class OpenAILLM(BaseLanguageModel):
         if AsyncOpenAI is None:
             raise RuntimeError("openai package not installed. pip install openai")
         self.client = AsyncOpenAI(api_key=api_key)
-        self.model_name = model_name
+        self.model_name = model_name or AppConfig.MODEL_NAME
+        if not self.model_name:
+            raise ValueError("MODEL_NAME must be set via environment or passed explicitly for OpenAILLM")
         self.temperature = temperature
         self.max_output_tokens = max_output_tokens
         self.top_p = top_p
@@ -338,7 +327,7 @@ def get_llm(config: Dict[str, Any] = None) -> BaseLanguageModel:
         # Create Gemini LLM
         return GeminiLLM(
             api_key=api_key,
-            model_name=config.get("model_name", "gemini-2.0-pro"),
+            model_name=config.get("model_name") or AppConfig.MODEL_NAME,
             temperature=config.get("temperature", 0.7),
             max_output_tokens=config.get("max_output_tokens", 1024),
             top_p=config.get("top_p", 0.95),
@@ -352,7 +341,7 @@ def get_llm(config: Dict[str, Any] = None) -> BaseLanguageModel:
             raise ValueError("OpenAI API key not found in config or environment")
         return OpenAILLM(
             api_key=api_key,
-            model_name=config.get("model_name", "gpt-4o-mini"),
+            model_name=config.get("model_name") or AppConfig.MODEL_NAME,
             temperature=config.get("temperature", 0.7),
             max_output_tokens=config.get("max_output_tokens", 1024),
             top_p=config.get("top_p", 0.95),

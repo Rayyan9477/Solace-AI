@@ -421,15 +421,37 @@ class SupervisorAgent(BaseAgent):
         concerns = []
         
         # Check therapeutic boundaries
+        response_lower = response_text.lower()
         for boundary_type, indicators in self.therapeutic_boundaries.items():
             for indicator in indicators:
-                if indicator.lower() in response_text.lower():
+                if indicator.lower() in response_lower:
                     if boundary_type == "avoid_diagnosis_terms":
                         concerns.append(EthicalConcern.COMPETENCY_EXCEEDED)
                     elif boundary_type == "crisis_escalation_required":
                         concerns.append(EthicalConcern.HARM_POTENTIAL)
                     elif boundary_type == "inappropriate_advice":
                         concerns.append(EthicalConcern.HARM_POTENTIAL)
+        
+        # Additional regex-based catch for common boundary phrases not covered by simple substrings
+        boundary_regexes = [
+            r"\bbe\s+friends\b",
+            r"\bfriends?\s+after\s+therapy\b",
+            r"\bmeet\s+outside\b",
+        ]
+        for pattern in boundary_regexes:
+            if re.search(pattern, response_lower):
+                concerns.append(EthicalConcern.BOUNDARY_VIOLATION)
+                break
+        
+        # Additional regex-based catch for medication stop/change advice (e.g., "stop taking your medication")
+        med_advice_regexes = [
+            r"\bstop\s+taking\b.*\bmedication\b",
+            r"\bdon't\s+see\b.*\bdoctor\b",
+        ]
+        for pattern in med_advice_regexes:
+            if re.search(pattern, response_lower):
+                concerns.append(EthicalConcern.HARM_POTENTIAL)
+                break
         
         # Check for bias indicators
         bias_patterns = [
@@ -445,7 +467,7 @@ class SupervisorAgent(BaseAgent):
         # Check for boundary violations
         boundary_patterns = [
             r"i love you", r"we should meet", r"personal relationship",
-            r"beyond our session", r"outside therapy"
+            r"beyond our session", r"outside therapy", r"be friends", r"friends after therapy"
         ]
         
         for pattern in boundary_patterns:

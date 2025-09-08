@@ -36,7 +36,9 @@ class AppConfig:
     LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-    MODEL_NAME = os.getenv("MODEL_NAME", "gemini-2.0-flash")
+    # Primary chat model must be specified via environment
+    # Intentionally no hardcoded model default to keep models out of codebase
+    MODEL_NAME = os.getenv("MODEL_NAME", "")
     USE_CPU = True  # Always true for cloud-based models
     MAX_RESPONSE_TOKENS = int(os.getenv("MAX_RESPONSE_TOKENS", "2000"))
 
@@ -53,8 +55,9 @@ class AppConfig:
     }
 
     # Embedding Configuration
+    # Embedding model must be specified via environment
     EMBEDDING_CONFIG = {
-        "model_name": "sentence-transformers/all-mpnet-base-v2",
+        "model_name": os.getenv("EMBEDDING_MODEL_NAME", ""),
         "normalize_embeddings": True
     }
 
@@ -68,7 +71,8 @@ class AppConfig:
         "collection_name": "mental_health_kb",
         "central_data_enabled": True,  # Enable central vector DB
         "retention_days": 180,  # Store data for 180 days
-        "embedder_model": "all-MiniLM-L6-v2",  # Sentence transformer model for embeddings
+        # Embedder model must be specified via environment (falls back to EMBEDDING_MODEL_NAME if provided)
+        "embedder_model": os.getenv("EMBEDDER_MODEL_NAME", os.getenv("EMBEDDING_MODEL_NAME", "")),
         "namespaces": [
             "user_profile",
             "conversation",
@@ -229,8 +233,9 @@ class AppConfig:
 
     # Voice Configuration - using free models
     VOICE_CONFIG = {
-        "stt_model": os.getenv("STT_MODEL", "openai/whisper-large-v3-turbo"),
-        "tts_model": os.getenv("TTS_MODEL", "nari-labs/Dia-1.6B"),
+        # Intentionally no hardcoded model defaults
+        "stt_model": os.getenv("STT_MODEL", ""),
+        "tts_model": os.getenv("TTS_MODEL", ""),
         "cache_dir": str(Path(__file__).resolve().parent.parent / 'models' / 'cache'),
         "use_gpu": os.getenv("USE_GPU", "True").lower() == "true",
         "voice_styles": {

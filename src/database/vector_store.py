@@ -49,6 +49,11 @@ class BaseVectorStore(ABC):
         """Clear all documents from the vector store"""
         pass
 
+    @abstractmethod
+    def count(self) -> int:
+        """Return number of stored documents"""
+        pass
+
 class FaissVectorStore(BaseVectorStore):
     """FAISS implementation with graceful fallback when dependencies are missing"""
 
@@ -98,11 +103,15 @@ class FaissVectorStore(BaseVectorStore):
             
         try:
             # Generate embeddings
-            texts = [doc.get('content', '') for doc in documents]
-            if self.embedder is not None:
-                embeddings = self.embedder.encode(texts, normalize_embeddings=True)
+            precomputed = [doc.get('embedding') for doc in documents]
+            if all(emb is not None for emb in precomputed):
+                embeddings = np.array(precomputed, dtype=np.float32)
             else:
-                embeddings = self._simple_embed(texts)
+                texts = [doc.get('content', '') for doc in documents]
+                if self.embedder is not None:
+                    embeddings = self.embedder.encode(texts, normalize_embeddings=True)
+                else:
+                    embeddings = self._simple_embed(texts)
 
             if self.index is not None:
                 # FAISS path
@@ -133,39 +142,50 @@ class FaissVectorStore(BaseVectorStore):
             logger.error(f"Error adding documents to FAISS: {str(e)}")
             return False
             
-    def search(self, query: str, k: int = 5, use_cache: bool = True) -> List[Dict[str, Any]]:
+    def search(self, query: str = None, k: int = 5, use_cache: bool = True,
+               query_vector: Optional[List[float]] = None, top_k: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         Search for similar documents with caching support
         
         Args:
-            query: The query text to search for
-            k: Number of results to return
+            query: The query text to search for (ignored if query_vector is provided)
+            k: Number of results to return (alias: top_k)
             use_cache: Whether to use cached results if available
+            query_vector: Optional precomputed embedding vector to search by
+            top_k: Optional alias for k
             
         Returns:
             List of matching documents
         """
+        if top_k is not None:
+            k = top_k
         if not self.is_connected:
             logger.error("Vector store not connected. Call connect() first.")
             return []
             
-        # Check cache first if enabled
-        cache_key = f"{query}_{k}"
-        if use_cache and cache_key in self.query_cache:
-            # Check if cache is still valid
-            if datetime.now().timestamp() < self.cache_expiry.get(cache_key, 0):
-                logger.info(f"Using cached results for query: {query}")
-                return self.query_cache[cache_key]
-            else:
-                # Remove expired cache entry
-                self._remove_from_cache(cache_key)
+        # Check cache first if enabled (only for text queries)
+        cache_key = None
+        if query_vector is None and query is not None:
+            cache_key = f"{query}_{k}"
+            if use_cache and cache_key in self.query_cache:
+                if datetime.now().timestamp() < self.cache_expiry.get(cache_key, 0):
+                    logger.info(f"Using cached results for query: {query}")
+                    return self.query_cache[cache_key]
+                else:
+                    self._remove_from_cache(cache_key)
             
         try:
-            # Generate query embedding
-            if self.embedder is not None:
-                query_embedding = self.embedder.encode([query], normalize_embeddings=True).astype(np.float32)
+            # Generate or accept query embedding
+            if query_vector is not None:
+                query_embedding = np.array([query_vector], dtype=np.float32)
             else:
-                query_embedding = self._simple_embed([query]).astype(np.float32)
+                if query is None:
+                    logger.error("Either query text or query_vector must be provided")
+                    return []
+                if self.embedder is not None:
+                    query_embedding = self.embedder.encode([query], normalize_embeddings=True).astype(np.float32)
+                else:
+                    query_embedding = self._simple_embed([query]).astype(np.float32)
 
             results: List[Dict[str, Any]] = []
             if self.index is not None:
@@ -200,8 +220,8 @@ class FaissVectorStore(BaseVectorStore):
                             'score': float(1.0 - sims[int(idx)])  # lower is better to match L2 semantics
                         })
             
-            # Cache results if enabled
-            if use_cache:
+            # Cache results if enabled and text query was used
+            if use_cache and cache_key is not None:
                 self._add_to_cache(cache_key, results)
                     
             return results
@@ -209,6 +229,15 @@ class FaissVectorStore(BaseVectorStore):
         except Exception as e:
             logger.error(f"Error searching FAISS: {str(e)}")
             return []
+
+    # Compatibility helpers for existing call sites
+    def add_item(self, vector: List[float], metadata: Dict[str, Any]) -> bool:
+        """Add a single item with a precomputed embedding vector and metadata"""
+        doc = {"content": metadata.get("title") or metadata.get("document_id") or "", "embedding": vector, **{"metadata": metadata}}
+        return self.add_documents([doc])
+
+    def count(self) -> int:
+        return len(self.documents)
     
     def set_cache_ttl(self, ttl_seconds: int) -> None:
         """Set the time-to-live for cached results in seconds"""
@@ -336,7 +365,10 @@ class FaissVectorStore(BaseVectorStore):
             return False
             
         try:
-            self.index = faiss.IndexFlatL2(self.dimension)
+            if faiss is not None:
+                self.index = faiss.IndexFlatL2(self.dimension)
+            else:
+                self._embeddings_matrix = np.empty((0, self.dimension), dtype=np.float32)
             self.documents = {}
             self._save_index()
             return True

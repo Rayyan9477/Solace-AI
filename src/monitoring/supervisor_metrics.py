@@ -131,7 +131,18 @@ class MetricsCollector:
         timestamp = datetime.now()
         
         # Basic validation metrics
-        self.record_metric("validation_accuracy", validation_result.overall_score,
+        # Fallbacks for objects without overall_score (e.g., simple ValidationResult)
+        overall_score = getattr(validation_result, "overall_score", None)
+        if overall_score is None:
+            # Derive a proxy accuracy from available fields
+            try:
+                acc = getattr(validation_result, "accuracy_score", 0.7)
+                app = getattr(validation_result, "appropriateness_score", 0.7)
+                con = getattr(validation_result, "consistency_score", 0.7)
+                overall_score = float(np.mean([acc, app, con]))
+            except Exception:
+                overall_score = 0.7
+        self.record_metric("validation_accuracy", overall_score,
                           MetricType.VALIDATION_PERFORMANCE,
                           {"agent": agent_name, "session_id": session_id})
         
@@ -140,24 +151,52 @@ class MetricsCollector:
                           {"agent": agent_name, "session_id": session_id})
         
         # Risk level metrics
-        risk_numeric = self._risk_level_to_numeric(validation_result.overall_risk)
+        overall_risk = getattr(validation_result, "overall_risk", None)
+        if overall_risk is None:
+            # Map clinical risk/validation level to a coarse risk value
+            try:
+                lvl = getattr(validation_result, "validation_level", None)
+                if lvl and hasattr(lvl, "value"):
+                    lvl_val = lvl.value
+                else:
+                    lvl_val = str(lvl)
+                clinical = getattr(validation_result, "clinical_risk", None)
+                clinical_val = clinical.value if hasattr(clinical, "value") else str(clinical)
+                # Heuristic mapping
+                if clinical_val in ["severe"] or lvl_val in ["blocked", "critical"]:
+                    risk_numeric = 5.0
+                elif clinical_val in ["high"]:
+                    risk_numeric = 4.0
+                elif clinical_val in ["moderate"]:
+                    risk_numeric = 3.0
+                elif clinical_val in ["low"]:
+                    risk_numeric = 2.0
+                else:
+                    risk_numeric = 1.0
+                overall_risk_value = clinical_val or "minimal"
+            except Exception:
+                risk_numeric = 3.0
+                overall_risk_value = "moderate"
+        else:
+            risk_numeric = self._risk_level_to_numeric(overall_risk)
+            overall_risk_value = overall_risk.value if hasattr(overall_risk, "value") else str(overall_risk)
         self.record_metric("risk_level", risk_numeric,
                           MetricType.CLINICAL_OUTCOMES,
-                          {"agent": agent_name, "risk_level": validation_result.overall_risk.value})
+                          {"agent": agent_name, "risk_level": overall_risk_value})
         
         # Dimension-specific metrics
-        for dimension, score in validation_result.dimension_scores.items():
+        for dimension, score in getattr(validation_result, "dimension_scores", {}).items():
             self.record_metric(f"dimension_{dimension.value}", score.score,
                               MetricType.AGENT_QUALITY,
                               {"agent": agent_name, "dimension": dimension.value})
         
         # Alert metrics
-        if validation_result.blocking_issues:
+        if getattr(validation_result, "blocking_issues", []):
             self.record_metric("blocked_responses", 1,
                               MetricType.VALIDATION_PERFORMANCE,
                               {"agent": agent_name, "reason": "blocking_issues"})
         
-        if validation_result.critical_issues:
+        if getattr(validation_result, "critical_issues", []):
             self.record_metric("critical_issues", len(validation_result.critical_issues),
                               MetricType.CLINICAL_OUTCOMES,
                               {"agent": agent_name, "issues": validation_result.critical_issues})

@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 import numpy as np
 from sentence_transformers import SentenceTransformer
+from src.config.settings import AppConfig
 import faiss
 import pickle
 import re
@@ -27,7 +28,7 @@ class SemanticMemoryManager:
         self,
         user_id: str = "default_user",
         storage_dir: Optional[str] = None,
-        embedding_model: str = "all-MiniLM-L6-v2",
+    embedding_model: str = None,
         dimension: int = 384,
         index_type: str = "flat",
         max_memory_entries: int = 1000
@@ -57,8 +58,11 @@ class SemanticMemoryManager:
         
         # Initialize embedding model
         try:
-            self.embedding_model = SentenceTransformer(embedding_model)
-            logger.info(f"Loaded embedding model: {embedding_model}")
+            resolved_model = embedding_model or AppConfig.EMBEDDING_CONFIG.get("model_name", "")
+            if not resolved_model:
+                raise ValueError("EMBEDDING_MODEL_NAME must be set via environment or passed explicitly")
+            self.embedding_model = SentenceTransformer(resolved_model)
+            logger.info(f"Loaded embedding model: {resolved_model}")
         except Exception as e:
             logger.error(f"Failed to load embedding model: {str(e)}")
             # Fallback to simpler mechanisms if model fails to load

@@ -24,6 +24,7 @@ from langchain_core.messages import (
 from src.config.settings import AppConfig
 
 logger = logging.getLogger(__name__)
+ERROR_TEXT = "I'm sorry, I encountered an error processing your request."
 
 class GeminiLLM(LLM):
     """
@@ -32,7 +33,7 @@ class GeminiLLM(LLM):
     This class implements the LangChain LLM interface for Google Gemini 2.0 API.
     """
     
-    model_name: str = "gemini-2.0-flash"
+    model_name: str = ""
     temperature: float = 0.7
     max_output_tokens: int = 2048
     top_p: float = 0.95
@@ -51,6 +52,11 @@ class GeminiLLM(LLM):
         # Configure Gemini API
         genai.configure(api_key=api_key)
         
+        # Resolve model name from env/config if not provided by subclass
+        self.model_name = self.model_name or AppConfig.MODEL_NAME
+        if not self.model_name:
+            raise ValueError("MODEL_NAME must be set via environment for GeminiLLM")
+
         # Initialize model
         self.client = genai.GenerativeModel(
             model_name=self.model_name,
@@ -78,28 +84,23 @@ class GeminiLLM(LLM):
         **kwargs
     ) -> LLMResult:
         """Generate text using Gemini model"""
-        generations = []
-        
+        from langchain.schema import Generation
+        generations: List[List[Generation]] = []
         for prompt in prompts:
             try:
-                # Generate completion
                 response = self.client.generate_content(prompt)
-                
-                # Extract text
-                if hasattr(response, "text"):
+                if getattr(response, "text", None):
                     text = response.text
                 else:
-                    # Handle different response formats
-                    text = response.candidates[0].content.parts[0].text if response.candidates else ""
-                
-                # Add to generations
-                generations.append([{"text": text}])
-                
+                    text = (
+                        response.candidates[0].content.parts[0].text
+                        if getattr(response, "candidates", None)
+                        else ""
+                    )
             except Exception as e:
                 logger.error(f"Error generating with Gemini: {e}")
-                # Return empty response on error
-                generations.append([{"text": "I'm sorry, I encountered an error processing your request."}])
-        
+                text = ERROR_TEXT
+            generations.append([Generation(text=text)])
         return LLMResult(generations=generations)
     
     async def _agenerate(
@@ -110,28 +111,23 @@ class GeminiLLM(LLM):
         **kwargs
     ) -> LLMResult:
         """Asynchronously generate text using Gemini model"""
-        generations = []
-        
+        from langchain.schema import Generation
+        generations: List[List[Generation]] = []
         for prompt in prompts:
             try:
-                # Generate completion asynchronously
                 response = await self.client.generate_content_async(prompt)
-                
-                # Extract text
-                if hasattr(response, "text"):
+                if getattr(response, "text", None):
                     text = response.text
                 else:
-                    # Handle different response formats
-                    text = response.candidates[0].content.parts[0].text if response.candidates else ""
-                
-                # Add to generations
-                generations.append([{"text": text}])
-                
+                    text = (
+                        response.candidates[0].content.parts[0].text
+                        if getattr(response, "candidates", None)
+                        else ""
+                    )
             except Exception as e:
                 logger.error(f"Error generating with Gemini: {e}")
-                # Return empty response on error
-                generations.append([{"text": "I'm sorry, I encountered an error processing your request."}])
-        
+                text = ERROR_TEXT
+            generations.append([Generation(text=text)])
         return LLMResult(generations=generations)
 
 class GeminiChatModel(BaseChatModel):
@@ -141,7 +137,7 @@ class GeminiChatModel(BaseChatModel):
     This class implements the LangChain Chat Model interface for Google Gemini 2.0 API.
     """
     
-    model_name: str = "gemini-2.0-flash"
+    model_name: str = ""
     temperature: float = 0.7
     max_output_tokens: int = 2048
     top_p: float = 0.95
@@ -160,6 +156,11 @@ class GeminiChatModel(BaseChatModel):
         # Configure Gemini API
         genai.configure(api_key=api_key)
         
+        # Resolve model name from env/config
+        self.model_name = self.model_name or AppConfig.MODEL_NAME
+        if not self.model_name:
+            raise ValueError("MODEL_NAME must be set via environment for GeminiChatModel")
+
         # Initialize model
         self.client = genai.GenerativeModel(
             model_name=self.model_name,
@@ -222,28 +223,26 @@ class GeminiChatModel(BaseChatModel):
     ) -> LLMResult:
         """Generate a chat completion using Gemini model"""
         try:
-            # Convert messages to prompt
             prompt = self._convert_messages_to_prompt(messages)
-            
-            # Generate completion
+
             response = self.client.generate_content(prompt)
-            
-            # Extract text
-            if hasattr(response, "text"):
+
+            if hasattr(response, "text") and response.text:
                 text = response.text
             else:
-                # Handle different response formats
-                text = response.candidates[0].content.parts[0].text if response.candidates else ""
-            
-            # Create result
-            message = AIMessage(content=text)
-            return LLMResult(generations=[[message]])
-            
+                text = (
+                    response.candidates[0].content.parts[0].text
+                    if getattr(response, "candidates", None)
+                    else ""
+                )
+
+            from langchain.schema import Generation
+            return LLMResult(generations=[[Generation(text=text)]])
+
         except Exception as e:
             logger.error(f"Error generating with Gemini Chat: {e}")
-            # Return empty response on error
-            message = AIMessage(content="I'm sorry, I encountered an error processing your request.")
-            return LLMResult(generations=[[message]])
+            from langchain.schema import Generation
+            return LLMResult(generations=[[Generation(text=ERROR_TEXT)]])
     
     async def _agenerate(
         self,
@@ -254,28 +253,26 @@ class GeminiChatModel(BaseChatModel):
     ) -> LLMResult:
         """Asynchronously generate a chat completion using Gemini model"""
         try:
-            # Convert messages to prompt
             prompt = self._convert_messages_to_prompt(messages)
-            
-            # Generate completion asynchronously
+
             response = await self.client.generate_content_async(prompt)
-            
-            # Extract text
-            if hasattr(response, "text"):
+
+            if hasattr(response, "text") and response.text:
                 text = response.text
             else:
-                # Handle different response formats
-                text = response.candidates[0].content.parts[0].text if response.candidates else ""
-            
-            # Create result
-            message = AIMessage(content=text)
-            return LLMResult(generations=[[message]])
-            
+                text = (
+                    response.candidates[0].content.parts[0].text
+                    if getattr(response, "candidates", None)
+                    else ""
+                )
+
+            from langchain.schema import Generation
+            return LLMResult(generations=[[Generation(text=text)]])
+
         except Exception as e:
             logger.error(f"Error generating with Gemini Chat: {e}")
-            # Return empty response on error
-            message = AIMessage(content="I'm sorry, I encountered an error processing your request.")
-            return LLMResult(generations=[[message]])
+            from langchain.schema import Generation
+            return LLMResult(generations=[[Generation(text=ERROR_TEXT)]])
 
 def create_gemini_llm(config: Dict[str, Any] = None) -> BaseLanguageModel:
     """
@@ -294,7 +291,7 @@ def create_gemini_llm(config: Dict[str, Any] = None) -> BaseLanguageModel:
     
     if model_type == "chat":
         return GeminiChatModel(
-            model_name=config.get("model_name", "gemini-2.0-flash"),
+            model_name=config.get("model_name") or AppConfig.MODEL_NAME,
             temperature=config.get("temperature", 0.7),
             max_output_tokens=config.get("max_output_tokens", 2048),
             top_p=config.get("top_p", 0.95),
@@ -303,7 +300,7 @@ def create_gemini_llm(config: Dict[str, Any] = None) -> BaseLanguageModel:
         )
     else:
         return GeminiLLM(
-            model_name=config.get("model_name", "gemini-2.0-flash"),
+            model_name=config.get("model_name") or AppConfig.MODEL_NAME,
             temperature=config.get("temperature", 0.7),
             max_output_tokens=config.get("max_output_tokens", 2048),
             top_p=config.get("top_p", 0.95),

@@ -183,3 +183,11 @@ def get_conversation_tracker():
     except Exception as e:
         logger.error(f"Error getting conversation tracker: {str(e)}")
         return None
+
+def search_knowledge(query: str, limit: int = 5) -> List[Dict[str, Any]]:
+    """Search knowledge items in the central vector DB"""
+    return search_relevant_data(query, data_types=["knowledge"], limit=limit)
+
+def find_therapy_resources(topic: str, limit: int = 5) -> List[Dict[str, Any]]:
+    """Find therapy resources in the central vector DB"""
+    return search_relevant_data(topic, data_types=["therapy"], limit=limit)
