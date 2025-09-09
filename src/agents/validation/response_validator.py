@@ -68,23 +68,25 @@ class RiskLevel(Enum):
             return NotImplemented
         return not self.__lt__(other)
 
+# Dataclasses for validation results
 @dataclass
 class ValidationScore:
-    """Individual validation dimension score."""
-    dimension: ValidationDimension
-    score: float  # 0.0 to 1.0
-    confidence: float  # 0.0 to 1.0
-    risk_level: RiskLevel
+    """Score and metadata for a single validation dimension."""
+    dimension: "ValidationDimension"
+    score: float
+    confidence: float
+    risk_level: "RiskLevel"
     issues_found: List[str]
     recommendations: List[str]
     supporting_evidence: List[str]
 
+
 @dataclass
 class ComprehensiveValidationResult:
-    """Comprehensive validation result across all dimensions."""
+    """Aggregated validation outcome across dimensions."""
     overall_score: float
-    overall_risk: RiskLevel
-    dimension_scores: Dict[ValidationDimension, ValidationScore]
+    overall_risk: "RiskLevel"
+    dimension_scores: Dict["ValidationDimension", "ValidationScore"]
     critical_issues: List[str]
     blocking_issues: List[str]
     warnings: List[str]
@@ -96,51 +98,51 @@ class ComprehensiveValidationResult:
 
 class SemanticAnalyzer:
     """Semantic analysis for response validation."""
-    
+
     def __init__(self, model_provider=None):
         self.model_provider = model_provider
-        
+
         # Therapeutic concepts and their indicators
         self.therapeutic_concepts = {
             "empathy": [
                 "understand how you feel", "that must be difficult", "I can see why",
-                "it sounds like", "I hear that you", "that makes sense"
+                "it sounds like", "I hear that you", "that makes sense",
             ],
             "validation": [
                 "your feelings are valid", "that's understandable", "many people feel",
-                "it's normal to", "you're not alone", "that's a common experience"
+                "it's normal to", "you're not alone", "that's a common experience",
             ],
             "hope": [
                 "things can get better", "there is hope", "you have strengths",
-                "positive changes are possible", "you've overcome before", "recovery is possible"
+                "positive changes are possible", "you've overcome before", "recovery is possible",
             ],
             "professional_support": [
                 "professional help", "qualified therapist", "mental health professional",
-                "clinical assessment", "professional guidance", "medical consultation"
-            ]
+                "clinical assessment", "professional guidance", "medical consultation",
+            ],
         }
-        
+
         # Harmful concepts to detect
         self.harmful_concepts = {
             "dismissive": [
                 "just get over it", "it's not that bad", "everyone goes through this",
-                "stop being dramatic", "you're overreacting", "just think positive"
+                "stop being dramatic", "you're overreacting", "just think positive",
             ],
             "minimizing": [
                 "it could be worse", "at least you have", "others have it harder",
-                "that's not really a problem", "you're lucky that", "be grateful for"
+                "that's not really a problem", "you're lucky that", "be grateful for",
             ],
             "inappropriate_advice": [
                 "you should leave them", "just quit your job", "cut off contact",
-                "that person is toxic", "you need to", "you have to"
+                "that person is toxic", "you need to", "you have to",
             ],
             "false_promises": [
                 "everything will be fine", "this will definitely work", "you'll feel better soon",
-                "guaranteed to help", "never worry again", "completely cured"
-            ]
+                "guaranteed to help", "never worry again", "completely cured",
+            ],
         }
-    
-    def analyze_therapeutic_quality(self, response_text: str, user_input: str = "") -> Dict[str, Any]:
+
+    def analyze_therapeutic_quality(self, response_text: str, _user_input: str = "") -> Dict[str, Any]:
         """Analyze therapeutic quality of response."""
         response_lower = response_text.lower()
 
@@ -172,63 +174,70 @@ class SemanticAnalyzer:
             "therapeutic_score": therapeutic_score,
             "positive_concepts": positive_concepts_found,
             "harmful_concepts": harmful_concepts_found,
-            "empathy_indicators": sum(1 for indicator in self.therapeutic_concepts["empathy"] if indicator in response_lower),
-            "validation_indicators": sum(1 for indicator in self.therapeutic_concepts["validation"] if indicator in response_lower),
-            "hope_indicators": sum(1 for indicator in self.therapeutic_concepts["hope"] if indicator in response_lower),
+            "empathy_indicators": sum(
+                1 for indicator in self.therapeutic_concepts["empathy"] if indicator in response_lower
+            ),
+            "validation_indicators": sum(
+                1 for indicator in self.therapeutic_concepts["validation"] if indicator in response_lower
+            ),
+            "hope_indicators": sum(
+                1 for indicator in self.therapeutic_concepts["hope"] if indicator in response_lower
+            ),
         }
-    
-    def analyze_response_appropriateness(self, response_text: str, user_input: str, 
-                                       context: Dict[str, Any] = None) -> Dict[str, Any]:
+
+    def analyze_response_appropriateness(
+        self, response_text: str, user_input: str, context: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
         """Analyze appropriateness of response to user input."""
         # Extract emotional tone from user input
         user_emotion = self._detect_emotional_tone(user_input)
         response_emotion = self._detect_emotional_tone(response_text)
-        
+
         # Check length appropriateness
-    response_length = len(response_text.split())
-    # user_length not used; rely on response length heuristics
-        
+        response_length = len(response_text.split())
+        # user_length not used; rely on response length heuristics
+
         length_appropriate = True
-        length_issues = []
-        
+        length_issues: List[str] = []
+
         if response_length < 10:
             length_appropriate = False
             length_issues.append("Response too brief for meaningful therapeutic engagement")
         elif response_length > 300:
             length_appropriate = False
             length_issues.append("Response too lengthy, may overwhelm user")
-        
+
         # Check emotional appropriateness
         emotion_appropriate = True
-        emotion_issues = []
-        
+        emotion_issues: List[str] = []
+
         if user_emotion == "distressed" and response_emotion == "cheerful":
             emotion_appropriate = False
             emotion_issues.append("Response tone mismatched to user's distressed state")
         elif user_emotion == "angry" and response_emotion == "dismissive":
             emotion_appropriate = False
             emotion_issues.append("Response may escalate user's anger")
-        
+
         # Calculate appropriateness score
         appropriateness_score = 1.0
         if not length_appropriate:
             appropriateness_score -= 0.3
         if not emotion_appropriate:
             appropriateness_score -= 0.4
-        
+
         return {
             "appropriateness_score": max(0, appropriateness_score),
             "length_appropriate": length_appropriate,
             "emotion_appropriate": emotion_appropriate,
             "user_emotion": user_emotion,
             "response_emotion": response_emotion,
-            "issues": length_issues + emotion_issues
+            "issues": length_issues + emotion_issues,
         }
-    
+
     def _detect_emotional_tone(self, text: str) -> str:
         """Detect emotional tone of text."""
         text_lower = text.lower()
-        
+
         # Emotional indicators
         distressed_words = ["sad", "depressed", "anxious", "worried", "scared", "hopeless", "overwhelmed"]
         angry_words = ["angry", "furious", "frustrated", "mad", "irritated", "annoyed"]
@@ -236,7 +245,7 @@ class SemanticAnalyzer:
         calm_words = ["calm", "peaceful", "relaxed", "okay", "fine", "stable"]
         cheerful_words = ["cheerful", "upbeat", "optimistic", "bright", "joyful"]
         dismissive_words = ["whatever", "doesn't matter", "who cares", "so what"]
-        
+
         # Count indicators
         distressed_count = sum(1 for word in distressed_words if word in text_lower)
         angry_count = sum(1 for word in angry_words if word in text_lower)
@@ -244,7 +253,7 @@ class SemanticAnalyzer:
         calm_count = sum(1 for word in calm_words if word in text_lower)
         cheerful_count = sum(1 for word in cheerful_words if word in text_lower)
         dismissive_count = sum(1 for word in dismissive_words if word in text_lower)
-        
+
         # Determine dominant emotion
         emotion_scores = {
             "distressed": distressed_count,
@@ -252,9 +261,9 @@ class SemanticAnalyzer:
             "positive": positive_count,
             "calm": calm_count,
             "cheerful": cheerful_count,
-            "dismissive": dismissive_count
+            "dismissive": dismissive_count,
         }
-        
+
         max_emotion = max(emotion_scores, key=emotion_scores.get)
         return max_emotion if emotion_scores[max_emotion] > 0 else "neutral"
 
@@ -511,6 +520,9 @@ class ComprehensiveResponseValidator:
                               user_input: str, context: Dict[str, Any] = None) -> ComprehensiveValidationResult:
         """Perform comprehensive validation of agent response."""
         start_time = datetime.now()
+        # Mark intentionally unused parameters and ensure async path
+        _ = agent_name  # kept for signature compatibility
+        await asyncio.sleep(0)
         
         # Initialize validation scores
         dimension_scores = {}

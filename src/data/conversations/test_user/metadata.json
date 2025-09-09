@@ -11,15 +11,39 @@
       "primary_emotion": "anxiety",
       "user_message": "I've been feeling anxious lately, especially at night when trying to sleep.",
       "assistant_response": "I'm sorry to hear you're experiencing anxiety, particularly at night. This is common and there are s..."
+    },
+    "992baf32-4138-4809-92fb-21aa2991ffd6": {
+      "timestamp": "2025-09-09T04:34:45.670169",
+      "primary_emotion": "anxiety",
+      "user_message": "I've been feeling anxious lately, especially at night when trying to sleep.",
+      "assistant_response": "I'm sorry to hear you're experiencing anxiety, particularly at night. This is common and there are s..."
+    },
+    "28a5d231-98ed-4808-a059-3fd64abc3818": {
+      "timestamp": "2025-09-09T06:42:41.772507",
+      "primary_emotion": "anxiety",
+      "user_message": "I've been feeling anxious lately, especially at night when trying to sleep.",
+      "assistant_response": "I'm sorry to hear you're experiencing anxiety, particularly at night. This is common and there are s..."
+    },
+    "946e14fe-b5d7-4e99-afce-7b7f3db261b8": {
+      "timestamp": "2025-09-09T06:47:30.428677",
+      "primary_emotion": "anxiety",
+      "user_message": "I've been feeling anxious lately, especially at night when trying to sleep.",
+      "assistant_response": "I'm sorry to hear you're experiencing anxiety, particularly at night. This is common and there are s..."
+    },
+    "041a7bde-b81b-4060-9c4c-461064dc865f": {
+      "timestamp": "2025-09-09T06:48:56.928358",
+      "primary_emotion": "anxiety",
+      "user_message": "I've been feeling anxious lately, especially at night when trying to sleep.",
+      "assistant_response": "I'm sorry to hear you're experiencing anxiety, particularly at night. This is common and there are s..."
     }
   },
   "statistics": {
-    "total_conversations": 2,
-    "total_messages": 2,
+    "total_conversations": 6,
+    "total_messages": 6,
     "emotion_counts": {
-      "anxiety": 2
+      "anxiety": 6
     },
     "first_conversation": "2025-09-08T11:45:16.310036",
-    "last_conversation": "2025-09-08T11:49:06.627203"
+    "last_conversation": "2025-09-09T06:48:56.928358"
   }
 }

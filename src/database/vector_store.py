@@ -21,6 +21,12 @@ from src.config.settings import AppConfig
 
 logger = logging.getLogger(__name__)
 
+# Reused constants
+_ERR_NOT_CONNECTED = "Vector store not connected. Call connect() first."
+_INDEX_FILENAME = "mental_health.index"
+_DOCS_FILENAME = "documents.json"
+_CACHE_FILENAME = "cache.json"
+
 class BaseVectorStore(ABC):
     """Abstract base class for vector stores"""
     
@@ -98,7 +104,7 @@ class FaissVectorStore(BaseVectorStore):
         
     def add_documents(self, documents: List[Dict[str, Any]]) -> bool:
         if not self.is_connected:
-            logger.error("Vector store not connected. Call connect() first.")
+            logger.error(_ERR_NOT_CONNECTED)
             return False
             
         try:
@@ -160,7 +166,7 @@ class FaissVectorStore(BaseVectorStore):
         if top_k is not None:
             k = top_k
         if not self.is_connected:
-            logger.error("Vector store not connected. Call connect() first.")
+            logger.error(_ERR_NOT_CONNECTED)
             return []
             
         # Check cache first if enabled (only for text queries)
@@ -262,7 +268,7 @@ class FaissVectorStore(BaseVectorStore):
         if cache_key in self.cache_expiry:
             del self.cache_expiry[cache_key]
     
-    def add_processed_result(self, query: str, result: Dict[str, Any], content_field: str = "content") -> str:
+    def add_processed_result(self, query: str, result: Dict[str, Any], _content_field: str = "content") -> str:
         """
         Store a processed result in the vector store for future reuse
         
@@ -275,7 +281,7 @@ class FaissVectorStore(BaseVectorStore):
             ID of the stored result document
         """
         if not self.is_connected:
-            logger.error("Vector store not connected. Call connect() first.")
+            logger.error(_ERR_NOT_CONNECTED)
             return ""
             
         try:
@@ -310,7 +316,7 @@ class FaissVectorStore(BaseVectorStore):
             List of similar processed results
         """
         if not self.is_connected:
-            logger.error("Vector store not connected. Call connect() first.")
+            logger.error(_ERR_NOT_CONNECTED)
             return []
             
         try:
@@ -330,7 +336,7 @@ class FaissVectorStore(BaseVectorStore):
                         else:
                             parsed_content = content
                         result['parsed_content'] = parsed_content
-                    except:
+                    except Exception:
                         result['parsed_content'] = content
                     similar_results.append(result)
                     
@@ -342,7 +348,7 @@ class FaissVectorStore(BaseVectorStore):
             
     def delete_documents(self, ids: List[str]) -> bool:
         if not self.is_connected:
-            logger.error("Vector store not connected. Call connect() first.")
+            logger.error(_ERR_NOT_CONNECTED)
             return False
             
         try:
@@ -361,7 +367,7 @@ class FaissVectorStore(BaseVectorStore):
             
     def clear(self) -> bool:
         if not self.is_connected:
-            logger.error("Vector store not connected. Call connect() first.")
+            logger.error(_ERR_NOT_CONNECTED)
             return False
             
         try:
@@ -387,13 +393,10 @@ class FaissVectorStore(BaseVectorStore):
         
         # Save FAISS index if backend available
         if self.index is not None and faiss is not None:
-            faiss.write_index(
-                self.index,
-                str(index_path / "mental_health.index")
-            )
+            faiss.write_index(self.index, str(index_path / _INDEX_FILENAME))
         
         # Save documents
-        with open(index_path / "documents.json", "w") as f:
+        with open(index_path / _DOCS_FILENAME, "w") as f:
             json.dump(self.documents, f)
             
         # Save cache (optional)
@@ -403,7 +406,7 @@ class FaissVectorStore(BaseVectorStore):
                 "cache_expiry": self.cache_expiry,
                 "cache_ttl": self.cache_ttl
             }
-            with open(index_path / "cache.json", "w") as f:
+            with open(index_path / _CACHE_FILENAME, "w") as f:
                 json.dump(cache_data, f)
         except Exception as e:
             logger.warning(f"Could not save cache: {str(e)}")
@@ -415,22 +418,20 @@ class FaissVectorStore(BaseVectorStore):
             
             # Load FAISS index
             if faiss is not None:
-                if (index_path / "mental_health.index").exists():
-                    self.index = faiss.read_index(
-                        str(index_path / "mental_health.index")
-                    )
+                if (index_path / _INDEX_FILENAME).exists():
+                    self.index = faiss.read_index(str(index_path / _INDEX_FILENAME))
                 else:
                     self.index = faiss.IndexFlatL2(self.dimension)
                 
             # Load documents
-            if (index_path / "documents.json").exists():
-                with open(index_path / "documents.json", "r") as f:
+            if (index_path / _DOCS_FILENAME).exists():
+                with open(index_path / _DOCS_FILENAME, "r") as f:
                     self.documents = json.load(f)
             
             # Load cache (optional)
-            if (index_path / "cache.json").exists():
+            if (index_path / _CACHE_FILENAME).exists():
                 try:
-                    with open(index_path / "cache.json", "r") as f:
+                    with open(index_path / _CACHE_FILENAME, "r") as f:
                         cache_data = json.load(f)
                         self.query_cache = cache_data.get("query_cache", {})
                         self.cache_expiry = cache_data.get("cache_expiry", {})

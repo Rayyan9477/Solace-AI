@@ -128,7 +128,7 @@ class MetricsCollector:
     def record_validation_metrics(self, agent_name: str, validation_result: Any,
                                 processing_time: float, session_id: str = None):
         """Record comprehensive validation metrics."""
-        timestamp = datetime.now()
+        # timestamp intentionally unused; removed to satisfy linters
         
         # Basic validation metrics
         # Fallbacks for objects without overall_score (e.g., simple ValidationResult)
@@ -313,7 +313,7 @@ class MetricsCollector:
             
             self.aggregated_metrics[metric_name] = aggregated
     
-    def get_metric_summary(self, metric_name: str, time_window: timedelta = None) -> Dict[str, Any]:
+    def get_metric_summary(self, metric_name: str, time_window: Optional[timedelta] = None) -> Dict[str, Any]:
         """Get summary statistics for a metric."""
         time_window = time_window or timedelta(hours=1)
         cutoff_time = datetime.now() - time_window
@@ -414,8 +414,8 @@ class PerformanceDashboard:
             "active_alerts": len(self.metrics_collector.get_active_alerts())
         }
     
-    def get_agent_performance_report(self, agent_name: str = None, 
-                                   time_window: timedelta = None) -> Dict[str, Any]:
+    def get_agent_performance_report(self, agent_name: Optional[str] = None, 
+                                   time_window: Optional[timedelta] = None) -> Dict[str, Any]:
         """Generate comprehensive agent performance report."""
         time_window = time_window or timedelta(days=1)
         
@@ -452,7 +452,7 @@ class PerformanceDashboard:
             "recommendations": self._generate_performance_recommendations(agent_name, time_window)
         }
     
-    def get_system_analytics(self, time_window: timedelta = None) -> Dict[str, Any]:
+    def get_system_analytics(self, time_window: Optional[timedelta] = None) -> Dict[str, Any]:
         """Get comprehensive system analytics."""
         time_window = time_window or timedelta(hours=24)
         
@@ -500,6 +500,7 @@ class PerformanceDashboard:
         """Get filtered metrics for analysis."""
         # This is a simplified implementation
         # In a real system, you'd filter the metrics buffer based on metadata
+        _ = agent_filter  # parameter acknowledged intentionally
         summary = self.metrics_collector.get_metric_summary(metric_name, time_window)
         
         if "mean" not in summary:
@@ -517,6 +518,7 @@ class PerformanceDashboard:
     
     def _identify_top_issues(self, agent_name: str, time_window: timedelta) -> List[str]:
         """Identify top issues for an agent."""
+        _ = agent_name, time_window  # parameters acknowledged intentionally
         # Simplified implementation - would analyze actual issue data
         return [
             "Occasional boundary violations detected",
@@ -526,22 +528,26 @@ class PerformanceDashboard:
     
     def _count_blocked_responses(self, agent_name: str, time_window: timedelta) -> int:
         """Count blocked responses for an agent."""
+        _ = agent_name  # parameter acknowledged intentionally
         summary = self.metrics_collector.get_metric_summary("blocked_responses", time_window)
         return summary.get("count", 0)
     
     def _count_critical_issues(self, agent_name: str, time_window: timedelta) -> int:
         """Count critical issues for an agent."""
+        _ = agent_name  # parameter acknowledged intentionally
         summary = self.metrics_collector.get_metric_summary("critical_issues", time_window)
         return summary.get("count", 0)
     
     def _get_user_satisfaction(self, agent_name: str, time_window: timedelta) -> float:
         """Get user satisfaction score for an agent."""
+        _ = agent_name  # parameter acknowledged intentionally
         summary = self.metrics_collector.get_metric_summary("user_satisfaction", time_window)
         return summary.get("mean", 0.0)
     
     def _generate_performance_recommendations(self, agent_name: str, 
                                            time_window: timedelta) -> List[str]:
         """Generate performance improvement recommendations."""
+        _ = agent_name, time_window  # parameters acknowledged intentionally
         return [
             "Consider additional empathy training for better user connection",
             "Review response length guidelines for consistency",
@@ -560,13 +566,13 @@ class PerformanceDashboard:
     
     def _calculate_system_availability(self, time_window: timedelta) -> float:
         """Calculate system availability percentage."""
+        _ = time_window  # parameter acknowledged intentionally
         # Simplified calculation - in reality would track downtime
         return 99.5  # 99.5% availability
     
     def _calculate_quality_distribution(self, time_window: timedelta) -> Dict[str, float]:
         """Calculate distribution of quality scores."""
-        summary = self.metrics_collector.get_metric_summary("validation_accuracy", time_window)
-        
+        _ = self.metrics_collector.get_metric_summary("validation_accuracy", time_window)
         return {
             "excellent": 0.75,  # > 0.8
             "good": 0.15,       # 0.6-0.8
@@ -576,6 +582,7 @@ class PerformanceDashboard:
     
     def _generate_agent_comparison(self, time_window: timedelta) -> Dict[str, Dict[str, float]]:
         """Generate agent performance comparison."""
+        _ = time_window  # parameter acknowledged intentionally
         # Simplified comparison - would analyze actual agent data
         return {
             "therapy_agent": {"accuracy": 0.85, "consistency": 0.82, "satisfaction": 0.78},
@@ -585,6 +592,7 @@ class PerformanceDashboard:
     
     def _analyze_trends(self, time_window: timedelta) -> Dict[str, str]:
         """Analyze performance trends."""
+        _ = time_window  # parameter acknowledged intentionally
         return {
             "validation_accuracy": "stable",
             "processing_time": "improving",
@@ -594,6 +602,7 @@ class PerformanceDashboard:
     
     def _detect_anomalies(self, time_window: timedelta) -> List[Dict[str, Any]]:
         """Detect performance anomalies."""
+        _ = time_window  # parameter acknowledged intentionally
         return [
             {
                 "type": "processing_time_spike",
@@ -609,7 +618,7 @@ class MetricsExporter:
     def __init__(self, metrics_collector: MetricsCollector):
         self.metrics_collector = metrics_collector
     
-    def export_to_json(self, file_path: str, time_window: timedelta = None):
+    def export_to_json(self, file_path: str, time_window: Optional[timedelta] = None):
         """Export metrics to JSON file."""
         time_window = time_window or timedelta(days=1)
         
@@ -629,8 +638,8 @@ class MetricsExporter:
         
         logger.info(f"Metrics exported to {file_path}")
     
-    def export_to_csv(self, file_path: str, metric_names: List[str] = None, 
-                     time_window: timedelta = None):
+    def export_to_csv(self, file_path: str, metric_names: Optional[List[str]] = None, 
+                     time_window: Optional[timedelta] = None):
         """Export metrics to CSV file."""
         import csv
         

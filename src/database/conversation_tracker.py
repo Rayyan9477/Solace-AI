@@ -5,7 +5,6 @@ Provides methods for retrieval and analysis of past conversations.
 """
 
 import os
-import faiss
 import json
 import logging
 import numpy as np
@@ -13,13 +12,21 @@ from typing import Dict, Any, List, Optional, Union, Tuple
 from pathlib import Path
 from datetime import datetime, timedelta
 import uuid
-# from sentence_transformers import SentenceTransformer  # Lazy import when needed
-from tqdm import tqdm
+# Sentence embedding model can be lazily imported in future if needed
+try:
+    import faiss  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    faiss = None
+
+# tqdm not required here; remove to avoid optional dependency
 
 from src.database.vector_store import FaissVectorStore
 from src.config.settings import AppConfig
 
 logger = logging.getLogger(__name__)
+
+# Reused error message
+_ERR_CONNECT_FAIL = "Failed to connect to vector store"
 
 class ConversationTracker:
     """
@@ -156,10 +163,9 @@ class ConversationTracker:
         Returns:
             Conversation ID if successful, empty string otherwise
         """
-        if not self.is_connected:
-            if not self._connect():
-                logger.error("Failed to connect to vector store")
-                return ""
+        if not self.is_connected and not self._connect():
+            logger.error(_ERR_CONNECT_FAIL)
+            return ""
         
         try:
             # Create conversation document
@@ -200,8 +206,8 @@ class ConversationTracker:
             
             return conversation_id
         except Exception as e:
-            logger.error(f"Error adding conversation to tracker: {str(e)}")
-            return ""
+            logger.error(f"Error adding conversation to tracker: {str(e)}") 
+            return "" 
     
     def _update_metadata(self, conversation_id: str, document: Dict[str, Any]) -> None:
         """Update metadata with new conversation information"""
@@ -253,10 +259,9 @@ class ConversationTracker:
         Returns:
             List of relevant conversations
         """
-        if not self.is_connected:
-            if not self._connect():
-                logger.error("Failed to connect to vector store")
-                return []
+        if not self.is_connected and not self._connect():
+            logger.error(_ERR_CONNECT_FAIL)
+            return []
         
         try:
             # Search vector store
@@ -269,22 +274,12 @@ class ConversationTracker:
             # Filter results
             filtered_results = []
             for result in results:
-                # Skip if not a conversation or wrong user
-                if result.get('type') != 'conversation' or result.get('user_id') != self.user_id:
+                # Apply structural, date, and emotion filters
+                if not self._is_valid_conversation_result(result):
                     continue
-                    
-                # Apply date filters
-                if start_date or end_date:
-                    result_date = datetime.fromisoformat(result["timestamp"])
-                    
-                    if start_date and result_date < datetime.fromisoformat(start_date):
-                        continue
-                        
-                    if end_date and result_date > datetime.fromisoformat(end_date):
-                        continue
-                
-                # Apply emotion filter
-                if emotion and result.get("primary_emotion") != emotion:
+                if not self._within_date_range(result.get("timestamp"), start_date, end_date):
+                    continue
+                if emotion and not self._matches_emotion(result, emotion):
                     continue
                 
                 filtered_results.append(result)
@@ -295,8 +290,44 @@ class ConversationTracker:
             
             return filtered_results
         except Exception as e:
-            logger.error(f"Error searching conversations: {str(e)}")
-            return []
+            logger.error(f"Error searching conversations: {str(e)}") 
+            return [] 
+
+    def _is_valid_conversation_result(self, result: Dict[str, Any]) -> bool:
+        """Check basic constraints for a conversation search result"""
+        try:
+            if result.get('type') != 'conversation':
+                return False
+            if result.get('user_id') != self.user_id:
+                return False
+            return True
+        except Exception:
+            return False
+
+    def _within_date_range(self, timestamp_iso: Optional[str], start_date: Optional[str], end_date: Optional[str]) -> bool:
+        """Check if an ISO timestamp is within the provided date range (inclusive). If no range, accept."""
+        try:
+            if not (start_date or end_date):
+                return True
+            if not timestamp_iso:
+                return False
+            ts = datetime.fromisoformat(timestamp_iso)
+            if start_date and ts < datetime.fromisoformat(start_date):
+                return False
+            if end_date and ts > datetime.fromisoformat(end_date):
+                return False
+            return True
+        except Exception:
+            return False
+
+    def _matches_emotion(self, result: Dict[str, Any], emotion: str) -> bool:
+        """Check if a result matches the requested primary emotion."""
+        try:
+            if not emotion:
+                return True
+            return result.get("primary_emotion") == emotion
+        except Exception:
+            return False
     
     def get_conversation_by_id(self, conversation_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -308,10 +339,9 @@ class ConversationTracker:
         Returns:
             Conversation dictionary or None if not found
         """
-        if not self.is_connected:
-            if not self._connect():
-                logger.error("Failed to connect to vector store")
-                return None
+        if not self.is_connected and not self._connect():
+            logger.error(_ERR_CONNECT_FAIL)
+            return None
         
         try:
             # Check if we have this conversation in metadata
@@ -334,8 +364,8 @@ class ConversationTracker:
             logger.warning(f"Conversation ID {conversation_id} not found in vector store")
             return None
         except Exception as e:
-            logger.error(f"Error retrieving conversation: {str(e)}")
-            return None
+            logger.error(f"Error retrieving conversation: {str(e)}") 
+            return None 
     
     def get_recent_conversations(self, limit: int = 10) -> List[Dict[str, Any]]:
         """
@@ -347,10 +377,9 @@ class ConversationTracker:
         Returns:
             List of recent conversations
         """
-        if not self.is_connected:
-            if not self._connect():
-                logger.error("Failed to connect to vector store")
-                return []
+        if not self.is_connected and not self._connect():
+            logger.error(_ERR_CONNECT_FAIL)
+            return []
         
         try:
             # Get conversation IDs sorted by timestamp
@@ -370,8 +399,8 @@ class ConversationTracker:
             
             return results
         except Exception as e:
-            logger.error(f"Error retrieving recent conversations: {str(e)}")
-            return []
+            logger.error(f"Error retrieving recent conversations: {str(e)}") 
+            return [] 
     
     def get_conversations_by_date(self, 
                                 date: str, 
@@ -386,10 +415,9 @@ class ConversationTracker:
         Returns:
             List of conversations from the specified date
         """
-        if not self.is_connected:
-            if not self._connect():
-                logger.error("Failed to connect to vector store")
-                return []
+        if not self.is_connected and not self._connect():
+            logger.error(_ERR_CONNECT_FAIL)
+            return []
         
         try:
             # Parse date
@@ -412,13 +440,13 @@ class ConversationTracker:
                         # Break if we have enough
                         if len(matching) >= limit:
                             break
-                except:
+                except Exception:
                     continue
             
             return matching
         except Exception as e:
-            logger.error(f"Error retrieving conversations by date: {str(e)}")
-            return []
+            logger.error(f"Error retrieving conversations by date: {str(e)}") 
+            return [] 
     
     def get_conversations_by_emotion(self, 
                                     emotion: str, 
@@ -433,10 +461,9 @@ class ConversationTracker:
         Returns:
             List of conversations with the specified emotion
         """
-        if not self.is_connected:
-            if not self._connect():
-                logger.error("Failed to connect to vector store")
-                return []
+        if not self.is_connected and not self._connect():
+            logger.error(_ERR_CONNECT_FAIL)
+            return []
         
         try:
             # Check all conversations
@@ -453,13 +480,13 @@ class ConversationTracker:
                         # Break if we have enough
                         if len(matching) >= limit:
                             break
-                except:
+                except Exception:
                     continue
             
             return matching
         except Exception as e:
-            logger.error(f"Error retrieving conversations by emotion: {str(e)}")
-            return []
+            logger.error(f"Error retrieving conversations by emotion: {str(e)}") 
+            return [] 
     
     def get_emotion_distribution(self, 
                                 start_date: Optional[str] = None,
@@ -474,38 +501,27 @@ class ConversationTracker:
         Returns:
             Dictionary mapping emotions to counts
         """
-        if not self.is_connected:
-            if not self._connect():
-                logger.error("Failed to connect to vector store")
-                return {}
+        if not self.is_connected and not self._connect():
+            logger.error(_ERR_CONNECT_FAIL)
+            return {}
         
         try:
             # If no date range specified, return overall statistics
             if not start_date and not end_date:
                 return self.conversation_metadata["statistics"]["emotion_counts"]
-            
-            # Parse dates
-            start_dt = datetime.fromisoformat(start_date) if start_date else None
-            end_dt = datetime.fromisoformat(end_date) if end_date else None
-            
+
             # Count emotions in the specified date range
-            emotion_counts = {}
-            for conv_id, meta in self.conversation_metadata["conversations"].items():
+            emotion_counts: Dict[str, int] = {}
+            for meta in self.conversation_metadata["conversations"].values():
                 try:
-                    # Check if within date range
-                    timestamp = datetime.fromisoformat(meta["timestamp"])
-                    if start_dt and timestamp < start_dt:
+                    if not self._within_date_range(meta.get("timestamp"), start_date, end_date):
                         continue
-                    if end_dt and timestamp > end_dt:
-                        continue
-                    
-                    # Count emotion
                     emotion = meta.get("primary_emotion")
                     if emotion:
                         emotion_counts[emotion] = emotion_counts.get(emotion, 0) + 1
-                except:
+                except Exception:
                     continue
-            
+
             return emotion_counts
         except Exception as e:
             logger.error(f"Error getting emotion distribution: {str(e)}")
@@ -526,58 +542,48 @@ class ConversationTracker:
         Returns:
             Path to the exported file
         """
-        if not self.is_connected:
-            if not self._connect():
-                logger.error("Failed to connect to vector store")
-                return ""
+        if not self.is_connected and not self._connect():
+            logger.error(_ERR_CONNECT_FAIL)
+            return ""
         
         try:
             # Generate default output path if not provided
             if not output_path:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                output_path = str(self.user_data_dir / f"export_{timestamp}.json")
-            
+                output_path = self._default_export_path()
+
             # Prepare export data
             export_data = {
                 "user_id": self.user_id,
                 "export_timestamp": datetime.now().isoformat(),
-                "date_range": {
-                    "start": start_date,
-                    "end": end_date
-                },
-                "conversations": []
+                "date_range": {"start": start_date, "end": end_date},
+                "conversations": [],
             }
-            
-            # Parse dates
-            start_dt = datetime.fromisoformat(start_date) if start_date else None
-            end_dt = datetime.fromisoformat(end_date) if end_date else None
-            
+
             # Get all conversations within date range
             for conv_id, meta in self.conversation_metadata["conversations"].items():
                 try:
-                    # Check if within date range
-                    timestamp = datetime.fromisoformat(meta["timestamp"])
-                    if start_dt and timestamp < start_dt:
+                    if not self._within_date_range(meta.get("timestamp"), start_date, end_date):
                         continue
-                    if end_dt and timestamp > end_dt:
-                        continue
-                    
-                    # Get full conversation
                     conversation = self.get_conversation_by_id(conv_id)
                     if conversation:
                         export_data["conversations"].append(conversation)
-                except:
+                except Exception:
                     continue
-            
+
             # Save to file
             with open(output_path, 'w') as f:
                 json.dump(export_data, f, indent=2)
-            
+
             logger.info(f"Exported {len(export_data['conversations'])} conversations to {output_path}")
             return output_path
         except Exception as e:
             logger.error(f"Error exporting conversations: {str(e)}")
             return ""
+
+    def _default_export_path(self) -> str:
+        """Create a default export file path under the user's conversation folder."""
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return str(self.user_data_dir / f"export_{ts}.json")
     
     def cleanup_old_conversations(self) -> int:
         """
@@ -586,15 +592,14 @@ class ConversationTracker:
         Returns:
             Number of conversations removed
         """
-        if not self.is_connected:
-            if not self._connect():
-                logger.error("Failed to connect to vector store")
-                return 0
+        if not self.is_connected and not self._connect():
+            logger.error(_ERR_CONNECT_FAIL)
+            return 0
         
         try:
             # Calculate cutoff date
             cutoff_date = datetime.now() - timedelta(days=self.retention_days)
-            cutoff_str = cutoff_date.isoformat()
+            # cutoff string omitted (unused)
             
             # Find conversations to remove
             to_remove = []
@@ -603,7 +608,7 @@ class ConversationTracker:
                     timestamp = datetime.fromisoformat(meta["timestamp"])
                     if timestamp < cutoff_date:
                         to_remove.append(conv_id)
-                except:
+                except Exception:
                     continue
             
             # Remove conversations
@@ -635,8 +640,8 @@ class ConversationTracker:
             logger.info(f"Removed {removed_count} old conversations")
             return removed_count
         except Exception as e:
-            logger.error(f"Error cleaning up old conversations: {str(e)}")
-            return 0
+            logger.error(f"Error cleaning up old conversations: {str(e)}") 
+            return 0 
     
     def get_statistics(self) -> Dict[str, Any]:
         """
@@ -669,7 +674,7 @@ class ConversationTracker:
             
             return stats
         except Exception as e:
-            logger.error(f"Error getting statistics: {str(e)}")
+            logger.error(f"Error getting statistics: {str(e)}") 
             return {
                 "total_conversations": 0,
                 "total_messages": 0,

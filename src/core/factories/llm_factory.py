@@ -37,46 +37,29 @@ class LLMFactory:
     
     @classmethod
     def register_provider(
-        self,
+        cls,
         provider_type: LLMProviderType,
         provider_class: Type[LLMInterface]
     ) -> None:
-        """
-        Register an LLM provider class.
-        
-        Args:
-            provider_type: Type of the provider
-            provider_class: Class implementing LLMInterface
-        """
+        """Register an LLM provider class."""
         if not issubclass(provider_class, LLMInterface):
-            raise TypeError(f"Provider class must implement LLMInterface")
-        
-        self._providers[provider_type] = provider_class
+            raise TypeError("Provider class must implement LLMInterface")
+        cls._providers[provider_type] = provider_class
     
     @classmethod
-    def unregister_provider(self, provider_type: LLMProviderType) -> None:
-        """
-        Unregister an LLM provider.
-        
-        Args:
-            provider_type: Type of the provider to unregister
-        """
-        if provider_type in self._providers:
-            del self._providers[provider_type]
+    def unregister_provider(cls, provider_type: LLMProviderType) -> None:
+        """Unregister an LLM provider."""
+        if provider_type in cls._providers:
+            del cls._providers[provider_type]
     
     @classmethod
-    def get_available_providers(self) -> list[LLMProviderType]:
-        """
-        Get list of available provider types.
-        
-        Returns:
-            List of available provider types
-        """
-        return list(self._providers.keys())
+    def get_available_providers(cls) -> list[LLMProviderType]:
+        """Get list of available provider types."""
+        return list(cls._providers.keys())
     
     @classmethod
     async def create_provider(
-        self,
+        cls,
         provider_type: LLMProviderType,
         config: LLMConfig,
         instance_id: Optional[str] = None
@@ -96,13 +79,12 @@ class LLMFactory:
             ProviderNotFoundError: If provider type is not registered
             ProviderInitializationError: If provider initialization fails
         """
-        if provider_type not in self._providers:
+        if provider_type not in cls._providers:
             raise ProviderNotFoundError(
-                f"LLM provider '{provider_type.value}' is not registered. "
-                f"Available providers: {[p.value for p in self._providers.keys()]}"
+                "LLM provider '" + provider_type.value + "' is not registered. "
+                + "Available providers: " + str([p.value for p in cls._providers.keys()])
             )
-        
-        provider_class = self._providers[provider_type]
+        provider_class = cls._providers[provider_type]
         
         try:
             # Create instance
@@ -116,8 +98,7 @@ class LLMFactory:
             
             # Store instance if ID provided
             if instance_id:
-                self._instances[instance_id] = provider
-            
+                cls._instances[instance_id] = provider
             return provider
             
         except Exception as e:
@@ -129,7 +110,7 @@ class LLMFactory:
     
     @classmethod
     async def create_from_config(
-        self,
+        cls,
         config: Dict[str, Any],
         instance_id: Optional[str] = None
     ) -> LLMInterface:
@@ -174,24 +155,15 @@ class LLMFactory:
             top_k=config.get("top_k"),
             additional_params=config.get("additional_params", {})
         )
-        
-        return await self.create_provider(provider_type, llm_config, instance_id)
+        return await cls.create_provider(provider_type, llm_config, instance_id)
     
     @classmethod
-    def get_instance(self, instance_id: str) -> Optional[LLMInterface]:
-        """
-        Get a stored provider instance by ID.
-        
-        Args:
-            instance_id: ID of the instance to retrieve
-            
-        Returns:
-            Provider instance if found, None otherwise
-        """
-        return self._instances.get(instance_id)
+    def get_instance(cls, instance_id: str) -> Optional[LLMInterface]:
+        """Get a stored provider instance by ID."""
+        return cls._instances.get(instance_id)
     
     @classmethod
-    def remove_instance(self, instance_id: str) -> bool:
+    def remove_instance(cls, instance_id: str) -> bool:
         """
         Remove a stored provider instance.
         
@@ -201,39 +173,28 @@ class LLMFactory:
         Returns:
             True if instance was removed, False if not found
         """
-        if instance_id in self._instances:
-            del self._instances[instance_id]
+        if instance_id in cls._instances:
+            del cls._instances[instance_id]
             return True
         return False
     
     @classmethod
-    async def shutdown_all_instances(self) -> None:
+    async def shutdown_all_instances(cls) -> None:
         """Shutdown all stored provider instances."""
         shutdown_tasks = []
-        for instance in self._instances.values():
+        for instance in cls._instances.values():
             if hasattr(instance, 'shutdown'):
                 shutdown_tasks.append(instance.shutdown())
-        
         if shutdown_tasks:
             await asyncio.gather(*shutdown_tasks, return_exceptions=True)
-        
-        self._instances.clear()
+        cls._instances.clear()
     
     @classmethod
-    def get_provider_info(self, provider_type: LLMProviderType) -> Dict[str, Any]:
-        """
-        Get information about a registered provider.
-        
-        Args:
-            provider_type: Type of provider to get info for
-            
-        Returns:
-            Dictionary containing provider information
-        """
-        if provider_type not in self._providers:
+    def get_provider_info(cls, provider_type: LLMProviderType) -> Dict[str, Any]:
+        """Get information about a registered provider."""
+        if provider_type not in cls._providers:
             return {"error": "Provider not registered"}
-        
-        provider_class = self._providers[provider_type]
+        provider_class = cls._providers[provider_type]
         return {
             "provider_type": provider_type.value,
             "class_name": provider_class.__name__,
@@ -242,29 +203,19 @@ class LLMFactory:
         }
     
     @classmethod
-    async def health_check_all(self) -> Dict[str, Any]:
-        """
-        Perform health check on all provider instances.
-        
-        Returns:
-            Dictionary containing health status of all instances
-        """
+    async def health_check_all(cls) -> Dict[str, Any]:
+        """Perform health check on all provider instances."""
         health_results = {}
-        
-        for instance_id, provider in self._instances.items():
+        for instance_id, provider in cls._instances.items():
             try:
                 health_info = await provider.health_check()
                 health_results[instance_id] = health_info
             except Exception as e:
-                health_results[instance_id] = {
-                    "status": "error",
-                    "error": str(e)
-                }
-        
+                health_results[instance_id] = {"status": "error", "error": str(e)}
         return {
-            "total_instances": len(self._instances),
-            "registered_providers": [p.value for p in self._providers.keys()],
-            "instances": health_results
+            "total_instances": len(cls._instances),
+            "registered_providers": [p.value for p in cls._providers.keys()],
+            "instances": health_results,
         }
 
 
@@ -287,21 +238,21 @@ def _register_builtin_providers():
     
     try:
         # Try to register Anthropic provider
-        from ...providers.llm.anthropic_provider import AnthropicProvider
+        from ...providers.llm.anthropic_provider import AnthropicProvider  # type: ignore[reportMissingImports]
         LLMFactory.register_provider(LLMProviderType.ANTHROPIC, AnthropicProvider)
     except ImportError:
         pass
     
     try:
         # Try to register HuggingFace provider
-        from ...providers.llm.huggingface_provider import HuggingFaceProvider
+        from ...providers.llm.huggingface_provider import HuggingFaceProvider  # type: ignore[reportMissingImports]
         LLMFactory.register_provider(LLMProviderType.HUGGINGFACE, HuggingFaceProvider)
     except ImportError:
         pass
     
     try:
         # Try to register Ollama provider
-        from ...providers.llm.ollama_provider import OllamaProvider
+        from ...providers.llm.ollama_provider import OllamaProvider  # type: ignore[reportMissingImports]
         LLMFactory.register_provider(LLMProviderType.OLLAMA, OllamaProvider)
     except ImportError:
         pass

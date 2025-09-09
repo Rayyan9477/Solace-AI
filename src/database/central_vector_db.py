@@ -25,7 +25,11 @@ from enum import Enum
 import numpy as np
 
 # from sentence_transformers import SentenceTransformer  # Lazy import when needed
-import faiss
+# Make faiss optional to allow running without it installed
+try:
+    import faiss  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    faiss = None
 
 from src.database.vector_store import FaissVectorStore
 from src.database.conversation_tracker import ConversationTracker

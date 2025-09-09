@@ -638,14 +638,21 @@ class ClinicalGuidelinesDB:
         elif rule.rule_type == "pattern" and rule.pattern:
             import re
             matches = re.findall(rule.pattern, text_to_check, re.IGNORECASE)
-        if matches:
+            if matches:
+                matched_content = (
+                    matches[0]
+                    if isinstance(matches[0], str)
+                    else " ".join(matches[0])
+                    if isinstance(matches[0], tuple)
+                    else str(matches[0])
+                )
                 return {
                     "rule_id": rule.rule_id,
                     "guideline_id": rule.guideline_id,
                     "violation_type": "pattern",
-            "matched_content": matches[0] if isinstance(matches[0], str) else " ".join(matches[0]) if isinstance(matches[0], tuple) else str(matches[0]),
+                    "matched_content": matched_content,
                     "message": rule.violation_message,
-                    "severity": rule.severity
+                    "severity": rule.severity,
                 }
         
         return None
