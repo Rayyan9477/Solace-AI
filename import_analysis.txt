@@ -1,0 +1,2016 @@
+================================================================================
+IMPORT DEPENDENCY ANALYSIS REPORT
+================================================================================
+
+Total modules analyzed: 199
+Total import relationships: 1587
+
+Circular dependencies found: 0
+No circular dependencies detected!
+
+--------------------------------------------------------------------------------
+
+HIGHLY COUPLED MODULES (>= 5 connections):
+--------------------------------------------------------------------------------
+  diagnosis.enterprise_multimodal_pipeline: 33 connections
+  utils.logger: 32 connections
+  main: 26 connections
+  database.central_vector_db: 24 connections
+  agents.adaptive_learning_integration: 23 connections
+  diagnosis.adaptive_learning: 22 connections
+  agents.adaptive_learning_agent: 20 connections
+  agents.insights_generation_system: 20 connections
+  agents.base_agent: 19 connections
+  agents.test_adaptive_learning_system: 19 connections
+
+================================================================================
+
+================================================================================
+FULL DEPENDENCY GRAPH:
+================================================================================
+
+__init__:
+  -> agents
+  -> analysis
+  -> clinical_decision_support
+  -> config
+  -> database
+  -> diagnosis
+  -> feature_extractors
+  -> ml_models
+  -> utils
+
+agents.__init__:
+  -> agents.agent_orchestrator
+  -> agents.base_agent
+  -> agents.chat_agent
+  -> agents.comprehensive_diagnosis_agent
+  -> agents.diagnosis_agent
+  -> agents.emotion_agent
+  -> agents.enhanced_diagnosis_agent
+  -> agents.integrated_diagnosis_agent
+  -> agents.personality_agent
+  -> agents.safety_agent
+  -> agents.search_agent
+
+agents.adaptive_learning_agent:
+  -> agents.base_agent
+  -> asyncio
+  -> collections
+  -> concurrent
+  -> database.central_vector_db
+  -> dataclasses
+  -> datetime
+  -> diagnosis.adaptive_learning
+  -> json
+  -> logging
+  -> models.llm
+  -> numpy
+  -> os
+  -> pickle
+  -> sklearn
+  -> torch
+  -> typing
+  -> utils.logger
+
+agents.adaptive_learning_integration:
+  -> agents.adaptive_learning_agent
+  -> agents.agent_orchestrator
+  -> agents.base_agent
+  -> agents.feedback_integration_system
+  -> agents.insights_generation_system
+  -> agents.outcome_tracker
+  -> agents.pattern_recognition_engine
+  -> agents.personalization_engine
+  -> agents.privacy_protection_system
+  -> agents.supervisor_agent
+  -> asyncio
+  -> collections
+  -> database.central_vector_db
+  -> dataclasses
+  -> datetime
+  -> diagnosis.adaptive_learning
+  -> json
+  -> logging
+  -> os
+  -> typing
+  -> utils.logger
+
+agents.agent_orchestrator:
+  -> abc
+  -> asyncio
+  -> collections
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> inspect
+  -> json
+  -> src
+  -> threading
+  -> time
+  -> typing
+  -> utils
+  -> uuid
+  -> weakref
+
+agents.base_agent:
+  -> agno
+  -> datetime
+  -> httpx
+  -> langchain
+  -> langchain_core
+  -> logging
+  -> typing
+
+agents.basic_integration_test:
+  -> datetime
+  -> insights_generation_system
+  -> os
+  -> privacy_protection_system
+  -> sys
+
+agents.chat_agent:
+  -> agents.base_agent
+  -> agno
+  -> collections
+  -> datetime
+  -> json
+  -> langchain
+  -> logging
+  -> numpy
+  -> os
+  -> src
+  -> typing
+
+agents.comprehensive_diagnosis_agent:
+  -> asyncio
+  -> logging
+  -> src
+  -> typing
+
+agents.crawler_agent:
+  -> agents.base_agent
+  -> agno
+  -> asyncio
+  -> bs4
+  -> concurrent
+  -> datetime
+  -> langchain
+  -> logging
+  -> requests
+  -> scrapy
+  -> src
+  -> typing
+  -> urllib
+
+agents.diagnosis_agent:
+  -> agents.base_agent
+  -> agno
+  -> datetime
+  -> langchain
+  -> logging
+  -> spacy
+  -> src
+  -> transformers
+  -> typing
+
+agents.diagnosis_agent_compatibility:
+  -> asyncio
+  -> datetime
+  -> logging
+  -> src
+  -> typing
+
+agents.emotion_agent:
+  -> agents.base_agent
+  -> agno
+  -> datetime
+  -> langchain
+  -> logging
+  -> src
+  -> typing
+  -> vaderSentiment
+
+agents.enhanced_diagnosis_agent:
+  -> agents.base_agent
+  -> agno
+  -> asyncio
+  -> datetime
+  -> langchain
+  -> logging
+  -> os
+  -> pathlib
+  -> spacy
+  -> src
+  -> sys
+  -> time
+  -> transformers
+  -> typing
+  -> uuid
+
+agents.enhanced_integrated_diagnosis_agent:
+  -> agents.base_agent
+  -> agno
+  -> datetime
+  -> json
+  -> langchain
+  -> logging
+  -> os
+  -> pathlib
+  -> src
+  -> sys
+  -> typing
+
+agents.feedback_integration_system:
+  -> asyncio
+  -> collections
+  -> dataclasses
+  -> datetime
+  -> diagnosis.adaptive_learning
+  -> enum
+  -> json
+  -> logging
+  -> numpy
+  -> pickle
+  -> re
+  -> sklearn
+  -> torch
+  -> typing
+  -> utils.logger
+
+agents.insights_generation_system:
+  -> agents.feedback_integration_system
+  -> agents.outcome_tracker
+  -> agents.pattern_recognition_engine
+  -> agents.personalization_engine
+  -> collections
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> json
+  -> logging
+  -> matplotlib
+  -> numpy
+  -> pandas
+  -> seaborn
+  -> sklearn
+  -> typing
+  -> utils.logger
+
+agents.integrated_diagnosis_agent:
+  -> agents.base_agent
+  -> agents.diagnosis_agent
+  -> agents.personality_agent
+  -> agno
+  -> asyncio
+  -> datetime
+  -> json
+  -> langchain
+  -> logging
+  -> os
+  -> random
+  -> typing
+
+agents.outcome_tracker:
+  -> asyncio
+  -> collections
+  -> dataclasses
+  -> datetime
+  -> diagnosis.adaptive_learning
+  -> enum
+  -> json
+  -> logging
+  -> numpy
+  -> pandas
+  -> pickle
+  -> sklearn
+  -> typing
+  -> utils.logger
+  -> warnings
+
+agents.pattern_recognition_engine:
+  -> asyncio
+  -> collections
+  -> dataclasses
+  -> datetime
+  -> diagnosis.adaptive_learning
+  -> json
+  -> logging
+  -> networkx
+  -> numpy
+  -> pickle
+  -> sklearn
+  -> torch
+  -> typing
+  -> utils.logger
+
+agents.personality_agent:
+  -> agents.base_agent
+  -> agno
+  -> datetime
+  -> json
+  -> langchain
+  -> logging
+  -> os
+  -> src
+  -> sys
+  -> typing
+
+agents.personalization_engine:
+  -> asyncio
+  -> collections
+  -> dataclasses
+  -> datetime
+  -> diagnosis.adaptive_learning
+  -> json
+  -> logging
+  -> numpy
+  -> pickle
+  -> sklearn
+  -> torch
+  -> typing
+  -> utils.logger
+
+agents.privacy_protection_system:
+  -> base64
+  -> collections
+  -> cryptography
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> hashlib
+  -> hmac
+  -> json
+  -> logging
+  -> numpy
+  -> random
+  -> typing
+  -> utils.logger
+
+agents.process_message_template:
+
+agents.safety_agent:
+  -> agents.base_agent
+  -> agno
+  -> asyncio
+  -> datetime
+  -> langchain
+  -> logging
+  -> typing
+
+agents.search_agent:
+  -> datetime
+  -> json
+  -> langchain
+  -> langchain_core
+  -> typing
+
+agents.simple_integration_test:
+  -> agents.adaptive_learning_integration
+  -> agents.insights_generation_system
+  -> agents.privacy_protection_system
+  -> asyncio
+  -> datetime
+  -> json
+  -> os
+  -> sys
+  -> typing
+
+agents.supervisor_agent:
+  -> asyncio
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> json
+  -> numpy
+  -> re
+  -> src
+  -> time
+  -> typing
+
+agents.test_adaptive_learning_system:
+  -> agents.adaptive_learning_agent
+  -> agents.adaptive_learning_integration
+  -> agents.feedback_integration_system
+  -> agents.insights_generation_system
+  -> agents.outcome_tracker
+  -> agents.pattern_recognition_engine
+  -> agents.personalization_engine
+  -> agents.privacy_protection_system
+  -> asyncio
+  -> datetime
+  -> diagnosis.adaptive_learning
+  -> json
+  -> logging
+  -> os
+  -> sys
+  -> tempfile
+  -> traceback
+  -> typing
+  -> utils.logger
+
+agents.therapeutic_friction.base_friction_agent:
+  -> abc
+  -> asyncio
+  -> datetime
+  -> enum
+  -> src
+  -> typing
+
+agents.therapeutic_friction.breakthrough_detection_agent:
+  -> agents.therapeutic_friction.base_friction_agent
+  -> datetime
+  -> math
+  -> re
+  -> typing
+
+agents.therapeutic_friction.friction_coordinator:
+  -> agents.therapeutic_friction.base_friction_agent
+  -> agents.therapeutic_friction.breakthrough_detection_agent
+  -> agents.therapeutic_friction.readiness_assessment_agent
+  -> asyncio
+  -> datetime
+  -> enum
+  -> src
+  -> statistics
+  -> typing
+
+agents.therapeutic_friction.readiness_assessment_agent:
+  -> agents.therapeutic_friction.base_friction_agent
+  -> datetime
+  -> re
+  -> src
+  -> typing
+
+agents.therapeutic_friction_agent:
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> json
+  -> math
+  -> random
+  -> src
+  -> typing
+
+agents.therapy_agent:
+  -> datetime
+  -> enum
+  -> json
+  -> random
+  -> src
+  -> typing
+
+agents.validation.__init__:
+  -> agents.validation.response_validator
+
+agents.validation.response_validator:
+  -> asyncio
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> json
+  -> numpy
+  -> re
+  -> src
+  -> typing
+
+analysis.__init__:
+
+analysis.conversation_analysis:
+  -> argparse
+  -> asyncio
+  -> datetime
+  -> json
+  -> os
+  -> pathlib
+  -> src
+  -> sys
+  -> typing
+
+analysis.emotion_analysis:
+  -> argparse
+  -> asyncio
+  -> datetime
+  -> json
+  -> matplotlib
+  -> numpy
+  -> os
+  -> pandas
+  -> pathlib
+  -> src
+  -> sys
+  -> typing
+
+auditing.__init__:
+  -> auditing.audit_system
+
+auditing.audit_system:
+  -> collections
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> gzip
+  -> hashlib
+  -> json
+  -> os
+  -> pathlib
+  -> sqlite3
+  -> src
+  -> threading
+  -> typing
+  -> uuid
+
+cli.__init__:
+
+cli.voice_chat:
+  -> argparse
+  -> asyncio
+  -> logging
+  -> os
+  -> src
+  -> sys
+  -> time
+  -> typing
+
+clinical_decision_support.__init__:
+  -> clinical_decision_support.alerts
+  -> clinical_decision_support.clinical_guidelines
+  -> clinical_decision_support.diagnostic_algorithms
+  -> clinical_decision_support.risk_assessment
+  -> clinical_decision_support.rule_engine
+  -> clinical_decision_support.treatment_recommendations
+
+clinical_decision_support.alerts:
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> logging
+  -> typing
+
+clinical_decision_support.clinical_guidelines:
+  -> dataclasses
+  -> datetime
+  -> logging
+  -> typing
+
+clinical_decision_support.diagnostic_algorithms:
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> json
+  -> logging
+  -> typing
+
+clinical_decision_support.risk_assessment:
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> logging
+  -> typing
+
+clinical_decision_support.rule_engine:
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> json
+  -> logging
+  -> re
+  -> typing
+
+clinical_decision_support.treatment_recommendations:
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> logging
+  -> typing
+
+components.__init__:
+
+components.base_module:
+  -> abc
+  -> asyncio
+  -> importlib
+  -> inspect
+  -> logging
+  -> pathlib
+  -> pkgutil
+  -> src
+  -> sys
+  -> time
+  -> typing
+
+components.central_vector_db_module:
+  -> json
+  -> logging
+  -> src
+  -> typing
+
+components.diagnosis_results:
+  -> json
+  -> logging
+  -> os
+  -> pathlib
+  -> typing
+
+components.dynamic_personality_assessment:
+  -> asyncio
+  -> json
+  -> logging
+  -> personality.big_five
+  -> personality.mbti
+  -> random
+  -> re
+  -> streamlit
+  -> time
+  -> typing
+
+components.integrated_assessment:
+  -> asyncio
+  -> json
+  -> logging
+  -> os
+  -> typing
+
+components.llm_module:
+  -> json
+  -> logging
+  -> os
+  -> pathlib
+  -> src
+  -> time
+  -> typing
+
+components.ui_manager:
+  -> json
+  -> logging
+  -> os
+  -> pathlib
+  -> src
+  -> typing
+
+components.vector_store_module:
+  -> logging
+  -> os
+  -> pathlib
+  -> src
+  -> typing
+
+components.voice_component:
+  -> asyncio
+  -> logging
+  -> queue
+  -> time
+  -> typing
+
+components.voice_module:
+  -> logging
+  -> os
+  -> pathlib
+  -> src
+  -> tempfile
+  -> typing
+
+config.__init__:
+
+config.settings:
+  -> dotenv
+  -> os
+  -> pathlib
+  -> typing
+
+config.supervision_config:
+  -> dataclasses
+  -> enum
+  -> json
+  -> os
+  -> pathlib
+  -> src
+  -> typing
+  -> yaml
+
+core.exceptions.__init__:
+  -> core.exceptions.agent_exceptions
+  -> core.exceptions.base_exceptions
+  -> core.exceptions.factory_exceptions
+  -> core.exceptions.llm_exceptions
+  -> core.exceptions.security_exceptions
+  -> core.exceptions.storage_exceptions
+
+core.exceptions.agent_exceptions:
+  -> core.exceptions.base_exceptions
+  -> typing
+
+core.exceptions.base_exceptions:
+  -> typing
+
+core.exceptions.factory_exceptions:
+  -> core.exceptions.base_exceptions
+  -> typing
+
+core.exceptions.llm_exceptions:
+  -> core.exceptions.base_exceptions
+  -> typing
+
+core.exceptions.security_exceptions:
+  -> core.exceptions.base_exceptions
+  -> typing
+
+core.exceptions.storage_exceptions:
+  -> core.exceptions.base_exceptions
+  -> typing
+
+core.factories.__init__:
+  -> core.factories.agent_factory
+  -> core.factories.llm_factory
+  -> core.factories.storage_factory
+
+core.factories.llm_factory:
+  -> asyncio
+  -> core.exceptions.factory_exceptions
+  -> core.interfaces.llm_interface
+  -> enum
+  -> providers.llm.anthropic_provider
+  -> providers.llm.gemini_provider
+  -> providers.llm.huggingface_provider
+  -> providers.llm.ollama_provider
+  -> providers.llm.openai_provider
+  -> typing
+
+core.interfaces.__init__:
+  -> core.interfaces.agent_interface
+  -> core.interfaces.config_interface
+  -> core.interfaces.event_interface
+  -> core.interfaces.llm_interface
+  -> core.interfaces.logger_interface
+  -> core.interfaces.storage_interface
+
+core.interfaces.agent_interface:
+  -> abc
+  -> dataclasses
+  -> enum
+  -> typing
+
+core.interfaces.config_interface:
+  -> abc
+  -> dataclasses
+  -> enum
+  -> typing
+
+core.interfaces.event_interface:
+  -> abc
+  -> asyncio
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> typing
+  -> uuid
+
+core.interfaces.llm_interface:
+  -> abc
+  -> dataclasses
+  -> enum
+  -> typing
+
+core.interfaces.logger_interface:
+  -> abc
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> json
+  -> typing
+
+core.interfaces.storage_interface:
+  -> abc
+  -> dataclasses
+  -> enum
+  -> json
+  -> typing
+
+dashboard.supervision_dashboard:
+  -> asyncio
+  -> base64
+  -> datetime
+  -> io
+  -> json
+  -> numpy
+  -> pandas
+  -> plotly
+  -> requests
+  -> streamlit
+  -> typing
+
+database.__init__:
+
+database.central_vector_db:
+  -> datetime
+  -> enum
+  -> faiss
+  -> json
+  -> logging
+  -> numpy
+  -> os
+  -> pathlib
+  -> src
+  -> time
+  -> typing
+  -> uuid
+
+database.conversation_tracker:
+  -> datetime
+  -> faiss
+  -> json
+  -> logging
+  -> numpy
+  -> os
+  -> pathlib
+  -> src
+  -> typing
+  -> uuid
+
+database.therapeutic_friction_vector_manager:
+  -> asyncio
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> json
+  -> numpy
+  -> os
+  -> src
+  -> typing
+
+database.vector_store:
+  -> abc
+  -> datetime
+  -> faiss
+  -> json
+  -> logging
+  -> numpy
+  -> os
+  -> pathlib
+  -> qdrant_client
+  -> sentence_transformers
+  -> src
+  -> typing
+
+diagnosis.__init__:
+  -> diagnosis.adaptive_learning
+  -> diagnosis.comprehensive_diagnosis
+  -> diagnosis.cultural_sensitivity
+  -> diagnosis.differential_diagnosis
+  -> diagnosis.enhanced_diagnosis
+  -> diagnosis.enhanced_integrated_system
+  -> diagnosis.integrated_diagnosis
+  -> diagnosis.temporal_analysis
+  -> diagnosis.therapeutic_friction
+
+diagnosis.adaptive_learning:
+  -> asyncio
+  -> collections
+  -> database.central_vector_db
+  -> dataclasses
+  -> datetime
+  -> json
+  -> logging
+  -> models.llm
+  -> numpy
+  -> os
+  -> pickle
+  -> typing
+  -> utils.logger
+
+diagnosis.comprehensive_diagnosis:
+  -> asyncio
+  -> collections
+  -> datetime
+  -> faiss
+  -> json
+  -> logging
+  -> numpy
+  -> os
+  -> pathlib
+  -> re
+  -> src
+  -> time
+  -> typing
+  -> utils
+
+diagnosis.comprehensive_diagnostic_report:
+  -> asyncio
+  -> base64
+  -> collections
+  -> database.central_vector_db
+  -> dataclasses
+  -> datetime
+  -> diagnosis.differential_diagnosis
+  -> diagnosis.enhanced_integrated_system
+  -> io
+  -> json
+  -> logging
+  -> matplotlib
+  -> models.llm
+  -> numpy
+  -> research.real_time_research
+  -> seaborn
+  -> typing
+  -> utils.logger
+
+diagnosis.cultural_sensitivity:
+  -> asyncio
+  -> collections
+  -> database.central_vector_db
+  -> dataclasses
+  -> datetime
+  -> json
+  -> logging
+  -> models.llm
+  -> numpy
+  -> re
+  -> typing
+  -> utils.logger
+
+diagnosis.diagnosis_example:
+  -> asyncio
+  -> json
+  -> logging
+  -> pathlib
+  -> src
+
+diagnosis.differential_diagnosis:
+  -> asyncio
+  -> collections
+  -> database.central_vector_db
+  -> dataclasses
+  -> datetime
+  -> json
+  -> logging
+  -> models.llm
+  -> numpy
+  -> re
+  -> typing
+  -> utils.logger
+
+diagnosis.enhanced_diagnosis:
+  -> asyncio
+  -> datetime
+  -> diagnosis.integrated_diagnosis
+  -> faiss
+  -> json
+  -> logging
+  -> numpy
+  -> os
+  -> pathlib
+  -> sentence_transformers
+  -> src
+  -> time
+  -> typing
+
+diagnosis.enhanced_diagnosis_example:
+  -> asyncio
+  -> database.central_vector_db
+  -> datetime
+  -> diagnosis.comprehensive_diagnostic_report
+  -> diagnosis.enhanced_integrated_system
+  -> json
+  -> typing
+  -> utils.logger
+
+diagnosis.enhanced_integrated_system:
+  -> asyncio
+  -> database.central_vector_db
+  -> dataclasses
+  -> datetime
+  -> diagnosis.adaptive_learning
+  -> diagnosis.cultural_sensitivity
+  -> diagnosis.differential_diagnosis
+  -> diagnosis.temporal_analysis
+  -> diagnosis.therapeutic_friction
+  -> json
+  -> logging
+  -> memory.enhanced_memory_system
+  -> research.real_time_research
+  -> traceback
+  -> typing
+  -> utils.logger
+
+diagnosis.enterprise.__init__:
+  -> diagnosis.enterprise.clinical
+  -> diagnosis.enterprise.config
+  -> diagnosis.enterprise.core
+  -> diagnosis.enterprise.feature_extraction
+  -> diagnosis.enterprise.models
+  -> diagnosis.enterprise.utils
+
+diagnosis.enterprise.config.__init__:
+  -> diagnosis.enterprise.config.base_config
+  -> diagnosis.enterprise.config.constants
+  -> diagnosis.enterprise.config.validation
+
+diagnosis.enterprise.config.base_config:
+  -> dataclasses
+  -> diagnosis.enterprise.config.constants
+  -> typing
+
+diagnosis.enterprise.config.constants:
+  -> enum
+  -> typing
+
+diagnosis.enterprise.config.validation:
+  -> diagnosis.enterprise.config.base_config
+  -> logging
+  -> typing
+
+diagnosis.enterprise.models.__init__:
+  -> diagnosis.enterprise.models.base
+  -> diagnosis.enterprise.models.bayesian
+  -> diagnosis.enterprise.models.fusion
+  -> diagnosis.enterprise.models.temporal
+  -> diagnosis.enterprise.models.uncertainty
+
+diagnosis.enterprise.models.base:
+  -> abc
+  -> logging
+  -> torch
+  -> typing
+
+diagnosis.enterprise.models.bayesian:
+  -> diagnosis.enterprise.models.base
+  -> logging
+  -> numpy
+  -> torch
+  -> typing
+
+diagnosis.enterprise.models.fusion:
+  -> diagnosis.enterprise.models.base
+  -> logging
+  -> torch
+  -> typing
+
+diagnosis.enterprise_multimodal_pipeline:
+  -> asyncio
+  -> collections
+  -> config.settings
+  -> database.vector_store
+  -> dataclasses
+  -> datetime
+  -> diagnosis.comprehensive_diagnosis
+  -> enum
+  -> faiss
+  -> hashlib
+  -> json
+  -> logging
+  -> models.llm
+  -> numpy
+  -> os
+  -> pandas
+  -> pathlib
+  -> qdrant_client
+  -> scipy
+  -> secrets
+  -> sentence_transformers
+  -> sklearn
+  -> tensorflow
+  -> time
+  -> torch
+  -> transformers
+  -> typing
+  -> utils.agentic_rag
+  -> utils.logger
+  -> uuid
+  -> warnings
+
+diagnosis.enterprise_pipeline_example:
+  -> analysis.conversation_analysis
+  -> asyncio
+  -> components.voice_component
+  -> datetime
+  -> diagnosis.enterprise_multimodal_pipeline
+  -> json
+  -> logging
+  -> numpy
+  -> personality.big_five
+  -> typing
+  -> utils.logger
+
+diagnosis.integrated_diagnosis:
+  -> datetime
+  -> faiss
+  -> json
+  -> logging
+  -> numpy
+  -> os
+  -> pathlib
+  -> src
+  -> typing
+
+diagnosis.model_management:
+  -> asyncio
+  -> dataclasses
+  -> datetime
+  -> diagnosis.enterprise_multimodal_pipeline
+  -> hashlib
+  -> json
+  -> logging
+  -> numpy
+  -> os
+  -> pathlib
+  -> pickle
+  -> shutil
+  -> sklearn
+  -> torch
+  -> typing
+  -> utils.logger
+  -> warnings
+
+diagnosis.temporal_analysis:
+  -> asyncio
+  -> collections
+  -> database.central_vector_db
+  -> dataclasses
+  -> datetime
+  -> json
+  -> logging
+  -> numpy
+  -> typing
+  -> utils.logger
+
+diagnosis.therapeutic_friction:
+  -> asyncio
+  -> collections
+  -> database.central_vector_db
+  -> dataclasses
+  -> datetime
+  -> json
+  -> logging
+  -> models.llm
+  -> numpy
+  -> re
+  -> typing
+  -> utils.logger
+
+enterprise.analytics_dashboard:
+  -> abc
+  -> asyncio
+  -> collections
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> json
+  -> logging
+  -> numpy
+  -> pandas
+  -> scipy
+  -> sklearn
+  -> src
+  -> statistics
+  -> threading
+  -> time
+  -> typing
+
+enterprise.clinical_compliance:
+  -> abc
+  -> asyncio
+  -> collections
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> hashlib
+  -> json
+  -> logging
+  -> src
+  -> statistics
+  -> threading
+  -> time
+  -> typing
+  -> uuid
+
+enterprise.data_reliability:
+  -> abc
+  -> asyncio
+  -> collections
+  -> contextlib
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> hashlib
+  -> json
+  -> logging
+  -> pickle
+  -> sqlite3
+  -> src
+  -> statistics
+  -> threading
+  -> time
+  -> typing
+  -> uuid
+
+enterprise.dependency_injection:
+  -> abc
+  -> asyncio
+  -> collections
+  -> contextlib
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> functools
+  -> inspect
+  -> logging
+  -> src
+  -> threading
+  -> time
+  -> typing
+  -> weakref
+
+enterprise.enterprise_orchestrator:
+
+enterprise.knowledge_integration:
+  -> abc
+  -> aiohttp
+  -> asyncio
+  -> collections
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> feedparser
+  -> hashlib
+  -> json
+  -> logging
+  -> re
+  -> src
+  -> threading
+  -> time
+  -> typing
+  -> urllib
+  -> xml
+
+enterprise.quality_assurance:
+  -> abc
+  -> asyncio
+  -> collections
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> json
+  -> logging
+  -> src
+  -> statistics
+  -> threading
+  -> time
+  -> typing
+  -> uuid
+
+enterprise.real_time_monitoring:
+  -> abc
+  -> asyncio
+  -> collections
+  -> contextlib
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> json
+  -> logging
+  -> src
+  -> statistics
+  -> threading
+  -> time
+  -> typing
+  -> uuid
+  -> weakref
+
+feature_extractors.__init__:
+  -> feature_extractors.base
+  -> feature_extractors.behavioral_extractors
+  -> feature_extractors.contextual_extractors
+  -> feature_extractors.multimodal_fusion
+  -> feature_extractors.temporal_extractors
+  -> feature_extractors.text_extractors
+  -> feature_extractors.voice_extractors
+
+feature_extractors.base:
+  -> abc
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> logging
+  -> numpy
+  -> typing
+
+feature_extractors.behavioral_extractors:
+  -> datetime
+  -> feature_extractors.base
+  -> logging
+  -> numpy
+  -> time
+  -> typing
+
+feature_extractors.contextual_extractors:
+  -> datetime
+  -> feature_extractors.base
+  -> logging
+  -> numpy
+  -> time
+  -> typing
+
+feature_extractors.multimodal_fusion:
+  -> datetime
+  -> feature_extractors.base
+  -> logging
+  -> numpy
+  -> time
+  -> typing
+
+feature_extractors.temporal_extractors:
+  -> datetime
+  -> feature_extractors.base
+  -> logging
+  -> numpy
+  -> time
+  -> typing
+
+feature_extractors.text_extractors:
+  -> datetime
+  -> feature_extractors.base
+  -> logging
+  -> nltk
+  -> numpy
+  -> re
+  -> sentence_transformers
+  -> time
+  -> transformers
+  -> typing
+
+feature_extractors.voice_extractors:
+  -> datetime
+  -> feature_extractors.base
+  -> logging
+  -> numpy
+  -> time
+  -> typing
+
+infrastructure.config.__init__:
+  -> infrastructure.config.config_manager
+  -> infrastructure.config.env_config
+  -> infrastructure.config.file_config
+  -> infrastructure.config.schema
+
+infrastructure.config.config_manager:
+  -> asyncio
+  -> core.exceptions.base_exceptions
+  -> core.interfaces.config_interface
+  -> infrastructure.config.schema
+  -> pathlib
+  -> typing
+
+infrastructure.di.__init__:
+  -> infrastructure.di.container
+  -> infrastructure.di.decorators
+
+infrastructure.di.container:
+  -> abc
+  -> asyncio
+  -> dataclasses
+  -> enum
+  -> inspect
+  -> threading
+  -> typing
+
+infrastructure.di.decorators:
+  -> asyncio
+  -> functools
+  -> infrastructure.di.container
+  -> inspect
+  -> typing
+
+infrastructure.di.diagnosis_registration:
+  -> infrastructure.di.container
+  -> logging
+  -> src
+  -> typing
+
+integration.__init__:
+  -> integration.event_bus
+  -> integration.friction_engine
+  -> integration.supervision_mesh
+
+integration.event_bus:
+  -> asyncio
+  -> collections
+  -> contextlib
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> json
+  -> logging
+  -> src
+  -> time
+  -> typing
+  -> uuid
+  -> weakref
+
+integration.friction_engine:
+  -> asyncio
+  -> collections
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> json
+  -> logging
+  -> math
+  -> src
+  -> time
+  -> typing
+
+integration.supervision_mesh:
+  -> abc
+  -> asyncio
+  -> collections
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> json
+  -> logging
+  -> src
+  -> time
+  -> typing
+
+knowledge.clinical.__init__:
+  -> knowledge.clinical.clinical_guidelines_db
+
+knowledge.clinical.clinical_guidelines_db:
+  -> dataclasses
+  -> enum
+  -> json
+  -> numpy
+  -> os
+  -> re
+  -> src
+  -> typing
+
+knowledge.therapeutic.__init__:
+  -> src
+
+knowledge.therapeutic.knowledge_base:
+  -> json
+  -> os
+  -> typing
+
+knowledge.therapeutic.technique_service:
+  -> asyncio
+  -> datetime
+  -> inspect
+  -> json
+  -> numpy
+  -> os
+  -> src
+  -> typing
+
+main:
+  -> agents.chat_agent
+  -> agents.diagnosis_agent
+  -> agents.emotion_agent
+  -> agents.safety_agent
+  -> agents.therapy_agent
+  -> asyncio
+  -> components.base_module
+  -> components.central_vector_db_module
+  -> components.llm_module
+  -> components.ui_manager
+  -> components.vector_store_module
+  -> components.voice_module
+  -> config.settings
+  -> datetime
+  -> logging
+  -> os
+  -> pathlib
+  -> src
+  -> sys
+  -> time
+  -> torch
+  -> utils.console_utils
+  -> utils.device_utils
+  -> utils.logger
+  -> utils.metrics
+  -> utils.migration_utils
+
+memory.__init__:
+  -> memory.enhanced_memory_system
+  -> memory.semantic_memory.semantic_memory_manager
+
+memory.enhanced_memory_system:
+  -> asyncio
+  -> collections
+  -> database.central_vector_db
+  -> dataclasses
+  -> datetime
+  -> hashlib
+  -> json
+  -> logging
+  -> models.llm
+  -> numpy
+  -> os
+  -> pickle
+  -> typing
+  -> utils.logger
+
+memory.semantic_memory.__init__:
+  -> memory.semantic_memory.semantic_memory_manager
+
+memory.semantic_memory.semantic_memory_manager:
+  -> datetime
+  -> faiss
+  -> json
+  -> logging
+  -> numpy
+  -> os
+  -> pathlib
+  -> pickle
+  -> re
+  -> sentence_transformers
+  -> src
+  -> time
+  -> typing
+
+ml_models.__init__:
+  -> ml_models.base
+  -> ml_models.bayesian
+  -> ml_models.fusion
+
+ml_models.base:
+  -> abc
+  -> logging
+  -> torch
+  -> typing
+
+ml_models.bayesian:
+  -> logging
+  -> ml_models.base
+  -> numpy
+  -> torch
+  -> typing
+
+ml_models.fusion:
+  -> logging
+  -> ml_models.base
+  -> torch
+  -> typing
+
+models.__init__:
+
+models.agno_llm_wrapper:
+
+models.gemini_api:
+  -> datetime
+  -> google
+  -> json
+  -> langchain
+  -> langchain_core
+  -> logging
+  -> os
+  -> src
+  -> time
+  -> typing
+
+models.gemini_llm:
+  -> google
+  -> langchain
+  -> langchain_core
+  -> logging
+  -> os
+  -> src
+  -> typing
+
+models.llm:
+  -> google
+  -> langchain
+  -> logging
+  -> openai
+  -> os
+  -> src
+  -> typing
+
+monitoring.__init__:
+  -> monitoring.supervisor_metrics
+
+monitoring.supervisor_metrics:
+  -> asyncio
+  -> collections
+  -> csv
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> json
+  -> numpy
+  -> pathlib
+  -> src
+  -> threading
+  -> time
+  -> typing
+
+personality.__init__:
+  -> __future__
+  -> datetime
+  -> json
+  -> logging
+  -> pathlib
+  -> personality.big_five
+  -> personality.mbti
+  -> typing
+
+personality.big_five:
+  -> importlib
+  -> ipipneo
+  -> json
+  -> logging
+  -> os
+  -> sys
+  -> typing
+
+personality.chatbot_personality:
+  -> json
+  -> logging
+  -> os
+  -> pathlib
+  -> random
+  -> typing
+
+personality.mbti:
+  -> json
+  -> logging
+  -> os
+  -> random
+  -> typing
+
+providers.llm.__init__:
+
+providers.llm.gemini_provider:
+  -> asyncio
+  -> core.exceptions.llm_exceptions
+  -> core.interfaces.llm_interface
+  -> google
+  -> typing
+
+providers.llm.openai_provider:
+  -> asyncio
+  -> core.exceptions.llm_exceptions
+  -> core.interfaces.llm_interface
+  -> json
+  -> openai
+  -> typing
+
+research.__init__:
+  -> research.real_time_research
+
+research.real_time_research:
+  -> aiohttp
+  -> asyncio
+  -> collections
+  -> database.central_vector_db
+  -> dataclasses
+  -> datetime
+  -> hashlib
+  -> json
+  -> logging
+  -> models.llm
+  -> numpy
+  -> os
+  -> pickle
+  -> typing
+  -> utils.logger
+
+security.__init__:
+  -> security.input_validator
+  -> security.secrets_manager
+
+security.input_validator:
+  -> bleach
+  -> core.exceptions
+  -> dataclasses
+  -> enum
+  -> html
+  -> json
+  -> logging
+  -> re
+  -> typing
+
+security.secrets_manager:
+  -> core.exceptions
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> hashlib
+  -> logging
+  -> os
+  -> pathlib
+  -> re
+  -> typing
+
+services.diagnosis.__init__:
+  -> services.diagnosis.agent_adapter
+  -> services.diagnosis.interfaces
+  -> services.diagnosis.orchestrator
+  -> services.diagnosis.unified_service
+
+services.diagnosis.agent_adapter:
+  -> asyncio
+  -> dataclasses
+  -> datetime
+  -> logging
+  -> services.diagnosis.interfaces
+  -> src
+  -> typing
+
+services.diagnosis.integration_setup:
+  -> asyncio
+  -> dataclasses
+  -> logging
+  -> services.diagnosis.interfaces
+  -> services.diagnosis.memory_integration
+  -> services.diagnosis.unified_service
+  -> src
+  -> typing
+
+services.diagnosis.interfaces:
+  -> abc
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> typing
+
+services.diagnosis.memory_integration:
+  -> asyncio
+  -> dataclasses
+  -> datetime
+  -> logging
+  -> services.diagnosis.interfaces
+  -> src
+  -> typing
+
+services.diagnosis.orchestrator:
+  -> asyncio
+  -> dataclasses
+  -> datetime
+  -> logging
+  -> services.diagnosis.interfaces
+  -> src
+  -> typing
+
+services.diagnosis.unified_service:
+  -> asyncio
+  -> dataclasses
+  -> datetime
+  -> logging
+  -> services.diagnosis.interfaces
+  -> src
+  -> traceback
+  -> typing
+
+utils.__init__:
+  -> utils.helpers
+  -> utils.logger
+  -> utils.metrics
+
+utils.agentic_rag:
+  -> datetime
+  -> dspy
+  -> json
+  -> langchain
+  -> langchain_chroma
+  -> llama_index
+  -> llama_index_vector_stores_chroma
+  -> logging
+  -> numpy
+  -> os
+  -> pathlib
+  -> src
+  -> torch
+  -> typing
+  -> utils.device_utils
+
+utils.audio_player:
+  -> io
+  -> logging
+  -> numpy
+  -> sounddevice
+  -> soundfile
+  -> time
+  -> typing
+
+utils.celebrity_voice_cloner:
+  -> aiohttp
+  -> asyncio
+  -> io
+  -> json
+  -> logging
+  -> numpy
+  -> os
+  -> pathlib
+  -> requests
+  -> soundfile
+  -> tempfile
+  -> torch
+  -> typing
+  -> urllib
+  -> utils.dia_tts
+
+utils.console_utils:
+  -> io
+  -> os
+  -> platform
+  -> sys
+
+utils.context_aware_memory:
+  -> datetime
+  -> json
+  -> logging
+  -> memory.semantic_memory
+  -> os
+  -> pathlib
+  -> re
+  -> time
+  -> typing
+
+utils.conversation_memory:
+  -> datetime
+  -> json
+  -> logging
+  -> os
+  -> pathlib
+  -> src
+  -> time
+  -> typing
+  -> uuid
+
+utils.device_utils:
+  -> logging
+  -> os
+  -> torch
+  -> typing
+
+utils.dia_tts:
+  -> asyncio
+  -> dia
+  -> importlib
+  -> io
+  -> librosa
+  -> logging
+  -> numpy
+  -> os
+  -> soundfile
+  -> subprocess
+  -> sys
+  -> time
+  -> torch
+  -> transformers
+  -> typing
+  -> utils.device_utils
+
+utils.error_handling:
+  -> dataclasses
+  -> datetime
+  -> enum
+  -> functools
+  -> json
+  -> logging
+  -> re
+  -> time
+  -> traceback
+  -> typing
+  -> uuid
+
+utils.helpers:
+  -> aiofiles
+  -> asyncio
+  -> bs4
+  -> datetime
+  -> html
+  -> json
+  -> logging
+  -> nltk
+  -> pathlib
+  -> re
+  -> sentence_transformers
+  -> src
+  -> typing
+
+utils.import_analyzer:
+  -> ast
+  -> collections
+  -> logging
+  -> os
+  -> pathlib
+  -> sys
+  -> typing
+
+utils.logger:
+  -> json
+  -> logging
+  -> os
+  -> src
+  -> sys
+  -> time
+  -> traceback
+  -> typing
+
+utils.metrics:
+  -> datetime
+  -> logging
+  -> prometheus_client
+  -> src
+  -> time
+  -> typing
+
+utils.migration_utils:
+  -> datetime
+  -> json
+  -> logging
+  -> os
+  -> pathlib
+  -> src
+  -> typing
+
+utils.vector_db_integration:
+  -> components
+  -> database
+  -> logging
+  -> typing
+
+utils.voice_ai:
+  -> asyncio
+  -> config.settings
+  -> datetime
+  -> io
+  -> librosa
+  -> logging
+  -> numpy
+  -> os
+  -> scipy
+  -> sounddevice
+  -> soundfile
+  -> torch
+  -> torchaudio
+  -> transformers
+  -> typing
+  -> utils.audio_player
+  -> utils.device_utils
+  -> utils.dia_tts
+
+utils.voice_clone_integration:
+  -> asyncio
+  -> logging
+  -> os
+  -> sys
+  -> typing
+  -> utils.audio_player
+  -> utils.celebrity_voice_cloner
+  -> utils.voice_ai
+
+utils.voice_emotion_analyzer:
+  -> argparse
+  -> asyncio
+  -> concurrent
+  -> hume
+  -> io
+  -> json
+  -> librosa
+  -> logging
+  -> numpy
+  -> os
+  -> requests
+  -> soundfile
+  -> tempfile
+  -> torch
+  -> transformers
+  -> typing
+  -> utils.device_utils
+
+utils.voice_input_manager:
+  -> argparse
+  -> asyncio
+  -> logging
+  -> os
+  -> queue
+  -> sys
+  -> threading
+  -> time
+  -> typing
+  -> utils
+
+utils.whisper_asr:
+  -> argparse
+  -> asyncio
+  -> huggingface_hub
+  -> json
+  -> logging
+  -> numpy
+  -> os
+  -> pathlib
+  -> sounddevice
+  -> soundfile
+  -> src
+  -> tempfile
+  -> time
+  -> torch
+  -> typing
+  -> utils.device_utils
+  -> utils.voice_emotion_analyzer
+  -> whisper
+

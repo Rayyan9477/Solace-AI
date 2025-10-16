@@ -1,14 +1,27 @@
 from pathlib import Path
 from typing import Dict, Any, Optional
 import os
+import logging
 from dotenv import load_dotenv
 
 # Load environment variables from project root .env file
 dotenv_path = Path(__file__).resolve().parent.parent.parent / '.env'
 load_dotenv(dotenv_path=dotenv_path)
 
+logger = logging.getLogger(__name__)
+
+
 class AppConfig:
-    """Application configuration settings"""
+    """
+    Application configuration settings.
+
+    This class provides centralized configuration with security validation
+    and integration with the security modules.
+    """
+
+    # Security validation state
+    _security_validated = False
+    _validation_errors = []
 
     # Application settings
     APP_NAME = "Mental Health Support Bot"
@@ -197,18 +210,106 @@ class AppConfig:
 
     @classmethod
     def validate_config(cls) -> bool:
-        """Validate configuration settings"""
+        """
+        Validate configuration settings including security checks.
+
+        Returns:
+            bool: True if configuration is valid and secure
+        """
+        cls._validation_errors = []
+
+        # Validate required directories
         required_dirs = [cls.DATA_DIR, cls.MODEL_DIR, cls.VECTOR_STORE_PATH]
         for dir_path in required_dirs:
             if not dir_path.exists():
+                cls._validation_errors.append(f"Required directory missing: {dir_path}")
                 return False
 
-        required_settings = [
-            cls.APP_NAME,
-            cls.MODEL_NAME,
-            cls.EMBEDDING_CONFIG["model_name"]
-        ]
-        return all(required_settings)
+        # Validate required settings
+        if not cls.MODEL_NAME:
+            cls._validation_errors.append("MODEL_NAME must be set in environment")
+
+        if not cls.EMBEDDING_CONFIG["model_name"]:
+            cls._validation_errors.append("EMBEDDING_MODEL_NAME must be set in environment")
+
+        # Validate security settings
+        if not cls._security_validated:
+            try:
+                cls.validate_security()
+            except Exception as e:
+                cls._validation_errors.append(f"Security validation failed: {e}")
+                logger.error(f"Security validation error: {e}")
+
+        return len(cls._validation_errors) == 0
+
+    @classmethod
+    def validate_security(cls) -> bool:
+        """
+        Validate security-sensitive configuration.
+
+        Returns:
+            bool: True if security validation passes
+
+        Raises:
+            ConfigurationError: If security validation fails critically
+        """
+        try:
+            from ..security import get_secrets_manager, EnvironmentValidator
+
+            secrets_manager = get_secrets_manager()
+            validator = EnvironmentValidator(secrets_manager)
+
+            # Run comprehensive environment validation
+            is_valid = validator.validate_environment()
+
+            if is_valid:
+                cls._security_validated = True
+                logger.info("Security validation passed")
+            else:
+                report = validator.get_validation_report()
+                cls._validation_errors.extend(report.get("validation_errors", []))
+                logger.warning(f"Security validation issues: {report}")
+
+            return is_valid
+
+        except ImportError as e:
+            logger.warning(f"Security module not available: {e}")
+            cls._security_validated = False
+            return False
+        except Exception as e:
+            logger.error(f"Security validation error: {e}")
+            cls._security_validated = False
+            raise
+
+    @classmethod
+    def get_validation_errors(cls) -> list:
+        """Get list of validation errors"""
+        return cls._validation_errors.copy()
+
+    @classmethod
+    def is_production(cls) -> bool:
+        """Check if running in production mode"""
+        return not cls.DEBUG
+
+    @classmethod
+    def require_secure_config(cls) -> None:
+        """
+        Require secure configuration or raise exception.
+
+        This should be called during application startup to ensure
+        all security requirements are met.
+
+        Raises:
+            ConfigurationError: If configuration is not secure
+        """
+        from ..core.exceptions import ConfigurationError
+
+        if not cls.validate_config():
+            errors = "\n".join(cls._validation_errors)
+            raise ConfigurationError(
+                f"Configuration validation failed:\n{errors}",
+                context={"errors": cls._validation_errors}
+            )
 
     @classmethod
     def get_model_path(cls, model_name: str) -> Path:

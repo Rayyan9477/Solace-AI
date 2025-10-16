@@ -43,7 +43,7 @@ class ChatAgent(BaseAgent):
                 "model_name": AppConfig.LLM_CONFIG.get("model", AppConfig.MODEL_NAME),
                 "api_key": AppConfig.LLM_CONFIG.get("api_key", os.environ.get("GEMINI_API_KEY", "")),
                 "temperature": AppConfig.LLM_CONFIG.get("temperature", 0.7),
-                "max_output_tokens": 2048,
+                "max_output_tokens": 4096,
                 "top_p": AppConfig.LLM_CONFIG.get("top_p", 0.95),
             }
             model = get_llm(provider_config)

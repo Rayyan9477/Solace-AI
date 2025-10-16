@@ -1060,3 +1060,55 @@ def register_core_services(container: DependencyInjectionContainer):
     )
     
     logger.info("Core services registered with dependency container")
+
+
+def register_llm_services(container: DependencyInjectionContainer):
+    """
+    Register LLM services with dependency injection.
+
+    This function registers language model services in the DI container,
+    making them available for injection throughout the application.
+    """
+    from src.models.llm import get_llm, GeminiLLM, OpenAILLM
+    from src.config.settings import AppConfig
+    from langchain.schema.language_model import BaseLanguageModel
+
+    # Register LLM factory
+    def create_llm():
+        """Factory function to create LLM based on configuration"""
+        try:
+            # Get LLM configuration from AppConfig
+            config = AppConfig.LLM_CONFIG.copy()
+
+            # Validate security before creating LLM
+            if not AppConfig._security_validated:
+                try:
+                    AppConfig.validate_security()
+                except Exception as e:
+                    logger.warning(f"Security validation warning during LLM creation: {e}")
+
+            # Create LLM instance
+            llm = get_llm(config, use_di=False)  # Don't use DI here to avoid recursion
+            logger.info(f"Created LLM instance: {config.get('provider', 'unknown')}")
+            return llm
+
+        except Exception as e:
+            logger.error(f"Failed to create LLM: {e}")
+            raise
+
+    # Register LLM as singleton
+    container.register_singleton(
+        service_type=BaseLanguageModel,
+        factory=create_llm,
+        health_check=lambda llm: {
+            'status': 'healthy' if llm else 'unhealthy',
+            'message': 'LLM service operational' if llm else 'LLM service unavailable',
+            'details': {
+                'llm_type': llm._llm_type if hasattr(llm, '_llm_type') else 'unknown',
+                'provider': AppConfig.LLM_PROVIDER
+            }
+        },
+        tags={'llm', 'core', 'ai'}
+    )
+
+    logger.info("LLM services registered with dependency container")

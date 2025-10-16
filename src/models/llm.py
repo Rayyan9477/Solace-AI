@@ -302,18 +302,40 @@ class OpenAILLM(BaseLanguageModel):
         return "openai"
 
 # Factory function to create an LLM based on configuration
-def get_llm(config: Dict[str, Any] = None) -> BaseLanguageModel:
+def get_llm(config: Dict[str, Any] = None, use_di: bool = False) -> BaseLanguageModel:
     """
-    Create a language model instance based on configuration
-    
+    Create a language model instance based on configuration.
+
+    This function now supports dependency injection through DIContainer.
+    Set use_di=True to use DI container, or False for direct instantiation.
+
     Args:
         config: Configuration dictionary
-        
+        use_di: Whether to use dependency injection container
+
     Returns:
         LLM instance
+
+    Note:
+        This function maintains backward compatibility with service locator pattern.
+        New code should use dependency injection via DIContainer.
     """
+    # Try to use DI container if requested
+    if use_di:
+        try:
+            from ..infrastructure.di import get_container
+            container = get_container()
+
+            # Try to resolve from container
+            llm = container.resolve(BaseLanguageModel)
+            if llm:
+                logger.info("LLM resolved from DI container")
+                return llm
+        except Exception as e:
+            logger.warning(f"Could not resolve LLM from DI container: {e}. Falling back to direct creation.")
+
     config = config or {}
-    
+
     provider = config.get("provider", "").lower()
 
     # Gemini

@@ -179,3 +179,4 @@ data/vector_store/
 # Logs
 logs/
 /log/
+.claude

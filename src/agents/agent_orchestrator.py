@@ -26,6 +26,13 @@ from src.agents.supervisor_agent import SupervisorAgent, ValidationLevel
 from src.monitoring.supervisor_metrics import MetricsCollector, QualityMetrics
 from src.auditing.audit_system import AuditTrail, AuditEventType, AuditSeverity
 
+# Import security exceptions
+try:
+    from src.core.exceptions import CircuitBreakerOpen
+    SECURITY_EXCEPTIONS_AVAILABLE = True
+except ImportError:
+    SECURITY_EXCEPTIONS_AVAILABLE = False
+
 # Import diagnosis services
 try:
     from src.services.diagnosis import (
@@ -285,7 +292,15 @@ class CircuitBreaker:
                     self.state = CircuitBreakerState.HALF_OPEN
                     self.logger.info(f"Circuit breaker {self.agent_id} moving to HALF_OPEN")
                 else:
-                    raise Exception(f"Circuit breaker {self.agent_id} is OPEN")
+                    # Use CircuitBreakerOpen exception if available
+                    if SECURITY_EXCEPTIONS_AVAILABLE:
+                        raise CircuitBreakerOpen(
+                            f"Circuit breaker is open for {self.agent_id}",
+                            service_name=self.agent_id,
+                            failure_count=self.failure_count
+                        )
+                    else:
+                        raise Exception(f"Circuit breaker {self.agent_id} is OPEN")
         
         try:
             # Execute with timeout

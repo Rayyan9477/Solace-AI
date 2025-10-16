@@ -6,18 +6,29 @@ import numpy as np
 from datetime import datetime
 import logging
 from abc import ABC, abstractmethod
+import threading
+import weakref
 
 # Vector store backends - import faiss if available
 try:
     import faiss  # type: ignore
+    FAISS_AVAILABLE = True
 except Exception:  # Allow running without faiss installed
     faiss = None
+    FAISS_AVAILABLE = False
 # Optional backends - imported when needed to avoid Keras conflicts:
-# from qdrant_client import QdrantClient  
+# from qdrant_client import QdrantClient
 # from pymilvus import connections, Collection, utility
 # from sentence_transformers import SentenceTransformer
 
 from src.config.settings import AppConfig
+
+# Import storage exceptions for better error handling
+try:
+    from src.core.exceptions import StorageError, StorageConnectionError
+    STORAGE_EXCEPTIONS_AVAILABLE = True
+except ImportError:
+    STORAGE_EXCEPTIONS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +72,21 @@ class BaseVectorStore(ABC):
         pass
 
 class FaissVectorStore(BaseVectorStore):
-    """FAISS implementation with graceful fallback when dependencies are missing"""
+    """
+    FAISS implementation with graceful fallback and improved error handling.
+
+    Features:
+    - Thread-safe operations with locks
+    - Memory management with limits
+    - Better error handling with custom exceptions
+    - Connection pooling ready
+    - Graceful degradation when dependencies unavailable
+    """
+
+    # Class-level memory limit (in MB)
+    MAX_MEMORY_MB = 2048
+    # Maximum cache size (number of queries)
+    MAX_CACHE_SIZE = 1000
 
     def __init__(self, dimension: int = 1536):
         self.dimension = dimension
@@ -73,80 +98,164 @@ class FaissVectorStore(BaseVectorStore):
         self.cache_expiry: Dict[str, float] = {}
         self.cache_ttl = 3600
         self._embeddings_matrix: Optional[np.ndarray] = None  # fallback storage
+
+        # Thread safety
+        self._lock = threading.RLock()
+        self._connection_lock = threading.Lock()
+
+        # Memory tracking
+        self._memory_usage_mb = 0.0
+
+        # Error tracking for circuit breaker pattern
+        self._error_count = 0
+        self._last_error_time = None
+        self._max_errors = 5
+        self._error_reset_time = 300  # 5 minutes
         
     def connect(self) -> bool:
-        """Initialize FAISS index and load existing data"""
-        try:
-            # Initialize embedder when available
+        """
+        Initialize FAISS index and load existing data with thread safety.
+
+        Returns:
+            bool: True if connection successful
+
+        Raises:
+            StorageConnectionError: If connection fails critically
+        """
+        with self._connection_lock:
             try:
-                from sentence_transformers import SentenceTransformer  # type: ignore
-                self.embedder = SentenceTransformer(AppConfig.EMBEDDING_CONFIG["model_name"])
-                logger.info("SentenceTransformer embedder initialized")
+                # Check if already connected
+                if self.is_connected:
+                    logger.info("Vector store already connected")
+                    return True
+
+                # Initialize embedder when available
+                try:
+                    from sentence_transformers import SentenceTransformer  # type: ignore
+                    model_name = AppConfig.EMBEDDING_CONFIG.get("model_name")
+                    if not model_name:
+                        logger.warning("No embedding model specified, using simple embedder")
+                        self.embedder = None
+                    else:
+                        self.embedder = SentenceTransformer(model_name)
+                        logger.info(f"SentenceTransformer embedder initialized: {model_name}")
+                except Exception as e:
+                    logger.warning(f"SentenceTransformer unavailable ({e}). Falling back to simple embedder.")
+                    self.embedder = None
+
+                # Initialize FAISS or fallback backend
+                if FAISS_AVAILABLE and faiss is not None:
+                    self.index = faiss.IndexFlatL2(self.dimension)
+                    self._load_index()
+                    logger.info("FAISS backend initialized successfully")
+                else:
+                    self.index = None
+                    self._embeddings_matrix = np.empty((0, self.dimension), dtype=np.float32)
+                    logger.warning("FAISS not available; using in-memory numpy backend")
+
+                self.is_connected = True
+                self._error_count = 0  # Reset error count on successful connection
+                return True
+
             except Exception as e:
-                logger.warning(f"SentenceTransformer unavailable ({e}). Falling back to simple embedder.")
-                self.embedder = None
+                logger.error(f"Failed to initialize vector store: {str(e)}", exc_info=True)
+                self.is_connected = False
 
-            if faiss is not None:
-                self.index = faiss.IndexFlatL2(self.dimension)
-                self._load_index()
-                logger.info("FAISS backend initialized")
-            else:
-                self.index = None
-                self._embeddings_matrix = np.empty((0, self.dimension), dtype=np.float32)
-                logger.info("FAISS not available; using in-memory numpy backend")
-
-            self.is_connected = True
-            return True
-        except Exception as e:
-            logger.error(f"Failed to initialize vector store: {str(e)}")
-            self.is_connected = False
-            return False
+                # Raise custom exception if available
+                if STORAGE_EXCEPTIONS_AVAILABLE:
+                    raise StorageConnectionError(
+                        f"Failed to connect to vector store: {str(e)}",
+                        storage_type="faiss",
+                        cause=e
+                    )
+                return False
         
     def add_documents(self, documents: List[Dict[str, Any]]) -> bool:
+        """
+        Add documents with memory management and error handling.
+
+        Args:
+            documents: List of documents to add
+
+        Returns:
+            bool: True if documents added successfully
+
+        Raises:
+            StorageError: If adding documents fails
+        """
         if not self.is_connected:
             logger.error(_ERR_NOT_CONNECTED)
+            if STORAGE_EXCEPTIONS_AVAILABLE:
+                raise StorageConnectionError(_ERR_NOT_CONNECTED, storage_type="faiss")
             return False
-            
-        try:
-            # Generate embeddings
-            precomputed = [doc.get('embedding') for doc in documents]
-            if all(emb is not None for emb in precomputed):
-                embeddings = np.array(precomputed, dtype=np.float32)
-            else:
-                texts = [doc.get('content', '') for doc in documents]
-                if self.embedder is not None:
-                    embeddings = self.embedder.encode(texts, normalize_embeddings=True)
+
+        with self._lock:
+            try:
+                # Check memory limits before adding
+                estimated_memory = len(documents) * self.dimension * 4 / (1024 * 1024)  # MB
+                if self._memory_usage_mb + estimated_memory > self.MAX_MEMORY_MB:
+                    logger.warning(
+                        f"Memory limit approaching: {self._memory_usage_mb + estimated_memory:.2f}MB. "
+                        f"Consider clearing cache or rebuilding index."
+                    )
+
+                # Generate embeddings
+                precomputed = [doc.get('embedding') for doc in documents]
+                if all(emb is not None for emb in precomputed):
+                    embeddings = np.array(precomputed, dtype=np.float32)
                 else:
-                    embeddings = self._simple_embed(texts)
+                    texts = [doc.get('content', '') for doc in documents]
+                    if self.embedder is not None:
+                        embeddings = self.embedder.encode(texts, normalize_embeddings=True)
+                    else:
+                        embeddings = self._simple_embed(texts)
 
-            if self.index is not None:
-                # FAISS path
-                self.index.add(embeddings.astype(np.float32))
-            else:
-                # Numpy fallback path
-                if self._embeddings_matrix is None:
-                    self._embeddings_matrix = embeddings.astype(np.float32)
+                # Add to appropriate backend
+                if self.index is not None:
+                    # FAISS path
+                    self.index.add(embeddings.astype(np.float32))
                 else:
-                    self._embeddings_matrix = np.vstack([self._embeddings_matrix, embeddings.astype(np.float32)])
+                    # Numpy fallback path
+                    if self._embeddings_matrix is None:
+                        self._embeddings_matrix = embeddings.astype(np.float32)
+                    else:
+                        self._embeddings_matrix = np.vstack([
+                            self._embeddings_matrix,
+                            embeddings.astype(np.float32)
+                        ])
 
-            # Store documents and track embedding row id
-            start_row = len(self.documents)
-            for i, doc in enumerate(documents):
-                doc_id = str(start_row + i)
-                self.documents[doc_id] = {
-                    **doc,
-                    'embedding_row': start_row + i,
-                    'timestamp': datetime.now().isoformat()
-                }
+                # Store documents and track embedding row id
+                start_row = len(self.documents)
+                for i, doc in enumerate(documents):
+                    doc_id = str(start_row + i)
+                    self.documents[doc_id] = {
+                        **doc,
+                        'embedding_row': start_row + i,
+                        'timestamp': datetime.now().isoformat()
+                    }
 
-            # Save if FAISS backend
-            if self.index is not None:
-                self._save_index()
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error adding documents to FAISS: {str(e)}")
-            return False
+                # Update memory usage
+                self._memory_usage_mb += estimated_memory
+
+                # Save if FAISS backend
+                if self.index is not None:
+                    self._save_index()
+
+                logger.info(f"Added {len(documents)} documents. Memory usage: {self._memory_usage_mb:.2f}MB")
+                return True
+
+            except Exception as e:
+                self._handle_error(e)
+                logger.error(f"Error adding documents to FAISS: {str(e)}", exc_info=True)
+
+                if STORAGE_EXCEPTIONS_AVAILABLE:
+                    raise StorageError(
+                        f"Failed to add documents: {str(e)}",
+                        storage_type="faiss",
+                        operation="add_documents",
+                        cause=e
+                    )
+                return False
             
     def search(self, query: str = None, k: int = 5, use_cache: bool = True,
                query_vector: Optional[List[float]] = None, top_k: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -486,6 +595,103 @@ class FaissVectorStore(BaseVectorStore):
             norm = np.linalg.norm(vectors[i]) + 1e-8
             vectors[i] = vectors[i] / norm
         return vectors
+
+    def _handle_error(self, error: Exception) -> None:
+        """
+        Handle errors with circuit breaker pattern.
+
+        Args:
+            error: The exception that occurred
+        """
+        current_time = datetime.now().timestamp()
+
+        # Reset error count if enough time has passed
+        if (self._last_error_time and
+            current_time - self._last_error_time > self._error_reset_time):
+            self._error_count = 0
+
+        self._error_count += 1
+        self._last_error_time = current_time
+
+        # Log warning if approaching error threshold
+        if self._error_count >= self._max_errors - 1:
+            logger.warning(
+                f"FAISS error count high ({self._error_count}/{self._max_errors}). "
+                "Consider reconnecting or checking system health."
+            )
+
+    def _manage_cache_size(self) -> None:
+        """
+        Manage cache size to prevent memory issues.
+
+        Removes least recently used entries if cache exceeds maximum size.
+        """
+        if len(self.query_cache) > self.MAX_CACHE_SIZE:
+            # Sort by expiry time and remove oldest entries
+            sorted_keys = sorted(
+                self.cache_expiry.items(),
+                key=lambda x: x[1]
+            )
+
+            # Remove oldest 10% of cache
+            remove_count = len(self.query_cache) // 10
+            for key, _ in sorted_keys[:remove_count]:
+                self._remove_from_cache(key)
+
+            logger.info(f"Cache cleanup: removed {remove_count} entries")
+
+    def get_memory_stats(self) -> Dict[str, Any]:
+        """
+        Get memory usage statistics.
+
+        Returns:
+            Dictionary with memory usage information
+        """
+        return {
+            'memory_usage_mb': round(self._memory_usage_mb, 2),
+            'max_memory_mb': self.MAX_MEMORY_MB,
+            'memory_usage_percent': round((self._memory_usage_mb / self.MAX_MEMORY_MB) * 100, 2),
+            'document_count': len(self.documents),
+            'cache_size': len(self.query_cache),
+            'max_cache_size': self.MAX_CACHE_SIZE,
+            'error_count': self._error_count,
+            'is_connected': self.is_connected
+        }
+
+    def health_check(self) -> Dict[str, Any]:
+        """
+        Perform health check on the vector store.
+
+        Returns:
+            Dictionary with health status
+        """
+        status = "healthy"
+        issues = []
+
+        if not self.is_connected:
+            status = "disconnected"
+            issues.append("Vector store not connected")
+
+        if self._error_count >= self._max_errors:
+            status = "unhealthy"
+            issues.append(f"Error count threshold reached: {self._error_count}")
+
+        if self._memory_usage_mb > self.MAX_MEMORY_MB * 0.9:
+            status = "degraded" if status == "healthy" else status
+            issues.append(f"Memory usage high: {self._memory_usage_mb:.2f}MB")
+
+        if len(self.query_cache) > self.MAX_CACHE_SIZE * 0.9:
+            if status == "healthy":
+                status = "degraded"
+            issues.append(f"Cache size high: {len(self.query_cache)}")
+
+        return {
+            'status': status,
+            'issues': issues,
+            'stats': self.get_memory_stats(),
+            'backend': 'faiss' if self.index is not None else 'numpy',
+            'embedder': 'sentence-transformers' if self.embedder is not None else 'simple'
+        }
 
 class QdrantVectorStore(BaseVectorStore):
     """Qdrant implementation of vector store"""

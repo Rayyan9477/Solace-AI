@@ -12,6 +12,14 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Import security validation (graceful fallback if not available)
+try:
+    from ..security import validate_user_message, ValidationSeverity
+    SECURITY_VALIDATION_AVAILABLE = True
+except ImportError:
+    logger.warning("Security validation module not available")
+    SECURITY_VALIDATION_AVAILABLE = False
+
 class CustomHTTPClient(httpx.Client):
     def __init__(self, *args, **kwargs):
         # Remove proxies argument if present
@@ -75,10 +83,51 @@ class BaseAgent(Agent):
         query: str,
         context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Process a query and return response with supervision support"""
+        """
+        Process a query and return response with supervision support.
+
+        This method now includes input validation to protect against
+        injection attacks and malicious input.
+        """
         processing_start_time = datetime.now()
-        
+
         try:
+            # Validate input for security threats
+            validation_result = None
+            if SECURITY_VALIDATION_AVAILABLE:
+                validation_result = validate_user_message(query)
+
+                # Check validation severity
+                if not validation_result.is_valid:
+                    if validation_result.severity in [ValidationSeverity.CRITICAL, ValidationSeverity.HIGH]:
+                        # Block critical/high severity threats
+                        logger.error(
+                            f"Security validation failed for query: {validation_result.errors}"
+                        )
+                        return {
+                            'error': 'Input validation failed for security reasons',
+                            'validation_errors': validation_result.errors,
+                            'timestamp': datetime.now().isoformat(),
+                            'metadata': {
+                                'agent_name': self.name,
+                                'security_blocked': True,
+                                'processing_time': (datetime.now() - processing_start_time).total_seconds()
+                            }
+                        }
+                    else:
+                        # Log warnings but continue processing
+                        logger.warning(
+                            f"Input validation warnings: {validation_result.warnings}"
+                        )
+
+                # Use sanitized query
+                query = validation_result.sanitized_value
+
+                # Log validation warnings if any
+                if validation_result.warnings:
+                    logger.info(f"Input sanitized: {validation_result.warnings}")
+            else:
+                logger.warning("Security validation not available - processing without validation")
             # Get context from memory and knowledge
             full_context = await self._get_context(query, context or {})
             
