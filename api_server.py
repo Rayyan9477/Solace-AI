@@ -15,14 +15,34 @@ import logging
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 import uvicorn
-from fastapi import FastAPI, Depends, HTTPException, Body, File, UploadFile, status
+from fastapi import FastAPI, Depends, HTTPException, Body, File, UploadFile, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.errors import RateLimitExceeded
 
 # Import application components
 from src.main import Application
 from src.config.settings import AppConfig
+from src.config.security import SecurityConfig
+from src.auth.models import (
+    UserCreate, UserLogin, UserResponse, Token, TokenData, RefreshTokenRequest,
+    PasswordReset, PasswordResetConfirm, PasswordChange, UserUpdate,
+    ChatRequestSecure, DiagnosticAssessmentRequestSecure, UserProfileRequestSecure
+)
+from src.auth.jwt_utils import jwt_manager
+from src.auth.dependencies import (
+    get_current_user, get_current_active_user, get_optional_user,
+    require_admin, require_therapist_or_admin, require_authenticated,
+    require_chat_access, require_assessment_access
+)
+from src.middleware.security import (
+    SecurityHeadersMiddleware, RequestLoggingMiddleware, IPFilterMiddleware,
+    ContentTypeValidationMiddleware, limiter, rate_limit_handler
+)
 
 # Set up logging
 log_dir = Path(__file__).resolve().parent / 'logs'
@@ -38,20 +58,48 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Create FastAPI app
+# Create FastAPI app with security configuration
 app = FastAPI(
-    title="Contextual-Chatbot API",
-    description="API for the Contextual-Chatbot application",
-    version="1.0.0"
+    title="Solace-AI API",
+    description="Secure API for the Solace-AI Mental Health Support application",
+    version="1.0.0",
+    docs_url="/docs" if SecurityConfig.is_development() else None,
+    redoc_url="/redoc" if SecurityConfig.is_development() else None,
+    openapi_url="/openapi.json" if SecurityConfig.is_development() else None
 )
 
-# Add CORS middleware
+# Add security middleware in correct order
+# 1. Security headers (first)
+app.add_middleware(SecurityHeadersMiddleware)
+
+# 2. Request logging for audit
+app.add_middleware(RequestLoggingMiddleware)
+
+# 3. Content type validation
+app.add_middleware(ContentTypeValidationMiddleware)
+
+# 4. IP filtering for admin endpoints
+app.add_middleware(IPFilterMiddleware)
+
+# 5. Rate limiting
+app.add_middleware(SlowAPIMiddleware)
+app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
+
+# 6. CORS with specific origins (CRITICAL FIX)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Update with specific origins in production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=SecurityConfig.ALLOWED_ORIGINS,
+    allow_credentials=False,  # Disabled for security unless specifically needed
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Accept",
+        "Origin",
+        "X-Requested-With"
+    ],
+    expose_headers=["X-Total-Count", "X-Page-Count"],
+    max_age=600  # Cache preflight for 10 minutes
 )
 
 # Application state
@@ -60,31 +108,23 @@ app_state = {
     "app_manager": None
 }
 
-# Request/response models
-class ChatRequest(BaseModel):
-    message: str
-    user_id: str = "default_user"
-    metadata: Optional[Dict[str, Any]] = None
-
+# Enhanced secure request/response models
 class ChatResponse(BaseModel):
     response: str
     emotion: Optional[Dict[str, Any]] = None
     metadata: Optional[Dict[str, Any]] = None
+    user_id: Optional[str] = None
+    timestamp: Optional[str] = None
 
 class AssessmentQuestionResponse(BaseModel):
     question_id: str
     response: Any
 
-class DiagnosticAssessmentRequest(BaseModel):
-    user_id: str
-    assessment_type: str
-    responses: Dict[str, Any]
-
-class UserProfileRequest(BaseModel):
-    user_id: str
-    name: Optional[str] = None
-    preferences: Optional[Dict[str, Any]] = None
-    metadata: Optional[Dict[str, Any]] = None
+class ErrorResponse(BaseModel):
+    error: str
+    detail: str
+    timestamp: str
+    request_id: Optional[str] = None
 
 # Supervision API models
 class SupervisionStatusResponse(BaseModel):
@@ -170,9 +210,149 @@ async def shutdown_event():
     except Exception as e:
         logger.error(f"Error shutting down application: {str(e)}")
 
-# Health check endpoint
+# Authentication endpoints
+@app.post("/api/auth/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit(SecurityConfig.get_rate_limit("auth"))
+async def register_user(request: Request, user_data: UserCreate):
+    """Register a new user with secure password handling"""
+    try:
+        # In production, integrate with your user database
+        # This is a placeholder implementation
+        
+        # Register user with secure validation
+        from src.services.user_service import user_service
+        
+        new_user = user_service.register_user(user_data)
+        
+        if not new_user:
+            logger.warning(f"Registration failed for user: {user_data.username}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Registration failed - user may already exist or password requirements not met"
+            )
+        
+        logger.info(f"New user registered: {new_user.username}")
+        return new_user
+        
+    except Exception as e:
+        logger.error(f"User registration failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Registration failed"
+        )
+
+@app.post("/api/auth/login", response_model=Token)
+@limiter.limit(SecurityConfig.get_rate_limit("auth"))
+async def login_user(request: Request, user_credentials: UserLogin):
+    """Authenticate user and return JWT tokens"""
+    try:
+        # In production, validate against your user database
+        # This is a placeholder implementation
+        from datetime import datetime
+        import uuid
+        
+        # Authenticate user with secure validation
+        from src.services.user_service import user_service
+        
+        authenticated_user = user_service.authenticate_user(
+            user_credentials.username, 
+            user_credentials.password
+        )
+        
+        if not authenticated_user:
+            logger.warning(f"Authentication failed for user: {user_credentials.username}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid username or password"
+            )
+        
+        # Create tokens for authenticated user
+        token_data = jwt_manager.create_user_tokens(authenticated_user)
+        
+        logger.info(f"User logged in: {user_credentials.username}")
+        return Token(**token_data)
+        
+    except Exception as e:
+        logger.error(f"Login failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials"
+        )
+
+@app.post("/api/auth/refresh", response_model=Token)
+@limiter.limit(SecurityConfig.get_rate_limit("auth"))
+async def refresh_token(request: Request, refresh_request: RefreshTokenRequest):
+    """Refresh access token using refresh token"""
+    try:
+        access_token, refresh_token = jwt_manager.refresh_access_token(refresh_request.refresh_token)
+        
+        return Token(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer",
+            expires_in=SecurityConfig.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+        )
+        
+    except Exception as e:
+        logger.error(f"Token refresh failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token"
+        )
+
+@app.post("/api/auth/logout")
+@limiter.limit(SecurityConfig.get_rate_limit("auth"))
+async def logout_user(
+    request: Request,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """Logout user by blacklisting current tokens"""
+    try:
+        # In a full implementation, you would blacklist both access and refresh tokens
+        logger.info(f"User logged out: {current_user.username}")
+        
+        return {"message": "Successfully logged out"}
+        
+    except Exception as e:
+        logger.error(f"Logout failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Logout failed"
+        )
+
+@app.get("/api/auth/me", response_model=UserResponse)
+async def get_current_user_profile(
+    current_user: TokenData = Depends(get_current_active_user)
+):
+    """Get current user profile information"""
+    try:
+        # In production, fetch from database using current_user.sub
+        from datetime import datetime
+        
+        user_profile = UserResponse(
+            id=current_user.sub,
+            username=current_user.username or "unknown",
+            email=f"{current_user.username}@example.com",
+            full_name="User Name",
+            role=current_user.role,
+            is_active=True,
+            created_at=datetime.utcnow(),
+            last_login=datetime.utcnow()
+        )
+        
+        return user_profile
+        
+    except Exception as e:
+        logger.error(f"Get user profile failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve user profile"
+        )
+
+# Health check endpoint (public)
 @app.get("/health")
-async def health_check():
+@limiter.limit(SecurityConfig.get_rate_limit("health"))
+async def health_check(request: Request):
     """Check the health of the API server"""
     if not app_state["initialized"]:
         return {"status": "initializing"}
@@ -183,9 +363,14 @@ async def health_check():
     
     return {"status": "unhealthy", "details": "Application manager not available"}
 
-# Chat endpoint
+# Chat endpoint - REQUIRES AUTHENTICATION
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+@limiter.limit(SecurityConfig.get_rate_limit("chat"))
+async def chat(
+    request: Request,
+    chat_request: ChatRequestSecure,
+    current_user: TokenData = Depends(require_chat_access)
+):
     """Process a chat message and return a response"""
     if not app_state["initialized"] or not app_state["app_manager"]:
         raise HTTPException(status_code=503, detail="Application not fully initialized")
@@ -204,17 +389,28 @@ async def chat(request: ChatRequest):
         if not chat_agent:
             raise HTTPException(status_code=503, detail="Chat agent not available")
         
-        # Process the chat message
+        # Use authenticated user's ID instead of request user_id
+        user_id = current_user.sub
+        
+        # Process the chat message with security context
         result = await chat_agent.process_message(
-            request.message, 
-            user_id=request.user_id,
-            metadata=request.metadata or {}
+            chat_request.message,
+            user_id=user_id,
+            metadata={
+                **(chat_request.metadata or {}),
+                "authenticated_user": current_user.username,
+                "user_role": current_user.role
+            }
         )
+        
+        from datetime import datetime
         
         response = {
             "response": result.get('response', 'Sorry, I encountered an error processing your message.'),
             "emotion": result.get('emotion'),
-            "metadata": result.get('metadata', {})
+            "metadata": result.get('metadata', {}),
+            "user_id": user_id,
+            "timestamp": datetime.utcnow().isoformat()
         }
         
         if "error" in response:
@@ -225,9 +421,14 @@ async def chat(request: ChatRequest):
         logger.error(f"Error processing chat request: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Assessment endpoints
+# Assessment endpoints - REQUIRE AUTHENTICATION
 @app.get("/api/assessment/questions/{assessment_type}")
-async def get_assessment_questions(assessment_type: str):
+@limiter.limit(SecurityConfig.get_rate_limit("assessment"))
+async def get_assessment_questions(
+    request: Request,
+    assessment_type: str,
+    current_user: TokenData = Depends(require_assessment_access)
+):
     """Get assessment questions for a specific assessment type"""
     if not app_state["initialized"] or not app_state["app_manager"]:
         raise HTTPException(status_code=503, detail="Application not fully initialized")
@@ -267,7 +468,12 @@ async def get_assessment_questions(assessment_type: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/assessment/submit")
-async def submit_assessment(request: DiagnosticAssessmentRequest):
+@limiter.limit(SecurityConfig.get_rate_limit("assessment"))
+async def submit_assessment(
+    request: Request,
+    assessment_request: DiagnosticAssessmentRequestSecure,
+    current_user: TokenData = Depends(require_assessment_access)
+):
     """Submit a completed assessment for analysis"""
     if not app_state["initialized"] or not app_state["app_manager"]:
         raise HTTPException(status_code=503, detail="Application not fully initialized")
@@ -280,16 +486,19 @@ async def submit_assessment(request: DiagnosticAssessmentRequest):
         if not diagnosis_agent:
             raise HTTPException(status_code=503, detail="Diagnosis agent not available")
         
-        # Process the assessment submission
+        # Use authenticated user's ID for security
+        user_id = current_user.sub
+        
+        # Process the assessment submission with authentication context
         result = await diagnosis_agent.process_assessment(
-            assessment_type=request.assessment_type,
-            responses=request.responses,
-            user_id=request.user_id
+            assessment_type=assessment_request.assessment_type,
+            responses=assessment_request.responses,
+            user_id=user_id
         )
         
         response = {
-            "assessment_type": request.assessment_type,
-            "user_id": request.user_id,
+            "assessment_type": assessment_request.assessment_type,
+            "user_id": user_id,
             "results": result.get('results', {}),
             "recommendations": result.get('recommendations', []),
             "severity": result.get('severity', 'unknown'),
@@ -304,9 +513,14 @@ async def submit_assessment(request: DiagnosticAssessmentRequest):
         logger.error(f"Error submitting assessment: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Voice endpoints
+# Voice endpoints - REQUIRE AUTHENTICATION
 @app.post("/api/voice/transcribe")
-async def transcribe_audio(audio_file: UploadFile = File(...)):
+@limiter.limit(SecurityConfig.get_rate_limit("upload"))
+async def transcribe_audio(
+    request: Request,
+    audio_file: UploadFile = File(...),
+    current_user: TokenData = Depends(get_current_active_user)
+):
     """Transcribe audio to text"""
     if not app_state["initialized"] or not app_state["app_manager"]:
         raise HTTPException(status_code=503, detail="Application not fully initialized")
@@ -319,8 +533,35 @@ async def transcribe_audio(audio_file: UploadFile = File(...)):
         if not voice_module:
             raise HTTPException(status_code=503, detail="Voice module not available")
         
+        # Validate file type and size for security
+        if audio_file.content_type not in SecurityConfig.INPUT_LIMITS["allowed_audio_types"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported audio format: {audio_file.content_type}"
+            )
+        
+        # Check file size (limit to prevent DoS)
+        max_size = SecurityConfig.INPUT_LIMITS["max_file_size_mb"] * 1024 * 1024
+        if audio_file.size and audio_file.size > max_size:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File too large. Maximum size: {SecurityConfig.INPUT_LIMITS['max_file_size_mb']}MB"
+            )
+        
         # Read the audio file
         audio_data = await audio_file.read()
+        
+        # Log audio transcription request for audit
+        logger.info(
+            f"Audio transcription request from user: {current_user.username}",
+            extra={
+                "event_type": "audio_transcription",
+                "user_id": current_user.sub,
+                "username": current_user.username,
+                "file_type": audio_file.content_type,
+                "file_size": len(audio_data)
+            }
+        )
         
         # Process the transcription request
         result = await voice_module.transcribe_audio(audio_data)
@@ -341,7 +582,12 @@ async def transcribe_audio(audio_file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/voice/synthesize")
-async def synthesize_speech(text: str = Body(..., embed=True)):
+@limiter.limit(SecurityConfig.get_rate_limit("upload"))
+async def synthesize_speech(
+    request: Request,
+    text: str = Body(..., embed=True),
+    current_user: TokenData = Depends(get_current_active_user)
+):
     """Synthesize text to speech"""
     if not app_state["initialized"] or not app_state["app_manager"]:
         raise HTTPException(status_code=503, detail="Application not fully initialized")
@@ -354,8 +600,19 @@ async def synthesize_speech(text: str = Body(..., embed=True)):
         if not voice_module:
             raise HTTPException(status_code=503, detail="Voice module not available")
         
+        # Validate text length for security
+        if len(text) > SecurityConfig.INPUT_LIMITS["max_message_length"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Text too long. Maximum length: {SecurityConfig.INPUT_LIMITS['max_message_length']} characters"
+            )
+        
+        # Basic content sanitization
+        import re
+        sanitized_text = re.sub(r'<[^>]+>', '', text).strip()
+        
         # Process the synthesis request
-        result = await voice_module.synthesize_speech(text)
+        result = await voice_module.synthesize_speech(sanitized_text)
         
         response = {
             "audio_data": result.get('audio_data'),
@@ -372,9 +629,14 @@ async def synthesize_speech(text: str = Body(..., embed=True)):
         logger.error(f"Error synthesizing speech: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# User management endpoints
+# User management endpoints - REQUIRE AUTHENTICATION
 @app.get("/api/user/{user_id}")
-async def get_user_profile(user_id: str):
+@limiter.limit(SecurityConfig.get_rate_limit("user_profile"))
+async def get_user_profile(
+    request: Request,
+    user_id: str,
+    current_user: TokenData = Depends(get_current_active_user)
+):
     """Get a user's profile"""
     if not app_state["initialized"] or not app_state["app_manager"]:
         raise HTTPException(status_code=503, detail="Application not fully initialized")
@@ -386,6 +648,13 @@ async def get_user_profile(user_id: str):
         
         if not central_db:
             raise HTTPException(status_code=503, detail="Central vector DB not available")
+        
+        # Security check: users can only access their own profile unless admin/therapist
+        if user_id != current_user.sub and current_user.role not in ["admin", "therapist"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: Can only access your own profile"
+            )
         
         # Process the user profile request
         result = await central_db.get_user_profile(user_id)
@@ -408,7 +677,12 @@ async def get_user_profile(user_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/user/update")
-async def update_user_profile(request: UserProfileRequest):
+@limiter.limit(SecurityConfig.get_rate_limit("user_profile"))
+async def update_user_profile(
+    request: Request,
+    profile_request: UserProfileRequestSecure,
+    current_user: TokenData = Depends(get_current_active_user)
+):
     """Update a user's profile"""
     if not app_state["initialized"] or not app_state["app_manager"]:
         raise HTTPException(status_code=503, detail="Application not fully initialized")
@@ -421,16 +695,28 @@ async def update_user_profile(request: UserProfileRequest):
         if not central_db:
             raise HTTPException(status_code=503, detail="Central vector DB not available")
         
+        # Use authenticated user's ID for security
+        user_id = current_user.sub
+        
+        # Security check: prevent updating other users' profiles
+        if profile_request.user_id and profile_request.user_id != user_id:
+            if current_user.role not in ["admin", "therapist"]:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied: Can only update your own profile"
+                )
+            user_id = profile_request.user_id
+        
         # Process the user profile update
         result = await central_db.update_user_profile(
-            user_id=request.user_id,
-            name=request.name,
-            preferences=request.preferences or {},
-            metadata=request.metadata or {}
+            user_id=user_id,
+            name=profile_request.name,
+            preferences=profile_request.preferences or {},
+            metadata=profile_request.metadata or {}
         )
         
         response = {
-            "user_id": request.user_id,
+            "user_id": user_id,
             "updated": result.get('success', False),
             "message": result.get('message', 'Profile updated successfully'),
             "profile": result.get('profile', {})

@@ -1,21 +1,45 @@
 """
-Comprehensive Error Handling and Validation System
+Comprehensive Error Handling and Logging System
+Implements structured error handling, logging, and monitoring for Solace-AI
 """
 
+import sys
+import json
 import logging
 import traceback
-import functools
-import time
-from typing import Dict, Any, List, Optional, Callable, Union, Type
-from dataclasses import dataclass, field
+import contextvars
 from datetime import datetime
+from typing import Any, Dict, Optional, Callable, Union
+from functools import wraps
 from enum import Enum
-import json
+from pathlib import Path
 
-logger = logging.getLogger(__name__)
+# Context variables for request tracking
+request_id = contextvars.ContextVar('request_id', default=None)
+user_id = contextvars.ContextVar('user_id', default=None)
+session_id = contextvars.ContextVar('session_id', default=None)
+
+class ErrorSeverity(Enum):
+    """Error severity levels"""
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+class ErrorCategory(Enum):
+    """Error categories for classification"""
+    AUTHENTICATION = "authentication"
+    AUTHORIZATION = "authorization"
+    VALIDATION = "validation"
+    BUSINESS_LOGIC = "business_logic"
+    EXTERNAL_SERVICE = "external_service"
+    DATABASE = "database"
+    SYSTEM = "system"
+    SECURITY = "security"
+    HIPAA_COMPLIANCE = "hipaa_compliance"
 
 class ErrorType(Enum):
-    """Types of errors in the system"""
+    """Legacy error types - kept for compatibility"""
     VALIDATION_ERROR = "validation_error"
     PROCESSING_ERROR = "processing_error"
     MODEL_ERROR = "model_error"

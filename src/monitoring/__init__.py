@@ -16,6 +16,17 @@ from .supervisor_metrics import (
     AlertLevel
 )
 
+from .health_monitor import (
+    SystemHealthMonitor,
+    HealthStatus,
+    HealthCheckResult,
+    SystemMetrics,
+    MetricsCollector as HealthMetricsCollector,
+    TimingContext,
+    timing_decorator,
+    health_monitor
+)
+
 __all__ = [
     'MetricsCollector',
     'PerformanceDashboard', 
@@ -24,5 +35,13 @@ __all__ = [
     'QualityMetrics',
     'AlertEvent',
     'MetricType',
-    'AlertLevel'
+    'AlertLevel',
+    'SystemHealthMonitor',
+    'HealthStatus',
+    'HealthCheckResult',
+    'SystemMetrics',
+    'HealthMetricsCollector',
+    'TimingContext',
+    'timing_decorator',
+    'health_monitor'
 ]

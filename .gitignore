@@ -180,3 +180,4 @@ data/vector_store/
 logs/
 /log/
 .claude
+nul
