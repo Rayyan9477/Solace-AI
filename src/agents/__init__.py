@@ -1,32 +1,96 @@
 """
-Agents module initialization
+Agents module initialization - Hierarchically organized agent implementations
 
 This package contains various agent implementations for the Contextual-Chatbot,
-including conversation, emotion analysis, personality assessment, and diagnosis.
+organized into logical categories:
+
+- base: Core agent infrastructure
+- orchestration: Agent coordination and supervision
+- core: Primary user-facing agents (chat, emotion, personality, safety)
+- clinical: Diagnosis and therapy agents
+- support: Search and crawler agents
+- analytics: Learning, pattern recognition, insights
+- personalization: User personalization and feedback systems
+- security: Privacy and security agents
+- therapeutic_friction: Growth-oriented challenge systems
+- validation: Response validation
 """
 
-from .base_agent import Agent
-from .chat_agent import ChatAgent
-from .emotion_agent import EmotionAgent
-from .personality_agent import PersonalityAgent
-from .diagnosis_agent import DiagnosisAgent
-from .enhanced_diagnosis_agent import EnhancedDiagnosisAgent
-from .integrated_diagnosis_agent import IntegratedDiagnosisAgent
-from .comprehensive_diagnosis_agent import ComprehensiveDiagnosisAgent
-from .search_agent import SearchAgent
-from .safety_agent import SafetyAgent
-from .agent_orchestrator import AgentOrchestrator
+# Base agents
+from .base import Agent
+
+# Orchestration
+from .orchestration import AgentOrchestrator, SupervisorAgent
+
+# Core agents
+from .core import ChatAgent, EmotionAgent, PersonalityAgent, SafetyAgent
+
+# Clinical agents
+from .clinical import DiagnosisAgent, EnhancedDiagnosisAgent, TherapyAgent
+
+# Support agents
+from .support import SearchAgent, CrawlerAgent
+
+# Analytics agents
+from .analytics import (
+    AdaptiveLearningAgent,
+    PatternRecognitionEngine,
+    InsightsGenerationSystem,
+    OutcomeTracker
+)
+
+# Personalization agents
+from .personalization import PersonalizationEngine, FeedbackIntegrationSystem
+
+# Security agents
+from .security import PrivacyProtectionSystem
+
+# Therapeutic friction
+from .therapeutic_friction import (
+    BaseFrictionAgent,
+    FrictionAgentType,
+    ReadinessAssessmentAgent,
+    BreakthroughDetectionAgent,
+    FrictionCoordinator
+)
+
+# Validation
+from .validation import ResponseValidator
 
 __all__ = [
+    # Base
     'Agent',
+    # Orchestration
+    'AgentOrchestrator',
+    'SupervisorAgent',
+    # Core
     'ChatAgent',
     'EmotionAgent',
     'PersonalityAgent',
+    'SafetyAgent',
+    # Clinical
     'DiagnosisAgent',
     'EnhancedDiagnosisAgent',
-    'IntegratedDiagnosisAgent',
-    'ComprehensiveDiagnosisAgent',
+    'TherapyAgent',
+    # Support
     'SearchAgent',
-    'SafetyAgent',
-    'AgentOrchestrator'
+    'CrawlerAgent',
+    # Analytics
+    'AdaptiveLearningAgent',
+    'PatternRecognitionEngine',
+    'InsightsGenerationSystem',
+    'OutcomeTracker',
+    # Personalization
+    'PersonalizationEngine',
+    'FeedbackIntegrationSystem',
+    # Security
+    'PrivacyProtectionSystem',
+    # Therapeutic Friction
+    'BaseFrictionAgent',
+    'FrictionAgentType',
+    'ReadinessAssessmentAgent',
+    'BreakthroughDetectionAgent',
+    'FrictionCoordinator',
+    # Validation
+    'ResponseValidator',
 ]

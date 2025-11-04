@@ -16,8 +16,8 @@ from src.agents.therapeutic_friction.friction_coordinator import FrictionCoordin
 from src.agents.therapeutic_friction.readiness_assessment_agent import ReadinessAssessmentAgent
 from src.agents.therapeutic_friction.breakthrough_detection_agent import BreakthroughDetectionAgent
 from src.agents.therapeutic_friction.base_friction_agent import FrictionAgentType, friction_agent_registry
-from src.agents.therapy_agent import TherapyAgent
-from src.agents.agent_orchestrator import AgentOrchestrator
+from src.agents.clinical.therapy_agent import TherapyAgent
+from src.agents.orchestration.agent_orchestrator import AgentOrchestrator
 from src.database.therapeutic_friction_vector_manager import TherapeuticFrictionVectorManager
 from src.knowledge.therapeutic.technique_service import TherapeuticTechniqueService
 

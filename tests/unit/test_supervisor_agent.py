@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from unittest.mock import Mock, patch, AsyncMock
 from typing import Dict, Any
 
-from src.agents.supervisor_agent import (
+from src.agents.orchestration.supervisor_agent import (
     SupervisorAgent,
     ValidationLevel,
     ClinicalRiskLevel,

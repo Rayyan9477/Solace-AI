@@ -8,8 +8,9 @@ import json
 import logging
 import traceback
 import contextvars
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, Optional, Callable, Union
+from typing import Any, Dict, Optional, Callable, Union, List, Type
 from functools import wraps
 from enum import Enum
 from pathlib import Path

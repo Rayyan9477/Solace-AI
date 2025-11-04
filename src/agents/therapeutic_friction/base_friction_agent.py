@@ -11,7 +11,7 @@ from datetime import datetime
 import asyncio
 from enum import Enum
 
-from src.agents.base_agent import BaseAgent
+from src.agents.base.base_agent import BaseAgent
 from src.utils.logger import get_logger
 
 
@@ -22,6 +22,25 @@ class FrictionAgentType(Enum):
     RELATIONSHIP_MONITORING = "relationship_monitoring"
     INTERVENTION_STRATEGY = "intervention_strategy"
     PROGRESS_TRACKING = "progress_tracking"
+
+
+class UserReadinessIndicator(Enum):
+    """Indicators of user readiness for therapeutic challenges."""
+    ENGAGEMENT = "engagement"
+    OPENNESS = "openness"
+    STABILITY = "stability"
+    RESISTANCE = "resistance"
+    TRUST = "trust"
+    AMBIVALENT = "ambivalent"
+
+
+class ChallengeLevel(Enum):
+    """Levels of therapeutic challenge intensity."""
+    MINIMAL = "minimal"
+    LOW = "low"
+    MODERATE = "moderate"
+    HIGH = "high"
+    MAXIMUM = "maximum"
 
 
 class BaseFrictionAgent(BaseAgent, ABC):
