@@ -16,8 +16,12 @@ from .response_validator import (
     SafetyAssessmentValidator
 )
 
+# Alias for backward compatibility
+ResponseValidator = ComprehensiveResponseValidator
+
 __all__ = [
     'ComprehensiveResponseValidator',
+    'ResponseValidator',  # Backward compat
     'ValidationScore',
     'ComprehensiveValidationResult',
     'ValidationDimension',

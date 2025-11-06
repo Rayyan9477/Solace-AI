@@ -15,10 +15,15 @@ import statistics
 from .base_friction_agent import BaseFrictionAgent, FrictionAgentType, friction_agent_registry
 from .readiness_assessment_agent import ReadinessAssessmentAgent
 from .breakthrough_detection_agent import BreakthroughDetectionAgent
-from src.agents.base_agent import BaseAgent
+from src.agents.base.base_agent import BaseAgent
 # Test shim: expose SupervisorAgent symbol for patching in tests
 SupervisorAgent = BaseAgent
-from src.agents.therapeutic_friction_agent import ChallengeLevel, InterventionType, UserReadinessIndicator
+from .base_friction_agent import ChallengeLevel, UserReadinessIndicator
+# InterventionType might be from therapy_agent
+try:
+    from src.agents.clinical.therapy_agent import InterventionType
+except ImportError:
+    InterventionType = None
 from src.utils.logger import get_logger
 
 

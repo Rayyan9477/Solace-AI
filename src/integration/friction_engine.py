@@ -21,12 +21,16 @@ from collections import defaultdict, deque
 import logging
 import math
 
-from src.agents.therapeutic_friction_agent import (
-    TherapeuticFrictionAgent,
+from src.agents.therapeutic_friction import FrictionCoordinator
+from src.agents.therapeutic_friction.base_friction_agent import (
     ChallengeLevel,
-    UserReadinessIndicator,
-    InterventionType
+    UserReadinessIndicator
 )
+# InterventionType might be from therapy_agent
+try:
+    from src.agents.clinical.therapy_agent import InterventionType
+except ImportError:
+    InterventionType = None
 from src.integration.event_bus import EventBus, Event, EventType, get_event_bus
 from src.integration.supervision_mesh import SupervisionMesh
 from src.utils.logger import get_logger
@@ -356,7 +360,7 @@ class FrictionEngine:
     
     def __init__(
         self,
-        friction_agent: TherapeuticFrictionAgent,
+        friction_agent: FrictionCoordinator,
         supervision_mesh: SupervisionMesh,
         event_bus: Optional[EventBus] = None
     ):
@@ -1028,7 +1032,7 @@ class FrictionEngine:
 # Factory function for creating a production-ready friction engine
 
 def create_friction_engine(
-    friction_agent: TherapeuticFrictionAgent,
+    friction_agent: FrictionCoordinator,
     supervision_mesh: SupervisionMesh,
     event_bus: Optional[EventBus] = None
 ) -> FrictionEngine:

@@ -17,7 +17,7 @@ from collections import defaultdict
 import logging
 from abc import ABC, abstractmethod
 
-from src.agents.supervisor_agent import SupervisorAgent, ValidationLevel, ValidationResult
+from src.agents.orchestration.supervisor_agent import SupervisorAgent, ValidationLevel, ValidationResult
 from src.integration.event_bus import EventBus, Event, EventType, get_event_bus
 from src.utils.logger import get_logger
 

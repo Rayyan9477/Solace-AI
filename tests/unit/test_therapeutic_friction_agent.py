@@ -10,10 +10,10 @@ from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime, timedelta
 import json
 
-from src.agents.therapeutic_friction_agent import (
-    TherapeuticFrictionAgent, 
-    ChallengeLevel, 
-    UserReadinessIndicator, 
+from src.agents.clinical.therapy_agent import (
+    TherapeuticFrictionAgent,
+    ChallengeLevel,
+    UserReadinessIndicator,
     InterventionType,
     UserProgress,
     TherapeuticRelationship

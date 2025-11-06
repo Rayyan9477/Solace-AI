@@ -16,7 +16,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import necessary modules
 from src.utils.voice_input_manager import VoiceInputManager
-from src.agents.agent_orchestrator import AgentOrchestrator
+from src.agents.orchestration.agent_orchestrator import AgentOrchestrator
 from src.agents.chat_agent import ChatAgent
 from src.agents.emotion_agent import EmotionAgent
 from src.agents.safety_agent import SafetyAgent

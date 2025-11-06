@@ -9,8 +9,7 @@ from typing import Dict, List, Optional, Any
 import re
 from datetime import datetime
 
-from .base_friction_agent import BaseFrictionAgent, FrictionAgentType
-from src.agents.therapeutic_friction_agent import UserReadinessIndicator
+from .base_friction_agent import BaseFrictionAgent, FrictionAgentType, UserReadinessIndicator
 
 
 class ReadinessAssessmentAgent(BaseFrictionAgent):

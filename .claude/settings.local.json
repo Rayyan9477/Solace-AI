@@ -15,7 +15,14 @@
       "Bash(pip check)",
       "Bash(pip install:*)",
       "Bash(touch:*)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(dir:*)",
+      "Bash(cat:*)",
+      "Bash(for file in /d/Repo/Contextual-Chatbot/src/agents/*.py)",
+      "Bash(head:*)",
+      "Bash(done)",
+      "Bash(tree:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": []
   }
