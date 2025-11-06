@@ -1,5 +1,6 @@
 from .metrics import MetricsManager
 from .logger import get_logger, configure_logger
+from .response_envelope import ResponseEnvelope, ResponseStatus
 
 # Lazy import helpers to avoid transformers dependency at init
 def get_text_helper():
@@ -21,9 +22,11 @@ def get_validation_helper():
 __all__ = [
     'MetricsManager',
     'get_text_helper',
-    'get_document_helper', 
+    'get_document_helper',
     'get_file_helper',
     'get_validation_helper',
     'get_logger',
-    'configure_logger'
+    'configure_logger',
+    'ResponseEnvelope',
+    'ResponseStatus'
 ]

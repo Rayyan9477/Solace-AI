@@ -13,6 +13,7 @@ from enum import Enum
 
 from src.agents.base.base_agent import BaseAgent
 from src.utils.logger import get_logger
+from src.utils.vector_db_integration import get_user_data
 
 
 class FrictionAgentType(Enum):
@@ -223,14 +224,78 @@ class BaseFrictionAgent(BaseAgent, ABC):
         self.integration_callbacks[name] = callback_func
     
     async def get_specialized_knowledge(self, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
-        """Retrieve specialized knowledge from vector database."""
+        """
+        Retrieve specialized knowledge from vector database.
+
+        This method performs semantic search across the agent's specialized knowledge domain,
+        retrieving the most relevant information for therapeutic friction assessments.
+
+        Args:
+            query: Search query describing needed knowledge
+            top_k: Maximum number of results to return (default: 3)
+
+        Returns:
+            List of knowledge items with content, metadata, and relevance scores
+
+        Example:
+            >>> knowledge = await agent.get_specialized_knowledge("user resistance patterns", top_k=5)
+            >>> for item in knowledge:
+            ...     print(f"{item['title']}: {item['relevance_score']}")
+        """
         try:
-            # This would integrate with the enhanced vector database system
-            # For now, return empty list as placeholder
             self.logger.debug(f"Knowledge query for {self.agent_type.value}: {query}")
-            return []
+
+            # Query vector database using agent's specialized namespace
+            results = await asyncio.to_thread(
+                get_user_data,
+                user_id="default_user",
+                data_type=self.vector_namespace,
+                query=query,
+                top_k=top_k
+            )
+
+            if not results:
+                self.logger.debug(f"No specialized knowledge found for query: {query}")
+                return []
+
+            # Format results with enhanced metadata
+            formatted_knowledge = []
+            for idx, item in enumerate(results):
+                knowledge_item = {
+                    'title': item.get('title', f'{self.agent_type.value.title()} Knowledge #{idx+1}'),
+                    'content': item.get('content', item.get('text', '')),
+                    'relevance_score': item.get('score', 0.0),
+                    'source': item.get('source', f'{self.agent_type.value}_knowledge_base'),
+                    'metadata': {
+                        'agent_type': self.agent_type.value,
+                        'namespace': self.vector_namespace,
+                        'query': query,
+                        'rank': idx + 1,
+                        'retrieved_at': datetime.now().isoformat()
+                    }
+                }
+
+                # Add optional fields if present
+                if 'category' in item:
+                    knowledge_item['category'] = item['category']
+                if 'tags' in item:
+                    knowledge_item['tags'] = item['tags']
+                if 'url' in item:
+                    knowledge_item['url'] = item['url']
+                if 'timestamp' in item:
+                    knowledge_item['created_at'] = item['timestamp']
+
+                formatted_knowledge.append(knowledge_item)
+
+            self.logger.info(
+                f"Retrieved {len(formatted_knowledge)} knowledge items for {self.agent_type.value} "
+                f"with avg relevance: {sum(k['relevance_score'] for k in formatted_knowledge) / len(formatted_knowledge):.3f}"
+            )
+
+            return formatted_knowledge
+
         except Exception as e:
-            self.logger.error(f"Error retrieving specialized knowledge: {str(e)}")
+            self.logger.error(f"Error retrieving specialized knowledge: {str(e)}", exc_info=True)
             return []
     
     def get_coordination_data(self) -> Dict[str, Any]:

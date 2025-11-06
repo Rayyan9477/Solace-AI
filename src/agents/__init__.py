@@ -1,51 +1,34 @@
 """
 Agents module initialization - Hierarchically organized agent implementations
 
-This package contains various agent implementations for the Contextual-Chatbot,
-organized into logical categories:
+This package contains agent implementations for the Contextual-Chatbot,
+organized into functional categories:
 
 - base: Core agent infrastructure
-- orchestration: Agent coordination and supervision
+- orchestration: Agent coordination and supervision (AgentOrchestrator)
 - core: Primary user-facing agents (chat, emotion, personality, safety)
-- clinical: Diagnosis and therapy agents
-- support: Search and crawler agents
-- analytics: Learning, pattern recognition, insights
-- personalization: User personalization and feedback systems
-- security: Privacy and security agents
-- therapeutic_friction: Growth-oriented challenge systems
-- validation: Response validation
+- clinical: Clinical agents (diagnosis, therapy)
+- support: Utility agents (search, crawler)
+- therapeutic_friction: Growth-oriented challenge system with sub-agents
+- validation: Response validation components
 """
 
 # Base agents
-from .base import Agent
+from .base import BaseAgent
 
-# Orchestration
+# Orchestration - Core coordination system
 from .orchestration import AgentOrchestrator, SupervisorAgent
 
-# Core agents
+# Core agents - Primary user interaction
 from .core import ChatAgent, EmotionAgent, PersonalityAgent, SafetyAgent
 
-# Clinical agents
+# Clinical agents - Therapeutic and diagnostic
 from .clinical import DiagnosisAgent, EnhancedDiagnosisAgent, TherapyAgent
 
-# Support agents
+# Support agents - Utility functions
 from .support import SearchAgent, CrawlerAgent
 
-# Analytics agents
-from .analytics import (
-    AdaptiveLearningAgent,
-    PatternRecognitionEngine,
-    InsightsGenerationSystem,
-    OutcomeTracker
-)
-
-# Personalization agents
-from .personalization import PersonalizationEngine, FeedbackIntegrationSystem
-
-# Security agents
-from .security import PrivacyProtectionSystem
-
-# Therapeutic friction
+# Therapeutic friction - Growth challenges
 from .therapeutic_friction import (
     BaseFrictionAgent,
     FrictionAgentType,
@@ -54,12 +37,9 @@ from .therapeutic_friction import (
     FrictionCoordinator
 )
 
-# Validation
-from .validation import ResponseValidator
-
 __all__ = [
     # Base
-    'Agent',
+    'BaseAgent',
     # Orchestration
     'AgentOrchestrator',
     'SupervisorAgent',
@@ -75,22 +55,10 @@ __all__ = [
     # Support
     'SearchAgent',
     'CrawlerAgent',
-    # Analytics
-    'AdaptiveLearningAgent',
-    'PatternRecognitionEngine',
-    'InsightsGenerationSystem',
-    'OutcomeTracker',
-    # Personalization
-    'PersonalizationEngine',
-    'FeedbackIntegrationSystem',
-    # Security
-    'PrivacyProtectionSystem',
     # Therapeutic Friction
     'BaseFrictionAgent',
     'FrictionAgentType',
     'ReadinessAssessmentAgent',
     'BreakthroughDetectionAgent',
     'FrictionCoordinator',
-    # Validation
-    'ResponseValidator',
 ]

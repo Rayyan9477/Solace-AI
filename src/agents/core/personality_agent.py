@@ -1,5 +1,4 @@
 import os
-import sys
 from typing import Dict, Any, Optional, List
 from ..base.base_agent import BaseAgent
 
@@ -16,8 +15,7 @@ import json
 # Add vector database integration
 from src.utils.vector_db_integration import add_user_data, get_user_data
 
-# Add the project root to the path to import the personality modules
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+# Import personality assessment modules using proper package imports
 from src.personality.big_five import BigFiveAssessment
 from src.personality.mbti import MBTIAssessment
 

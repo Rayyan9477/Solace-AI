@@ -898,18 +898,28 @@ class AgentOrchestrator(Module):
         # Generate session ID if not provided
         if session_id is None:
             session_id = f"session_{int(time.time())}"
-        
+
         # Get workflow definition
         workflow = self.workflows[workflow_id]
         agent_sequence = workflow["agent_sequence"]
-        
+
+        # Validate workflow agents before execution
+        is_valid, missing_agents, error_message = self._validate_workflow_agents(workflow_id, agent_sequence)
+        if not is_valid:
+            return {
+                "error": error_message,
+                "status": "failed",
+                "missing_agents": missing_agents,
+                "workflow_id": workflow_id
+            }
+
         # Update context store with initial context
         if context:
             await self.update_context(session_id, context)
-        
+
         # Get full context for this session
         full_context = await self.get_context(session_id)
-        
+
         # Prepare workflow state
         workflow_state = {
             "workflow_id": workflow_id,
@@ -1325,7 +1335,7 @@ class AgentOrchestrator(Module):
     def _deep_merge(self, target: Dict[str, Any], source: Dict[str, Any]) -> None:
         """
         Recursively merge source dict into target dict
-        
+
         Args:
             target: Target dictionary to merge into
             source: Source dictionary to merge from
@@ -1337,6 +1347,44 @@ class AgentOrchestrator(Module):
             else:
                 # Update or add non-dictionary items
                 target[key] = value
+
+    def _validate_workflow_agents(self, workflow_id: str, agent_sequence: List[str]) -> tuple:
+        """
+        Validate that all agents in the workflow sequence are registered.
+
+        Args:
+            workflow_id: ID of the workflow being validated
+            agent_sequence: List of agent IDs in the workflow
+
+        Returns:
+            Tuple of (is_valid: bool, missing_agents: List[str], error_message: str)
+        """
+        missing_agents = []
+
+        for agent_id in agent_sequence:
+            # Special case: unified_diagnosis_service is not a regular agent
+            if agent_id == "unified_diagnosis_service":
+                continue
+
+            # Check if agent is registered
+            if agent_id not in self.agent_modules:
+                missing_agents.append(agent_id)
+
+        if missing_agents:
+            error_msg = (
+                f"Workflow '{workflow_id}' validation failed: "
+                f"{len(missing_agents)} agent(s) not registered: {', '.join(missing_agents)}. "
+                f"Registered agents: {', '.join(self.agent_modules.keys())}"
+            )
+            self.logger.error(error_msg, {
+                "workflow_id": workflow_id,
+                "missing_agents": missing_agents,
+                "registered_agents": list(self.agent_modules.keys())
+            })
+            return False, missing_agents, error_msg
+
+        self.logger.debug(f"Workflow '{workflow_id}' validation passed - all agents registered")
+        return True, [], ""
     
     async def shutdown(self) -> bool:
         """Shutdown the orchestrator"""
@@ -1844,18 +1892,28 @@ class AgentOrchestrator(Module):
         # Generate session ID if not provided
         if session_id is None:
             session_id = f"enhanced_session_{int(time.time())}"
-        
+
         # Get workflow definition
         workflow = self.workflows[workflow_id]
         agent_sequence = workflow["agent_sequence"]
-        
+
+        # Validate workflow agents before execution
+        is_valid, missing_agents, error_message = self._validate_workflow_agents(workflow_id, agent_sequence)
+        if not is_valid:
+            return {
+                "error": error_message,
+                "status": "failed",
+                "missing_agents": missing_agents,
+                "workflow_id": workflow_id
+            }
+
         # Update context store with initial context
         if context:
             await self.update_context(session_id, context)
-        
+
         # Get full context for this session
         full_context = await self.get_context(session_id)
-        
+
         # Prepare enhanced workflow state
         workflow_state = {
             "workflow_id": workflow_id,

@@ -166,29 +166,100 @@ class TherapyAgent(BaseAgent):
         return enhanced_response
     
     def integrate_friction_insights(self, friction_result: Dict[str, Any]) -> Dict[str, Any]:
-        """Integrate insights from TherapeuticFrictionAgent to enhance therapeutic approach.
-        
-        Args:
-            friction_result: Results from TherapeuticFrictionAgent processing
-            
-        Returns:
-            Enhanced therapeutic insights combining both approaches
         """
+        Integrate therapeutic friction insights to create adaptive, growth-oriented interventions.
+
+        Combines traditional evidence-based therapy with therapeutic friction principles,
+        dynamically adjusting challenge levels based on user readiness assessment.
+        This integration enables optimal balance between support and growth challenge.
+
+        Integration Algorithm:
+            1. Assess friction data availability → use defaults if unavailable
+            2. Update therapeutic alliance score using weighted average (70% current, 30% friction)
+            3. Adjust challenge threshold based on readiness assessment:
+               - validation_only/gentle_inquiry → reduce alliance by 0.1 (cap at 0.5)
+               - strong_challenge/breakthrough_push → increase alliance by 0.05 (cap at 1.0)
+            4. Extract growth questions, experiments, and breakthrough potential
+            5. Generate integrated recommendations combining both approaches
+
+        Args:
+            friction_result (Dict[str, Any]): Results from TherapeuticFrictionAgent containing:
+                - 'user_readiness' (str): Readiness category (e.g., 'ready', 'ambivalent')
+                - 'challenge_level' (str): Challenge intensity recommendation
+                - 'therapeutic_relationship' (dict): Bond strength and rupture indicators
+                - 'response_strategy' (dict): Growth questions and behavioral experiments
+                - 'context_updates' (dict): Breakthrough potential and progress indicators
+
+        Returns:
+            Dict[str, Any]: Integrated therapeutic insights with 13 fields:
+                - combined_approach (bool): Whether friction insights were integrated
+                - friction_readiness (str): User readiness assessment
+                - friction_challenge_level (str): Recommended challenge intensity
+                - friction_questions (list[str]): Growth-oriented questions
+                - friction_experiments (list[dict]): Behavioral experiments
+                - breakthrough_potential (float): Breakthrough likelihood (0-1)
+                - integrated_recommendations (list[str]): Combined therapeutic recommendations
+                - friction_available (bool): Whether friction data was available
+                - therapeutic_alliance_adjusted (float): Updated alliance score
+                - readiness_factors (dict): Factors affecting readiness
+                - growth_opportunities (list): Identified growth areas
+                - fallback_mode (bool, optional): True if using defaults
+
+        Example:
+            >>> friction_data = {
+            ...     'user_readiness': 'ready',
+            ...     'challenge_level': 'moderate_challenge',
+            ...     'therapeutic_relationship': {'therapeutic_bond_strength': 0.85},
+            ...     'response_strategy': {
+            ...         'growth_questions': ['What are you avoiding?'],
+            ...         'behavioral_experiments': [{'title': 'Face fear gradually'}]
+            ...     },
+            ...     'context_updates': {
+            ...         'therapeutic_friction': {'breakthrough_potential': 0.7}
+            ...     }
+            ... }
+            >>> integration = self.integrate_friction_insights(friction_data)
+            >>> print(integration['friction_challenge_level'])
+            'moderate_challenge'
+            >>> print(integration['combined_approach'])
+            True
+
+        Note:
+            - Fallback mode activates when friction_result is None or empty
+            - Alliance score adjustments are conservative to prevent over-correction
+            - All recommendations err on the side of therapeutic safety
+        """
+        # Provide meaningful defaults when friction data is unavailable
         if not friction_result:
-            return {}
-        
+            return {
+                "combined_approach": False,
+                "friction_readiness": "unknown",
+                "friction_challenge_level": "supportive",
+                "friction_questions": [],
+                "friction_experiments": [],
+                "breakthrough_potential": 0.0,
+                "integrated_recommendations": [
+                    "Continue building therapeutic alliance",
+                    "Focus on evidence-based interventions appropriate to presentation",
+                    "Monitor for readiness indicators before introducing challenges"
+                ],
+                "friction_available": False,
+                "fallback_mode": True
+            }
+
         # Update therapeutic alliance based on friction agent insights
         friction_relationship = friction_result.get("therapeutic_relationship", {})
         if friction_relationship:
-            self.therapeutic_alliance_score = max(
-                self.therapeutic_alliance_score,
-                friction_relationship.get("therapeutic_bond_strength", self.therapeutic_alliance_score)
+            bond_strength = friction_relationship.get("therapeutic_bond_strength", self.therapeutic_alliance_score)
+            # Update alliance score with weighted average (70% current, 30% friction assessment)
+            self.therapeutic_alliance_score = (
+                0.7 * self.therapeutic_alliance_score + 0.3 * bond_strength
             )
-        
+
         # Incorporate readiness assessment for modulating interventions
         user_readiness = friction_result.get("user_readiness", "ambivalent")
         challenge_level = friction_result.get("challenge_level", "gentle_inquiry")
-        
+
         # Adjust challenging response threshold based on friction agent's assessment
         if challenge_level in ["validation_only", "gentle_inquiry"]:
             # Reduce challenging for vulnerable users
@@ -196,19 +267,25 @@ class TherapyAgent(BaseAgent):
         elif challenge_level in ["strong_challenge", "breakthrough_push"]:
             # User can handle more challenge
             self.therapeutic_alliance_score = min(1.0, self.therapeutic_alliance_score + 0.05)
-        
+
         # Combine intervention recommendations
         friction_strategy = friction_result.get("response_strategy", {})
+        breakthrough_data = friction_result.get("context_updates", {}).get("therapeutic_friction", {})
+
         therapeutic_integration = {
             "combined_approach": True,
             "friction_readiness": user_readiness,
             "friction_challenge_level": challenge_level,
             "friction_questions": friction_strategy.get("growth_questions", []),
             "friction_experiments": friction_strategy.get("behavioral_experiments", []),
-            "breakthrough_potential": friction_result.get("context_updates", {}).get("therapeutic_friction", {}).get("breakthrough_potential", 0),
-            "integrated_recommendations": self._generate_integrated_recommendations(friction_result)
+            "breakthrough_potential": breakthrough_data.get("breakthrough_potential", 0.0),
+            "integrated_recommendations": self._generate_integrated_recommendations(friction_result),
+            "friction_available": True,
+            "therapeutic_alliance_adjusted": self.therapeutic_alliance_score,
+            "readiness_factors": friction_result.get("readiness_factors", {}),
+            "growth_opportunities": friction_result.get("growth_opportunities", [])
         }
-        
+
         return therapeutic_integration
     
     def _get_agent_specific_context(self, query: str, response: Any, context: Dict[str, Any]) -> Dict[str, Any]:
@@ -391,12 +468,26 @@ class TherapyAgent(BaseAgent):
         
         return experiments.get(emotion, [])
     
-    def _generate_homework_assignment(self, modality: Optional[TherapeuticModality], 
+    def _generate_homework_assignment(self, modality: Optional[TherapeuticModality],
                                     emotion: str, user_input: str) -> Optional[Dict[str, Any]]:
-        """Generate appropriate homework assignment."""
+        """
+        Generate appropriate homework assignment based on therapeutic modality.
+
+        Creates evidence-based homework assignments tailored to the specific
+        therapeutic approach and user's current presentation.
+
+        Args:
+            modality: The therapeutic modality to base the assignment on
+            emotion: User's current emotional state
+            user_input: User's message for context
+
+        Returns:
+            Dict containing homework assignment details, or None if modality unavailable
+        """
         if not modality:
             return None
-        
+
+        # Comprehensive assignments for all therapeutic modalities
         assignments = {
             TherapeuticModality.CBT: {
                 "title": "Thought Record",
@@ -408,7 +499,8 @@ class TherapyAgent(BaseAgent):
                     "Write a more balanced thought",
                     "Rate your belief in the balanced thought"
                 ],
-                "duration": "daily for 1 week"
+                "duration": "daily for 1 week",
+                "modality": "CBT"
             },
             TherapeuticModality.DBT: {
                 "title": "Distress Tolerance Skills Practice",
@@ -419,28 +511,94 @@ class TherapyAgent(BaseAgent):
                     "Paced breathing: 4 seconds in, 6 seconds out",
                     "Paired muscle relaxation: Tense and release muscle groups"
                 ],
-                "duration": "practice when needed"
+                "duration": "practice when needed",
+                "modality": "DBT"
+            },
+            TherapeuticModality.ACT: {
+                "title": "Values Clarification Exercise",
+                "description": "Identify your core values and take committed action",
+                "instructions": [
+                    "List your top 5 life values (e.g., family, growth, health, creativity)",
+                    "For each value, rate how aligned your current life is (1-10)",
+                    "Choose one value to focus on this week",
+                    "Identify one small action that aligns with this value",
+                    "Complete the action and notice your experience without judgment"
+                ],
+                "duration": "complete once, then reflect daily",
+                "modality": "ACT"
+            },
+            TherapeuticModality.EXPOSURE: {
+                "title": "Gradual Exposure Hierarchy",
+                "description": "Create a step-by-step plan to face anxiety-provoking situations",
+                "instructions": [
+                    "List situations you've been avoiding (from least to most anxiety-provoking)",
+                    "Rate each situation's anxiety level (0-10)",
+                    "Choose the lowest-rated situation to start with",
+                    "Practice facing this situation 3 times this week",
+                    "Record your anxiety before, during, and after each exposure",
+                    "Note: Only progress when anxiety naturally decreases"
+                ],
+                "duration": "3 exposures this week",
+                "modality": "EXPOSURE"
+            },
+            TherapeuticModality.MINDFULNESS: {
+                "title": "Daily Mindfulness Practice",
+                "description": "Cultivate present-moment awareness through structured practice",
+                "instructions": [
+                    "Set aside 10 minutes daily for mindfulness meditation",
+                    "Find a quiet space and sit comfortably",
+                    "Focus on your breath - notice the sensation of breathing",
+                    "When your mind wanders (it will!), gently return focus to breath",
+                    "After practice, journal: What did you notice? Any insights?"
+                ],
+                "duration": "10 minutes daily for 1 week",
+                "modality": "MINDFULNESS"
             },
             TherapeuticModality.BEHAVIORAL_ACTIVATION: {
                 "title": "Activity Scheduling",
                 "description": "Schedule and engage in meaningful activities",
                 "instructions": [
-                    "List 5 activities that used to bring you joy",
-                    "Schedule one activity each day",
-                    "Rate your mood before and after (1-10)",
-                    "Note any obstacles and how you overcame them"
+                    "List 5 activities that used to bring you joy or satisfaction",
+                    "Schedule one activity each day for the next week",
+                    "Rate your mood before starting the activity (1-10)",
+                    "Complete the activity even if you don't feel like it",
+                    "Rate your mood after completing the activity (1-10)",
+                    "Note any obstacles encountered and how you overcame them"
                 ],
-                "duration": "daily for 1 week"
+                "duration": "daily for 1 week",
+                "modality": "BEHAVIORAL_ACTIVATION"
+            },
+            TherapeuticModality.PSYCHOEDUCATION: {
+                "title": "Understanding Your Mental Health",
+                "description": "Learn about your mental health condition and coping strategies",
+                "instructions": [
+                    "Read provided educational materials about your symptoms/condition",
+                    "Identify 3 key facts that resonate with your experience",
+                    "List 2 coping strategies from the materials you'd like to try",
+                    "Journal: How does understanding your condition help?",
+                    "Prepare questions for your next session"
+                ],
+                "duration": "complete within 1 week",
+                "modality": "PSYCHOEDUCATION"
             }
         }
-        
+
         assignment = assignments.get(modality)
         if assignment:
+            # Add metadata
             assignment["assigned_date"] = datetime.now().isoformat()
             assignment["due_date"] = (datetime.now() + timedelta(days=7)).isoformat()
+            assignment["emotion_context"] = emotion
+            assignment["user_input_context"] = user_input[:100]  # First 100 chars for context
+
+            # Track assignment
             self.homework_assignments.append(assignment)
-        
-        return assignment
+
+            return assignment
+        else:
+            # Fallback for unexpected modality
+            logger.warning(f"Unknown therapeutic modality: {modality}")
+            return None
     
     def _update_therapeutic_alliance(self, user_input: str, emotion: str) -> None:
         """Update therapeutic alliance score based on interaction."""

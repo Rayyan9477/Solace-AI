@@ -1,30 +1,26 @@
 from typing import Optional, Dict, Any, List
 import os
+import asyncio
 # Import Gemini integration
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import SystemMessage, HumanMessage
 from langchain.schema.language_model import BaseLanguageModel
-from langchain.memory import ConversationBufferMemory
 from agno.memory import Memory
 from agno.knowledge import AgentKnowledge
 from ..base.base_agent import BaseAgent
 import logging
 from datetime import datetime
 import json
-import numpy as np
-from collections import deque
-from typing import Deque
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 # Use provider-agnostic factory
 from src.models.llm import get_llm
-# Import for therapy integration
-from src.agents.clinical.therapy_agent import TherapyAgent
 # Import the enhanced memory components
 from src.utils.context_aware_memory import ContextAwareMemoryAdapter
 from src.memory.semantic_memory import SemanticMemoryManager
 # Import vector database integration
 from src.utils.vector_db_integration import add_user_data, get_user_data
+# Import memory factory for centralized memory management
+from src.utils.memory_factory import create_agent_memory
 
 logger = logging.getLogger(__name__)
 
@@ -49,27 +45,8 @@ class ChatAgent(BaseAgent):
             model = get_llm(provider_config)
             logger.info(f"Created default LLM for ChatAgent provider={provider_config['provider']}")
 
-        # Create a langchain memory instance
-        langchain_memory = ConversationBufferMemory(
-            memory_key="chat_history",
-            return_messages=True,
-            input_key="input",
-            output_key="output"
-        )
-
-        # Create memory dict for agno Memory
-        memory_dict = {
-            "memory": "chat_memory",
-            "storage": "local_storage",
-            "memory_key": "chat_history",
-            "chat_memory": langchain_memory,
-            "input_key": "input",
-            "output_key": "output",
-            "return_messages": True
-        }
-
-        # Initialize Memory with the dictionary
-        memory = Memory(**memory_dict)
+        # Create memory using centralized factory
+        memory = create_agent_memory()
 
         super().__init__(
             model=model,
@@ -79,10 +56,7 @@ class ChatAgent(BaseAgent):
             memory=memory,
             knowledge=AgentKnowledge()
         )
-        
-        # Create therapy agent for accessing therapeutic techniques
-        self.therapy_agent = None
-        
+
         # Initialize enhanced memory components if enabled
         self.user_id = user_id
         self.enable_semantic_memory = enable_semantic_memory
@@ -243,7 +217,7 @@ Provide a supportive, empathetic response that addresses the user's emotional ne
                 response_text = llm_result.generations[0][0].text
             except (AttributeError, TypeError):
                 # Fallback for LLMs that don't support agenerate_messages
-                logger.warning("LLM does not support agenerate_messages, using fallback method")
+                logger.warning("LLM does not support agenerate_messages, using async fallback method")
                 # Render full prompt with context
                 rendered_msgs = self.chat_prompt.format_messages(
                     message=message,
@@ -257,24 +231,19 @@ Provide a supportive, empathetic response that addresses the user's emotional ne
                     personality_adaptations=personality_adaptations_str
                 )
                 prompt_text = "\n".join(m.content for m in rendered_msgs)
-                # Use a synchronous approach as fallback
-                sync_result = self.llm.generate([prompt_text])
+                # Use asyncio.to_thread to avoid blocking the event loop
+                sync_result = await asyncio.to_thread(self.llm.generate, [prompt_text])
                 response_text = sync_result.generations[0][0].text
 
-            # Check if we need to enhance the response with therapeutic techniques
-            if "workflow_id" in context and context["workflow_id"] == "therapeutic_chat":
-                # Check if therapy agent exists, create if not
-                if self.therapy_agent is None:
-                    logger.info("Creating therapy agent for therapeutic chat workflow")
-                    self.therapy_agent = TherapyAgent(model_provider=self.llm)
-                
-                # Process the message with therapy agent
-                if "therapeutic_techniques" not in context:
-                    therapy_result = await self.therapy_agent.process(message, context)
-                    
-                    # Enhance response with therapeutic techniques if available
-                    if therapy_result and therapy_result.get("formatted_techniques"):
-                        response_text = self.therapy_agent.enhance_response(response_text, therapy_result)
+            # Check if therapeutic techniques were provided by orchestrator workflow
+            # The orchestrator should have already run therapy_agent before chat_agent
+            if "therapeutic_techniques" in context and context.get("therapeutic_techniques"):
+                therapeutic_data = context["therapeutic_techniques"]
+                # Integrate therapeutic techniques into response
+                if therapeutic_data.get("formatted_techniques"):
+                    response_text = self._integrate_therapeutic_techniques(
+                        response_text, therapeutic_data
+                    )
 
             # Update original memory
             try:
@@ -340,9 +309,9 @@ Provide a supportive, empathetic response that addresses the user's emotional ne
                 if context and "user_id" in context:
                     chat_data["user_id"] = context["user_id"]
                 
-                # Store in vector database
-                doc_id = add_user_data("conversation", chat_data)
-                
+                # Store in vector database using async wrapper
+                doc_id = await asyncio.to_thread(add_user_data, "conversation", chat_data)
+
                 if doc_id:
                     logger.info(f"Stored chat message in vector DB: {doc_id}")
                 else:
@@ -579,3 +548,21 @@ Voice Emotion Analysis:
         
         # Return empty list if semantic memory is not available or if search fails
         return []
+
+    def _integrate_therapeutic_techniques(self, response_text: str, therapeutic_data: Dict[str, Any]) -> str:
+        """
+        Integrate therapeutic techniques into chat response.
+        Called when orchestrator workflow has already run therapy_agent.
+
+        Args:
+            response_text: Original chat response
+            therapeutic_data: Therapeutic techniques from therapy_agent
+
+        Returns:
+            Enhanced response with therapeutic guidance
+        """
+        techniques = therapeutic_data.get("formatted_techniques", "")
+        if techniques:
+            # Append therapeutic guidance to response
+            return f"{response_text}\n\n{techniques}"
+        return response_text

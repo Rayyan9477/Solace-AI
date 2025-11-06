@@ -45,15 +45,22 @@ class Application:
         self.device = get_device()
         self.device_info = get_device_info()
         self.logger = get_logger(__name__)
-        
+        self.performance_profiler = None
+        self.optimization_enabled = False
+
         # Environment validation
         self._validate_environment()
-        
+
         # Configure logging based on app settings
         self._configure_logging()
-        
+
+        # Initialize performance profiling if optimization is available
+        self._initialize_optimization_components()
+
         self.logger.info(f"Application initialized with device: {self.device}")
         self.logger.info(f"Device info: {self.device_info}")
+        if self.optimization_enabled:
+            self.logger.info("Optimization components enabled")
     
     def _configure_logging(self):
         """Configure logging based on application settings"""
@@ -65,7 +72,28 @@ class Application:
         }
         configure_logging(log_config)
         self.logger.info("Logging configured", {"config": log_config})
-    
+
+    def _initialize_optimization_components(self):
+        """Initialize optimization and performance profiling components"""
+        try:
+            # Check if optimization module is available
+            from src.agents.orchestration import OPTIMIZATION_ENABLED
+            self.optimization_enabled = OPTIMIZATION_ENABLED
+
+            if self.optimization_enabled:
+                # Initialize performance profiler
+                from src.optimization.performance_profiler import AgentPerformanceProfiler
+                self.performance_profiler = AgentPerformanceProfiler()
+                self.logger.info("Performance profiler initialized")
+
+                # Log optimization details
+                from src.optimization import __version__ as opt_version
+                self.logger.info(f"Optimization module version: {opt_version}")
+
+        except ImportError as e:
+            self.logger.warning(f"Optimization components not available: {e}")
+            self.optimization_enabled = False
+
     def _validate_environment(self):
         """Validate that required environment variables and configuration are set"""
         # Ensure required configuration is present
@@ -239,26 +267,73 @@ class Application:
             }
         )
         
-        # Create agent modules with dependencies
-        agent_configs = {
-            "safety": {},
-            "emotion": {},
-            "chat": {},
-            "diagnosis": {},
-            "personality": {},
-            "crawler": AppConfig.get_crawler_config(),
-            "search": {},
-            "integrated_diagnosis": {}
+        # Create orchestrator FIRST (needed for agent coordination)
+        # Configure with optimization settings
+        orchestrator_config = {
+            "enhanced_features_enabled": True,
+            "event_driven_enabled": True,
+            "supervision_mesh_enabled": True,
+            "circuit_breaker_enabled": True,
+            "performance_monitoring_enabled": True,
+            "retry_config": {
+                "max_retries": 3,
+                "base_delay": 1.0,
+                "max_delay": 60.0
+            },
+            "circuit_breaker_config": {
+                "failure_threshold": 5,
+                "reset_timeout": 60,
+                "success_threshold": 2,
+                "timeout": 30
+            }
         }
-        
+
+        orchestrator = self.module_manager.create_module(
+            type_id="AgentOrchestrator",
+            module_id="orchestrator",
+            config=orchestrator_config
+        )
+
+        # Create agent modules with dependencies
+        # Use optimized model configurations if available
+        agent_configs = {}
+
+        # Configure each agent with optimized model settings
+        for agent_name in ["safety", "emotion", "chat", "diagnosis", "personality",
+                         "therapy", "search", "integrated_diagnosis"]:
+            # Get optimized model config for this agent
+            if hasattr(AppConfig, 'get_optimized_model_config'):
+                model_config = AppConfig.get_optimized_model_config(f"{agent_name}_agent")
+            else:
+                model_config = AppConfig.get_model_config()
+
+            agent_configs[agent_name] = {"model_config": model_config}
+
+        # Special configuration for crawler agent
+        agent_configs["crawler"] = {
+            **AppConfig.get_crawler_config(),
+            "model_config": AppConfig.get_optimized_model_config("crawler_agent")
+            if hasattr(AppConfig, 'get_optimized_model_config') else AppConfig.get_model_config()
+        }
+
         # Create agent modules
         for agent_name, agent_config in agent_configs.items():
-            self.module_manager.create_module(
+            agent = self.module_manager.create_module(
                 type_id=f"{agent_name.capitalize()}Agent",
                 module_id=f"{agent_name}_agent",
                 config=agent_config
             )
-        
+            # Register each agent with orchestrator for workflow coordination
+            if orchestrator and agent:
+                try:
+                    orchestrator.register_agent(f"{agent_name}_agent", agent)
+                    self.logger.info(f"Registered {agent_name}_agent with orchestrator")
+                    if self.optimization_enabled:
+                        self.logger.debug(f"Using optimized model for {agent_name}_agent: "
+                                       f"{agent_config.get('model_config', {}).get('model', 'default')}")
+                except Exception as e:
+                    self.logger.warning(f"Could not register {agent_name}_agent: {e}")
+
         # Create UI module
         self.module_manager.create_module(
             type_id="UIManager",
@@ -286,15 +361,36 @@ class Application:
     async def health_check(self):
         """Perform health check on all application modules"""
         health_info = await self.module_manager.health_check_all()
-        
+
+        # Add optimization metrics if available
+        if self.optimization_enabled and self.performance_profiler:
+            try:
+                # Get performance recommendations
+                recommendations = self.performance_profiler.get_optimization_recommendations()
+                health_info["optimization"] = {
+                    "enabled": True,
+                    "recommendations": recommendations,
+                    "bottlenecks_detected": len(recommendations.get("bottlenecks", [])),
+                    "cache_opportunities": len(recommendations.get("cache_opportunities", []))
+                }
+            except Exception as e:
+                self.logger.warning(f"Error getting optimization metrics: {e}")
+                health_info["optimization"] = {"enabled": True, "error": str(e)}
+        else:
+            health_info["optimization"] = {"enabled": False}
+
         # Log health status
         if health_info["overall_status"] == "operational":
-            self.logger.info("Health check: All systems operational", 
-                         {"modules": len(health_info["modules"]), "initialized": health_info["initialized_modules"]})
+            self.logger.info("Health check: All systems operational",
+                         {"modules": len(health_info["modules"]),
+                          "initialized": health_info["initialized_modules"],
+                          "optimization": health_info["optimization"]["enabled"]})
         else:
-            self.logger.warning("Health check: System degraded", 
-                            {"modules": len(health_info["modules"]), "initialized": health_info["initialized_modules"]})
-        
+            self.logger.warning("Health check: System degraded",
+                            {"modules": len(health_info["modules"]),
+                             "initialized": health_info["initialized_modules"],
+                             "optimization": health_info["optimization"]["enabled"]})
+
         return health_info
 
     def run(self):

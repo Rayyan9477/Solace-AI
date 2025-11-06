@@ -1,4 +1,4 @@
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from ..base.base_agent import BaseAgent
 from agno.tools import tool
 from agno.memory import Memory
@@ -7,12 +7,19 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import SystemMessage, HumanMessage
 from langchain.schema.language_model import BaseLanguageModel
-from langchain.memory import ConversationBufferMemory
 import logging
 from datetime import datetime
 
 # Import vector database integration
 from src.utils.vector_db_integration import add_user_data
+# Import memory factory for centralized memory management
+from src.utils.memory_factory import create_agent_memory
+# Import sentiment analysis utilities
+from src.utils.sentiment_utils import (
+    analyze_text_sentiment,
+    get_emotion_from_sentiment,
+    detect_emotional_triggers
+)
 
 # Initialize VADER sentiment analyzer
 sentiment_analyzer = SentimentIntensityAnalyzer()
@@ -84,28 +91,9 @@ async def analyze_voice_emotion(emotion_data: Dict[str, Any]) -> Dict[str, Any]:
 
 class EmotionAgent(BaseAgent):
     def __init__(self, model: BaseLanguageModel):
-        # Create a langchain memory instance
-        langchain_memory = ConversationBufferMemory(
-            memory_key="chat_history",
-            return_messages=True,
-            input_key="input",
-            output_key="output"
-        )
-        
-        # Create memory dict for agno Memory
-        memory_dict = {
-            "memory": "chat_memory",  # Memory parameter should be a string
-            "storage": "local_storage",  # Storage parameter should be a string
-            "memory_key": "chat_history",
-            "chat_memory": langchain_memory,
-            "input_key": "input",
-            "output_key": "output",
-            "return_messages": True
-        }
-        
-        # Initialize Memory with the dictionary
-        memory = Memory(**memory_dict)
-        
+        # Create memory using centralized factory
+        memory = create_agent_memory()
+
         super().__init__(
             model=model,
             name="emotion_analyzer",
@@ -157,69 +145,35 @@ Congruence: [match between voice tone and text content]""")
             Dictionary containing emotional analysis
         """
         try:
-            # Instead of using the analyze_emotion function directly, implement a simpler approach
-            # to avoid the 'Function' object is not callable error
-            sentiment_result = {
-                'sentiment_scores': {'neg': 0.0, 'neu': 1.0, 'pos': 0.0, 'compound': 0.0},
-                'compound_score': 0.0,
-                'normalized_intensity': 0.0
-            }
-            
-            # Use VADER sentiment analyzer directly
-            try:
-                sentiment = sentiment_analyzer.polarity_scores(text)
-                sentiment_result = {
-                    'sentiment_scores': sentiment,
-                    'compound_score': sentiment['compound'],
-                    'normalized_intensity': abs(sentiment['compound']) * 10
-                }
-            except Exception as e:
-                logger.warning(f"VADER sentiment analysis failed: {str(e)}")
-            
+            # Use centralized sentiment analysis utility
+            sentiment_result = analyze_text_sentiment(text)
+
             # Get history - handle potential memory errors
             history = {}
             try:
                 history = await self.memory.get("last_analysis", {})
             except Exception as e:
                 logger.warning(f"Failed to get memory: {str(e)}")
-            
-            # Create a simplified analysis based on sentiment
+
+            # Create base analysis structure
             analysis = {
-                'primary_emotion': 'neutral',
-                'secondary_emotions': [],
-                'intensity': 5,
                 'triggers': [],
                 'clinical_indicators': [],
                 'pattern_changes': [],
                 'confidence': 0.7,
                 'timestamp': datetime.now().isoformat()
             }
-            
-            # Determine primary emotion based on sentiment
+
+            # Get emotion data from sentiment using utility
             compound = sentiment_result.get('compound_score', 0)
-            if compound > 0.05:
-                analysis['primary_emotion'] = 'happy'
-                analysis['secondary_emotions'] = ['content', 'satisfied']
-            elif compound < -0.05:
-                analysis['primary_emotion'] = 'sad'
-                analysis['secondary_emotions'] = ['disappointed', 'frustrated']
-            else:
-                analysis['primary_emotion'] = 'neutral'
-                analysis['secondary_emotions'] = ['calm', 'balanced']
-            
-            # Set intensity based on sentiment
-            analysis['intensity'] = min(10, max(1, int(abs(compound) * 10)))
-            
-            # Add some basic triggers based on common words
-            text_lower = text.lower()
-            if 'work' in text_lower or 'job' in text_lower:
-                analysis['triggers'].append('work-related stress')
-            if 'family' in text_lower or 'parent' in text_lower:
-                analysis['triggers'].append('family dynamics')
-            if 'health' in text_lower or 'sick' in text_lower:
-                analysis['triggers'].append('health concerns')
-            
+            emotion_data = get_emotion_from_sentiment(compound)
+            analysis.update(emotion_data)
+
+            # Detect emotional triggers using utility
+            analysis['triggers'] = detect_emotional_triggers(text)
+
             # Add some basic clinical indicators
+            text_lower = text.lower()
             if 'depressed' in text_lower or 'hopeless' in text_lower:
                 analysis['clinical_indicators'].append('depression symptoms')
             if 'anxious' in text_lower or 'worried' in text_lower:
@@ -251,23 +205,8 @@ Congruence: [match between voice tone and text content]""")
             Dictionary containing combined emotional analysis
         """
         try:
-            # Get text sentiment analysis
-            sentiment_result = {
-                'sentiment_scores': {'neg': 0.0, 'neu': 1.0, 'pos': 0.0, 'compound': 0.0},
-                'compound_score': 0.0,
-                'normalized_intensity': 0.0
-            }
-            
-            # Use VADER sentiment analyzer for text
-            try:
-                sentiment = sentiment_analyzer.polarity_scores(text)
-                sentiment_result = {
-                    'sentiment_scores': sentiment,
-                    'compound_score': sentiment['compound'],
-                    'normalized_intensity': abs(sentiment['compound']) * 10
-                }
-            except Exception as e:
-                logger.warning(f"VADER sentiment analysis failed: {str(e)}")
+            # Use centralized sentiment analysis utility
+            sentiment_result = analyze_text_sentiment(text)
             
             # Get history
             history = {}
@@ -481,10 +420,11 @@ Congruence: [match between voice tone and text content]""")
                     result['clinical_indicators'] = [i.strip() for i in value.split(',')]
                 elif 'Pattern Changes' in key:
                     result['pattern_changes'] = [p.strip() for p in value.split(',')]
-                    
-        except Exception:
+
+        except Exception as e:
+            logger.warning(f"Error parsing emotion analysis result: {str(e)}")
             pass
-            
+
         return result
 
     def _calculate_confidence(self, analysis: Dict[str, Any], sentiment: Dict[str, Any]) -> float:
@@ -514,28 +454,151 @@ Congruence: [match between voice tone and text content]""")
 - Notable Patterns: {', '.join(history.get('pattern_changes', []))}"""
 
     def _fallback_analysis(self, message: str) -> Dict[str, Any]:
-        """Enhanced fallback analysis using VADER"""
-        sentiment = sentiment_analyzer.polarity_scores(message)
-        
-        # Map compound score to emotion
-        if sentiment['compound'] >= 0.5:
-            emotion = 'happy'
-        elif sentiment['compound'] <= -0.5:
-            emotion = 'sad'
-        elif sentiment['neu'] >= 0.8:
-            emotion = 'neutral'
-        else:
-            emotion = 'mixed'
-            
-        return {
-            'primary_emotion': emotion,
-            'secondary_emotions': [],
-            'intensity': int(abs(sentiment['compound']) * 10),
-            'triggers': [],
-            'clinical_indicators': [],
-            'pattern_changes': [],
-            'confidence': 0.4  # Low confidence for fallback
-        }
+        """
+        Enhanced fallback analysis with comprehensive sentiment and trigger detection.
+
+        This fallback provides robust emotion analysis when the primary LLM-based
+        analysis fails, using VADER sentiment analysis, trigger detection, and
+        clinical indicator identification.
+
+        Args:
+            message: User's message text
+
+        Returns:
+            Dict with emotion analysis including primary/secondary emotions,
+            intensity, triggers, clinical indicators, and confidence score
+        """
+        try:
+            # Use centralized sentiment analysis utilities
+            sentiment_result = analyze_text_sentiment(message)
+
+            # Get emotion mapping from sentiment score
+            emotion_data = get_emotion_from_sentiment(sentiment_result['compound_score'])
+
+            # Detect emotional triggers
+            triggers = detect_emotional_triggers(message)
+
+            # Detect clinical indicators based on message content
+            clinical_indicators = self._detect_clinical_indicators_fallback(message)
+
+            # Calculate more sophisticated intensity
+            intensity = emotion_data['intensity']
+
+            # Add context-based secondary emotions
+            secondary_emotions = emotion_data.get('secondary_emotions', [])
+
+            # Enhance secondary emotions based on message analysis
+            message_lower = message.lower()
+            if 'anxious' in message_lower or 'worry' in message_lower or 'nervous' in message_lower:
+                if 'anxious' not in secondary_emotions:
+                    secondary_emotions.append('anxious')
+            if 'stress' in message_lower or 'overwhelm' in message_lower:
+                if 'stressed' not in secondary_emotions:
+                    secondary_emotions.append('stressed')
+            if 'angry' in message_lower or 'frustrated' in message_lower or 'mad' in message_lower:
+                if 'angry' not in secondary_emotions:
+                    secondary_emotions.append('angry')
+
+            return {
+                'primary_emotion': emotion_data['primary_emotion'],
+                'secondary_emotions': secondary_emotions,
+                'intensity': intensity,
+                'triggers': triggers,
+                'clinical_indicators': clinical_indicators,
+                'pattern_changes': [],  # Cannot detect without history in fallback
+                'confidence': 0.6,  # Moderate confidence for enhanced fallback
+                'sentiment_scores': sentiment_result['sentiment_scores'],
+                'analysis_method': 'fallback_vader_enhanced'
+            }
+
+        except Exception as e:
+            logger.error(f"Error in fallback analysis: {str(e)}", exc_info=True)
+            # Last resort minimal fallback
+            return {
+                'primary_emotion': 'neutral',
+                'secondary_emotions': [],
+                'intensity': 5,
+                'triggers': [],
+                'clinical_indicators': [],
+                'pattern_changes': [],
+                'confidence': 0.2,
+                'error': str(e),
+                'analysis_method': 'minimal_fallback'
+            }
+
+    def _detect_clinical_indicators_fallback(self, message: str) -> List[str]:
+        """
+        Detect clinical mental health indicators using keyword-based pattern matching.
+
+        Performs rule-based detection of seven clinical indicator categories commonly
+        associated with mental health conditions. This fallback method provides baseline
+        screening when advanced NLP models are unavailable.
+
+        Detection categories:
+            1. depression_symptoms: Feelings of sadness, hopelessness, emptiness
+            2. anxiety_symptoms: Worry, fear, panic, nervousness
+            3. sleep_disturbance: Insomnia, fatigue, exhaustion
+            4. mood_changes: Irritability, mood swings, anger
+            5. social_withdrawal: Isolation, loneliness, avoidance
+            6. concentration_issues: Focus problems, memory issues, distraction
+            7. self_harm_ideation: Thoughts of self-harm or suicide (CRITICAL)
+
+        Args:
+            message (str): User's message text to analyze for clinical indicators
+
+        Returns:
+            List[str]: List of detected indicator categories (empty if none detected).
+            Multiple indicators can be present in a single message.
+
+        Example:
+            >>> message = "I've been feeling hopeless and can't sleep at night"
+            >>> indicators = self._detect_clinical_indicators_fallback(message)
+            >>> print(indicators)
+            ['depression_symptoms', 'sleep_disturbance']
+            >>>
+            >>> crisis_msg = "I feel worthless and want to hurt myself"
+            >>> indicators = self._detect_clinical_indicators_fallback(crisis_msg)
+            >>> print(indicators)
+            ['depression_symptoms', 'self_harm_ideation']
+
+        Note:
+            - Detection is case-insensitive and uses keyword matching
+            - self_harm_ideation triggers immediate escalation to SafetyAgent
+            - This is a screening tool, not a diagnostic instrument
+            - False positives/negatives are possible with keyword-based detection
+        """
+        indicators = []
+        message_lower = message.lower()
+
+        # Depression indicators
+        if any(word in message_lower for word in ['depressed', 'hopeless', 'worthless', 'empty', 'numb']):
+            indicators.append('depression_symptoms')
+
+        # Anxiety indicators
+        if any(word in message_lower for word in ['panic', 'anxious', 'worry', 'fear', 'nervous', 'scared']):
+            indicators.append('anxiety_symptoms')
+
+        # Sleep disturbances
+        if any(word in message_lower for word in ['insomnia', 'sleep', 'tired', 'exhausted', 'fatigue']):
+            indicators.append('sleep_disturbance')
+
+        # Mood changes
+        if any(word in message_lower for word in ['mood swing', 'irritable', 'angry', 'rage', 'upset']):
+            indicators.append('mood_changes')
+
+        # Social withdrawal
+        if any(word in message_lower for word in ['alone', 'isolated', 'withdraw', 'avoid people', 'lonely']):
+            indicators.append('social_withdrawal')
+
+        # Concentration issues
+        if any(word in message_lower for word in ['focus', 'concentrate', 'attention', 'distracted', 'memory']):
+            indicators.append('concentration_issues')
+
+        # Self-harm ideation (requires immediate attention)
+        if any(word in message_lower for word in ['hurt myself', 'self-harm', 'cut', 'harm', 'suicide']):
+            indicators.append('self_harm_ideation')
+
+        return indicators
     
     async def store_to_vector_db(self, query: str, response: Dict[str, Any], context: Dict[str, Any]) -> None:
         """
@@ -569,17 +632,3 @@ Congruence: [match between voice tone and text content]""")
             
         except Exception as e:
             logger.error(f"Error storing emotion data in vector DB: {str(e)}")
-            
-    def generate_response_sync(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        Generate a response synchronously
-        
-        Args:
-            query: User's query
-            context: Optional processing context
-            
-        Returns:
-            Dictionary containing the response
-        """
-        # Placeholder for synchronous response generation logic
-        return {}

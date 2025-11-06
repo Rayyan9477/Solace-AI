@@ -15,19 +15,12 @@ from transformers import pipeline
 from datetime import datetime
 import logging
 import os
-import sys
 from pathlib import Path
 import asyncio
 import time
 import uuid
 
-# Add the project root to the path
-script_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(os.path.dirname(script_dir))
-if project_root not in sys.path:
-    sys.path.append(project_root)
-
-# Import the AgenticRAG system
+# Import the AgenticRAG system using proper package imports
 from src.utils.agentic_rag import AgenticRAG
 
 # Import integration components
@@ -37,28 +30,112 @@ from src.integration.friction_engine import FrictionEngine
 
 logger = logging.getLogger(__name__)
 
-# Load models
-try:
-    nlp = spacy.load("en_core_web_sm")
-except Exception as e:
-    logger.warning(f"Failed to load spaCy model: {str(e)}. Using fallback methods.")
-    nlp = None
+# Load models with progressive fallback strategy
+def _load_spacy_model():
+    """
+    Load spaCy NLP model with progressive fallback strategy.
 
-try:
-    symptom_classifier = pipeline(
-        "zero-shot-classification",
-        model="facebook/bart-large-mnli",
-        device=-1  # Use CPU
-    )
-    diagnostic_classifier = pipeline(
-        "zero-shot-classification",
-        model="facebook/bart-large-mnli",
-        device=-1
-    )
-except Exception as e:
-    logger.warning(f"Failed to load transformers pipeline: {str(e)}. Using fallback methods.")
-    symptom_classifier = None
-    diagnostic_classifier = None
+    Attempts to load spaCy models in order of preference, falling back to smaller
+    models if larger ones are unavailable. This ensures the agent can still function
+    even when optimal models aren't installed.
+
+    Fallback sequence:
+        1. en_core_web_sm - Small English model (11 MB)
+        2. en_core_web_md - Medium English model (40 MB)
+        3. en - Basic English model
+        4. None - Rule-based fallback (no spaCy model loaded)
+
+    Returns:
+        spacy.Language or None: Loaded spaCy model if successful, None if all models
+        fail to load (triggers keyword-based NLP fallback).
+
+    Example:
+        >>> nlp = _load_spacy_model()
+        >>> if nlp:
+        ...     doc = nlp("Patient reports feeling anxious")
+        ...     tokens = [token.text for token in doc]
+
+    Note:
+        When None is returned, the diagnostic system automatically falls back to
+        rule-based keyword matching for symptom extraction.
+    """
+    models_to_try = ["en_core_web_sm", "en_core_web_md", "en"]
+
+    for model_name in models_to_try:
+        try:
+            model = spacy.load(model_name)
+            logger.info(f"Successfully loaded spaCy model: {model_name}")
+            return model
+        except Exception as e:
+            logger.debug(f"Failed to load spaCy model '{model_name}': {str(e)}")
+            continue
+
+    logger.warning("All spaCy models failed to load. Using rule-based NLP fallback.")
+    return None
+
+def _load_classifier_models():
+    """
+    Load transformer-based zero-shot classification models with progressive fallback.
+
+    Attempts to load transformer models for symptom and diagnostic classification,
+    falling back to smaller models if larger ones fail. This ensures robust
+    classification even in resource-constrained environments.
+
+    Fallback sequence:
+        1. facebook/bart-large-mnli - BART Large model (1.6 GB, highest accuracy)
+        2. facebook/bart-base - BART Base model (558 MB, good accuracy)
+        3. distilbert-base-uncased-mnli - DistilBERT (268 MB, faster, lower accuracy)
+        4. (None, None) - Keyword-based classification fallback
+
+    Returns:
+        tuple[Pipeline, Pipeline] or tuple[None, None]: Two zero-shot classification
+        pipelines (symptom_classifier, diagnostic_classifier) if successful, or
+        (None, None) if all models fail (triggers keyword-based classification).
+
+    Example:
+        >>> symptom_clf, diagnostic_clf = _load_classifier_models()
+        >>> if symptom_clf:
+        ...     result = symptom_clf(
+        ...         "I feel sad and tired",
+        ...         candidate_labels=["depression", "anxiety", "stress"]
+        ...     )
+        ...     print(result['labels'][0])  # Most likely symptom category
+
+    Note:
+        All models are configured to use CPU (device=-1) for maximum compatibility.
+        When (None, None) is returned, the diagnostic system automatically falls
+        back to weighted keyword matching for symptom classification.
+    """
+    models_to_try = [
+        "facebook/bart-large-mnli",
+        "facebook/bart-base",
+        "distilbert-base-uncased-mnli"
+    ]
+
+    for model_name in models_to_try:
+        try:
+            symptom_clf = pipeline(
+                "zero-shot-classification",
+                model=model_name,
+                device=-1  # Use CPU
+            )
+            diagnostic_clf = pipeline(
+                "zero-shot-classification",
+                model=model_name,
+                device=-1
+            )
+            logger.info(f"Successfully loaded transformer model: {model_name}")
+            return symptom_clf, diagnostic_clf
+        except Exception as e:
+            logger.debug(f"Failed to load transformer model '{model_name}': {str(e)}")
+            continue
+
+    logger.warning("All transformer models failed to load. Using keyword-based classification fallback.")
+    return None, None
+
+# Initialize models with progressive fallback
+nlp = _load_spacy_model()
+symptom_classifier, diagnostic_classifier = _load_classifier_models()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -647,56 +724,194 @@ Additional Considerations: [important factors to consider]""")
             return self._fallback_diagnosis(" ".join(symptoms))
 
     def _fallback_diagnosis(self, symptom_text: str) -> Dict[str, Any]:
-        """Simple fallback for diagnosis when all other methods fail"""
-        keywords = {
-            "Major Depressive Disorder": ["sad", "depressed", "hopeless", "tired", "sleep", "interest"],
-            "Generalized Anxiety Disorder": ["worry", "anxious", "nervous", "stress", "fear"],
-            "Bipolar Disorder": ["mood", "energy", "high", "low", "irritable"],
-            "Post-Traumatic Stress Disorder": ["trauma", "flashback", "nightmare", "avoid"],
-            "Social Anxiety Disorder": ["social", "embarrass", "fear", "shy", "awkward"],
-            "Panic Disorder": ["panic", "attack", "heart", "breath", "dizzy"]
+        """
+        Enhanced fallback diagnosis using comprehensive keyword matching and symptom analysis.
+
+        When ML models are unavailable, uses sophisticated keyword matching with
+        weighted symptom clusters and severity indicators for diagnosis.
+
+        Args:
+            symptom_text: Text describing symptoms
+
+        Returns:
+            Dict with potential diagnoses, confidence scores, severity, and recommendations
+        """
+        # Comprehensive symptom clusters with weights
+        condition_keywords = {
+            "Major Depressive Disorder": {
+                "core": ["depressed", "sad", "hopeless", "worthless", "empty"],
+                "supporting": ["tired", "fatigue", "sleep", "interest", "pleasure", "appetite", "concentration"],
+                "severity": ["suicidal", "death", "harm", "end"]
+            },
+            "Generalized Anxiety Disorder": {
+                "core": ["worry", "anxious", "nervous", "tense"],
+                "supporting": ["restless", "tired", "concentration", "irritable", "muscle", "sleep"],
+                "severity": ["overwhelming", "constant", "can't stop", "panic"]
+            },
+            "Bipolar Disorder": {
+                "core": ["mood swing", "manic", "high", "low", "irritable"],
+                "supporting": ["energy", "sleep", "racing thoughts", "impulsive", "risky"],
+                "severity": ["extreme", "uncontrollable", "psychotic"]
+            },
+            "Post-Traumatic Stress Disorder": {
+                "core": ["trauma", "flashback", "nightmare", "intrusive"],
+                "supporting": ["avoid", "hypervigilant", "startle", "numb", "detached"],
+                "severity": ["reliving", "terror", "overwhelmed"]
+            },
+            "Social Anxiety Disorder": {
+                "core": ["social", "embarrass", "judged", "scrutiny"],
+                "supporting": ["avoid", "fear", "shy", "awkward", "blushing", "trembling"],
+                "severity": ["isolated", "can't function", "extreme"]
+            },
+            "Panic Disorder": {
+                "core": ["panic", "attack", "sudden fear"],
+                "supporting": ["heart racing", "breath", "dizzy", "trembling", "chest pain", "nausea"],
+                "severity": ["dying", "losing control", "going crazy"]
+            },
+            "Obsessive-Compulsive Disorder": {
+                "core": ["obsessive", "compulsive", "intrusive thoughts", "rituals"],
+                "supporting": ["repetitive", "checking", "washing", "counting", "can't stop"],
+                "severity": ["hours", "overwhelming", "interferes"]
+            }
         }
-        
-        symptom_words = set(symptom_text.lower().split())
+
+        symptom_text_lower = symptom_text.lower()
         potential_diagnoses = []
-        
-        for condition, keywords_list in keywords.items():
-            count = sum(1 for keyword in keywords_list if keyword in symptom_words)
-            if count > 0:
-                confidence = min(0.3 + (count * 0.1), 0.8)
+
+        for condition, keyword_groups in condition_keywords.items():
+            # Calculate weighted score
+            core_count = sum(1 for keyword in keyword_groups["core"] if keyword in symptom_text_lower)
+            supporting_count = sum(1 for keyword in keyword_groups["supporting"] if keyword in symptom_text_lower)
+            severity_count = sum(1 for keyword in keyword_groups["severity"] if keyword in symptom_text_lower)
+
+            # Weighted scoring: core = 0.3, supporting = 0.1, severity = 0.15
+            base_confidence = (core_count * 0.3) + (supporting_count * 0.1) + (severity_count * 0.15)
+
+            if base_confidence > 0:
+                # Cap confidence at 0.75 for keyword-based diagnosis
+                confidence = min(base_confidence, 0.75)
+
+                # Determine severity based on indicators
+                if severity_count > 0:
+                    severity = "severe"
+                elif core_count >= 2:
+                    severity = "moderate"
+                else:
+                    severity = "mild"
+
                 potential_diagnoses.append({
                     'condition': condition,
-                    'confidence': confidence,
-                    'severity': _estimate_severity(confidence)
+                    'confidence': round(confidence, 2),
+                    'severity': severity,
+                    'matched_keywords': {
+                        'core': core_count,
+                        'supporting': supporting_count,
+                        'severity': severity_count
+                    }
                 })
-        
+
         # Sort by confidence
         potential_diagnoses.sort(key=lambda x: x['confidence'], reverse=True)
-        
+
         # Determine overall severity
         if potential_diagnoses:
-            severity = max(potential_diagnoses, key=lambda x: x['confidence'])['severity']
+            severity = potential_diagnoses[0]['severity']
         else:
             severity = "mild"
             potential_diagnoses = [{
-                'condition': 'Unspecified condition',
+                'condition': 'Unspecified Mental Health Concern',
                 'confidence': 0.3,
-                'severity': 'mild'
+                'severity': 'mild',
+                'matched_keywords': {'core': 0, 'supporting': 0, 'severity': 0}
             }]
-        
-        # Generate basic recommendations
-        recommendations = [
-            "Consider consulting with a mental health professional",
-            "Track your symptoms and their frequency",
-            "Practice self-care strategies for overall well-being"
-        ]
-        
+
+        # Generate context-appropriate recommendations
+        recommendations = self._generate_fallback_recommendations(severity, potential_diagnoses)
+
         return {
-            "symptoms": symptom_text.split(),
-            "potential_diagnoses": potential_diagnoses,
+            "symptoms": symptom_text.split()[:20],  # Limit to first 20 words
+            "potential_diagnoses": potential_diagnoses[:3],  # Top 3 most likely
             "severity": severity,
-            "recommendations": recommendations
+            "recommendations": recommendations,
+            "analysis_method": "keyword_based_fallback",
+            "confidence_note": "This is a preliminary assessment based on keyword matching. Professional evaluation is strongly recommended."
         }
+
+    def _generate_fallback_recommendations(self, severity: str, diagnoses: list) -> list:
+        """
+        Generate evidence-based mental health recommendations tailored to severity and diagnosis.
+
+        Combines severity-based interventions, condition-specific strategies, and general
+        mental health best practices to provide comprehensive, actionable recommendations.
+
+        Args:
+            severity (str): Severity level of symptoms - "severe", "moderate", or "mild"
+            diagnoses (list): List of potential diagnosis dicts with 'condition', 'confidence',
+                              and 'severity' keys, ordered by confidence (highest first)
+
+        Returns:
+            list[str]: Comprehensive list of recommendations including:
+                - Urgency-appropriate professional help guidance
+                - Condition-specific therapeutic interventions
+                - General wellness and lifestyle strategies
+                - Crisis resources (for severe cases)
+
+        Example:
+            >>> diagnoses = [
+            ...     {'condition': 'Major Depressive Disorder', 'confidence': 0.75, 'severity': 'moderate'},
+            ...     {'condition': 'Generalized Anxiety Disorder', 'confidence': 0.65, 'severity': 'mild'}
+            ... ]
+            >>> recommendations = self._generate_fallback_recommendations('moderate', diagnoses)
+            >>> print(recommendations[0])
+            'Schedule an appointment with a mental health professional within 1-2 weeks'
+
+        Note:
+            Recommendations are intentionally conservative and err on the side of recommending
+            professional evaluation. Crisis resources are always included for severe cases.
+        """
+        recommendations = []
+
+        # Severity-based recommendations
+        if severity == "severe":
+            recommendations.extend([
+                "URGENT: Seek immediate professional mental health evaluation",
+                "Contact a crisis helpline if experiencing thoughts of self-harm (988)",
+                "Consider emergency psychiatric services if symptoms are overwhelming"
+            ])
+        elif severity == "moderate":
+            recommendations.extend([
+                "Schedule an appointment with a mental health professional within 1-2 weeks",
+                "Consider therapy (CBT, DBT, or other evidence-based approaches)",
+                "Discuss medication options with a psychiatrist if symptoms persist"
+            ])
+        else:  # mild
+            recommendations.extend([
+                "Consider consulting with a mental health professional for assessment",
+                "Explore self-help resources and coping strategies",
+                "Monitor symptoms and seek help if they worsen or persist"
+            ])
+
+        # Condition-specific recommendations
+        if diagnoses and len(diagnoses) > 0:
+            top_condition = diagnoses[0]['condition']
+
+            if "Depression" in top_condition:
+                recommendations.append("Practice behavioral activation: schedule pleasant activities daily")
+            elif "Anxiety" in top_condition:
+                recommendations.append("Practice relaxation techniques: deep breathing, progressive muscle relaxation")
+            elif "PTSD" in top_condition:
+                recommendations.append("Consider trauma-focused therapy (EMDR, CPT) with qualified therapist")
+            elif "Panic" in top_condition:
+                recommendations.append("Learn panic management techniques and avoid safety behaviors")
+
+        # General recommendations
+        recommendations.extend([
+            "Maintain regular sleep schedule and healthy lifestyle habits",
+            "Build support network: connect with trusted friends or family",
+            "Track symptoms to identify patterns and triggers"
+        ])
+
+        return recommendations
     
     async def _validate_with_supervision(
         self,

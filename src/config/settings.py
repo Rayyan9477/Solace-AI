@@ -332,6 +332,67 @@ class AppConfig:
             "low_cpu_mem_usage": True
         }
 
+    @classmethod
+    def get_optimized_model_config(cls, agent_name: str = None) -> Dict[str, Any]:
+        """
+        Get optimized model configuration for specific agents.
+
+        This method returns model configurations optimized for cost and performance
+        based on the agent's specific needs.
+
+        Args:
+            agent_name: Name of the agent to get configuration for
+
+        Returns:
+            Model configuration optimized for the specific agent
+        """
+        # Default to base model config
+        base_config = cls.get_model_config()
+
+        # Agent-specific optimizations (can be overridden via environment variables)
+        agent_models = {
+            # Critical agents use more capable models
+            "chat_agent": os.getenv("CHAT_AGENT_MODEL", cls.MODEL_NAME),
+            "therapy_agent": os.getenv("THERAPY_AGENT_MODEL", cls.MODEL_NAME),
+            "diagnosis_agent": os.getenv("DIAGNOSIS_AGENT_MODEL", cls.MODEL_NAME),
+
+            # Standard agents can use lighter models for cost optimization
+            "emotion_agent": os.getenv("EMOTION_AGENT_MODEL", cls.MODEL_NAME),
+            "personality_agent": os.getenv("PERSONALITY_AGENT_MODEL", cls.MODEL_NAME),
+            "safety_agent": os.getenv("SAFETY_AGENT_MODEL", cls.MODEL_NAME),
+
+            # Support agents use the lightest models
+            "search_agent": os.getenv("SEARCH_AGENT_MODEL", cls.MODEL_NAME),
+            "crawler_agent": os.getenv("CRAWLER_AGENT_MODEL", cls.MODEL_NAME)
+        }
+
+        if agent_name and agent_name in agent_models:
+            optimized_config = base_config.copy()
+            optimized_config["model"] = agent_models[agent_name]
+
+            # Adjust temperature based on agent type
+            if agent_name in ["safety_agent", "diagnosis_agent"]:
+                # More deterministic for safety and diagnosis
+                optimized_config["temperature"] = 0.3
+            elif agent_name in ["chat_agent", "therapy_agent"]:
+                # More creative for conversational agents
+                optimized_config["temperature"] = 0.7
+            else:
+                # Standard temperature for other agents
+                optimized_config["temperature"] = 0.5
+
+            # Adjust max tokens based on agent needs
+            if agent_name in ["chat_agent", "therapy_agent"]:
+                optimized_config["max_tokens"] = cls.MAX_RESPONSE_TOKENS
+            elif agent_name in ["search_agent", "crawler_agent"]:
+                optimized_config["max_tokens"] = 500  # Shorter responses for support agents
+            else:
+                optimized_config["max_tokens"] = 1000  # Standard length for other agents
+
+            return optimized_config
+
+        return base_config
+
     # Voice Configuration - using free models
     VOICE_CONFIG = {
         # Intentionally no hardcoded model defaults

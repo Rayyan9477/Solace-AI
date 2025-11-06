@@ -1,14 +1,14 @@
 from typing import Dict, Any, Optional, List
 from langchain_core.messages import SystemMessage, HumanMessage
-from langchain.memory import ConversationBufferMemory
 from agno.agent import Agent
-from agno.tools import tool
 from agno.memory import Memory
 from agno.knowledge import AgentKnowledge
 from datetime import datetime
-import httpx
 from langchain.schema.language_model import BaseLanguageModel
 import logging
+
+# Import memory factory for centralized memory management
+from ...utils.memory_factory import get_or_create_memory
 
 logger = logging.getLogger(__name__)
 
@@ -19,12 +19,6 @@ try:
 except ImportError:
     logger.warning("Security validation module not available")
     SECURITY_VALIDATION_AVAILABLE = False
-
-class CustomHTTPClient(httpx.Client):
-    def __init__(self, *args, **kwargs):
-        # Remove proxies argument if present
-        kwargs.pop("proxies", None)
-        super().__init__(*args, **kwargs)
 
 class BaseAgent(Agent):
     def __init__(
@@ -39,33 +33,15 @@ class BaseAgent(Agent):
         show_tool_calls: bool = True,
         markdown: bool = True
     ):
-        # Create a default memory if none is provided
-        if memory is None:
-            # Create a langchain memory instance
-            langchain_memory = ConversationBufferMemory(
-                memory_key="chat_history",
-                return_messages=True,
-                input_key="input",
-                output_key="output"
-            )
-            
-            # Create memory dict for agno Memory
-            memory_dict = {
-                "memory": "chat_memory",
-                "storage": "local_storage",
-                "memory_key": "chat_history",
-                "chat_memory": langchain_memory,
-                "input_key": "input",
-                "output_key": "output",
-                "return_messages": True
-            }
-            
-            # Initialize Memory with the dictionary
-            memory = Memory(**memory_dict)
-        
+        # Get or create memory using centralized factory
+        memory = get_or_create_memory(memory)
+
         # Store the model for direct access
         self.llm = model
-        
+
+        # Store agent capabilities for orchestrator discovery
+        self.capabilities = []  # Subclasses should override
+
         super().__init__(
             name=name,
             role=role,
@@ -269,14 +245,176 @@ class BaseAgent(Agent):
         query: str,
         context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Synchronous version of generate_response for fallback"""
+        """
+        Synchronous fallback for generate_response when async is not supported.
+
+        This method provides a robust fallback with proper context handling,
+        error recovery, and consistent response formatting.
+
+        Args:
+            query: The user's query
+            context: Optional context dictionary with memory, knowledge, etc.
+
+        Returns:
+            Dict with response text, metadata, and confidence score
+        """
+        processing_start = datetime.now()
+        context = context or {}
+
         try:
-            # Simple implementation for fallback
-            if hasattr(self.llm, 'generate'):
-                response = self.llm.generate([query])
-                return response.generations[0][0].text
-            else:
-                return "I'm having trouble generating a response right now."
+            # Check if LLM supports synchronous generation
+            if not hasattr(self.llm, 'generate'):
+                logger.error(f"{self.name}: LLM does not support generate() method")
+                return {
+                    'response': "I apologize, but I'm unable to process your request at the moment due to a technical limitation.",
+                    'error': 'LLM does not support synchronous generation',
+                    'metadata': {
+                        'timestamp': datetime.now().isoformat(),
+                        'agent_name': self.name,
+                        'confidence': 0.0,
+                        'processing_time': (datetime.now() - processing_start).total_seconds()
+                    }
+                }
+
+            # Format query with context if available
+            formatted_query = self._format_query_with_context(query, context)
+
+            # Generate response
+            llm_result = self.llm.generate([formatted_query])
+
+            if not llm_result.generations or not llm_result.generations[0]:
+                raise ValueError("LLM returned empty response")
+
+            response_text = llm_result.generations[0][0].text
+
+            # Calculate processing time and confidence
+            processing_time = (datetime.now() - processing_start).total_seconds()
+            confidence = self._calculate_confidence({'response': response_text})
+
+            return {
+                'response': response_text,
+                'metadata': {
+                    'timestamp': datetime.now().isoformat(),
+                    'agent_name': self.name,
+                    'confidence': confidence,
+                    'processing_time': processing_time,
+                    'fallback_method': 'sync_generation'
+                }
+            }
+
         except Exception as e:
-            logger.error(f"Error in sync response generation: {str(e)}")
-            return "I'm having trouble generating a response right now."
+            logger.error(f"Error in {self.name} sync response generation: {str(e)}", exc_info=True)
+            processing_time = (datetime.now() - processing_start).total_seconds()
+
+            return {
+                'response': (
+                    "I apologize, but I encountered an error while processing your request. "
+                    "Please try rephrasing your question or contact support if the issue persists."
+                ),
+                'error': str(e),
+                'metadata': {
+                    'timestamp': datetime.now().isoformat(),
+                    'agent_name': self.name,
+                    'confidence': 0.1,
+                    'processing_time': processing_time,
+                    'fallback_method': 'error_recovery'
+                }
+            }
+
+    def _format_query_with_context(self, query: str, context: Dict[str, Any]) -> str:
+        """
+        Format user query with contextual information for enhanced LLM understanding.
+
+        Enriches the query with conversation history, relevant knowledge, and emotional
+        state to provide the LLM with comprehensive context for generating more accurate
+        and empathetic responses.
+
+        Args:
+            query (str): User's raw query or message
+            context (Dict[str, Any]): Context dictionary containing:
+                - 'memory' (list[dict], optional): Conversation history items, each with:
+                    - 'role' (str): Message source ('user', 'assistant', 'system')
+                    - 'content' (str): Message content
+                    - 'timestamp' (str, optional): ISO format timestamp
+                - 'knowledge' (list[dict], optional): Relevant knowledge items, each with:
+                    - 'content' (str): Knowledge text
+                    - 'relevance_score' (float): Similarity score (0-1)
+                    - 'source' (str): Knowledge source identifier
+                - 'emotion' (dict, optional): Detected emotional state with:
+                    - 'primary_emotion' (str): Main emotion label
+                    - 'intensity' (float): Emotion strength (1-10)
+                    - 'confidence' (float): Detection confidence (0-1)
+
+        Returns:
+            str: Formatted prompt string combining query, context, and agent role
+
+        Example:
+            >>> context = {
+            ...     'memory': [
+            ...         {'role': 'user', 'content': 'I have been feeling stressed'},
+            ...         {'role': 'assistant', 'content': 'I understand. Let\\'s explore that.'}
+            ...     ],
+            ...     'knowledge': [
+            ...         {'content': 'Stress management techniques include...', 'relevance_score': 0.85}
+            ...     ],
+            ...     'emotion': {'primary_emotion': 'anxious', 'intensity': 7.2}
+            ... }
+            >>> formatted = self._format_query_with_context("What can I do about it?", context)
+            >>> print(formatted)
+            User Query: What can I do about it?
+
+            Recent Context:
+            - user: I have been feeling stressed
+            - assistant: I understand. Let's explore that.
+
+            Relevant Knowledge:
+            - Stress management techniques include...
+
+            User Emotion: anxious
+
+            As Mental Health Assistant, provide a helpful response:
+
+        Note:
+            - Memory is limited to last 3 items to prevent context overload
+            - Knowledge is limited to top 2 most relevant items
+            - Content is truncated to 100 characters for conciseness
+        """
+        formatted_parts = [f"User Query: {query}"]
+
+        # Add memory context if available
+        if 'memory' in context and context['memory']:
+            memory_items = context['memory'][-3:]  # Last 3 memory items
+            if memory_items:
+                formatted_parts.append("\nRecent Context:")
+                for item in memory_items:
+                    if isinstance(item, dict):
+                        role = item.get('role', 'unknown')
+                        content = item.get('content', '')
+                        formatted_parts.append(f"- {role}: {content[:100]}...")
+
+        # Add knowledge context if available
+        if 'knowledge' in context and context['knowledge']:
+            knowledge_items = context['knowledge'][:2]  # Top 2 knowledge items
+            if knowledge_items:
+                formatted_parts.append("\nRelevant Knowledge:")
+                for item in knowledge_items:
+                    if isinstance(item, dict):
+                        formatted_parts.append(f"- {item.get('content', '')[:100]}...")
+
+        # Add any additional context hints
+        if context.get('emotion'):
+            formatted_parts.append(f"\nUser Emotion: {context['emotion'].get('primary_emotion', 'unknown')}")
+
+        formatted_parts.append(f"\nAs {self.role}, provide a helpful response:")
+
+        return "\n".join(formatted_parts)
+
+    def get_capabilities(self) -> List[str]:
+        """
+        Return list of capabilities this agent provides.
+        Override in subclasses to specify specific capabilities.
+
+        Returns:
+            List of capability identifiers (e.g., ["chat", "empathy", "crisis_detection"])
+        """
+        return self.capabilities if self.capabilities else [self.name]
