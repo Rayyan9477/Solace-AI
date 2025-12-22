@@ -88,10 +88,7 @@ try:
 except ImportError:
     DiagnosisModule = None
 
-try:
-    from .enhanced_diagnosis import EnhancedDiagnosisModule
-except ImportError:
-    EnhancedDiagnosisModule = None
+# EnhancedDiagnosisModule removed - was 90% duplicate of ComprehensiveDiagnosisModule
 
 try:
     from .comprehensive_diagnosis import ComprehensiveDiagnosisModule
@@ -124,16 +121,9 @@ def create_diagnosis_module(use_agentic_rag=True, use_cache=True, **kwargs):
             return ComprehensiveDiagnosisModule()
     except Exception:
         pass
-    
+
     try:
-        # Fallback to enhanced diagnosis module
-        if EnhancedDiagnosisModule is not None:
-            return EnhancedDiagnosisModule()
-    except Exception:
-        pass
-    
-    try:
-        # Ultimate fallback to basic diagnosis module
+        # Fallback to basic diagnosis module
         if DiagnosisModule is not None:
             return DiagnosisModule()
     except Exception:
@@ -173,6 +163,5 @@ __all__ = [
     
     # Legacy modules (may be None if import failed)
     'DiagnosisModule',
-    'EnhancedDiagnosisModule',
     'ComprehensiveDiagnosisModule'
 ]

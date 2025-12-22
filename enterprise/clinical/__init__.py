@@ -1,1 +1,0 @@
-# Clinical Integration APIs and Interfaces
