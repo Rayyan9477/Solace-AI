@@ -22,7 +22,8 @@
       "Bash(head:*)",
       "Bash(done)",
       "Bash(tree:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(wc:*)"
     ],
     "deny": []
   }

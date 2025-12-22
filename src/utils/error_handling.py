@@ -52,13 +52,6 @@ class ErrorType(Enum):
     TIMEOUT_ERROR = "timeout_error"
     UNKNOWN_ERROR = "unknown_error"
 
-class ErrorSeverity(Enum):
-    """Severity levels for errors"""
-    LOW = 1
-    MEDIUM = 2
-    HIGH = 3
-    CRITICAL = 4
-
 @dataclass
 class ErrorDetails:
     """Detailed error information"""

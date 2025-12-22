@@ -59,7 +59,8 @@ class BaseModel(nn.Module, ABC):
     @classmethod
     def load_checkpoint(cls, filepath: str, device: Optional[str] = None):
         """Load model from checkpoint"""
-        checkpoint = torch.load(filepath, map_location=device)
+        # SECURITY: Use weights_only=True to prevent arbitrary code execution (CWE-502)
+        checkpoint = torch.load(filepath, map_location=device, weights_only=True)
         
         # Create model instance
         model = cls(checkpoint['model_config'])

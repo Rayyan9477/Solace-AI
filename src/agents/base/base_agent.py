@@ -7,8 +7,8 @@ from datetime import datetime
 from langchain.schema.language_model import BaseLanguageModel
 import logging
 
-# Import memory factory for centralized memory management
-from ...utils.memory_factory import get_or_create_memory
+# Import memory factory for centralized memory management (canonical location)
+from src.memory.memory_factory import get_or_create_memory
 
 logger = logging.getLogger(__name__)
 

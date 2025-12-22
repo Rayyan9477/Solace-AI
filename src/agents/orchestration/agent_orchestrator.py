@@ -21,7 +21,8 @@ import weakref
 
 from src.components.base_module import Module, get_module_manager
 from src.utils.logger import get_logger
-from src.utils.vector_db_integration import get_conversation_tracker, search_relevant_data
+# Canonical location for vector DB utilities
+from src.database.vector_db_integration import get_conversation_tracker, search_relevant_data
 from src.agents.orchestration.supervisor_agent import SupervisorAgent, ValidationLevel
 from src.monitoring.supervisor_metrics import MetricsCollector, QualityMetrics
 from src.auditing.audit_system import AuditTrail, AuditEventType, AuditSeverity
@@ -91,7 +92,7 @@ class ValidationRequest:
     input_data: Dict[str, Any]
     output_data: Dict[str, Any]
     session_id: str
-    validation_types: List[str] = None
+    validation_types: Optional[List[str]] = None
     priority: str = "normal"
 
 @dataclass
@@ -103,38 +104,96 @@ class CircuitBreakerConfig:
     timeout: int = 30  # request timeout
 
 class MessageBus:
-    """Event-driven message bus for agent communication."""
-    
+    """Event-driven message bus for agent communication.
+
+    Uses weak references for handlers to prevent memory leaks when
+    handler objects are garbage collected without explicit unsubscribe.
+    """
+
     def __init__(self):
-        self.subscribers = defaultdict(list)
+        # Store handlers as weak references to prevent memory leaks
+        # Key: MessageType, Value: list of (weak_ref, is_method) tuples
+        self._weak_subscribers: Dict[MessageType, List[tuple]] = defaultdict(list)
         self.message_queue = asyncio.Queue(maxsize=10000)
         self.lock = threading.RLock()
         self.running = False
         self.logger = get_logger(__name__ + ".MessageBus")
-        
+
     async def start(self):
         """Start the message bus processing."""
         self.running = True
         asyncio.create_task(self._process_messages())
         self.logger.info("Message bus started")
-    
+
     async def stop(self):
         """Stop the message bus."""
         self.running = False
-        self.logger.info("Message bus stopped")
-    
-    def subscribe(self, message_type: MessageType, handler: Callable):
-        """Subscribe to specific message types."""
+        # Clean up all subscribers
         with self.lock:
-            self.subscribers[message_type].append(handler)
+            self._weak_subscribers.clear()
+        self.logger.info("Message bus stopped")
+
+    def subscribe(self, message_type: MessageType, handler: Callable):
+        """Subscribe to specific message types using weak references.
+
+        Handlers are stored as weak references to prevent memory leaks.
+        When the handler's owning object is garbage collected, the
+        handler is automatically removed during the next cleanup cycle.
+        """
+        with self.lock:
+            # Create weak reference based on handler type
+            if hasattr(handler, '__self__'):
+                # Bound method - store weak ref to object and method name
+                obj_ref = weakref.ref(handler.__self__)
+                method_name = handler.__name__
+                self._weak_subscribers[message_type].append((obj_ref, method_name, True))
+            else:
+                # Regular function - store weak ref directly
+                func_ref = weakref.ref(handler)
+                self._weak_subscribers[message_type].append((func_ref, None, False))
         self.logger.debug(f"Handler subscribed to {message_type.value}")
-    
+
     def unsubscribe(self, message_type: MessageType, handler: Callable):
         """Unsubscribe from message types."""
         with self.lock:
-            if handler in self.subscribers[message_type]:
-                self.subscribers[message_type].remove(handler)
+            self._cleanup_dead_refs(message_type)
+            # Find and remove the matching handler
+            subscribers = self._weak_subscribers[message_type]
+            for i, (ref, method_name, is_method) in enumerate(subscribers):
+                resolved = self._resolve_handler(ref, method_name, is_method)
+                if resolved is handler:
+                    subscribers.pop(i)
+                    break
         self.logger.debug(f"Handler unsubscribed from {message_type.value}")
+
+    def _resolve_handler(self, ref, method_name, is_method) -> Optional[Callable]:
+        """Resolve a weak reference back to the handler."""
+        obj = ref()
+        if obj is None:
+            return None
+        if is_method:
+            return getattr(obj, method_name, None)
+        return obj
+
+    def _cleanup_dead_refs(self, message_type: MessageType):
+        """Remove dead weak references for a message type."""
+        subscribers = self._weak_subscribers[message_type]
+        # Filter out dead references
+        self._weak_subscribers[message_type] = [
+            entry for entry in subscribers
+            if entry[0]() is not None
+        ]
+
+    def _get_live_handlers(self, message_type: MessageType) -> List[Callable]:
+        """Get all live handlers for a message type, cleaning dead refs."""
+        with self.lock:
+            self._cleanup_dead_refs(message_type)
+            handlers = []
+            for ref, method_name, is_method in self._weak_subscribers[message_type]:
+                handler = self._resolve_handler(ref, method_name, is_method)
+                if handler is not None:
+                    handlers.append(handler)
+            return handlers
     
     async def publish(self, message: Message):
         """Publish a message to the bus."""
@@ -160,11 +219,10 @@ class MessageBus:
                 self.logger.error(f"Error processing message: {str(e)}")
     
     async def _route_message(self, message: Message):
-        """Route message to appropriate handlers."""
-        handlers = []
-        with self.lock:
-            handlers = self.subscribers[message.type].copy()
-        
+        """Route message to appropriate handlers using weak references."""
+        # Get live handlers (dead references are automatically cleaned)
+        handlers = self._get_live_handlers(message.type)
+
         for handler in handlers:
             try:
                 if asyncio.iscoroutinefunction(handler):
@@ -183,8 +241,8 @@ class ValidatorRegistry:
         self.lock = threading.RLock()
         self.logger = get_logger(__name__ + ".ValidatorRegistry")
         
-    def register_validator(self, validator_id: str, validator: Any, 
-                          validator_types: List[str] = None, weight: float = 1.0):
+    def register_validator(self, validator_id: str, validator: Any,
+                          validator_types: Optional[List[str]] = None, weight: float = 1.0):
         """Register a validator agent."""
         with self.lock:
             self.validators[validator_id] = validator

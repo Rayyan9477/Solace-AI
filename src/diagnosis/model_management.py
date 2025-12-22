@@ -306,7 +306,8 @@ class ModelManager:
             for component_name in ['fusion', 'bayesian_classifier', 'temporal', 'severity']:
                 model_path = checkpoint_dir / f"{component_name}.pth"
                 if model_path.exists():
-                    checkpoint_data = torch.load(model_path, map_location=device)
+                    # SECURITY: Use weights_only=True to prevent arbitrary code execution
+                    checkpoint_data = torch.load(model_path, map_location=device, weights_only=True)
                     pipeline.model_components[component_name].load_state_dict(
                         checkpoint_data['model_state_dict']
                     )

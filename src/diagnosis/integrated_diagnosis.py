@@ -23,81 +23,11 @@ from src.database.vector_store import VectorStore
 from src.utils.agentic_rag import AgenticRAG
 from src.config.settings import AppConfig
 
+# Import shared condition definitions from centralized constants
+from src.diagnosis.constants import CONDITION_DEFINITIONS
+
 # Configure logging
 logger = logging.getLogger(__name__)
-
-# Mental health condition definitions with associated symptoms and patterns
-CONDITION_DEFINITIONS = {
-    "depression": {
-        "name": "Depression",
-        "symptoms": [
-            "persistent sadness", "loss of interest", "fatigue", "sleep problems",
-            "appetite changes", "feelings of worthlessness", "difficulty concentrating", 
-            "negative thoughts", "low energy", "social withdrawal"
-        ],
-        "voice_indicators": ["monotone voice", "slower speech", "reduced pitch variation", "quieter volume"],
-        "personality_correlations": {
-            "big_five": {
-                "neuroticism": "high",
-                "extraversion": "low",
-                "openness": "variable",
-                "agreeableness": "variable",
-                "conscientiousness": "low"
-            }
-        },
-        "severity_thresholds": {
-            "mild": 3,      # 3+ symptoms present
-            "moderate": 5,  # 5+ symptoms present
-            "severe": 7     # 7+ symptoms present
-        }
-    },
-    "anxiety": {
-        "name": "Anxiety",
-        "symptoms": [
-            "excessive worry", "restlessness", "fatigue", "difficulty concentrating", 
-            "irritability", "muscle tension", "sleep problems", "racing thoughts",
-            "feeling on edge", "anticipating worst outcomes"
-        ],
-        "voice_indicators": ["faster speech", "higher pitch", "trembling voice", "rapid breathing"],
-        "personality_correlations": {
-            "big_five": {
-                "neuroticism": "high", 
-                "extraversion": "variable",
-                "openness": "variable",
-                "agreeableness": "variable", 
-                "conscientiousness": "high"
-            }
-        },
-        "severity_thresholds": {
-            "mild": 3,      # 3+ symptoms present
-            "moderate": 5,  # 5+ symptoms present
-            "severe": 7     # 7+ symptoms present
-        }
-    },
-    "stress": {
-        "name": "Stress",
-        "symptoms": [
-            "feeling overwhelmed", "racing thoughts", "difficulty relaxing", 
-            "irritability", "muscle tension", "headaches", "fatigue",
-            "sleep problems", "difficulty concentrating", "mood changes"
-        ],
-        "voice_indicators": ["faster speech", "tense tone", "higher pitch", "louder volume"],
-        "personality_correlations": {
-            "big_five": {
-                "neuroticism": "high",
-                "extraversion": "variable",
-                "openness": "variable",
-                "agreeableness": "low when stressed",
-                "conscientiousness": "variable"
-            }
-        },
-        "severity_thresholds": {
-            "mild": 3,      # 3+ symptoms present
-            "moderate": 5,  # 5+ symptoms present
-            "severe": 7     # 7+ symptoms present
-        }
-    }
-}
 
 class DiagnosisModule:
     """

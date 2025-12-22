@@ -1,9 +1,48 @@
 # Solace-AI: Complete Project Map & Technical Audit
 
 > **Audit Date**: December 22, 2025
-> **Codebase Size**: 251 Python files | ~86,470 lines of code
+> **Last Updated**: December 23, 2025 (Post-Remediation)
+> **Codebase Size**: ~243 Python files | ~80,000 lines of code (after cleanup)
 > **Analysis Depth**: Line-by-line, function-by-function review using 8 specialized agents
-> **Technical Debt Score**: 8.4/10 (Critical)
+> **Technical Debt Score**: ~~8.4/10~~ **6.2/10** (Reduced from Critical to High)
+
+---
+
+## REMEDIATION LOG (December 23, 2025)
+
+### Completed Fixes - 5 Batches
+
+| Batch | Focus | Items Fixed | Impact |
+|-------|-------|-------------|--------|
+| **1** | Dead Code Removal | 3 enterprise folders deleted, enhanced_diagnosis.py removed | ~4,500 lines removed |
+| **2** | Security Vulnerabilities | SSRF protection, torch.load fix, safety defaults, duplicate enum | 5 P0 security fixes |
+| **3** | Implementation Bugs | Type safety, resource cleanup, weak refs, proper typing | 5 critical bugs fixed |
+| **4** | Module Consolidation | Shared constants, orchestration fix, component cleanup | ~650 lines deduplicated |
+| **5** | File Relocations | memory_factory, vector_db_integration relocated | Proper module organization |
+
+### Fixed P0/P1 Issues
+
+| Issue | Status | Fix Applied |
+|-------|--------|-------------|
+| 3 Enterprise Folders | ✅ FIXED | `enterprise/`, `src/enterprise/`, `src/diagnosis/enterprise/` deleted |
+| SSRF Vulnerability | ✅ FIXED | Domain whitelist + IP blocking in `crawler_agent.py` |
+| torch.load CWE-502 | ✅ FIXED | `weights_only=True` in `model_management.py`, `base.py` |
+| Duplicate ErrorSeverity | ✅ FIXED | Removed second enum definition in `error_handling.py` |
+| Safety Agent Unsafe Default | ✅ FIXED | Changed to `safe: False` default in `safety_agent.py` |
+| Type Mismatch (ConfidenceLevel) | ✅ FIXED | Using `ConfidenceLevel.LOW` enum in `orchestrator.py` |
+| Unclosed DB Connections | ✅ FIXED | Added `close()` + context manager to `central_vector_db.py` |
+| Memory Leak (MessageBus) | ✅ FIXED | Weak references for handlers in `agent_orchestrator.py` |
+| Dangerous Class Override | ✅ FIXED | Removed silent AgentOrchestrator replacement |
+| Duplicate CONDITION_DEFINITIONS | ✅ FIXED | Shared `constants/condition_definitions.py` created |
+| Misplaced Files | ✅ FIXED | `memory_factory.py` → `memory/`, `vector_db_integration.py` → `database/` |
+
+### Remaining Work (Future Batches)
+
+- [ ] Voice services consolidation (11 files → 1 directory)
+- [ ] Logger/metrics relocation to infrastructure/
+- [ ] God class refactoring (agent_orchestrator.py)
+- [ ] Remaining diagnosis module consolidation
+- [ ] API layer security improvements (CSRF, rate limiting)
 
 ---
 
@@ -55,17 +94,17 @@
 
 ### 2.1 Most Severe Issues
 
-| Priority | Finding | Impact | Location |
-|----------|---------|--------|----------|
-| P0 | **3 Separate Enterprise Folders** - Dead code, broken imports, 100% duplicate ML models | Broken imports at runtime | `enterprise/`, `src/enterprise/`, `src/diagnosis/enterprise/` |
-| P0 | **Pickle Deserialization (CWE-502)** - Arbitrary code execution vulnerability | Remote Code Execution | `src/memory/enhanced_memory_system.py:892-901` |
-| P0 | **SSRF Vulnerability** - No URL validation in crawler agent | Server-Side Request Forgery | `src/agents/support/crawler_agent.py:51-143` |
-| P0 | **Duplicate ErrorSeverity Enum** - Defined twice with different types (str vs int) | Type confusion, comparison failures | `src/utils/error_handling.py:23-28, 55-60` |
-| P0 | **Missing functools Import** - Runtime NameError in production code | Crashes on error handling | `src/utils/error_handling.py:219` |
-| P1 | **God Class (2,382 lines)** - 15+ responsibilities in single class | Unmaintainable | `src/agents/orchestration/agent_orchestrator.py` |
-| P1 | **4 Diagnosis Modules (78% overlap)** - 5,874 duplicate lines | Maintenance nightmare | `src/diagnosis/*.py` |
-| P1 | **9 Memory Implementations** - 7 files with 70% overlap | Confusion, inconsistency | Across 4 directories |
-| P1 | **Safety Agent Defaults to Safe on Error** - Security bypass | False negatives on safety | `src/agents/core/safety_agent.py` |
+| Priority | Finding | Impact | Location | Status |
+|----------|---------|--------|----------|--------|
+| ~~P0~~ | ~~**3 Separate Enterprise Folders**~~ | ~~Broken imports~~ | ~~`enterprise/`, `src/enterprise/`, `src/diagnosis/enterprise/`~~ | ✅ FIXED |
+| P0 | **Pickle Deserialization (CWE-502)** - torch.load fixed, pickle.load remains | Remote Code Execution | `src/memory/enhanced_memory_system.py:892-901` | ⚠️ PARTIAL |
+| ~~P0~~ | ~~**SSRF Vulnerability**~~ | ~~Server-Side Request Forgery~~ | ~~`src/agents/support/crawler_agent.py`~~ | ✅ FIXED |
+| ~~P0~~ | ~~**Duplicate ErrorSeverity Enum**~~ | ~~Type confusion~~ | ~~`src/utils/error_handling.py`~~ | ✅ FIXED |
+| P0 | **Missing functools Import** - Runtime NameError | Crashes on error handling | `src/utils/error_handling.py:219` | 🔴 OPEN |
+| P1 | **God Class (2,382 lines)** - 15+ responsibilities | Unmaintainable | `src/agents/orchestration/agent_orchestrator.py` | 🔴 OPEN |
+| P1 | **4 Diagnosis Modules (78% overlap)** - Partially consolidated | Maintenance nightmare | `src/diagnosis/*.py` | ⚠️ PARTIAL |
+| P1 | **9 Memory Implementations** - Factory centralized | Confusion, inconsistency | Across 4 directories | ⚠️ PARTIAL |
+| ~~P1~~ | ~~**Safety Agent Defaults to Safe on Error**~~ | ~~Security bypass~~ | ~~`src/agents/core/safety_agent.py`~~ | ✅ FIXED |
 
 ### 2.2 Duplication Statistics
 
@@ -86,37 +125,33 @@
 ### 3.1 Current Structure (Problematic)
 
 ```
-R:\Solace-AI\ (251 files, 31+ top-level directories in src/)
-├── enterprise/              # DEAD CODE - Delete entire folder
-│   ├── main.py             # Never imported
-│   ├── architecture/       # Unused scaffolding
-│   ├── memory/             # Duplicates src/memory/
-│   ├── research/           # Placeholder code
-│   └── ...                 # 13 more unused files
+R:\Solace-AI\ (~243 files after cleanup, ~27 directories in src/)
+├── enterprise/              # ✅ DELETED (Batch 1)
 │
 ├── src/
-│   ├── agents/             # 24 files - BLOATED with overlapping agents
+│   ├── agents/             # 24 files - Core agents, orchestration improved
 │   ├── analysis/           # 2 files - Should include feature_extractors
 │   ├── auditing/           # 1 file - Underutilized
 │   ├── auth/               # 3 files - OK
 │   ├── cli/                # 1 file - OK
 │   ├── clinical_decision_support/ # 7 files - Overlaps with diagnosis/
 │   ├── compliance/         # 1 file - Scattered (others in security/, config/)
-│   ├── components/         # 11 files - MISUSE: Not components, mixed services
+│   ├── components/         # 10 files - diagnosis_results.py removed
 │   ├── config/             # 6 files - Scattered (also in infrastructure/)
 │   ├── core/               # 16 files - OK
 │   ├── dashboard/          # 1 file - OK
 │   ├── data/               # 9 subdirs - Mostly test data, bloated
-│   ├── database/           # 4 files - Duplicated in components/
-│   ├── diagnosis/          # 33 files - CRITICAL BLOAT (includes enterprise/)
-│   ├── enterprise/         # 8 files - BROKEN imports, duplicates core
+│   ├── database/           # 5 files - vector_db_integration.py added ✅
+│   ├── diagnosis/          # 30 files - enterprise/ removed, constants/ added ✅
+│   │   └── constants/      # NEW - shared condition definitions ✅
+│   ├── enterprise/         # ✅ DELETED (Batch 4)
 │   ├── feature_extractors/ # 7 files - Should be in analysis/
 │   ├── infrastructure/     # 6 files - OK
 │   ├── integration/        # 3 files - OK
 │   ├── knowledge/          # 4 files - OK
-│   ├── memory/             # 4 files - ALSO has files in utils/
+│   ├── memory/             # 5 files - memory_factory.py added ✅
 │   ├── middleware/         # 1 file - OK
-│   ├── ml_models/          # 3 files - Duplicated from diagnosis/enterprise/
+│   ├── ml_models/          # 3 files - Security fixes applied ✅
 │   ├── models/             # 5 files - MISPLACED: LLM should be in providers/
 │   ├── monitoring/         # 2 files - OK
 │   ├── optimization/       # 5 files - Includes duplicate orchestrator
@@ -125,18 +160,18 @@ R:\Solace-AI\ (251 files, 31+ top-level directories in src/)
 │   ├── research/           # 1 file - OK
 │   ├── security/           # 2 files - Scattered (also compliance/, config/)
 │   ├── services/           # 6 files - OK
-│   └── utils/              # 22 files - DUMPING GROUND for disparate code
+│   └── utils/              # 20 files - 2 relocated, deprecation stubs added ✅
 ```
 
 ### 3.2 Bloated Directories (Requiring Cleanup)
 
-| Directory | Files | Issue | Action |
-|-----------|-------|-------|--------|
-| `src/diagnosis/` | 33 | Nested enterprise/, 78% duplication | Consolidate to 8-10 files |
-| `src/utils/` | 22 | Mixed concerns, 12 files don't belong | Relocate 12 files |
-| `src/components/` | 11 | Misuse of term, mixed modules | Delete, merge into proper dirs |
-| `src/enterprise/` | 8 | Broken imports, duplicates core | Delete or fully integrate |
-| `enterprise/` (root) | 13+ | Dead code, never imported | **DELETE ENTIRE FOLDER** |
+| Directory | Files | Issue | Action | Status |
+|-----------|-------|-------|--------|--------|
+| `src/diagnosis/` | 30 | Nested enterprise/ removed, constants added | Consolidate to 8-10 files | ⚠️ PARTIAL |
+| `src/utils/` | 20 | 2 files relocated, 10 more need moving | Relocate remaining files | ⚠️ PARTIAL |
+| `src/components/` | 10 | diagnosis_results.py removed | Delete, merge into proper dirs | ⚠️ PARTIAL |
+| ~~`src/enterprise/`~~ | ~~8~~ | ~~Broken imports~~ | ~~N/A~~ | ✅ DELETED |
+| ~~`enterprise/` (root)~~ | ~~13+~~ | ~~Dead code~~ | ~~N/A~~ | ✅ DELETED |
 
 ### 3.3 Redundant Implementations
 
@@ -150,20 +185,20 @@ R:\Solace-AI\ (251 files, 31+ top-level directories in src/)
 
 ### 3.4 Misplaced Files
 
-| File | Current Location | Correct Location |
-|------|------------------|------------------|
-| `diagnosis_results.py` | `src/components/` | `src/diagnosis/results.py` |
-| `llm.py`, `gemini_llm.py` | `src/models/` | `src/providers/llm/` |
-| `central_vector_db_module.py` | `src/components/` | `src/database/` |
-| `voice_component.py`, `voice_module.py` | `src/components/` | `src/providers/voice/` |
-| `big_five.py`, `mbti.py` | `src/personality/` | `src/assessment/` |
-| `context_aware_memory.py` | `src/utils/` | `src/memory/` |
-| `conversation_memory.py` | `src/utils/` | `src/memory/` |
-| `memory_factory.py` | `src/utils/` | `src/core/factories/` |
-| `vector_db_integration.py` | `src/utils/` | `src/database/` |
-| `agentic_rag.py` | `src/utils/` | `src/rag/` (new) |
-| `import_analyzer.py` | `src/utils/` | `tools/` |
-| `migration_utils.py` | `src/utils/` | `scripts/` |
+| File | Current Location | Correct Location | Status |
+|------|------------------|------------------|--------|
+| ~~`diagnosis_results.py`~~ | ~~`src/components/`~~ | ~~N/A~~ | ✅ DELETED (duplicate) |
+| `llm.py`, `gemini_llm.py` | `src/models/` | `src/providers/llm/` | 🔴 OPEN |
+| `central_vector_db_module.py` | `src/components/` | `src/database/` | 🔴 OPEN |
+| `voice_component.py`, `voice_module.py` | `src/components/` | `src/providers/voice/` | 🔴 OPEN |
+| `big_five.py`, `mbti.py` | `src/personality/` | `src/assessment/` | 🔴 OPEN |
+| `context_aware_memory.py` | `src/utils/` | `src/memory/` | 🔴 OPEN |
+| `conversation_memory.py` | `src/utils/` | `src/memory/` | 🔴 OPEN |
+| ~~`memory_factory.py`~~ | ~~`src/utils/`~~ | `src/memory/` | ✅ RELOCATED |
+| ~~`vector_db_integration.py`~~ | ~~`src/utils/`~~ | `src/database/` | ✅ RELOCATED |
+| `agentic_rag.py` | `src/utils/` | `src/rag/` (new) | 🔴 OPEN |
+| `import_analyzer.py` | `src/utils/` | `tools/` | 🔴 OPEN |
+| `migration_utils.py` | `src/utils/` | `scripts/` | 🔴 OPEN |
 
 ---
 

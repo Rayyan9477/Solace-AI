@@ -13,7 +13,7 @@ from dataclasses import asdict
 
 from .interfaces import (
     IDiagnosisOrchestrator, IDiagnosisService, IEnhancedDiagnosisService,
-    DiagnosisRequest, DiagnosisResult, DiagnosisType
+    DiagnosisRequest, DiagnosisResult, DiagnosisType, ConfidenceLevel
 )
 from src.infrastructure.di.container import Injectable
 from src.utils.logger import get_logger
@@ -125,14 +125,14 @@ class DiagnosisOrchestrator(Injectable, IDiagnosisOrchestrator):
             error_msg = f"Diagnosis orchestration failed: {str(e)}"
             self.logger.error(error_msg)
             
-            # Return error result
+            # Return error result with proper enum type
             return DiagnosisResult(
                 user_id=request.user_id,
                 session_id=request.session_id,
                 timestamp=start_time,
                 diagnosis_type=request.diagnosis_type,
                 primary_diagnosis=None,
-                confidence_level="low",
+                confidence_level=ConfidenceLevel.LOW,
                 confidence_score=0.0,
                 symptoms=[],
                 potential_conditions=[],

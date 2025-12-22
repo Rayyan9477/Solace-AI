@@ -13,12 +13,112 @@ from scrapy.linkextractors import LinkExtractor
 from bs4 import BeautifulSoup
 import requests
 from urllib.parse import urlparse
+import ipaddress
+import re
 import logging
 from src.config.settings import AppConfig
 from src.utils.helpers import TextHelper, DocumentHelper
 from langchain.schema.language_model import BaseLanguageModel
 
 logger = logging.getLogger(__name__)
+
+# SECURITY: Whitelist of allowed domains for crawling mental health resources
+ALLOWED_DOMAINS_WHITELIST = {
+    'nimh.nih.gov',           # National Institute of Mental Health
+    'samhsa.gov',             # SAMHSA
+    'mentalhealth.gov',       # MentalHealth.gov
+    'nami.org',               # National Alliance on Mental Illness
+    'psychiatry.org',         # American Psychiatric Association
+    'apa.org',                # American Psychological Association
+    'who.int',                # World Health Organization
+    'cdc.gov',                # CDC Mental Health
+    'mayoclinic.org',         # Mayo Clinic
+    'webmd.com',              # WebMD
+    'healthline.com',         # Healthline
+    'psychologytoday.com',    # Psychology Today
+    'verywellmind.com',       # Verywell Mind
+}
+
+
+def validate_url_for_ssrf(url: str) -> tuple[bool, str]:
+    """
+    Validate URL to prevent Server-Side Request Forgery (SSRF) attacks.
+
+    SECURITY: This function prevents:
+    - Requests to private/internal IP ranges
+    - Requests to localhost/loopback
+    - Requests to non-HTTPS URLs
+    - Requests to non-whitelisted domains
+
+    Args:
+        url: URL to validate
+
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    try:
+        parsed = urlparse(url)
+
+        # Require HTTPS only
+        if parsed.scheme != 'https':
+            return False, f"Only HTTPS URLs are allowed, got: {parsed.scheme}"
+
+        # Get hostname
+        hostname = parsed.hostname
+        if not hostname:
+            return False, "URL has no hostname"
+
+        hostname_lower = hostname.lower()
+
+        # Block localhost and loopback
+        if hostname_lower in ('localhost', '127.0.0.1', '::1', '0.0.0.0'):
+            return False, "Localhost URLs are not allowed"
+
+        # Check if hostname is an IP address
+        try:
+            ip = ipaddress.ip_address(hostname)
+            # Block private IP ranges
+            if ip.is_private:
+                return False, "Private IP addresses are not allowed"
+            if ip.is_loopback:
+                return False, "Loopback addresses are not allowed"
+            if ip.is_reserved:
+                return False, "Reserved IP addresses are not allowed"
+            if ip.is_link_local:
+                return False, "Link-local addresses are not allowed"
+            # Block metadata services (AWS, GCP, Azure)
+            if str(ip) in ('169.254.169.254', '169.254.170.2'):
+                return False, "Cloud metadata service addresses are not allowed"
+        except ValueError:
+            # Not an IP address, continue with domain validation
+            pass
+
+        # Check against whitelist of allowed domains
+        domain_allowed = False
+        for allowed_domain in ALLOWED_DOMAINS_WHITELIST:
+            if hostname_lower == allowed_domain or hostname_lower.endswith('.' + allowed_domain):
+                domain_allowed = True
+                break
+
+        if not domain_allowed:
+            return False, f"Domain not in whitelist: {hostname_lower}. Only approved mental health resources are allowed."
+
+        # Block suspicious URL patterns
+        suspicious_patterns = [
+            r'@',           # URL with credentials
+            r'\\',          # Backslash
+            r'%00',         # Null byte
+            r'%0d|%0a',     # CRLF injection
+        ]
+        for pattern in suspicious_patterns:
+            if re.search(pattern, url, re.IGNORECASE):
+                return False, f"URL contains suspicious pattern: {pattern}"
+
+        return True, ""
+
+    except Exception as e:
+        logger.error(f"URL validation error: {str(e)}")
+        return False, f"URL validation failed: {str(e)}"
 
 class MentalHealthSpider(CrawlSpider):
     """Spider for crawling mental health resources"""
@@ -70,24 +170,48 @@ class MentalHealthSpider(CrawlSpider):
 @tool("content_crawler")
 async def crawl_content(query: str, urls: List[str], max_pages: int = 10) -> Dict[str, Any]:
     """
-    Crawls mental health resources from specified URLs
-    
+    Crawls mental health resources from specified URLs.
+
+    SECURITY: All URLs are validated against SSRF attacks and must be from
+    whitelisted mental health resource domains.
+
     Args:
         query: Search query to guide crawling
-        urls: List of URLs to crawl
+        urls: List of URLs to crawl (must be HTTPS and from whitelisted domains)
         max_pages: Maximum number of pages to crawl
-        
+
     Returns:
         Dictionary containing crawled content and metadata
     """
     try:
+        # SECURITY: Validate all URLs before processing
+        validated_urls = []
+        rejected_urls = []
+
+        for url in urls:
+            is_valid, error_msg = validate_url_for_ssrf(url)
+            if is_valid:
+                validated_urls.append(url)
+            else:
+                logger.warning(f"URL rejected for security: {url} - {error_msg}")
+                rejected_urls.append({'url': url, 'reason': error_msg})
+
+        if not validated_urls:
+            return {
+                'documents': [],
+                'query': query,
+                'error': 'No valid URLs provided. All URLs were rejected for security reasons.',
+                'rejected_urls': rejected_urls,
+                'timestamp': datetime.now().isoformat()
+            }
+
         process = CrawlerProcess(AppConfig.CRAWLER_CONFIG.get('settings', {}))
         doc_helper = DocumentHelper()
-        
-        # Configure spider
+
+        # Configure spider with validated URLs only
         spider = MentalHealthSpider(
-            start_urls=urls,
-            allowed_domains=[url.split('/')[2] for url in urls]
+            start_urls=validated_urls,
+            allowed_domains=[urlparse(url).hostname for url in validated_urls]
         )
         
         # Run crawler

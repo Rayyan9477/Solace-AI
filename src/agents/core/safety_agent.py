@@ -206,43 +206,62 @@ Resources: [relevant crisis resources]""")
             }
 
     def _parse_result(self, text: str) -> Dict[str, Any]:
-        """Parse the structured output from Claude"""
+        """Parse the structured output from Claude.
+
+        SECURITY: Defaults to UNSAFE (safe=False) to ensure errors fail safely.
+        Only marks as safe if explicit 'SAFE' or 'LOW' risk level is parsed.
+        """
         result = {
-            'safe': True,
-            'risk_level': 'SAFE',
+            'safe': False,  # SECURITY: Default to unsafe - must be explicitly set to safe
+            'risk_level': 'UNKNOWN',
             'concerns': [],
             'warning_signs': [],
-            'recommendations': [],
+            'recommendations': ['Seek professional evaluation due to parsing error'],
             'emergency_protocol': False,
-            'resources': []
+            'resources': ['National Crisis Hotline: 988 (24/7)']
         }
-        
+
         try:
             lines = text.strip().split('\n')
+            risk_level_found = False
+
             for line in lines:
                 if ':' not in line:
                     continue
-                    
+
                 key, value = [x.strip() for x in line.split(':', 1)]
-                
+
                 if 'Risk Level' in key:
                     risk_level = value.upper()
                     result['risk_level'] = risk_level
                     result['safe'] = risk_level in ['SAFE', 'LOW']
+                    risk_level_found = True
                 elif 'Primary Concerns' in key:
-                    result['concerns'] = [c.strip() for c in value.split(',')]
+                    result['concerns'] = [c.strip() for c in value.split(',') if c.strip()]
                 elif 'Warning Signs' in key:
-                    result['warning_signs'] = [w.strip() for w in value.split(',')]
+                    result['warning_signs'] = [w.strip() for w in value.split(',') if w.strip()]
                 elif 'Recommended Actions' in key:
-                    result['recommendations'] = [r.strip() for r in value.split(',')]
+                    result['recommendations'] = [r.strip() for r in value.split(',') if r.strip()]
                 elif 'Emergency Protocol' in key:
                     result['emergency_protocol'] = value.lower() == 'yes'
                 elif 'Resources' in key:
-                    result['resources'] = [r.strip() for r in value.split(',')]
+                    result['resources'] = [r.strip() for r in value.split(',') if r.strip()]
+
+            # If no risk level was found in parsing, ensure conservative defaults
+            if not risk_level_found:
+                logger.warning("No risk level found in safety assessment - defaulting to UNKNOWN/unsafe")
+                result['concerns'].append('Risk level could not be determined')
 
         except Exception as e:
-            logger.warning(f"Error parsing safety assessment result: {str(e)}")
-            pass
+            logger.error(f"Error parsing safety assessment result: {str(e)}")
+            # SECURITY: On parse error, return conservative unsafe result
+            result['safe'] = False
+            result['risk_level'] = 'UNKNOWN'
+            result['concerns'] = ['Error parsing safety assessment', str(e)]
+            result['recommendations'] = [
+                'Seek professional evaluation',
+                'Contact crisis services if concerned'
+            ]
 
         return result
 

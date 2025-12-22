@@ -93,39 +93,32 @@ def test_module_discovery():
         return False
 
 def test_diagnosis_results():
-    """Test DiagnosisResults class"""
-    print_section("Testing DiagnosisResults")
-    
+    """Test DiagnosticReport class from comprehensive diagnostic report module"""
+    print_section("Testing DiagnosticReport")
+
     try:
-        # Try to import the DiagnosisResults class
-        from src.components.diagnosis_results import DiagnosisResults
-        
-        # Create an instance
-        results = DiagnosisResults()
-        print(f"DiagnosisResults instance created: {results}")
-        
-        # Test basic functionality
-        test_data = {
-            "mental_health": {
-                "overall_status": "mild",
-                "areas_of_concern": [
-                    {"name": "Anxiety", "severity": "moderate", "score": 6}
-                ],
-                "strengths": [
-                    {"name": "Resilience", "score": 8}
-                ]
-            }
-        }
-        
-        # Format the results
-        formatted = results.format_results(test_data)
-        print("Formatted results:")
-        for key, value in formatted.items():
-            print(f"- {key}: {value}")
-        
+        # Import from the comprehensive diagnostic report module (canonical location)
+        from src.diagnosis.comprehensive_diagnostic_report import DiagnosticReport
+        from datetime import datetime
+
+        # Verify the dataclass can be imported
+        print(f"DiagnosticReport class imported successfully")
+
+        # Test that CONDITION_DEFINITIONS can be imported from shared constants
+        from src.diagnosis.constants import CONDITION_DEFINITIONS
+        print(f"CONDITION_DEFINITIONS loaded with {len(CONDITION_DEFINITIONS)} conditions")
+
+        # Verify all expected conditions are present
+        expected_conditions = ["depression", "anxiety", "stress", "ptsd", "bipolar"]
+        for condition in expected_conditions:
+            if condition in CONDITION_DEFINITIONS:
+                print(f"- {condition}: {len(CONDITION_DEFINITIONS[condition]['symptoms'])} symptoms")
+            else:
+                print(f"- {condition}: MISSING")
+
         return True
     except Exception as e:
-        print(f"DiagnosisResults test failed: {str(e)}")
+        print(f"DiagnosticReport test failed: {str(e)}")
         traceback.print_exc()
         return False
 

@@ -725,8 +725,52 @@ class CentralVectorDB:
     def get_conversation_tracker(self) -> ConversationTracker:
         """
         Get the conversation tracker instance
-        
+
         Returns:
             ConversationTracker instance
         """
         return self.conversation_tracker
+
+    def close(self) -> bool:
+        """
+        Close database connections and release resources.
+
+        This method ensures proper cleanup of all database resources including:
+        - Vector store connections
+        - Conversation tracker resources
+        - Cached namespace metadata
+
+        Returns:
+            True if closed successfully, False otherwise
+        """
+        try:
+            # Close vector store if it has a close method
+            if hasattr(self.vector_store, 'close'):
+                self.vector_store.close()
+            elif hasattr(self.vector_store, 'disconnect'):
+                self.vector_store.disconnect()
+
+            # Close conversation tracker if it has a close method
+            if hasattr(self.conversation_tracker, 'close'):
+                self.conversation_tracker.close()
+            elif hasattr(self.conversation_tracker, 'disconnect'):
+                self.conversation_tracker.disconnect()
+
+            # Clear namespace cache
+            self.namespaces.clear()
+
+            logger.info(f"CentralVectorDB closed for user {self.user_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error closing CentralVectorDB: {str(e)}")
+            return False
+
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - ensures resources are closed."""
+        self.close()
+        return False  # Don't suppress exceptions
