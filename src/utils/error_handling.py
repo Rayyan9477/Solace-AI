@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional, Callable, Union, List, Type
 from functools import wraps
 from enum import Enum
+import time
 from pathlib import Path
 
 # Context variables for request tracking
@@ -84,7 +85,10 @@ class ProcessingError(Exception):
 
 class ErrorHandler:
     """Central error handling and logging system"""
-    
+
+    # Maximum number of errors to keep in history to prevent memory leak
+    MAX_ERROR_HISTORY_SIZE = 1000
+
     def __init__(self):
         self.error_history: List[ErrorDetails] = []
         self.error_counts: Dict[str, int] = {}
@@ -118,10 +122,15 @@ class ErrorHandler:
         
         # Log error
         self._log_error(error_details)
-        
-        # Store error
+
+        # Store error with bounded history to prevent memory leak (SEC-MEMORY-001)
         self.error_history.append(error_details)
-        
+        # Trim old errors if history exceeds max size
+        if len(self.error_history) > self.MAX_ERROR_HISTORY_SIZE:
+            # Remove oldest 10% of errors when limit is reached
+            trim_count = self.MAX_ERROR_HISTORY_SIZE // 10
+            self.error_history = self.error_history[trim_count:]
+
         # Update error counts
         error_key = f"{component}:{error_type.value}"
         self.error_counts[error_key] = self.error_counts.get(error_key, 0) + 1
@@ -210,7 +219,7 @@ def handle_exceptions(component: str = None,
                      default_return: Any = None):
     """Decorator for handling exceptions in functions"""
     def decorator(func: Callable):
-        @functools.wraps(func)
+        @wraps(func)
         def wrapper(*args, **kwargs):
             try:
                 return func(*args, **kwargs)
@@ -313,7 +322,7 @@ class InputValidator:
 def validate_input(schema: Dict[str, Any]):
     """Decorator for input validation"""
     def decorator(func: Callable):
-        @functools.wraps(func)
+        @wraps(func)
         def wrapper(*args, **kwargs):
             # Extract data to validate (assumes first argument or 'data' keyword)
             data = None
@@ -365,7 +374,7 @@ class RetryHandler:
              exceptions: tuple = (Exception,)):
         """Retry decorator"""
         def decorator(func: Callable):
-            @functools.wraps(func)
+            @wraps(func)
             def wrapper(*args, **kwargs):
                 attempt = 0
                 current_delay = delay

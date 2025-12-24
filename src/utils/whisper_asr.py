@@ -79,8 +79,21 @@ class WhisperASR:
             hume_api_key = os.environ.get("HUME_API_KEY")
             if hasattr(AppConfig, 'HUME_API_KEY'):
                 hume_api_key = AppConfig.HUME_API_KEY
-            
-            # Initialize emotion analyzer
+
+            # SEC-012: Validate API key before use
+            if use_hume_ai:
+                if not hume_api_key:
+                    logger.warning("HUME_API_KEY not set - Hume AI emotion analysis disabled")
+                    use_hume_ai = False
+                elif len(hume_api_key.strip()) < 10:
+                    logger.warning("HUME_API_KEY appears malformed (too short) - Hume AI disabled")
+                    use_hume_ai = False
+                    hume_api_key = None
+                elif hume_api_key.strip() != hume_api_key:
+                    logger.warning("HUME_API_KEY contains leading/trailing whitespace - trimming")
+                    hume_api_key = hume_api_key.strip()
+
+            # Initialize emotion analyzer with validated key
             self.emotion_analyzer = VoiceEmotionAnalyzer(
                 use_hume_ai=use_hume_ai,
                 hume_api_key=hume_api_key,

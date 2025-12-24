@@ -10,13 +10,12 @@ import asyncio
 import logging
 from typing import Dict, Any, List, Optional, Tuple, Union
 from datetime import datetime, timedelta
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 import json
 import numpy as np
 from collections import defaultdict
 import aiohttp
 import hashlib
-import pickle
 import os
 
 from ..database.central_vector_db import CentralVectorDB
@@ -24,6 +23,28 @@ from ..utils.logger import get_logger
 from ..models.llm import get_llm
 
 logger = get_logger(__name__)
+
+
+def _json_serial(obj: Any) -> Any:
+    """JSON serializer for objects not serializable by default json code."""
+    if isinstance(obj, datetime):
+        return {"__datetime__": True, "value": obj.isoformat()}
+    if isinstance(obj, np.ndarray):
+        return {"__ndarray__": True, "value": obj.tolist()}
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    raise TypeError(f"Type {type(obj)} not serializable")
+
+
+def _json_deserial(obj: Dict[str, Any]) -> Any:
+    """JSON deserializer for custom types."""
+    if "__datetime__" in obj:
+        return datetime.fromisoformat(obj["value"])
+    if "__ndarray__" in obj:
+        return np.array(obj["value"])
+    return obj
 
 @dataclass
 class ResearchArticle:
@@ -852,51 +873,51 @@ class RealTimeResearchEngine:
             self.logger.error(f"Error storing efficacy data: {str(e)}")
     
     def _load_research_data(self):
-        """Load persisted research data"""
+        """Load persisted research data using JSON (CWE-502 fix: replaced pickle)"""
         try:
             data_dir = "src/data/research"
-            
-            # Load articles
-            articles_file = f"{data_dir}/articles.pkl"
+
+            # Load articles (JSON format for security)
+            articles_file = f"{data_dir}/articles.json"
             if os.path.exists(articles_file):
-                with open(articles_file, "rb") as f:
-                    self.research_articles = pickle.load(f)
-            
-            # Load guidelines
-            guidelines_file = f"{data_dir}/guidelines.pkl"
+                with open(articles_file, "r", encoding="utf-8") as f:
+                    self.research_articles = json.load(f, object_hook=_json_deserial)
+
+            # Load guidelines (JSON format for security)
+            guidelines_file = f"{data_dir}/guidelines.json"
             if os.path.exists(guidelines_file):
-                with open(guidelines_file, "rb") as f:
-                    self.clinical_guidelines = pickle.load(f)
-            
-            # Load efficacy data
-            efficacy_file = f"{data_dir}/efficacy.pkl"
+                with open(guidelines_file, "r", encoding="utf-8") as f:
+                    self.clinical_guidelines = json.load(f, object_hook=_json_deserial)
+
+            # Load efficacy data (JSON format for security)
+            efficacy_file = f"{data_dir}/efficacy.json"
             if os.path.exists(efficacy_file):
-                with open(efficacy_file, "rb") as f:
-                    self.treatment_efficacies = pickle.load(f)
-            
+                with open(efficacy_file, "r", encoding="utf-8") as f:
+                    self.treatment_efficacies = json.load(f, object_hook=_json_deserial)
+
             self.logger.info("Successfully loaded research data")
-            
+
         except Exception as e:
             self.logger.warning(f"Could not load research data, starting fresh: {str(e)}")
     
     def _persist_research_data(self):
-        """Persist research data to disk"""
+        """Persist research data to disk using JSON (CWE-502 fix: replaced pickle)"""
         try:
             data_dir = "src/data/research"
             os.makedirs(data_dir, exist_ok=True)
-            
-            # Save articles
-            with open(f"{data_dir}/articles.pkl", "wb") as f:
-                pickle.dump(self.research_articles, f)
-            
-            # Save guidelines
-            with open(f"{data_dir}/guidelines.pkl", "wb") as f:
-                pickle.dump(self.clinical_guidelines, f)
-            
-            # Save efficacy data
-            with open(f"{data_dir}/efficacy.pkl", "wb") as f:
-                pickle.dump(dict(self.treatment_efficacies), f)
-            
+
+            # Save articles as JSON
+            with open(f"{data_dir}/articles.json", "w", encoding="utf-8") as f:
+                json.dump(self.research_articles, f, default=_json_serial, indent=2)
+
+            # Save guidelines as JSON
+            with open(f"{data_dir}/guidelines.json", "w", encoding="utf-8") as f:
+                json.dump(self.clinical_guidelines, f, default=_json_serial, indent=2)
+
+            # Save efficacy data as JSON
+            with open(f"{data_dir}/efficacy.json", "w", encoding="utf-8") as f:
+                json.dump(dict(self.treatment_efficacies), f, default=_json_serial, indent=2)
+
         except Exception as e:
             self.logger.error(f"Error persisting research data: {str(e)}")
     

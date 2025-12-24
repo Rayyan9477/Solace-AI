@@ -13,15 +13,73 @@ import torch
 import soundfile as sf
 import numpy as np
 import tempfile
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Set
 from pathlib import Path
 import requests
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
+import ipaddress
 
 from .dia_tts import DiaTTS
 
 # Configure logger
 logger = logging.getLogger(__name__)
+
+# Security: Allowed domains for external API requests (SEC-008)
+ALLOWED_DOMAINS: Set[str] = {
+    'www.wikidata.org',
+    'wikidata.org',
+    'www.googleapis.com',
+    'googleapis.com',
+}
+
+
+def _is_safe_url(url: str) -> bool:
+    """
+    Validate that a URL is safe to request.
+
+    Security checks:
+    - Domain must be in the allowed whitelist
+    - Must use HTTPS protocol
+    - Must not resolve to private/internal IP addresses
+
+    Args:
+        url: The URL to validate
+
+    Returns:
+        True if the URL is safe, False otherwise
+    """
+    try:
+        parsed = urlparse(url)
+
+        # Require HTTPS
+        if parsed.scheme != 'https':
+            logger.warning(f"URL rejected: non-HTTPS scheme '{parsed.scheme}'")
+            return False
+
+        # Check domain against whitelist
+        hostname = parsed.hostname
+        if not hostname:
+            logger.warning("URL rejected: no hostname")
+            return False
+
+        if hostname not in ALLOWED_DOMAINS:
+            logger.warning(f"URL rejected: domain '{hostname}' not in allowed list")
+            return False
+
+        # Check for IP address URLs (could be SSRF attempt)
+        try:
+            ip = ipaddress.ip_address(hostname)
+            if ip.is_private or ip.is_loopback or ip.is_reserved:
+                logger.warning(f"URL rejected: private/internal IP address")
+                return False
+        except ValueError:
+            # Not an IP address, which is expected for domain names
+            pass
+
+        return True
+    except Exception as e:
+        logger.error(f"URL validation error: {e}")
+        return False
 
 class CelebrityVoiceCloner:
     """
@@ -130,7 +188,12 @@ class CelebrityVoiceCloner:
             # Use a simple API to search for celebrities
             # Using Wikidata API as a source of celebrity information
             url = f"https://www.wikidata.org/w/api.php?action=wbsearchentities&search={quote(query)}&language=en&format=json&limit=5"
-            
+
+            # Security: Validate URL before making request (SEC-008)
+            if not _is_safe_url(url):
+                logger.error(f"URL validation failed for celebrity search")
+                return []
+
             async with aiohttp.ClientSession() as session:
                 async with session.get(url) as response:
                     if response.status == 200:

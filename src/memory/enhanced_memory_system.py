@@ -15,14 +15,99 @@ import json
 import numpy as np
 from collections import defaultdict, deque
 import hashlib
-import pickle
 import os
+import warnings
 
 from ..database.central_vector_db import CentralVectorDB
 from ..utils.logger import get_logger
 from ..models.llm import get_llm
 
 logger = get_logger(__name__)
+
+
+class MemoryJSONEncoder(json.JSONEncoder):
+    """
+    Custom JSON encoder for memory system dataclasses.
+
+    Handles serialization of:
+    - datetime objects (ISO format)
+    - dataclasses (via asdict)
+    - numpy arrays (via tolist)
+    - defaultdict (via dict conversion)
+
+    Security: This replaces pickle serialization to prevent CWE-502
+    (Deserialization of Untrusted Data) vulnerabilities.
+    """
+
+    def default(self, obj: Any) -> Any:
+        if isinstance(obj, datetime):
+            return {"__datetime__": True, "value": obj.isoformat()}
+        elif isinstance(obj, np.ndarray):
+            return {"__ndarray__": True, "value": obj.tolist()}
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        elif hasattr(obj, '__dataclass_fields__'):
+            # Handle dataclasses
+            data = asdict(obj)
+            data["__dataclass__"] = obj.__class__.__name__
+            return data
+        elif isinstance(obj, defaultdict):
+            return {"__defaultdict__": True, "value": dict(obj)}
+        elif isinstance(obj, deque):
+            return {"__deque__": True, "value": list(obj)}
+        return super().default(obj)
+
+
+def _decode_memory_object(obj: Dict[str, Any]) -> Any:
+    """
+    Decode JSON objects back to their original types.
+
+    This function is used as object_hook in json.load() to reconstruct
+    datetime objects, numpy arrays, and dataclasses from their JSON
+    representation.
+
+    Security: Only reconstructs known safe types - no arbitrary code execution.
+    """
+    if "__datetime__" in obj:
+        return datetime.fromisoformat(obj["value"])
+    elif "__ndarray__" in obj:
+        return np.array(obj["value"])
+    elif "__defaultdict__" in obj:
+        return defaultdict(list, obj["value"])
+    elif "__deque__" in obj:
+        return deque(obj["value"])
+    elif "__dataclass__" in obj:
+        dataclass_type = obj.pop("__dataclass__")
+        # Reconstruct known dataclasses only (whitelist approach for security)
+        if dataclass_type == "TherapeuticInsight":
+            # Convert datetime fields
+            if "timestamp" in obj and isinstance(obj["timestamp"], str):
+                obj["timestamp"] = datetime.fromisoformat(obj["timestamp"])
+            return TherapeuticInsight(**obj)
+        elif dataclass_type == "ProgressMilestone":
+            if "achieved_at" in obj and isinstance(obj["achieved_at"], str):
+                obj["achieved_at"] = datetime.fromisoformat(obj["achieved_at"])
+            return ProgressMilestone(**obj)
+        elif dataclass_type == "SessionMemory":
+            if "start_time" in obj and isinstance(obj["start_time"], str):
+                obj["start_time"] = datetime.fromisoformat(obj["start_time"])
+            if "end_time" in obj and isinstance(obj["end_time"], str):
+                obj["end_time"] = datetime.fromisoformat(obj["end_time"])
+            return SessionMemory(**obj)
+        elif dataclass_type == "UserProfileMemory":
+            if "created_at" in obj and isinstance(obj["created_at"], str):
+                obj["created_at"] = datetime.fromisoformat(obj["created_at"])
+            if "last_updated" in obj and isinstance(obj["last_updated"], str):
+                obj["last_updated"] = datetime.fromisoformat(obj["last_updated"])
+            return UserProfileMemory(**obj)
+        else:
+            # Unknown dataclass type - return as dict (safe fallback)
+            logger.warning(f"Unknown dataclass type during deserialization: {dataclass_type}")
+            return obj
+    return obj
+
 
 @dataclass
 class TherapeuticInsight:
@@ -1053,67 +1138,155 @@ class EnhancedMemorySystem:
             self.logger.error(f"Error storing milestone in database: {str(e)}")
     
     def _load_memory_data(self):
-        """Load persisted memory data"""
+        """
+        Load persisted memory data from JSON files.
+
+        Security: Uses JSON instead of pickle to prevent CWE-502
+        (Deserialization of Untrusted Data) vulnerabilities.
+
+        Legacy .pkl files are NOT loaded for security reasons.
+        If legacy files exist, a warning is logged and fresh data is used.
+        """
         try:
             data_dir = "src/data/memory_system"
-            
-            # Load insights
-            insights_file = f"{data_dir}/insights.pkl"
+            loaded_count = 0
+
+            # Check for legacy pickle files and warn (but don't load - security risk)
+            legacy_files = [
+                f"{data_dir}/insights.pkl",
+                f"{data_dir}/sessions.pkl",
+                f"{data_dir}/profiles.pkl",
+                f"{data_dir}/milestones.pkl"
+            ]
+            for legacy_file in legacy_files:
+                if os.path.exists(legacy_file):
+                    self.logger.warning(
+                        f"Legacy pickle file detected: {legacy_file}. "
+                        f"Pickle files are not loaded due to security concerns (CWE-502). "
+                        f"Please manually migrate data to JSON format or delete the file."
+                    )
+
+            # Load insights from JSON
+            insights_file = f"{data_dir}/insights.json"
             if os.path.exists(insights_file):
-                with open(insights_file, "rb") as f:
-                    self.therapeutic_insights = pickle.load(f)
-            
-            # Load sessions
-            sessions_file = f"{data_dir}/sessions.pkl"
+                with open(insights_file, "r", encoding="utf-8") as f:
+                    data = json.load(f, object_hook=_decode_memory_object)
+                    if isinstance(data, dict):
+                        self.therapeutic_insights = defaultdict(list, data)
+                        loaded_count += 1
+
+            # Load sessions from JSON
+            sessions_file = f"{data_dir}/sessions.json"
             if os.path.exists(sessions_file):
-                with open(sessions_file, "rb") as f:
-                    self.session_memories = pickle.load(f)
-            
-            # Load profiles
-            profiles_file = f"{data_dir}/profiles.pkl"
+                with open(sessions_file, "r", encoding="utf-8") as f:
+                    data = json.load(f, object_hook=_decode_memory_object)
+                    if isinstance(data, dict):
+                        self.session_memories = defaultdict(list, data)
+                        loaded_count += 1
+
+            # Load profiles from JSON
+            profiles_file = f"{data_dir}/profiles.json"
             if os.path.exists(profiles_file):
-                with open(profiles_file, "rb") as f:
-                    self.user_profiles = pickle.load(f)
-            
-            # Load milestones
-            milestones_file = f"{data_dir}/milestones.pkl"
+                with open(profiles_file, "r", encoding="utf-8") as f:
+                    data = json.load(f, object_hook=_decode_memory_object)
+                    if isinstance(data, dict):
+                        self.user_profiles = data
+                        loaded_count += 1
+
+            # Load milestones from JSON
+            milestones_file = f"{data_dir}/milestones.json"
             if os.path.exists(milestones_file):
-                with open(milestones_file, "rb") as f:
-                    self.progress_milestones = pickle.load(f)
-            
-            self.logger.info("Successfully loaded memory system data")
-            
+                with open(milestones_file, "r", encoding="utf-8") as f:
+                    data = json.load(f, object_hook=_decode_memory_object)
+                    if isinstance(data, dict):
+                        self.progress_milestones = defaultdict(list, data)
+                        loaded_count += 1
+
+            if loaded_count > 0:
+                self.logger.info(f"Successfully loaded {loaded_count} memory data files")
+            else:
+                self.logger.info("No existing memory data found, starting fresh")
+
+        except json.JSONDecodeError as e:
+            self.logger.error(f"JSON parsing error in memory data: {str(e)}")
+            self.logger.warning("Starting with fresh memory data due to corrupted files")
         except Exception as e:
             self.logger.warning(f"Could not load memory data, starting fresh: {str(e)}")
-    
+
     def _persist_memory_data(self):
-        """Persist memory data to disk"""
+        """
+        Persist memory data to disk using JSON format.
+
+        Security: Uses JSON instead of pickle to prevent CWE-502
+        (Deserialization of Untrusted Data) vulnerabilities.
+
+        The data is serialized with a custom encoder that handles:
+        - datetime objects
+        - dataclasses
+        - numpy arrays
+        - defaultdict/deque
+        """
         try:
             data_dir = "src/data/memory_system"
             os.makedirs(data_dir, exist_ok=True)
-            
-            # Save insights
-            with open(f"{data_dir}/insights.pkl", "wb") as f:
-                pickle.dump(dict(self.therapeutic_insights), f)
-            
-            # Save sessions
-            with open(f"{data_dir}/sessions.pkl", "wb") as f:
-                pickle.dump(dict(self.session_memories), f)
-            
-            # Save profiles
-            with open(f"{data_dir}/profiles.pkl", "wb") as f:
-                pickle.dump(self.user_profiles, f)
-            
-            # Save milestones
-            with open(f"{data_dir}/milestones.pkl", "wb") as f:
-                pickle.dump(dict(self.progress_milestones), f)
-            
+
+            # Save insights as JSON
+            insights_file = f"{data_dir}/insights.json"
+            with open(insights_file, "w", encoding="utf-8") as f:
+                json.dump(
+                    dict(self.therapeutic_insights),
+                    f,
+                    cls=MemoryJSONEncoder,
+                    indent=2,
+                    ensure_ascii=False
+                )
+
+            # Save sessions as JSON
+            sessions_file = f"{data_dir}/sessions.json"
+            with open(sessions_file, "w", encoding="utf-8") as f:
+                json.dump(
+                    dict(self.session_memories),
+                    f,
+                    cls=MemoryJSONEncoder,
+                    indent=2,
+                    ensure_ascii=False
+                )
+
+            # Save profiles as JSON
+            profiles_file = f"{data_dir}/profiles.json"
+            with open(profiles_file, "w", encoding="utf-8") as f:
+                json.dump(
+                    self.user_profiles,
+                    f,
+                    cls=MemoryJSONEncoder,
+                    indent=2,
+                    ensure_ascii=False
+                )
+
+            # Save milestones as JSON
+            milestones_file = f"{data_dir}/milestones.json"
+            with open(milestones_file, "w", encoding="utf-8") as f:
+                json.dump(
+                    dict(self.progress_milestones),
+                    f,
+                    cls=MemoryJSONEncoder,
+                    indent=2,
+                    ensure_ascii=False
+                )
+
+            self.logger.debug("Memory data persisted successfully")
+
+        except (TypeError, ValueError) as e:
+            self.logger.error(f"Serialization error persisting memory data: {str(e)}")
+        except OSError as e:
+            self.logger.error(f"File system error persisting memory data: {str(e)}")
         except Exception as e:
-            self.logger.error(f"Error persisting memory data: {str(e)}")
-    
+            self.logger.error(f"Unexpected error persisting memory data: {str(e)}")
+
     def __del__(self):
         """Ensure data is persisted when object is destroyed"""
         try:
             self._persist_memory_data()
-        except:
+        except Exception:
+            # Silently ignore errors during cleanup - logging may not be available
             pass

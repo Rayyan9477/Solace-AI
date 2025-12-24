@@ -3,11 +3,16 @@ Migration Utilities for Central Vector Database
 
 This module provides utility functions to migrate existing data from various
 sources into the new central vector database.
+
+Security improvements:
+- SEC-010: JSON file size limits to prevent DoS
+- SEC-011: Path traversal protection for user_id input
 """
 
 import os
 import json
 import logging
+import re
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from pathlib import Path
@@ -17,29 +22,90 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Security: Maximum file size for JSON loading (10 MB) - SEC-010
+MAX_JSON_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+# Security: Valid user_id pattern to prevent path traversal - SEC-011
+VALID_USER_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_\-]+$')
+
+
+def _sanitize_user_id(user_id: str) -> str:
+    """
+    Sanitize user_id to prevent path traversal attacks (SEC-011).
+
+    Args:
+        user_id: The user ID to sanitize
+
+    Returns:
+        Sanitized user_id
+
+    Raises:
+        ValueError: If user_id contains invalid characters
+    """
+    if not user_id:
+        raise ValueError("user_id cannot be empty")
+
+    # Check for path traversal attempts
+    if '..' in user_id or '/' in user_id or '\\' in user_id:
+        raise ValueError(f"Invalid user_id: path traversal detected")
+
+    # Validate against pattern
+    if not VALID_USER_ID_PATTERN.match(user_id):
+        raise ValueError(f"Invalid user_id: contains invalid characters")
+
+    return user_id
+
+
+def _safe_json_load(file_path: Path) -> Any:
+    """
+    Safely load JSON file with size limit check (SEC-010).
+
+    Args:
+        file_path: Path to the JSON file
+
+    Returns:
+        Parsed JSON data
+
+    Raises:
+        ValueError: If file exceeds size limit
+        json.JSONDecodeError: If file contains invalid JSON
+    """
+    # Check file size before loading
+    file_size = file_path.stat().st_size
+    if file_size > MAX_JSON_FILE_SIZE:
+        raise ValueError(
+            f"JSON file exceeds maximum size limit: {file_size} > {MAX_JSON_FILE_SIZE} bytes"
+        )
+
+    with open(file_path, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
 def migrate_conversations(source_path: Optional[str] = None, user_id: str = "default_user") -> int:
     """
     Migrate conversation data to the central vector database
-    
+
     Args:
         source_path: Path to the conversation data directory (defaults to standard location)
         user_id: User ID for the data
-        
+
     Returns:
         Number of successfully migrated conversations
     """
     try:
+        # Security: Sanitize user_id to prevent path traversal (SEC-011)
+        user_id = _sanitize_user_id(user_id)
+
         # Use default path if not provided
         if not source_path:
             source_path = Path(__file__).parent.parent / 'data' / 'conversations'
         else:
             source_path = Path(source_path)
-        
+
         # Ensure the path exists
         if not source_path.exists():
             logger.warning(f"Conversation source path does not exist: {source_path}")
             return 0
-            
+
         # Find all conversation files
         conversation_files = list(source_path.glob(f"{user_id}_*.json"))
         
@@ -53,9 +119,8 @@ def migrate_conversations(source_path: Optional[str] = None, user_id: str = "def
         # Process each conversation file
         for file_path in conversation_files:
             try:
-                # Load conversation data
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    conversations = json.load(f)
+                # Security: Load JSON with size limit check (SEC-010)
+                conversations = _safe_json_load(file_path)
                 
                 # Migrate each conversation
                 for conv in conversations:
@@ -99,26 +164,29 @@ def migrate_conversations(source_path: Optional[str] = None, user_id: str = "def
 def migrate_personality_data(source_path: Optional[str] = None, user_id: str = "default_user") -> int:
     """
     Migrate personality assessment data to the central vector database
-    
+
     Args:
         source_path: Path to the personality data directory (defaults to standard location)
         user_id: User ID for the data
-        
+
     Returns:
         Number of successfully migrated personality assessments
     """
     try:
+        # Security: Sanitize user_id to prevent path traversal (SEC-011)
+        user_id = _sanitize_user_id(user_id)
+
         # Use default path if not provided
         if not source_path:
             source_path = Path(__file__).parent.parent / 'data' / 'personality'
         else:
             source_path = Path(source_path)
-        
+
         # Ensure the path exists
         if not source_path.exists():
             logger.warning(f"Personality data source path does not exist: {source_path}")
             return 0
-            
+
         # Find all personality files
         personality_files = list(source_path.glob(f"{user_id}_*.json"))
         
@@ -132,9 +200,8 @@ def migrate_personality_data(source_path: Optional[str] = None, user_id: str = "
         # Process each personality file
         for file_path in personality_files:
             try:
-                # Load personality data
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    personality_data = json.load(f)
+                # Security: Load JSON with size limit check (SEC-010)
+                personality_data = _safe_json_load(file_path)
                 
                 # Add metadata
                 if not isinstance(personality_data, dict):
@@ -168,26 +235,29 @@ def migrate_personality_data(source_path: Optional[str] = None, user_id: str = "
 def migrate_diagnostic_data(source_path: Optional[str] = None, user_id: str = "default_user") -> int:
     """
     Migrate diagnostic assessment data to the central vector database
-    
+
     Args:
         source_path: Path to the diagnostic data directory (defaults to standard location)
         user_id: User ID for the data
-        
+
     Returns:
         Number of successfully migrated diagnostic assessments
     """
     try:
+        # Security: Sanitize user_id to prevent path traversal (SEC-011)
+        user_id = _sanitize_user_id(user_id)
+
         # Use default path if not provided
         if not source_path:
             source_path = Path(__file__).parent.parent / 'data' / 'diagnosis'
         else:
             source_path = Path(source_path)
-        
+
         # Ensure the path exists
         if not source_path.exists():
             logger.warning(f"Diagnostic data source path does not exist: {source_path}")
             return 0
-            
+
         # Find all diagnostic files
         diagnostic_files = list(source_path.glob(f"{user_id}_*.json"))
         
@@ -201,9 +271,8 @@ def migrate_diagnostic_data(source_path: Optional[str] = None, user_id: str = "d
         # Process each diagnostic file
         for file_path in diagnostic_files:
             try:
-                # Load diagnostic data
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    diagnostic_data = json.load(f)
+                # Security: Load JSON with size limit check (SEC-010)
+                diagnostic_data = _safe_json_load(file_path)
                 
                 # Add metadata
                 if not isinstance(diagnostic_data, dict):
@@ -272,10 +341,14 @@ def migrate_knowledge_base(source_path: Optional[str] = None) -> int:
             try:
                 # Determine file type and load appropriately
                 if file_path.suffix == '.json':
-                    with open(file_path, 'r') as f:
-                        item_data = json.load(f)
+                    # Security: Load JSON with size limit check (SEC-010)
+                    item_data = _safe_json_load(file_path)
                 else:
-                    with open(file_path, 'r') as f:
+                    # Check file size for non-JSON files too
+                    if file_path.stat().st_size > MAX_JSON_FILE_SIZE:
+                        logger.warning(f"Skipping large file: {file_path}")
+                        continue
+                    with open(file_path, 'r', encoding='utf-8') as f:
                         content = f.read()
                     
                     # Create structured data for non-JSON files
@@ -348,10 +421,14 @@ def migrate_therapy_resources(source_path: Optional[str] = None) -> int:
             try:
                 # Determine file type and load appropriately
                 if file_path.suffix == '.json':
-                    with open(file_path, 'r') as f:
-                        resource_data = json.load(f)
+                    # Security: Load JSON with size limit check (SEC-010)
+                    resource_data = _safe_json_load(file_path)
                 else:
-                    with open(file_path, 'r') as f:
+                    # Check file size for non-JSON files too
+                    if file_path.stat().st_size > MAX_JSON_FILE_SIZE:
+                        logger.warning(f"Skipping large file: {file_path}")
+                        continue
+                    with open(file_path, 'r', encoding='utf-8') as f:
                         content = f.read()
                     
                     # Create structured data for non-JSON files

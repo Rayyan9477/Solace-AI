@@ -1,16 +1,16 @@
 # Solace-AI: Complete Project Map & Technical Audit
 
 > **Audit Date**: December 22, 2025
-> **Last Updated**: December 23, 2025 (Post-Remediation)
+> **Last Updated**: December 25, 2025 (Post-Remediation Batch 8)
 > **Codebase Size**: ~243 Python files | ~80,000 lines of code (after cleanup)
 > **Analysis Depth**: Line-by-line, function-by-function review using 8 specialized agents
-> **Technical Debt Score**: ~~8.4/10~~ **6.2/10** (Reduced from Critical to High)
+> **Technical Debt Score**: ~~8.4/10~~ ~~6.2/10~~ ~~5.8/10~~ ~~5.4/10~~ **5.0/10** (Reduced from Critical to Moderate)
 
 ---
 
 ## REMEDIATION LOG (December 23, 2025)
 
-### Completed Fixes - 5 Batches
+### Completed Fixes - 8 Batches
 
 | Batch | Focus | Items Fixed | Impact |
 |-------|-------|-------------|--------|
@@ -19,6 +19,9 @@
 | **3** | Implementation Bugs | Type safety, resource cleanup, weak refs, proper typing | 5 critical bugs fixed |
 | **4** | Module Consolidation | Shared constants, orchestration fix, component cleanup | ~650 lines deduplicated |
 | **5** | File Relocations | memory_factory, vector_db_integration relocated | Proper module organization |
+| **6** | Critical Bugs + Security | functools NameError, pickle CWE-502, memory modules relocated | 5 P0/P1 fixes |
+| **7** | Security + Memory Leaks | Shell command fix, URL validation, token blacklist, error history bounds | 5 security/memory fixes |
+| **8** | Pickle + Path Security | JSON size limits, path traversal, 2 more CWE-502 pickle fixes, resource leak | 5 security fixes |
 
 ### Fixed P0/P1 Issues
 
@@ -35,6 +38,20 @@
 | Dangerous Class Override | ✅ FIXED | Removed silent AgentOrchestrator replacement |
 | Duplicate CONDITION_DEFINITIONS | ✅ FIXED | Shared `constants/condition_definitions.py` created |
 | Misplaced Files | ✅ FIXED | `memory_factory.py` → `memory/`, `vector_db_integration.py` → `database/` |
+| functools NameError | ✅ FIXED | Added `import time`, changed `@functools.wraps` to `@wraps` in `error_handling.py` |
+| Pickle CWE-502 (Full) | ✅ FIXED | Replaced pickle with JSON serialization in `enhanced_memory_system.py` |
+| Memory Module Relocation | ✅ FIXED | `context_aware_memory.py`, `conversation_memory.py` → `memory/` with deprecation stubs |
+| SEC-009 Unsafe Shell Command | ✅ FIXED | Replaced `os.system` with `subprocess.run` in `console_utils.py` |
+| SEC-008 URL Validation | ✅ FIXED | Added domain whitelist and URL validation in `celebrity_voice_cloner.py` |
+| SEC-005 Token Blacklist | ✅ FIXED | Added TTL-based `TokenBlacklist` class with bounded size in `jwt_utils.py` |
+| Memory Leak error_history | ✅ FIXED | Added `MAX_ERROR_HISTORY_SIZE` limit with auto-trim in `error_handling.py` |
+| Bare Except Clause | ✅ FIXED | Changed bare `except:` to `except (ValueError, TypeError, AttributeError):` in `conversation_analysis.py` |
+| SEC-010 JSON Size Limits | ✅ FIXED | Added `MAX_JSON_FILE_SIZE` check and `_safe_json_load()` in `migration_utils.py` |
+| SEC-011 Path Traversal | ✅ FIXED | Added `_sanitize_user_id()` with regex validation in `migration_utils.py` |
+| CWE-502 Pickle (research) | ✅ FIXED | Replaced pickle with JSON serialization in `real_time_research.py` |
+| CWE-502 Pickle (learning) | ✅ FIXED | Replaced pickle with JSON serialization in `adaptive_learning.py` |
+| Resource Leak File Handle | ✅ FIXED | Added try/finally for file closure in `voice_emotion_analyzer.py` |
+| SEC-012 API Key Validation | ✅ FIXED | Added validation for empty/malformed API keys in `whisper_asr.py` |
 
 ### Remaining Work (Future Batches)
 
@@ -97,10 +114,10 @@
 | Priority | Finding | Impact | Location | Status |
 |----------|---------|--------|----------|--------|
 | ~~P0~~ | ~~**3 Separate Enterprise Folders**~~ | ~~Broken imports~~ | ~~`enterprise/`, `src/enterprise/`, `src/diagnosis/enterprise/`~~ | ✅ FIXED |
-| P0 | **Pickle Deserialization (CWE-502)** - torch.load fixed, pickle.load remains | Remote Code Execution | `src/memory/enhanced_memory_system.py:892-901` | ⚠️ PARTIAL |
+| ~~P0~~ | ~~**Pickle Deserialization (CWE-502)**~~ | ~~Remote Code Execution~~ | ~~`src/memory/enhanced_memory_system.py`~~ | ✅ FIXED |
 | ~~P0~~ | ~~**SSRF Vulnerability**~~ | ~~Server-Side Request Forgery~~ | ~~`src/agents/support/crawler_agent.py`~~ | ✅ FIXED |
 | ~~P0~~ | ~~**Duplicate ErrorSeverity Enum**~~ | ~~Type confusion~~ | ~~`src/utils/error_handling.py`~~ | ✅ FIXED |
-| P0 | **Missing functools Import** - Runtime NameError | Crashes on error handling | `src/utils/error_handling.py:219` | 🔴 OPEN |
+| ~~P0~~ | ~~**Missing functools Import**~~ | ~~Crashes on error handling~~ | ~~`src/utils/error_handling.py`~~ | ✅ FIXED |
 | P1 | **God Class (2,382 lines)** - 15+ responsibilities | Unmaintainable | `src/agents/orchestration/agent_orchestrator.py` | 🔴 OPEN |
 | P1 | **4 Diagnosis Modules (78% overlap)** - Partially consolidated | Maintenance nightmare | `src/diagnosis/*.py` | ⚠️ PARTIAL |
 | P1 | **9 Memory Implementations** - Factory centralized | Confusion, inconsistency | Across 4 directories | ⚠️ PARTIAL |

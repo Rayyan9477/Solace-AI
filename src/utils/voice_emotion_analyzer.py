@@ -395,21 +395,28 @@ class VoiceEmotionAnalyzer:
                 }
                 
             import asyncio
-            
+
             # Create a job to analyze the audio file
-            file_object = open(audio_file, "rb")
-            
-            # Submit the job to Hume AI
-            logger.info("Submitting audio to Hume AI for analysis")
-            async with self.hume_client:
-                job = await self.hume_client.submit_job(
-                    files=[file_object],
-                    configs=[self.prosody_config]
-                )
-                
-                # Wait for the job to complete
-                result = await job.await_complete()
-                prosody_result = result.get_prosody()
+            # Using try/finally to ensure file is closed (resource leak fix)
+            file_object = None
+            try:
+                file_object = open(audio_file, "rb")
+
+                # Submit the job to Hume AI
+                logger.info("Submitting audio to Hume AI for analysis")
+                async with self.hume_client:
+                    job = await self.hume_client.submit_job(
+                        files=[file_object],
+                        configs=[self.prosody_config]
+                    )
+
+                    # Wait for the job to complete
+                    result = await job.await_complete()
+                    prosody_result = result.get_prosody()
+            finally:
+                # Ensure file is always closed to prevent resource leak
+                if file_object is not None:
+                    file_object.close()
                 
             # Process the results
             if prosody_result and "predictions" in prosody_result:

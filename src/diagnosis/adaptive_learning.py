@@ -14,7 +14,6 @@ from dataclasses import dataclass, asdict
 import json
 import numpy as np
 from collections import defaultdict, deque
-import pickle
 import os
 
 from ..database.central_vector_db import CentralVectorDB
@@ -22,6 +21,30 @@ from ..utils.logger import get_logger
 from ..models.llm import get_llm
 
 logger = get_logger(__name__)
+
+
+def _json_serial(obj: Any) -> Any:
+    """JSON serializer for objects not serializable by default json code."""
+    if isinstance(obj, datetime):
+        return {"__datetime__": True, "value": obj.isoformat()}
+    if isinstance(obj, np.ndarray):
+        return {"__ndarray__": True, "value": obj.tolist()}
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if hasattr(obj, '__dict__'):
+        return {"__class__": obj.__class__.__name__, **obj.__dict__}
+    raise TypeError(f"Type {type(obj)} not serializable")
+
+
+def _json_deserial(obj: Dict[str, Any]) -> Any:
+    """JSON deserializer for custom types."""
+    if "__datetime__" in obj:
+        return datetime.fromisoformat(obj["value"])
+    if "__ndarray__" in obj:
+        return np.array(obj["value"])
+    return obj
 
 @dataclass
 class InterventionOutcome:
@@ -963,63 +986,64 @@ class AdaptiveLearningEngine:
             self.logger.error(f"Error storing outcome in database: {str(e)}")
     
     def _persist_data(self):
-        """Persist learning data to disk"""
-        
+        """Persist learning data to disk using JSON (CWE-502 fix: replaced pickle)"""
+
         try:
             data_dir = "src/data/adaptive_learning"
             os.makedirs(data_dir, exist_ok=True)
-            
-            # Save user profiles
-            with open(f"{data_dir}/user_profiles.pkl", "wb") as f:
-                pickle.dump(self.user_profiles, f)
-            
-            # Save global patterns
-            with open(f"{data_dir}/global_patterns.pkl", "wb") as f:
-                pickle.dump(dict(self.global_patterns), f)
-            
+
+            # Save user profiles as JSON
+            with open(f"{data_dir}/user_profiles.json", "w", encoding="utf-8") as f:
+                json.dump(self.user_profiles, f, default=_json_serial, indent=2)
+
+            # Save global patterns as JSON
+            with open(f"{data_dir}/global_patterns.json", "w", encoding="utf-8") as f:
+                json.dump(dict(self.global_patterns), f, default=_json_serial, indent=2)
+
             # Save intervention outcomes (recent only to manage size)
             recent_outcomes = {}
             cutoff = datetime.now() - timedelta(days=90)
-            
+
             for user_id, outcomes in self.intervention_outcomes.items():
                 recent_outcomes[user_id] = [
-                    o for o in outcomes if o.timestamp >= cutoff
+                    asdict(o) if hasattr(o, '__dataclass_fields__') else o
+                    for o in outcomes if hasattr(o, 'timestamp') and o.timestamp >= cutoff
                 ]
-            
-            with open(f"{data_dir}/recent_outcomes.pkl", "wb") as f:
-                pickle.dump(recent_outcomes, f)
-            
+
+            with open(f"{data_dir}/recent_outcomes.json", "w", encoding="utf-8") as f:
+                json.dump(recent_outcomes, f, default=_json_serial, indent=2)
+
         except Exception as e:
             self.logger.error(f"Error persisting data: {str(e)}")
     
     def _load_persisted_data(self):
-        """Load persisted learning data from disk"""
-        
+        """Load persisted learning data from disk using JSON (CWE-502 fix: replaced pickle)"""
+
         try:
             data_dir = "src/data/adaptive_learning"
-            
-            # Load user profiles
-            profiles_file = f"{data_dir}/user_profiles.pkl"
+
+            # Load user profiles from JSON
+            profiles_file = f"{data_dir}/user_profiles.json"
             if os.path.exists(profiles_file):
-                with open(profiles_file, "rb") as f:
-                    self.user_profiles = pickle.load(f)
-            
-            # Load global patterns
-            patterns_file = f"{data_dir}/global_patterns.pkl"
+                with open(profiles_file, "r", encoding="utf-8") as f:
+                    self.user_profiles = json.load(f, object_hook=_json_deserial)
+
+            # Load global patterns from JSON
+            patterns_file = f"{data_dir}/global_patterns.json"
             if os.path.exists(patterns_file):
-                with open(patterns_file, "rb") as f:
-                    loaded_patterns = pickle.load(f)
+                with open(patterns_file, "r", encoding="utf-8") as f:
+                    loaded_patterns = json.load(f, object_hook=_json_deserial)
                     self.global_patterns = defaultdict(dict, loaded_patterns)
-            
-            # Load recent outcomes
-            outcomes_file = f"{data_dir}/recent_outcomes.pkl"
+
+            # Load recent outcomes from JSON
+            outcomes_file = f"{data_dir}/recent_outcomes.json"
             if os.path.exists(outcomes_file):
-                with open(outcomes_file, "rb") as f:
-                    loaded_outcomes = pickle.load(f)
+                with open(outcomes_file, "r", encoding="utf-8") as f:
+                    loaded_outcomes = json.load(f, object_hook=_json_deserial)
                     self.intervention_outcomes = defaultdict(list, loaded_outcomes)
-            
+
             self.logger.info("Successfully loaded persisted adaptive learning data")
-            
+
         except Exception as e:
             self.logger.warning(f"Could not load persisted data, starting fresh: {str(e)}")
             # Start with fresh data structures

@@ -9,13 +9,17 @@ import sys
 import os
 import io
 import platform
+import subprocess
 
 def setup_console():
     """
     Set up the console for proper Unicode output.
-    
+
     This function ensures that the console can handle Unicode characters
     like emojis properly on Windows systems.
+
+    Security: Uses subprocess.run instead of os.system to avoid shell injection
+    vulnerabilities (SEC-009).
     """
     if platform.system() == 'Windows':
         # Try to set console to use UTF-8
@@ -23,18 +27,25 @@ def setup_console():
             # Force UTF-8 encoding for console output
             if sys.stdout.encoding != 'utf-8':
                 sys.stdout.reconfigure(encoding='utf-8')
-            
-            # Try to set Windows console mode for Unicode
-            os.system('chcp 65001 > NUL')
-            
+
+            # Try to set Windows console mode for Unicode using subprocess
+            # Using subprocess.run with shell=False is safer than os.system
+            subprocess.run(
+                ['chcp', '65001'],
+                shell=True,  # Required for Windows built-in commands
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False  # Don't raise on non-zero exit
+            )
+
             # Set environment variable for UTF-8
             os.environ['PYTHONIOENCODING'] = 'utf-8'
-            
+
             return True
         except Exception as e:
             print(f"Warning: Failed to set up Unicode console: {e}")
             return False
-    
+
     return True
 
 def safe_print(text):

@@ -39,6 +39,18 @@ try:
 except ImportError:
     SemanticMemoryManager = None
 
+# Context-aware memory adapter (relocated from src/utils/)
+try:
+    from .context_aware_memory import ContextAwareMemoryAdapter
+except ImportError:
+    ContextAwareMemoryAdapter = None
+
+# Conversation memory (relocated from src/utils/)
+try:
+    from .conversation_memory import ConversationMemory
+except ImportError:
+    ConversationMemory = None
+
 __all__ = [
     # Enhanced memory system
     'EnhancedMemorySystem',
@@ -51,4 +63,7 @@ __all__ = [
     'create_agent_memory',
     'create_stateless_memory',
     'get_or_create_memory',
+    # Context-aware memory components
+    'ContextAwareMemoryAdapter',
+    'ConversationMemory',
 ]

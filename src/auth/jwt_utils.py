@@ -5,25 +5,110 @@ Provides secure JWT token generation, validation, and management functionality.
 """
 
 import uuid
+import logging
+import threading
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 import jwt
 from passlib.context import CryptContext
 from src.config.security import SecurityConfig, SecurityExceptions
 from src.auth.models import TokenData, UserResponse
 
+logger = logging.getLogger(__name__)
+
+
+class TokenBlacklist:
+    """
+    Thread-safe token blacklist with TTL-based cleanup and bounded size.
+
+    Security improvements (SEC-005):
+    - Stores JTI (token ID) instead of full tokens to save memory
+    - Automatic cleanup of expired entries
+    - Maximum size limit to prevent memory exhaustion
+    - Thread-safe operations
+    """
+
+    MAX_BLACKLIST_SIZE = 10000  # Maximum number of blacklisted tokens
+
+    def __init__(self):
+        self._blacklist: Dict[str, datetime] = {}  # jti -> expiry_time
+        self._lock = threading.Lock()
+        self._last_cleanup = datetime.now(timezone.utc)
+        self._cleanup_interval = timedelta(minutes=15)
+
+    def add(self, jti: str, expires_at: datetime) -> None:
+        """Add a token JTI to the blacklist with its expiry time."""
+        with self._lock:
+            # Cleanup if needed
+            self._maybe_cleanup()
+
+            # If at max capacity, force cleanup or remove oldest
+            if len(self._blacklist) >= self.MAX_BLACKLIST_SIZE:
+                self._force_cleanup()
+
+            self._blacklist[jti] = expires_at
+
+    def contains(self, jti: str) -> bool:
+        """Check if a token JTI is blacklisted."""
+        with self._lock:
+            if jti not in self._blacklist:
+                return False
+
+            # Check if expired (can be removed)
+            expiry = self._blacklist[jti]
+            if expiry < datetime.now(timezone.utc):
+                del self._blacklist[jti]
+                return False
+
+            return True
+
+    def _maybe_cleanup(self) -> None:
+        """Cleanup expired entries if cleanup interval has passed."""
+        now = datetime.now(timezone.utc)
+        if now - self._last_cleanup > self._cleanup_interval:
+            self._do_cleanup()
+            self._last_cleanup = now
+
+    def _force_cleanup(self) -> None:
+        """Force cleanup when at capacity."""
+        self._do_cleanup()
+        # If still at capacity after cleanup, remove oldest 10%
+        if len(self._blacklist) >= self.MAX_BLACKLIST_SIZE:
+            sorted_entries = sorted(self._blacklist.items(), key=lambda x: x[1])
+            remove_count = self.MAX_BLACKLIST_SIZE // 10
+            for jti, _ in sorted_entries[:remove_count]:
+                del self._blacklist[jti]
+            logger.warning(f"Token blacklist forced removal of {remove_count} entries")
+
+    def _do_cleanup(self) -> None:
+        """Remove all expired entries."""
+        now = datetime.now(timezone.utc)
+        expired = [jti for jti, exp in self._blacklist.items() if exp < now]
+        for jti in expired:
+            del self._blacklist[jti]
+        if expired:
+            logger.debug(f"Cleaned up {len(expired)} expired blacklist entries")
+
+    def size(self) -> int:
+        """Return current blacklist size."""
+        with self._lock:
+            return len(self._blacklist)
+
 
 class JWTManager:
     """JWT token management with security best practices"""
-    
+
     def __init__(self):
         self.pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
         self.secret_key = SecurityConfig.SECRET_KEY
         self.algorithm = SecurityConfig.ALGORITHM
         self.access_token_expire_minutes = SecurityConfig.ACCESS_TOKEN_EXPIRE_MINUTES
         self.refresh_token_expire_days = SecurityConfig.REFRESH_TOKEN_EXPIRE_DAYS
-        
-        # Token blacklist (in production, use Redis or database)
+
+        # Token blacklist with TTL and bounded size (SEC-005)
+        self._token_blacklist = TokenBlacklist()
+
+        # Legacy compatibility - deprecated, use _token_blacklist instead
         self.blacklisted_tokens = set()
     
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
@@ -81,27 +166,41 @@ class JWTManager:
     def verify_token(self, token: str, token_type: str = "access") -> TokenData:
         """Verify and decode a JWT token"""
         try:
-            # Check if token is blacklisted
+            # First decode to get JTI for blacklist check
+            # Use options to skip exp verification initially
+            unverified_payload = jwt.decode(
+                token,
+                self.secret_key,
+                algorithms=[self.algorithm],
+                options={"verify_exp": False}
+            )
+
+            # Check if token JTI is blacklisted (SEC-005)
+            jti = unverified_payload.get("jti")
+            if jti and self._token_blacklist.contains(jti):
+                raise SecurityExceptions.InvalidTokenError("Token has been revoked")
+
+            # Legacy blacklist check for backward compatibility
             if token in self.blacklisted_tokens:
                 raise SecurityExceptions.InvalidTokenError("Token has been revoked")
-            
-            # Decode the token
+
+            # Now fully decode and verify the token
             payload = jwt.decode(
-                token, 
-                self.secret_key, 
+                token,
+                self.secret_key,
                 algorithms=[self.algorithm],
                 options={"verify_exp": True}
             )
-            
+
             # Verify token type
             if payload.get("token_type") != token_type:
                 raise SecurityExceptions.InvalidTokenError(f"Expected {token_type} token")
-            
+
             # Extract user data
             user_id = payload.get("sub")
             if user_id is None:
                 raise SecurityExceptions.InvalidTokenError("Token missing user ID")
-            
+
             return TokenData(
                 sub=user_id,
                 username=payload.get("username"),
@@ -111,11 +210,13 @@ class JWTManager:
                 iat=payload.get("iat"),
                 jti=payload.get("jti")
             )
-            
+
         except jwt.ExpiredSignatureError:
             raise SecurityExceptions.InvalidTokenError("Token has expired")
         except jwt.JWTError as e:
             raise SecurityExceptions.InvalidTokenError(f"Token validation failed: {str(e)}")
+        except SecurityExceptions.InvalidTokenError:
+            raise
         except Exception as e:
             raise SecurityExceptions.InvalidTokenError(f"Unexpected error: {str(e)}")
     
@@ -152,8 +253,36 @@ class JWTManager:
             raise SecurityExceptions.InvalidTokenError(f"Failed to refresh token: {str(e)}")
     
     def blacklist_token(self, token: str):
-        """Add token to blacklist"""
-        self.blacklisted_tokens.add(token)
+        """
+        Add token to blacklist.
+
+        Uses the new JTI-based blacklist with TTL for memory efficiency (SEC-005).
+        Falls back to legacy full-token blacklist for backward compatibility.
+        """
+        try:
+            # Decode token to get JTI and expiry
+            payload = jwt.decode(
+                token,
+                self.secret_key,
+                algorithms=[self.algorithm],
+                options={"verify_exp": False}  # Allow expired tokens to be blacklisted
+            )
+            jti = payload.get("jti")
+            exp = payload.get("exp")
+
+            if jti and exp:
+                # Convert exp timestamp to datetime
+                expires_at = datetime.fromtimestamp(exp, tz=timezone.utc)
+                self._token_blacklist.add(jti, expires_at)
+            else:
+                # Fallback to legacy blacklist if no JTI
+                self.blacklisted_tokens.add(token)
+                logger.warning("Token blacklisted without JTI - using legacy method")
+
+        except jwt.JWTError:
+            # If we can't decode, still add to legacy blacklist
+            self.blacklisted_tokens.add(token)
+            logger.warning("Failed to decode token for blacklisting - using legacy method")
     
     def get_user_permissions(self, role: str) -> List[str]:
         """Get user permissions based on role"""

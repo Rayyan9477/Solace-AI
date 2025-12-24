@@ -40,7 +40,8 @@ def print_conversation(conversation: Dict[str, Any], include_metadata: bool = Fa
     try:
         dt = datetime.fromisoformat(timestamp)
         formatted_time = dt.strftime("%B %d, %Y at %I:%M %p")
-    except:
+    except (ValueError, TypeError, AttributeError):
+        # Handle invalid timestamp formats gracefully
         formatted_time = timestamp
     print(f"📅 {formatted_time}")
     
