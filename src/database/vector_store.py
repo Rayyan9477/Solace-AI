@@ -582,19 +582,73 @@ class FaissVectorStore(BaseVectorStore):
             pass
 
     def _simple_embed(self, texts: List[str]) -> np.ndarray:
-        """Lightweight hashing-based embedding fallback to avoid heavy deps.
+        """
+        Lightweight embedding fallback using character n-grams and multi-hash (BUG-013 fix).
 
-        Produces deterministic fixed-size vectors using token hashing.
+        Produces deterministic fixed-size dense vectors without heavy dependencies.
+        Uses character n-grams (3-grams) with multiple hash functions for:
+        - Better semantic similarity (similar words share n-grams)
+        - Denser vectors (more features activated per text)
+        - More robust to typos and variations
+
+        Args:
+            texts: List of text strings to embed
+
+        Returns:
+            Numpy array of shape (len(texts), self.dimension) with L2-normalized vectors
         """
         vectors = np.zeros((len(texts), self.dimension), dtype=np.float32)
+
+        # Use multiple hash functions for better distribution
+        hash_seeds = [31, 37, 41, 43, 47]
+
         for i, text in enumerate(texts):
-            for tok in str(text).lower().split():
-                h = abs(hash(tok)) % self.dimension
-                vectors[i, h] += 1.0
-            # Normalize to unit length to mimic normalized embeddings
-            norm = np.linalg.norm(vectors[i]) + 1e-8
-            vectors[i] = vectors[i] / norm
+            if not text:
+                # Empty text gets a random but consistent vector
+                vectors[i] = self._deterministic_random_vector(i)
+                continue
+
+            text_lower = str(text).lower()
+
+            # Generate character n-grams (trigrams work well for semantic similarity)
+            for n in [2, 3, 4]:  # Use bi-grams, tri-grams, and quad-grams
+                for j in range(max(1, len(text_lower) - n + 1)):
+                    ngram = text_lower[j:j + n]
+
+                    # Apply multiple hash functions for denser representation
+                    for seed in hash_seeds:
+                        # Combine ngram hash with seed for different projections
+                        h = hash(ngram + str(seed))
+                        idx = abs(h) % self.dimension
+
+                        # Weight by n-gram length (longer n-grams are more specific)
+                        weight = 1.0 / (n ** 0.5)
+                        vectors[i, idx] += weight
+
+            # Also add word-level features (important for semantics)
+            words = text_lower.split()
+            for word in words:
+                if len(word) >= 2:  # Skip single chars
+                    for seed in hash_seeds[:2]:  # Use fewer hash functions for words
+                        h = hash(word + str(seed))
+                        idx = abs(h) % self.dimension
+                        vectors[i, idx] += 2.0  # Words get higher weight
+
+            # L2 normalize for cosine similarity compatibility
+            norm = np.linalg.norm(vectors[i])
+            if norm > 1e-8:
+                vectors[i] = vectors[i] / norm
+            else:
+                # Fallback for very short or empty text
+                vectors[i] = self._deterministic_random_vector(i)
+
         return vectors
+
+    def _deterministic_random_vector(self, seed: int) -> np.ndarray:
+        """Generate a deterministic pseudo-random unit vector for empty/edge cases."""
+        rng = np.random.RandomState(seed)
+        vec = rng.randn(self.dimension).astype(np.float32)
+        return vec / (np.linalg.norm(vec) + 1e-8)
 
     def _handle_error(self, error: Exception) -> None:
         """

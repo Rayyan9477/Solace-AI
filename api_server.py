@@ -41,7 +41,7 @@ from src.auth.dependencies import (
 )
 from src.middleware.security import (
     SecurityHeadersMiddleware, RequestLoggingMiddleware, IPFilterMiddleware,
-    ContentTypeValidationMiddleware, limiter, rate_limit_handler
+    ContentTypeValidationMiddleware, CSRFProtectionMiddleware, limiter, rate_limit_handler
 )
 
 # Set up logging
@@ -81,11 +81,15 @@ app.add_middleware(ContentTypeValidationMiddleware)
 # 4. IP filtering for admin endpoints
 app.add_middleware(IPFilterMiddleware)
 
-# 5. Rate limiting
+# 5. CSRF protection (SEC-006)
+# Enabled in production; JWT-protected requests bypass CSRF check
+app.add_middleware(CSRFProtectionMiddleware, enabled=not SecurityConfig.is_development())
+
+# 6. Rate limiting
 app.add_middleware(SlowAPIMiddleware)
 app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
 
-# 6. CORS with specific origins (CRITICAL FIX)
+# 7. CORS with specific origins (CRITICAL FIX)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=SecurityConfig.ALLOWED_ORIGINS,

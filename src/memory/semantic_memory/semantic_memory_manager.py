@@ -14,8 +14,10 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 from src.config.settings import AppConfig
 import faiss
-import pickle
 import re
+
+# Security: Removed pickle import - CWE-502 unsafe deserialization
+# Using JSON with custom serialization for memory entries
 
 logger = logging.getLogger(__name__)
 
@@ -98,23 +100,34 @@ class SemanticMemoryManager:
             return faiss.IndexFlatIP(self.embedding_dimension)
     
     def _load_memories(self) -> None:
-        """Load memories from disk"""
+        """Load memories from disk (SEC: CWE-502 fix - JSON instead of pickle)"""
         try:
             index_path = self.storage_dir / "memory_index.faiss"
-            entries_path = self.storage_dir / "memory_entries.pkl"
-            
+            entries_path = self.storage_dir / "memory_entries.json"
+            legacy_entries_path = self.storage_dir / "memory_entries.pkl"
+
             if index_path.exists() and entries_path.exists():
                 # Load FAISS index
                 self.index = faiss.read_index(str(index_path))
-                
-                # Load memory entries
-                with open(entries_path, 'rb') as f:
-                    loaded_data = pickle.load(f)
-                    self.memory_entries = loaded_data.get('entries', [])
-                    self.id_to_entry = loaded_data.get('id_to_entry', {})
+
+                # Load memory entries from JSON
+                with open(entries_path, 'r', encoding='utf-8') as f:
+                    loaded_data = json.load(f)
+                    # Restore numpy arrays in entries
+                    self.memory_entries = self._deserialize_entries(loaded_data.get('entries', []))
+                    self.id_to_entry = {int(k): v for k, v in loaded_data.get('id_to_entry', {}).items()}
                     self.next_id = loaded_data.get('next_id', len(self.memory_entries))
-                
+
                 logger.info(f"Loaded {len(self.memory_entries)} memories from {entries_path}")
+            elif legacy_entries_path.exists():
+                # SEC: Skip legacy pickle files due to security risk (CWE-502)
+                logger.warning(
+                    f"Legacy pickle file found at {legacy_entries_path}. "
+                    "Skipping due to security risk. Starting with empty memories."
+                )
+                self.memory_entries = []
+                self.id_to_entry = {}
+                self.next_id = 0
         except Exception as e:
             logger.error(f"Error loading memories: {str(e)}")
             # If loading fails, start with empty memories
@@ -123,24 +136,72 @@ class SemanticMemoryManager:
             self.next_id = 0
     
     def _save_memories(self) -> None:
-        """Save memories to disk"""
+        """Save memories to disk (SEC: CWE-502 fix - JSON instead of pickle)"""
         try:
             # Save FAISS index
             index_path = self.storage_dir / "memory_index.faiss"
             faiss.write_index(self.index, str(index_path))
-            
-            # Save memory entries
-            entries_path = self.storage_dir / "memory_entries.pkl"
-            with open(entries_path, 'wb') as f:
-                pickle.dump({
-                    'entries': self.memory_entries,
-                    'id_to_entry': self.id_to_entry,
-                    'next_id': self.next_id
-                }, f)
-            
+
+            # Save memory entries as JSON
+            entries_path = self.storage_dir / "memory_entries.json"
+            serialized_data = {
+                'entries': self._serialize_entries(self.memory_entries),
+                'id_to_entry': {str(k): v for k, v in self.id_to_entry.items()},
+                'next_id': self.next_id
+            }
+            with open(entries_path, 'w', encoding='utf-8') as f:
+                json.dump(serialized_data, f, indent=2)
+
             logger.info(f"Saved {len(self.memory_entries)} memories to {entries_path}")
         except Exception as e:
             logger.error(f"Error saving memories: {str(e)}")
+
+    def _serialize_entries(self, entries: List[Dict]) -> List[Dict]:
+        """
+        Serialize memory entries to JSON-safe format (SEC: CWE-502 fix).
+
+        Converts numpy arrays to lists for JSON serialization.
+        """
+        serialized = []
+        for entry in entries:
+            serialized_entry = {}
+            for key, value in entry.items():
+                if isinstance(value, np.ndarray):
+                    serialized_entry[key] = {
+                        "__type__": "ndarray",
+                        "data": value.tolist(),
+                        "dtype": str(value.dtype)
+                    }
+                elif isinstance(value, (np.integer, np.floating)):
+                    serialized_entry[key] = float(value)
+                elif isinstance(value, datetime):
+                    serialized_entry[key] = {"__type__": "datetime", "value": value.isoformat()}
+                else:
+                    serialized_entry[key] = value
+            serialized.append(serialized_entry)
+        return serialized
+
+    def _deserialize_entries(self, entries: List[Dict]) -> List[Dict]:
+        """
+        Deserialize memory entries from JSON format (SEC: CWE-502 fix).
+
+        Restores numpy arrays from their JSON-safe representations.
+        """
+        deserialized = []
+        for entry in entries:
+            deserialized_entry = {}
+            for key, value in entry.items():
+                if isinstance(value, dict) and value.get("__type__") == "ndarray":
+                    deserialized_entry[key] = np.array(
+                        value["data"],
+                        dtype=value.get("dtype", "float32")
+                    )
+                elif isinstance(value, dict) and value.get("__type__") == "datetime":
+                    deserialized_entry[key] = datetime.fromisoformat(value["value"])
+                else:
+                    deserialized_entry[key] = value
+            deserialized.append(deserialized_entry)
+        return deserialized
     
     def _get_embedding(self, text: str) -> np.ndarray:
         """Get embedding for text"""

@@ -6,10 +6,14 @@ Implements comprehensive security middleware including:
 - Rate limiting
 - Request/response logging
 - IP filtering
+- CSRF protection (SEC-006)
 """
 
 import time
 import asyncio
+import secrets
+import hmac
+import hashlib
 from typing import Callable, List, Optional, Dict, Any
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -258,6 +262,170 @@ class ContentTypeValidationMiddleware(BaseHTTPMiddleware):
                     content={"detail": "Unsupported Media Type"}
                 )
         
+        return await call_next(request)
+
+
+class CSRFProtectionMiddleware(BaseHTTPMiddleware):
+    """
+    CSRF Protection Middleware using Double Submit Cookie Pattern (SEC-006).
+
+    This middleware provides stateless CSRF protection for state-changing requests.
+    It is designed to work alongside JWT-based authentication.
+
+    Protection approach:
+    1. Requests with valid Authorization headers bypass CSRF check (JWT protected)
+    2. State-changing requests (POST, PUT, DELETE, PATCH) require CSRF token
+    3. CSRF token is validated against a signed cookie
+    """
+
+    # Token configuration
+    CSRF_COOKIE_NAME = "csrftoken"
+    CSRF_HEADER_NAME = "X-CSRFToken"
+    CSRF_FORM_FIELD = "csrf_token"
+    TOKEN_LENGTH = 32  # 256 bits of entropy
+
+    # Endpoints that don't require CSRF protection
+    EXEMPT_PATHS = [
+        "/api/auth/login",
+        "/api/auth/register",
+        "/api/auth/refresh",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+        "/health",
+    ]
+
+    def __init__(self, app, enabled: bool = True):
+        super().__init__(app)
+        self.enabled = enabled
+        self.secret_key = SecurityConfig.SECRET_KEY
+
+    def _generate_csrf_token(self) -> str:
+        """Generate a cryptographically secure CSRF token."""
+        return secrets.token_urlsafe(self.TOKEN_LENGTH)
+
+    def _sign_token(self, token: str) -> str:
+        """Sign a CSRF token with HMAC."""
+        signature = hmac.new(
+            self.secret_key.encode(),
+            token.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        return f"{token}.{signature}"
+
+    def _verify_token(self, signed_token: str, submitted_token: str) -> bool:
+        """Verify that the submitted token matches the signed cookie."""
+        try:
+            if not signed_token or not submitted_token:
+                return False
+
+            parts = signed_token.split(".")
+            if len(parts) != 2:
+                return False
+
+            token, signature = parts
+
+            # Verify signature
+            expected_signature = hmac.new(
+                self.secret_key.encode(),
+                token.encode(),
+                hashlib.sha256
+            ).hexdigest()
+
+            if not hmac.compare_digest(signature, expected_signature):
+                return False
+
+            # Verify submitted token matches
+            return hmac.compare_digest(token, submitted_token)
+
+        except Exception:
+            return False
+
+    def _is_exempt(self, request: Request) -> bool:
+        """Check if the request path is exempt from CSRF protection."""
+        path = request.url.path
+
+        # Check explicit exemptions
+        for exempt_path in self.EXEMPT_PATHS:
+            if path.startswith(exempt_path):
+                return True
+
+        return False
+
+    def _has_valid_authorization(self, request: Request) -> bool:
+        """Check if request has a valid Authorization header (JWT-protected)."""
+        auth_header = request.headers.get("Authorization", "")
+        # If there's a Bearer token, the request is JWT-protected
+        # which provides CSRF protection implicitly
+        return auth_header.startswith("Bearer ") and len(auth_header) > 10
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        """Process request with CSRF protection."""
+        # Skip if disabled
+        if not self.enabled:
+            return await call_next(request)
+
+        # Skip safe methods
+        if request.method in ("GET", "HEAD", "OPTIONS", "TRACE"):
+            response = await call_next(request)
+            # Set CSRF cookie for GET requests to forms
+            if request.method == "GET" and not request.cookies.get(self.CSRF_COOKIE_NAME):
+                token = self._generate_csrf_token()
+                signed_token = self._sign_token(token)
+                response.set_cookie(
+                    key=self.CSRF_COOKIE_NAME,
+                    value=signed_token,
+                    httponly=False,  # Must be readable by JavaScript
+                    samesite="strict",
+                    secure=not SecurityConfig.is_development(),
+                    max_age=3600 * 24  # 24 hours
+                )
+            return response
+
+        # Skip exempt paths
+        if self._is_exempt(request):
+            return await call_next(request)
+
+        # Skip JWT-protected requests (Authorization header provides CSRF protection)
+        if self._has_valid_authorization(request):
+            return await call_next(request)
+
+        # Validate CSRF token for state-changing requests
+        cookie_token = request.cookies.get(self.CSRF_COOKIE_NAME, "")
+        header_token = request.headers.get(self.CSRF_HEADER_NAME, "")
+
+        # Try to get token from form data if not in header
+        submitted_token = header_token
+        if not submitted_token:
+            try:
+                # Check if content-type is form data
+                content_type = request.headers.get("content-type", "")
+                if "application/x-www-form-urlencoded" in content_type:
+                    form_data = await request.form()
+                    submitted_token = form_data.get(self.CSRF_FORM_FIELD, "")
+            except Exception:
+                pass
+
+        if not self._verify_token(cookie_token, submitted_token):
+            client_ip = get_remote_address(request)
+            logger.warning(
+                f"CSRF validation failed for IP: {client_ip} on {request.url.path}",
+                extra={
+                    "event_type": "csrf_validation_failed",
+                    "client_ip": client_ip,
+                    "endpoint": request.url.path,
+                    "method": request.method,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            )
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "error": "CSRF validation failed",
+                    "detail": "Missing or invalid CSRF token"
+                }
+            )
+
         return await call_next(request)
 
 

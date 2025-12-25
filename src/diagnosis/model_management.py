@@ -15,7 +15,6 @@ Version: 1.0.0
 
 import os
 import json
-import pickle
 import hashlib
 import shutil
 import logging
@@ -25,6 +24,9 @@ from pathlib import Path
 from dataclasses import dataclass, asdict
 import asyncio
 import warnings
+
+# Security: Removed pickle import - CWE-502 unsafe deserialization
+# Using JSON with custom serialization for feature extractors
 
 # ML/AI imports
 import torch
@@ -129,6 +131,74 @@ class ModelManager:
                 logger.error(f"Error loading model registry: {str(e)}")
                 self.model_registry = {}
 
+    def _serialize_feature_extractors(self, extractors: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Serialize feature extractors to JSON-safe format (SEC: CWE-502 fix).
+
+        Converts numpy arrays and other non-JSON-serializable types to safe formats.
+
+        Args:
+            extractors: Dictionary of feature extractors
+
+        Returns:
+            JSON-serializable dictionary
+        """
+        def convert_value(v):
+            if isinstance(v, np.ndarray):
+                return {"__type__": "ndarray", "data": v.tolist(), "dtype": str(v.dtype)}
+            elif isinstance(v, (np.integer, np.floating)):
+                return {"__type__": "numpy_scalar", "value": float(v), "dtype": str(type(v).__name__)}
+            elif isinstance(v, datetime):
+                return {"__type__": "datetime", "value": v.isoformat()}
+            elif isinstance(v, dict):
+                return {k: convert_value(val) for k, val in v.items()}
+            elif isinstance(v, (list, tuple)):
+                return [convert_value(item) for item in v]
+            elif isinstance(v, (str, int, float, bool, type(None))):
+                return v
+            else:
+                # For objects we can't serialize, store their string representation
+                return {"__type__": "unsupported", "repr": str(v)}
+
+        if extractors is None:
+            return {}
+        return {k: convert_value(v) for k, v in extractors.items()}
+
+    def _deserialize_feature_extractors(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Deserialize feature extractors from JSON format (SEC: CWE-502 fix).
+
+        Restores numpy arrays and other types from their JSON-safe representations.
+
+        Args:
+            data: JSON-serializable dictionary from _serialize_feature_extractors
+
+        Returns:
+            Dictionary of feature extractors with proper types restored
+        """
+        def restore_value(v):
+            if isinstance(v, dict):
+                type_marker = v.get("__type__")
+                if type_marker == "ndarray":
+                    return np.array(v["data"], dtype=v.get("dtype", "float32"))
+                elif type_marker == "numpy_scalar":
+                    return np.float64(v["value"])
+                elif type_marker == "datetime":
+                    return datetime.fromisoformat(v["value"])
+                elif type_marker == "unsupported":
+                    logger.warning(f"Unsupported type found during deserialization: {v.get('repr')}")
+                    return None
+                else:
+                    return {k: restore_value(val) for k, val in v.items()}
+            elif isinstance(v, list):
+                return [restore_value(item) for item in v]
+            else:
+                return v
+
+        if data is None:
+            return {}
+        return {k: restore_value(v) for k, v in data.items()}
+
     def _save_model_registry(self):
         """Save model registry to disk"""
         registry_path = self.models_directory / "model_registry.json"
@@ -191,11 +261,13 @@ class ModelManager:
                     }, model_path)
                     model_files[component_name] = str(model_path)
             
-            # Save feature extractors (if they have state)
-            extractors_path = checkpoint_dir / "feature_extractors.pkl"
+            # Save feature extractors as JSON (SEC: CWE-502 fix - no pickle)
+            extractors_path = checkpoint_dir / "feature_extractors.json"
             try:
-                with open(extractors_path, 'wb') as f:
-                    pickle.dump(pipeline.feature_extractors, f)
+                # Serialize feature extractors to JSON-safe format
+                serialized = self._serialize_feature_extractors(pipeline.feature_extractors)
+                with open(extractors_path, 'w', encoding='utf-8') as f:
+                    json.dump(serialized, f, indent=2)
                 model_files['feature_extractors'] = str(extractors_path)
             except Exception as e:
                 logger.warning(f"Could not save feature extractors: {str(e)}")
@@ -312,14 +384,23 @@ class ModelManager:
                         checkpoint_data['model_state_dict']
                     )
             
-            # Load feature extractors
-            extractors_path = checkpoint_dir / "feature_extractors.pkl"
+            # Load feature extractors from JSON (SEC: CWE-502 fix - no pickle)
+            extractors_path = checkpoint_dir / "feature_extractors.json"
+            # Also check for legacy pkl file for backward compatibility
+            legacy_extractors_path = checkpoint_dir / "feature_extractors.pkl"
             if extractors_path.exists():
                 try:
-                    with open(extractors_path, 'rb') as f:
-                        pipeline.feature_extractors = pickle.load(f)
+                    with open(extractors_path, 'r', encoding='utf-8') as f:
+                        serialized = json.load(f)
+                    pipeline.feature_extractors = self._deserialize_feature_extractors(serialized)
                 except Exception as e:
                     logger.warning(f"Could not load feature extractors: {str(e)}")
+            elif legacy_extractors_path.exists():
+                # SEC: Skip loading legacy pickle files due to security risk (CWE-502)
+                logger.warning(
+                    f"Legacy pickle file found at {legacy_extractors_path}. "
+                    "Skipping due to security risk. Please re-save checkpoint."
+                )
             
             # Load clinical knowledge
             knowledge_path = checkpoint_dir / "clinical_knowledge.json"

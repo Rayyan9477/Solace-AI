@@ -96,12 +96,32 @@ class TokenBlacklist:
 
 
 class JWTManager:
-    """JWT token management with security best practices"""
+    """
+    JWT token management with security best practices.
+
+    Security measures implemented:
+    - SEC-005: Token blacklist with TTL and bounded size
+    - SEC-007: Algorithm confusion protection (CVE-2015-2951, CVE-2018-0114)
+        - Explicitly defines allowed algorithms (no 'none')
+        - Validates token header algorithm before decoding
+        - Uses symmetric HS256 by default (configurable)
+    """
+
+    # SEC-007: Explicitly allowed algorithms - 'none' is NEVER allowed
+    ALLOWED_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
 
     def __init__(self):
         self.pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
         self.secret_key = SecurityConfig.SECRET_KEY
         self.algorithm = SecurityConfig.ALGORITHM
+
+        # SEC-007: Validate that configured algorithm is in allowed list
+        if self.algorithm not in self.ALLOWED_ALGORITHMS:
+            raise ValueError(
+                f"Invalid JWT algorithm: {self.algorithm}. "
+                f"Allowed algorithms: {self.ALLOWED_ALGORITHMS}"
+            )
+
         self.access_token_expire_minutes = SecurityConfig.ACCESS_TOKEN_EXPIRE_MINUTES
         self.refresh_token_expire_days = SecurityConfig.REFRESH_TOKEN_EXPIRE_DAYS
 
@@ -163,15 +183,66 @@ class JWTManager:
         except Exception as e:
             raise SecurityExceptions.InvalidTokenError(f"Failed to create refresh token: {str(e)}")
     
-    def verify_token(self, token: str, token_type: str = "access") -> TokenData:
-        """Verify and decode a JWT token"""
+    def _validate_token_header(self, token: str) -> None:
+        """
+        Validate JWT token header algorithm before decoding (SEC-007).
+
+        Explicitly checks for algorithm confusion attacks including:
+        - 'none' algorithm attack (CVE-2015-2951)
+        - RS256 to HS256 downgrade attack (CVE-2018-0114)
+
+        Args:
+            token: The raw JWT token string
+
+        Raises:
+            SecurityExceptions.InvalidTokenError: If algorithm is invalid
+        """
         try:
+            # Extract header without verification
+            header = jwt.get_unverified_header(token)
+            token_alg = header.get("alg", "").upper()
+
+            # SEC-007: Explicitly reject 'none' algorithm
+            if token_alg.lower() == "none" or not token_alg:
+                logger.warning(
+                    "JWT algorithm confusion attempt detected: 'none' algorithm",
+                    extra={"event_type": "jwt_algorithm_attack", "algorithm": token_alg}
+                )
+                raise SecurityExceptions.InvalidTokenError(
+                    "Invalid token: 'none' algorithm not allowed"
+                )
+
+            # SEC-007: Reject algorithms not in our allowed list
+            if token_alg not in self.ALLOWED_ALGORITHMS:
+                logger.warning(
+                    f"JWT algorithm mismatch: token uses {token_alg}, expected {self.algorithm}",
+                    extra={"event_type": "jwt_algorithm_mismatch", "token_alg": token_alg}
+                )
+                raise SecurityExceptions.InvalidTokenError(
+                    f"Invalid token algorithm: {token_alg}"
+                )
+
+        except jwt.exceptions.DecodeError as e:
+            raise SecurityExceptions.InvalidTokenError(f"Malformed token header: {str(e)}")
+
+    def verify_token(self, token: str, token_type: str = "access") -> TokenData:
+        """
+        Verify and decode a JWT token.
+
+        Security measures:
+        - SEC-007: Validates token header algorithm before decoding
+        - SEC-005: Checks token blacklist
+        """
+        try:
+            # SEC-007: Validate token header algorithm BEFORE decoding
+            self._validate_token_header(token)
+
             # First decode to get JTI for blacklist check
             # Use options to skip exp verification initially
             unverified_payload = jwt.decode(
                 token,
                 self.secret_key,
-                algorithms=[self.algorithm],
+                algorithms=[self.algorithm],  # SEC-007: Only allow configured algorithm
                 options={"verify_exp": False}
             )
 
@@ -188,7 +259,7 @@ class JWTManager:
             payload = jwt.decode(
                 token,
                 self.secret_key,
-                algorithms=[self.algorithm],
+                algorithms=[self.algorithm],  # SEC-007: Only allow configured algorithm
                 options={"verify_exp": True}
             )
 
