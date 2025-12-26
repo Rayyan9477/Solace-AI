@@ -75,6 +75,16 @@ class Metrics:
             )
         except ValueError:
             self.SAFETY_FLAGS = self.REGISTRY._names_to_collectors['safety_flags']
+
+        # Initialize ASSESSMENT_COMPLETED Counter (BUG FIX: was referenced but not defined)
+        try:
+            self.ASSESSMENT_COMPLETED = Counter(
+                'assessment_completed',
+                'Count of completed diagnostic assessments',
+                ['type']
+            )
+        except ValueError:
+            self.ASSESSMENT_COMPLETED = self.REGISTRY._names_to_collectors['assessment_completed']
     
     def track_interaction(self, interaction_type: str):
         """Track interaction type"""
@@ -109,7 +119,17 @@ class Metrics:
         else:
             # Fallback tracking
             self.metrics_store['safety_flags'] += 1
-    
+
+    def track_assessment_completed(self, assessment_type: str = "general"):
+        """Track completed diagnostic assessment"""
+        if self.prometheus_enabled and self.initialized:
+            self.ASSESSMENT_COMPLETED.labels(type=assessment_type).inc()
+        else:
+            # Fallback tracking
+            if 'assessments_completed' not in self.metrics_store:
+                self.metrics_store['assessments_completed'] = 0
+            self.metrics_store['assessments_completed'] += 1
+
     def get_metrics_summary(self):
         """Get a summary of tracked metrics (for fallback mode)"""
         if not self.prometheus_enabled:
@@ -203,11 +223,19 @@ class MetricsManager:
             end = datetime.fromisoformat(end_time) if end_time else datetime.now()
             
             # Get metrics from Prometheus
+            # Note: Counter values are accessed via _value.sum() for labeled counters
+            total_assessments = 0
+            if hasattr(self._metrics, 'ASSESSMENT_COMPLETED'):
+                try:
+                    total_assessments = self._metrics.ASSESSMENT_COMPLETED._value.sum()
+                except (AttributeError, TypeError):
+                    total_assessments = 0
+
             summary = {
                 'total_interactions': self._metrics.INTERACTION_TYPES._value.sum(),
                 'avg_response_time': float(self._metrics.RESPONSE_TIME.describe()['avg']),
                 'total_safety_flags': self._metrics.SAFETY_FLAGS._value.sum(),
-                'total_assessments': self._metrics.ASSESSMENT_COMPLETED._value,
+                'total_assessments': total_assessments,
                 'time_range': {
                     'start': start.isoformat(),
                     'end': end.isoformat()

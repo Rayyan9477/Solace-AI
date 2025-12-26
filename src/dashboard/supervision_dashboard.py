@@ -111,7 +111,7 @@ def check_api_connectivity() -> bool:
     try:
         response = requests.get(f"{API_BASE_URL}/supervision/status", timeout=5)
         return response.status_code == 200
-    except:
+    except (requests.RequestException, ConnectionError, TimeoutError):
         return False
 
 def show_overview_page():
@@ -728,7 +728,7 @@ def get_supervision_status() -> Optional[Dict]:
         response = requests.get(f"{API_BASE_URL}/supervision/status")
         if response.status_code == 200:
             return response.json()
-    except:
+    except (requests.RequestException, ConnectionError, TimeoutError, ValueError):
         pass
     return None
 
@@ -741,7 +741,7 @@ def get_supervision_summary(time_window_hours: int = 24) -> Optional[Dict]:
         )
         if response.status_code == 200:
             return response.json()
-    except:
+    except (requests.RequestException, ConnectionError, TimeoutError, ValueError):
         pass
     return None
 
@@ -753,10 +753,10 @@ def get_agent_quality_report(agent_name: Optional[str]) -> Optional[Dict]:
         else:
             # Get report for all agents
             response = requests.get(f"{API_BASE_URL}/supervision/agent-quality/all")
-        
+
         if response.status_code == 200:
             return response.json()
-    except:
+    except (requests.RequestException, ConnectionError, TimeoutError, ValueError):
         pass
     return None
 
@@ -766,7 +766,7 @@ def get_session_analysis(session_id: str) -> Optional[Dict]:
         response = requests.get(f"{API_BASE_URL}/supervision/session-analysis/{session_id}")
         if response.status_code == 200:
             return response.json()
-    except:
+    except (requests.RequestException, ConnectionError, TimeoutError, ValueError):
         pass
     return None
 
@@ -783,7 +783,7 @@ def generate_compliance_report(standard: str, start_date: str, end_date: str) ->
         )
         if response.status_code == 200:
             return response.json()
-    except:
+    except (requests.RequestException, ConnectionError, TimeoutError, ValueError):
         pass
     return None
 
@@ -793,7 +793,7 @@ def get_active_alerts() -> Optional[Dict]:
         response = requests.get(f"{API_BASE_URL}/supervision/alerts")
         if response.status_code == 200:
             return response.json()
-    except:
+    except (requests.RequestException, ConnectionError, TimeoutError, ValueError):
         pass
     return None
 
@@ -802,7 +802,7 @@ def resolve_alert(alert_id: str) -> bool:
     try:
         response = requests.post(f"{API_BASE_URL}/supervision/alerts/{alert_id}/resolve")
         return response.status_code == 200
-    except:
+    except (requests.RequestException, ConnectionError, TimeoutError):
         return False
 
 def get_available_agents() -> List[str]:

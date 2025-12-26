@@ -432,14 +432,16 @@ class DiaTTS:
     def _generate_audio(self, text: str, speaker_id: int = 0) -> Dict[str, Any]:
         """
         Generate audio from text (runs in a separate thread)
-        
+
         Args:
             text: Text to convert to speech
             speaker_id: Speaker ID for voice characteristics
-            
+
         Returns:
             Dict with generation results including audio bytes
         """
+        inputs = None
+        output = None
         try:
             with torch.no_grad():
                 # Process text through the model
@@ -448,22 +450,22 @@ class DiaTTS:
                     return_tensors="pt",
                     speaker_id=speaker_id
                 ).to(self.device)
-                
+
                 # Generate audio
                 output = self.model.generate(**inputs)
-                
-                # Convert to numpy array
+
+                # Convert to numpy array (moves to CPU)
                 speech = output.cpu().numpy().squeeze()
-                
+
                 # Convert to WAV format
                 audio_bytes = self._speech_to_wav(speech)
-                
+
                 return {
                     "success": True,
                     "audio_bytes": audio_bytes,
                     "sample_rate": 24000  # Dia 1.6B uses 24kHz
                 }
-                
+
         except Exception as e:
             logger.error(f"Error in audio generation: {str(e)}")
             return {
@@ -471,6 +473,15 @@ class DiaTTS:
                 "error": str(e),
                 "audio_bytes": b""
             }
+        finally:
+            # Clean up GPU tensors to prevent VRAM leak (BUG FIX)
+            if inputs is not None:
+                del inputs
+            if output is not None:
+                del output
+            # Clear CUDA cache if using GPU
+            if self.use_gpu and torch.cuda.is_available():
+                torch.cuda.empty_cache()
             
     def _speech_to_wav(self, speech_array: np.ndarray, sample_rate: int = 24000) -> bytes:
         """

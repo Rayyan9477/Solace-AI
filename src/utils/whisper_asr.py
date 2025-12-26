@@ -408,8 +408,9 @@ class WhisperASR:
                 # Clean up temporary file
                 try:
                     os.unlink(temp_path)
-                except:
-                    pass
+                except (OSError, PermissionError) as cleanup_err:
+                    # Log but don't fail if temp file cleanup fails
+                    logger.debug(f"Could not clean up temp file {temp_path}: {cleanup_err}")
                     
                 return emotion_results
                 

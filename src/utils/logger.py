@@ -113,7 +113,8 @@ def configure_logger(logger_name: str, log_level: Optional[Union[str, int]] = No
     try:
         config = AppConfig()
         config_log_level = getattr(config, "LOG_LEVEL", None)
-    except:
+    except (ImportError, AttributeError, ValueError, OSError) as e:
+        # Gracefully handle config loading failures without catching KeyboardInterrupt
         config_log_level = None
     
     # Determine log level
