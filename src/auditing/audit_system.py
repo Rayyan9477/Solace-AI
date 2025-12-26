@@ -174,8 +174,9 @@ class AuditTrail:
             else:
                 # File-backed: keep defaults, only set a busy timeout
                 conn.execute("PRAGMA busy_timeout=1000;")
-        except Exception:
-            pass
+        except (sqlite3.Error, sqlite3.OperationalError, sqlite3.DatabaseError) as pragma_err:
+            # PRAGMA failures are non-fatal - database will use defaults
+            logger.debug(f"PRAGMA configuration skipped: {pragma_err}")
         return conn
 
     def _initialize_database(self):

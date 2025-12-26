@@ -732,12 +732,12 @@ class SymptomFrequencyMapper:
             analysis = {}
             for symptom_type, timestamps in frequency_map.items():
                 analysis[symptom_type] = self._analyze_symptom_frequency(timestamps, days_back)
-            
+
             return {
                 "user_id": user_id,
                 "analysis_period_days": days_back,
                 "frequency_analysis": analysis,
-                "overall_patterns": self._identify_overall_patterns(analysis)
+                "overall_patterns": self._identify_overall_patterns(analysis, frequency_map)
             }
             
         except Exception as e:
@@ -788,24 +788,107 @@ class SymptomFrequencyMapper:
             "last_occurrence": max(timestamps).isoformat()
         }
     
-    def _identify_overall_patterns(self, analysis: Dict[str, Any]) -> Dict[str, Any]:
+    def _identify_overall_patterns(
+        self,
+        analysis: Dict[str, Any],
+        frequency_map: Dict[str, List[datetime]] = None
+    ) -> Dict[str, Any]:
         """Identify overall patterns across all symptoms"""
         if not analysis:
             return {}
-        
+
         # Find most frequent symptoms
         frequent_symptoms = [
             symptom for symptom, data in analysis.items()
             if data.get("frequency", 0) > 0.3
         ]
-        
+
         # Find clustered symptoms (occurring together)
-        clustered_patterns = []
-        # TODO: Implement clustering analysis
-        
+        clustered_patterns = self._analyze_symptom_clusters(frequency_map) if frequency_map else []
+
         return {
             "most_frequent_symptoms": frequent_symptoms,
             "total_symptom_types": len(analysis),
             "average_frequency": np.mean([data.get("frequency", 0) for data in analysis.values()]),
             "clustered_patterns": clustered_patterns
         }
+
+    def _analyze_symptom_clusters(
+        self,
+        frequency_map: Dict[str, List[datetime]],
+        co_occurrence_window_hours: int = 24
+    ) -> List[Dict[str, Any]]:
+        """
+        Analyze which symptoms tend to co-occur within a given time window.
+
+        Uses a co-occurrence matrix approach to identify symptom clusters.
+        Two symptoms are considered co-occurring if they appear within the
+        specified window (default 24 hours) of each other.
+
+        Args:
+            frequency_map: Dictionary mapping symptom types to their timestamps
+            co_occurrence_window_hours: Hours within which symptoms are considered co-occurring
+
+        Returns:
+            List of cluster patterns with symptom pairs and their co-occurrence strength
+        """
+        if not frequency_map or len(frequency_map) < 2:
+            return []
+
+        symptom_types = list(frequency_map.keys())
+        n_symptoms = len(symptom_types)
+        window = timedelta(hours=co_occurrence_window_hours)
+
+        # Build co-occurrence matrix
+        co_occurrence_matrix = np.zeros((n_symptoms, n_symptoms), dtype=int)
+
+        for i, symptom_a in enumerate(symptom_types):
+            for j, symptom_b in enumerate(symptom_types):
+                if i >= j:  # Skip diagonal and already computed pairs
+                    continue
+
+                timestamps_a = frequency_map[symptom_a]
+                timestamps_b = frequency_map[symptom_b]
+
+                # Count co-occurrences
+                co_count = 0
+                for ts_a in timestamps_a:
+                    for ts_b in timestamps_b:
+                        if abs(ts_a - ts_b) <= window:
+                            co_count += 1
+                            break  # Only count once per timestamp_a
+
+                co_occurrence_matrix[i, j] = co_count
+                co_occurrence_matrix[j, i] = co_count  # Symmetric
+
+        # Extract significant clusters (co-occurrence > threshold)
+        clusters = []
+        min_co_occurrences = 2  # Minimum co-occurrences to be significant
+
+        for i in range(n_symptoms):
+            for j in range(i + 1, n_symptoms):
+                co_count = co_occurrence_matrix[i, j]
+                if co_count >= min_co_occurrences:
+                    symptom_a = symptom_types[i]
+                    symptom_b = symptom_types[j]
+
+                    # Calculate co-occurrence ratio
+                    total_a = len(frequency_map[symptom_a])
+                    total_b = len(frequency_map[symptom_b])
+                    min_occurrences = min(total_a, total_b)
+
+                    if min_occurrences > 0:
+                        co_occurrence_ratio = round(co_count / min_occurrences, 2)
+
+                        clusters.append({
+                            "symptoms": [symptom_a, symptom_b],
+                            "co_occurrences": co_count,
+                            "co_occurrence_ratio": co_occurrence_ratio,
+                            "strength": "strong" if co_occurrence_ratio > 0.7 else "moderate" if co_occurrence_ratio > 0.4 else "weak",
+                            "description": f"{symptom_a} and {symptom_b} frequently occur together"
+                        })
+
+        # Sort by co-occurrence ratio (strongest clusters first)
+        clusters.sort(key=lambda x: x["co_occurrence_ratio"], reverse=True)
+
+        return clusters[:10]  # Return top 10 clusters

@@ -677,7 +677,8 @@ class BreakthroughDetectionAgent(BaseFrictionAgent):
         try:
             breakthrough_time = datetime.fromisoformat(breakthrough["timestamp"])
             return (datetime.now() - breakthrough_time).days <= days
-        except:
+        except (ValueError, TypeError, KeyError, AttributeError):
+            # Invalid or missing timestamp - treat as not recent
             return False
     
     def _assess_temporal_breakthrough_alignment(self, temporal_type: str, text: str) -> float:

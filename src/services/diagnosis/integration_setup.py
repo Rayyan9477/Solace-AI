@@ -280,7 +280,8 @@ class DiagnosisSystemIntegration:
             try:
                 from .memory_integration import DiagnosisMemoryIntegrationService
                 self.memory_integration = await self.container.resolve(DiagnosisMemoryIntegrationService)
-            except:
+            except (ImportError, KeyError, AttributeError, RuntimeError) as e:
+                self.logger.debug(f"Memory integration service not available: {e}")
                 self.memory_integration = None
             
             self.logger.debug("Service references resolved successfully")
@@ -323,15 +324,15 @@ class DiagnosisSystemIntegration:
                 try:
                     service_health = await self.unified_service.get_service_health()
                     status["unified_service_health"] = service_health
-                except:
-                    pass
-            
+                except (AttributeError, RuntimeError, asyncio.TimeoutError) as e:
+                    self.logger.debug(f"Could not get unified service health: {e}")
+
             if self.diagnosis_orchestrator:
                 try:
                     orchestrator_health = await self.diagnosis_orchestrator.get_orchestrator_health()
                     status["orchestrator_health"] = orchestrator_health
-                except:
-                    pass
+                except (AttributeError, RuntimeError, asyncio.TimeoutError) as e:
+                    self.logger.debug(f"Could not get orchestrator health: {e}")
             
             return status
             

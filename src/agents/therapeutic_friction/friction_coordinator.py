@@ -554,7 +554,8 @@ class FrictionCoordinator(BaseAgent):
                     if most_recent_time is None or timestamp > most_recent_time:
                         most_recent_time = timestamp
                         most_recent_agent = agent_type
-                except:
+                except (ValueError, TypeError, AttributeError):
+                    # Invalid timestamp format - skip this result
                     continue
         
         if most_recent_agent and most_recent_agent in sub_agent_results:

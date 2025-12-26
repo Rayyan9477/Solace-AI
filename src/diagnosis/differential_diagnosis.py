@@ -1157,18 +1157,151 @@ class DifferentialDiagnosisEngine:
         return any(keyword.lower() in text_lower for keyword in keywords)
     
     def _temporal_matches_criterion(self, temporal_patterns: Dict[str, Any], criterion: Dict[str, Any]) -> bool:
-        """Check if temporal patterns support a criterion"""
-        # Implementation would check temporal requirements
-        return False
-    
+        """
+        Check if temporal patterns support a criterion.
+
+        Analyzes duration, frequency, and onset patterns against criterion requirements.
+        """
+        if not temporal_patterns or not criterion:
+            return False
+
+        criterion_temporal = criterion.get("temporal", {})
+        if not criterion_temporal:
+            # No temporal requirements - consider matched
+            return True
+
+        matches = 0
+        checks = 0
+
+        # Check duration requirements
+        required_duration = criterion_temporal.get("duration", "")
+        if required_duration:
+            checks += 1
+            reported_duration = temporal_patterns.get("duration", "")
+            symptom_duration_days = temporal_patterns.get("duration_days", 0)
+
+            # Parse duration requirements (e.g., "at least 2 weeks" = 14 days)
+            if "2 weeks" in required_duration.lower() and symptom_duration_days >= 14:
+                matches += 1
+            elif "1 week" in required_duration.lower() and symptom_duration_days >= 7:
+                matches += 1
+            elif reported_duration and required_duration.lower() in reported_duration.lower():
+                matches += 1
+
+        # Check frequency requirements
+        required_frequency = criterion_temporal.get("frequency", "")
+        if required_frequency:
+            checks += 1
+            reported_frequency = temporal_patterns.get("frequency", "")
+            frequency_score = temporal_patterns.get("frequency_score", 0)
+
+            # Match "nearly every day" = frequency > 0.7
+            if "nearly every day" in required_frequency.lower() and frequency_score >= 0.7:
+                matches += 1
+            elif "most days" in required_frequency.lower() and frequency_score >= 0.5:
+                matches += 1
+            elif reported_frequency and required_frequency.lower() in reported_frequency.lower():
+                matches += 1
+
+        # Check onset requirements
+        required_onset = criterion_temporal.get("onset", "")
+        if required_onset:
+            checks += 1
+            reported_onset = temporal_patterns.get("onset", "")
+            if reported_onset and required_onset.lower() in reported_onset.lower():
+                matches += 1
+
+        # Return True if at least half of temporal requirements are met
+        return checks == 0 or (matches / checks) >= 0.5
+
     def _emotion_matches_criterion(self, voice_emotion_data: Dict[str, Any], criterion: Dict[str, Any]) -> bool:
-        """Check if voice emotion data supports a criterion"""
-        # Implementation would analyze emotion patterns
+        """
+        Check if voice emotion data supports a criterion.
+
+        Analyzes detected emotions against expected patterns for the criterion.
+        """
+        if not voice_emotion_data or not criterion:
+            return False
+
+        # Map criterion keywords to expected emotions
+        emotion_mappings = {
+            "depressed": ["sadness", "grief", "despair", "melancholy"],
+            "anxious": ["anxiety", "fear", "worry", "nervousness"],
+            "hopeless": ["sadness", "despair", "resignation"],
+            "irritable": ["anger", "frustration", "irritation"],
+            "fearful": ["fear", "anxiety", "terror"],
+            "excited": ["excitement", "joy", "enthusiasm"],
+            "anhedonia": ["flat", "neutral", "apathy"],
+        }
+
+        criterion_keywords = criterion.get("keywords", [])
+        detected_emotions = voice_emotion_data.get("emotions", {})
+        primary_emotion = voice_emotion_data.get("primary_emotion", "").lower()
+        emotion_intensity = voice_emotion_data.get("intensity", 0)
+
+        # Check if detected emotions match expected patterns
+        for keyword in criterion_keywords:
+            keyword_lower = keyword.lower()
+            expected_emotions = emotion_mappings.get(keyword_lower, [keyword_lower])
+
+            # Check primary emotion
+            if primary_emotion in expected_emotions:
+                return True
+
+            # Check all detected emotions
+            for expected in expected_emotions:
+                if expected in detected_emotions:
+                    if detected_emotions[expected] >= 0.3:  # Threshold for significance
+                        return True
+
         return False
-    
+
     def _personality_matches_criterion(self, personality_data: Dict[str, Any], criterion: Dict[str, Any]) -> bool:
-        """Check if personality data supports a criterion"""
-        # Implementation would analyze personality factors
+        """
+        Check if personality data supports a criterion.
+
+        Analyzes Big Five traits and other personality factors.
+        """
+        if not personality_data or not criterion:
+            return False
+
+        # Map conditions to typical personality profiles
+        personality_indicators = {
+            "depression": {"neuroticism": "high", "extraversion": "low"},
+            "anxiety": {"neuroticism": "high"},
+            "social_anxiety": {"extraversion": "low", "neuroticism": "high"},
+            "mania": {"extraversion": "high", "openness": "high"},
+            "compulsive": {"conscientiousness": "high"},
+        }
+
+        criterion_keywords = criterion.get("keywords", [])
+        big_five = personality_data.get("big_five", {})
+
+        if not big_five:
+            return False
+
+        # Check for personality patterns matching criterion keywords
+        for keyword in criterion_keywords:
+            keyword_lower = keyword.lower()
+
+            # Find matching personality indicator
+            for condition, profile in personality_indicators.items():
+                if condition in keyword_lower or keyword_lower in condition:
+                    matches = 0
+                    checks = 0
+
+                    for trait, expected_level in profile.items():
+                        trait_score = big_five.get(trait, 0.5)
+                        checks += 1
+
+                        if expected_level == "high" and trait_score >= 0.6:
+                            matches += 1
+                        elif expected_level == "low" and trait_score <= 0.4:
+                            matches += 1
+
+                    if checks > 0 and (matches / checks) >= 0.5:
+                        return True
+
         return False
     
     async def _llm_identify_candidates(self, symptoms: List[str], behavioral_observations: List[str]) -> List[str]:

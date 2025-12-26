@@ -935,5 +935,7 @@ class RealTimeResearchEngine:
         """Ensure data is persisted when object is destroyed"""
         try:
             self._persist_research_data()
-        except:
+        except (OSError, IOError, RuntimeError, TypeError, AttributeError):
+            # Silently ignore persistence errors during destruction
+            # Object may be in partially destroyed state
             pass

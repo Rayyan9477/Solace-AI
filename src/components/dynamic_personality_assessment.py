@@ -110,6 +110,86 @@ class DynamicPersonalityAssessment:
             ]
         }
 
+    def _capture_emotion_from_response(self, response: Any, state: Dict[str, Any]) -> None:
+        """
+        Capture and store emotion data from a user response.
+
+        This method runs the emotion analysis asynchronously and stores
+        the results in the assessment state for later analysis.
+
+        Args:
+            response: The user's response (could be text, scale value, or option dict)
+            state: The current assessment state dictionary
+        """
+        import asyncio
+
+        if not self.emotion_agent:
+            return
+
+        try:
+            # Convert response to text for emotion analysis
+            if isinstance(response, dict):
+                response_text = response.get('text', str(response))
+            else:
+                response_text = str(response)
+
+            # Skip emotion analysis for very short responses (e.g., scale ratings)
+            if len(response_text) < 5:
+                return
+
+            # Run emotion analysis asynchronously
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # We're in an async context (like Streamlit), use create_task
+                    asyncio.create_task(self._async_capture_emotion(response_text, state))
+                else:
+                    # Synchronous context - run in event loop
+                    loop.run_until_complete(self._async_capture_emotion(response_text, state))
+            except RuntimeError:
+                # No event loop - create one for this operation
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(self._async_capture_emotion(response_text, state))
+                finally:
+                    loop.close()
+
+        except Exception as e:
+            logger.warning(f"Failed to capture emotion: {str(e)}")
+
+    async def _async_capture_emotion(self, response_text: str, state: Dict[str, Any]) -> None:
+        """
+        Asynchronously capture emotion from response text.
+
+        Args:
+            response_text: The text to analyze for emotion
+            state: The assessment state dictionary to update
+        """
+        try:
+            emotion_result = await self.emotion_agent.analyze_emotion(response_text)
+
+            # Update last emotion
+            primary_emotion = emotion_result.get("primary_emotion", "neutral")
+            state["last_emotion"] = primary_emotion
+
+            # Initialize emotional_data list if needed
+            if "emotional_data" not in state:
+                state["emotional_data"] = []
+
+            # Store emotion data with timestamp
+            state["emotional_data"].append({
+                "text": response_text,
+                "emotion": emotion_result,
+                "timestamp": time.time(),
+                "question_index": state.get("current_question_index", 0)
+            })
+
+            logger.debug(f"Captured emotion: {primary_emotion} for response")
+
+        except Exception as e:
+            logger.warning(f"Emotion analysis failed: {str(e)}")
+
     def render(self):
         """Render the dynamic personality assessment UI"""
         import streamlit as st
@@ -344,12 +424,11 @@ class DynamicPersonalityAssessment:
                     
                     # Capture emotion if available
                     if self.emotion_agent:
-                        # TODO: Emotion capture logic
-                        pass
-                    
+                        self._capture_emotion_from_response(response, state)
+
                     # Handle question adaptation for future questions
                     self._adapt_upcoming_questions()
-                    
+
                     # Move to the next question
                     state["current_question_index"] += 1
                     st.rerun()
@@ -371,12 +450,11 @@ class DynamicPersonalityAssessment:
                         
                         # Capture emotion if available
                         if self.emotion_agent:
-                            # TODO: Emotion capture logic
-                            pass
-                        
+                            self._capture_emotion_from_response(response, state)
+
                         # Handle question adaptation for future questions
                         self._adapt_upcoming_questions()
-                        
+
                         # Move to the next question
                         state["current_question_index"] += 1
                         st.rerun()
