@@ -954,9 +954,9 @@ class ModelManager:
             else:
                 # Simple increment
                 parts.append('1')
-            
+
             return '.'.join(parts)
-        except:
+        except (ValueError, TypeError, AttributeError, IndexError):
             # Fallback to timestamp-based version
             return f"auto_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 

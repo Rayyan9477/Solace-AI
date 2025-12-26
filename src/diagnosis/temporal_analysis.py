@@ -456,7 +456,7 @@ class TemporalAnalysisEngine:
         try:
             slope = np.polyfit(x, y, 1)[0]
             return float(slope)
-        except:
+        except (np.linalg.LinAlgError, ValueError, TypeError, FloatingPointError):
             return 0
     
     def _calculate_weekly_averages(self, symptoms: List[SymptomEntry]) -> List[Dict[str, Any]]:

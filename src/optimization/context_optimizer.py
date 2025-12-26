@@ -231,12 +231,12 @@ class SemanticContextCompressor:
             elif item.item_type == 'emotion':
                 try:
                     compressed_context['emotion'] = json.loads(item.content)
-                except:
+                except (json.JSONDecodeError, TypeError, ValueError):
                     compressed_context['emotion'] = {'primary_emotion': 'unknown'}
             elif item.item_type == 'safety':
                 try:
                     compressed_context['safety'] = json.loads(item.content)
-                except:
+                except (json.JSONDecodeError, TypeError, ValueError):
                     compressed_context['safety'] = {'safe': True}
 
         return compressed_context

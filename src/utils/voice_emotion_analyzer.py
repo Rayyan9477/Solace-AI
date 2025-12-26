@@ -310,8 +310,8 @@ class VoiceEmotionAnalyzer:
                 # Load audio with librosa (handles resampling automatically)
                 try:
                     speech_array, sampling_rate = librosa.load(audio_file, sr=16000)
-                except:
-                    # Fallback if librosa fails
+                except (OSError, IOError, RuntimeError, ValueError) as audio_err:
+                    # Fallback if librosa fails (audio format issues, file access, etc.)
                     speech_array, sampling_rate = sf.read(audio_file)
                     if sampling_rate != 16000:
                         # Simple resampling if needed
@@ -496,8 +496,8 @@ class VoiceEmotionAnalyzer:
                 # Load audio with librosa (handles resampling automatically)
                 try:
                     speech_array, sampling_rate = librosa.load(audio_file, sr=16000)
-                except:
-                    # Fallback if librosa fails
+                except (OSError, IOError, RuntimeError, ValueError) as audio_err:
+                    # Fallback if librosa fails (audio format issues, file access, etc.)
                     speech_array, sampling_rate = sf.read(audio_file)
                     if sampling_rate != 16000:
                         # Simple resampling if needed

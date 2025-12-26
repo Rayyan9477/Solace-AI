@@ -19,6 +19,9 @@ from src.database.vector_store import FaissVectorStore
 
 logger = logging.getLogger(__name__)
 
+# Memory leak prevention: Maximum session history size (BUG FIX)
+MAX_SESSION_HISTORY_SIZE = 500
+
 
 class ConversationMemory:
     """
@@ -138,6 +141,11 @@ class ConversationMemory:
 
             # Add to session history
             self.session_history.append(document)
+
+            # Prevent memory leak: trim session history if too large (BUG FIX)
+            if len(self.session_history) > MAX_SESSION_HISTORY_SIZE:
+                # Keep most recent entries, remove oldest
+                self.session_history = self.session_history[-MAX_SESSION_HISTORY_SIZE:]
 
             # Update last accessed time
             self.last_accessed = datetime.now()
