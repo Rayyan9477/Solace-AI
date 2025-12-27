@@ -250,7 +250,7 @@ class CircuitBreaker:
             if self._should_attempt_reset():
                 self.state = 'half-open'
             else:
-                raise Exception("Circuit breaker is open")
+                raise RuntimeError("Circuit breaker is open")
         
         try:
             result = func(*args, **kwargs)

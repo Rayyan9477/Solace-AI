@@ -601,7 +601,7 @@ class ClinicalGuidelinesDB:
                     return s
                 try:
                     return ViolationSeverity(s)
-                except Exception:
+                except (ValueError, KeyError):
                     return ViolationSeverity[str(s).upper()]
             max_severity = max((_sev(v) for v in violations), key=lambda sv: list(ViolationSeverity).index(sv))
             risk_level = max_severity

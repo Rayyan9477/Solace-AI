@@ -125,7 +125,7 @@ class TherapeuticFrictionVectorManager:
                 store = VectorStore.create()
                 try:
                     store.connect()
-                except Exception:
+                except (ConnectionError, RuntimeError, OSError):
                     self.logger.warning(f"Vector store connect() failed for {doc_type.value}")
                 self.vector_stores[doc_type] = store
                 

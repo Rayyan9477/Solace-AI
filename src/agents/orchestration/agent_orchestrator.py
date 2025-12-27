@@ -358,7 +358,7 @@ class CircuitBreaker:
                             failure_count=self.failure_count
                         )
                     else:
-                        raise Exception(f"Circuit breaker {self.agent_id} is OPEN")
+                        raise RuntimeError(f"Circuit breaker {self.agent_id} is OPEN")
         
         try:
             # Execute with timeout
@@ -579,8 +579,8 @@ class RetryManager:
                 delay = min(self.base_delay * (2 ** attempt), self.max_delay)
                 self.logger.warning(f"Retry {attempt + 1}/{self.max_retries} for {func.__name__} after {delay}s: {str(e)}")
                 await asyncio.sleep(delay)
-        
-        raise Exception("Should not reach here")
+
+        raise RuntimeError("Internal error: retry loop completed without returning or raising")
 
 class AgentOrchestrator(Module):
     """
@@ -2117,17 +2117,17 @@ class AgentOrchestrator(Module):
             self.logger.error(error_msg, {"session_id": workflow_state["session_id"]})
             workflow_state["status"] = "failed"
             workflow_state["error"] = error_msg
-            raise Exception(error_msg)
-        
+            raise ValueError(error_msg)
+
         agent = self.agent_modules[agent_id]
         agent_process = getattr(agent, "process", None)
-        
+
         if not agent_process or not callable(agent_process):
             error_msg = f"Agent {agent_id} does not have a valid process method"
             self.logger.error(error_msg, {"session_id": workflow_state["session_id"]})
             workflow_state["status"] = "failed"
             workflow_state["error"] = error_msg
-            raise Exception(error_msg)
+            raise AttributeError(error_msg)
         
         # Refresh context before processing
         workflow_state["context"] = await self.get_context(workflow_state["session_id"])
@@ -2173,7 +2173,7 @@ class AgentOrchestrator(Module):
                 workflow_state["status"] = "failed"
                 workflow_state["error"] = error_msg
                 self.logger.warning(error_msg, {"session_id": workflow_state["session_id"]})
-                raise Exception(error_msg)
+                raise PermissionError(error_msg)
         
         elif self.supervision_enabled and self.supervisor_agent:
             # Fallback to single supervisor validation
@@ -2199,7 +2199,7 @@ class AgentOrchestrator(Module):
                     error_msg = f"Agent {agent_id} response blocked due to safety concerns"
                     workflow_state["status"] = "failed"
                     workflow_state["error"] = error_msg
-                    raise Exception(error_msg)
+                    raise PermissionError(error_msg)
         
         return result, agent_processing_time
 

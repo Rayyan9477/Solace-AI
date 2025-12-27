@@ -496,8 +496,8 @@ def _extract_condition_from_path(file_path: Path) -> str:
         
         # Default to general if no match
         return "general"
-    
-    except Exception:
+
+    except (AttributeError, TypeError, OSError):
         return "general"
 
 def migrate_all_user_data(user_id: str = "default_user") -> Dict[str, int]:
