@@ -103,7 +103,7 @@ class ConversationTracker:
             else:
                 logger.warning(f"Failed to connect to conversation tracker for user {self.user_id}")
             return result
-        except Exception as e:
+        except (RuntimeError, OSError, ConnectionError, ValueError) as e:
             logger.error(f"Error connecting to conversation tracker: {str(e)}")
             return False
     
@@ -127,7 +127,7 @@ class ConversationTracker:
                             "last_conversation": None
                         }
                     }
-            except Exception as e:
+            except (OSError, json.JSONDecodeError, ValueError, TypeError) as e:
                 logger.error(f"Error loading conversation metadata: {str(e)}")
                 self.conversation_metadata = {
                     "conversations": {},
@@ -148,7 +148,7 @@ class ConversationTracker:
                     json.dump(self.conversation_metadata, f, indent=2)
                 logger.info(f"Saved conversation metadata for user {self.user_id}")
                 return True
-            except Exception as e:
+            except (OSError, TypeError, ValueError) as e:
                 logger.error(f"Error saving conversation metadata: {str(e)}")
                 return False
     
@@ -211,8 +211,8 @@ class ConversationTracker:
             self._update_metadata(conversation_id, document)
             
             return conversation_id
-        except Exception as e:
-            logger.error(f"Error adding conversation to tracker: {str(e)}") 
+        except (RuntimeError, ValueError, TypeError, KeyError) as e:
+            logger.error(f"Error adding conversation to tracker: {str(e)}")
             return "" 
     
     def _update_metadata(self, conversation_id: str, document: Dict[str, Any]) -> None:
@@ -244,7 +244,7 @@ class ConversationTracker:
 
                 # Save updated metadata (lock is reentrant, so this is safe)
                 self._save_metadata()
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError, KeyError, OSError) as e:
                 logger.error(f"Error updating metadata: {str(e)}")
     
     def search_conversations(self, 
@@ -296,8 +296,8 @@ class ConversationTracker:
                     break
             
             return filtered_results
-        except Exception as e:
-            logger.error(f"Error searching conversations: {str(e)}") 
+        except (RuntimeError, ValueError, TypeError, KeyError) as e:
+            logger.error(f"Error searching conversations: {str(e)}")
             return [] 
 
     def _is_valid_conversation_result(self, result: Dict[str, Any]) -> bool:
@@ -370,8 +370,8 @@ class ConversationTracker:
             
             logger.warning(f"Conversation ID {conversation_id} not found in vector store")
             return None
-        except Exception as e:
-            logger.error(f"Error retrieving conversation: {str(e)}") 
+        except (RuntimeError, ValueError, KeyError, TypeError) as e:
+            logger.error(f"Error retrieving conversation: {str(e)}")
             return None 
     
     def get_recent_conversations(self, limit: int = 10) -> List[Dict[str, Any]]:
@@ -405,8 +405,8 @@ class ConversationTracker:
                     results.append(conversation)
             
             return results
-        except Exception as e:
-            logger.error(f"Error retrieving recent conversations: {str(e)}") 
+        except (RuntimeError, ValueError, KeyError, TypeError) as e:
+            logger.error(f"Error retrieving recent conversations: {str(e)}")
             return [] 
     
     def get_conversations_by_date(self, 
@@ -451,8 +451,8 @@ class ConversationTracker:
                     continue
 
             return matching
-        except Exception as e:
-            logger.error(f"Error retrieving conversations by date: {str(e)}") 
+        except (RuntimeError, ValueError, KeyError, TypeError) as e:
+            logger.error(f"Error retrieving conversations by date: {str(e)}")
             return [] 
     
     def get_conversations_by_emotion(self, 
@@ -491,8 +491,8 @@ class ConversationTracker:
                     continue
             
             return matching
-        except Exception as e:
-            logger.error(f"Error retrieving conversations by emotion: {str(e)}") 
+        except (RuntimeError, ValueError, KeyError, TypeError) as e:
+            logger.error(f"Error retrieving conversations by emotion: {str(e)}")
             return [] 
     
     def get_emotion_distribution(self, 
@@ -530,7 +530,7 @@ class ConversationTracker:
                     continue
 
             return emotion_counts
-        except Exception as e:
+        except (RuntimeError, ValueError, KeyError, TypeError) as e:
             logger.error(f"Error getting emotion distribution: {str(e)}")
             return {}
     
@@ -583,7 +583,7 @@ class ConversationTracker:
 
             logger.info(f"Exported {len(export_data['conversations'])} conversations to {output_path}")
             return output_path
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError, TypeError) as e:
             logger.error(f"Error exporting conversations: {str(e)}")
             return ""
 
@@ -646,8 +646,8 @@ class ConversationTracker:
             
             logger.info(f"Removed {removed_count} old conversations")
             return removed_count
-        except Exception as e:
-            logger.error(f"Error cleaning up old conversations: {str(e)}") 
+        except (RuntimeError, ValueError, KeyError, TypeError) as e:
+            logger.error(f"Error cleaning up old conversations: {str(e)}")
             return 0 
     
     def get_statistics(self) -> Dict[str, Any]:
@@ -680,8 +680,8 @@ class ConversationTracker:
                 stats["top_emotions"] = sorted_emotions[:3]
             
             return stats
-        except Exception as e:
-            logger.error(f"Error getting statistics: {str(e)}") 
+        except (RuntimeError, ValueError, KeyError, TypeError) as e:
+            logger.error(f"Error getting statistics: {str(e)}")
             return {
                 "total_conversations": 0,
                 "total_messages": 0,

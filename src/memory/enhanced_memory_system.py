@@ -309,7 +309,7 @@ class EnhancedMemorySystem:
             self.logger.info(f"Stored therapeutic insight {insight_id} for user {user_id}")
             return insight_id
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
             self.logger.error(f"Error storing therapeutic insight: {str(e)}")
             return ""
     
@@ -375,7 +375,7 @@ class EnhancedMemorySystem:
             self.logger.info(f"Recorded session memory {session_id} for user {user_id}")
             return True
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
             self.logger.error(f"Error recording session memory: {str(e)}")
             return False
     
@@ -417,7 +417,7 @@ class EnhancedMemorySystem:
             else:
                 return await self._get_recent_context(user_id, cutoff_date)
                 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
             self.logger.error(f"Error retrieving contextual memory: {str(e)}")
             return {"error": str(e)}
     
@@ -484,7 +484,7 @@ class EnhancedMemorySystem:
                 "total_sessions_analyzed": len(sessions)
             }
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
             self.logger.error(f"Error identifying recurring themes: {str(e)}")
             return {"error": str(e)}
     
@@ -539,7 +539,7 @@ class EnhancedMemorySystem:
                 "celebration_pending": len([m for m in milestones if m.celebration_status == "pending"])
             }
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
             self.logger.error(f"Error tracking progress milestones: {str(e)}")
             return {"error": str(e)}
     
@@ -604,7 +604,7 @@ class EnhancedMemorySystem:
                 )
             }
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
             self.logger.error(f"Error getting session continuity context: {str(e)}")
             return {"error": str(e)}
     
@@ -666,7 +666,7 @@ class EnhancedMemorySystem:
             notes = await self.llm.generate_response(prompt)
             return notes.strip()
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, AttributeError) as e:
             self.logger.error(f"Error generating therapist notes: {str(e)}")
             return f"Standard {insight_type} insight documented"
     
@@ -854,7 +854,7 @@ class EnhancedMemorySystem:
             themes = [line.strip() for line in response.split('\n') if line.strip()]
             return themes[:5]
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, AttributeError) as e:
             self.logger.error(f"Error extracting themes: {str(e)}")
             return []
     
@@ -922,7 +922,7 @@ class EnhancedMemorySystem:
             summary = await self.llm.generate_response(prompt)
             return summary.strip()
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, AttributeError) as e:
             self.logger.error(f"Error generating session summary: {str(e)}")
             return "Session completed with therapeutic discussion and intervention."
     
@@ -1084,7 +1084,7 @@ class EnhancedMemorySystem:
                 doc_id=insight.insight_id
             )
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
             self.logger.error(f"Error storing insight in database: {str(e)}")
     
     async def _store_session_in_db(self, session: SessionMemory):
@@ -1109,7 +1109,7 @@ class EnhancedMemorySystem:
                 doc_id=session.session_id
             )
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
             self.logger.error(f"Error storing session in database: {str(e)}")
     
     async def _store_milestone_in_db(self, milestone: ProgressMilestone):
@@ -1134,7 +1134,7 @@ class EnhancedMemorySystem:
                 doc_id=milestone.milestone_id
             )
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
             self.logger.error(f"Error storing milestone in database: {str(e)}")
     
     def _load_memory_data(self):
@@ -1210,7 +1210,7 @@ class EnhancedMemorySystem:
         except json.JSONDecodeError as e:
             self.logger.error(f"JSON parsing error in memory data: {str(e)}")
             self.logger.warning("Starting with fresh memory data due to corrupted files")
-        except Exception as e:
+        except (OSError, ValueError, TypeError, KeyError) as e:
             self.logger.warning(f"Could not load memory data, starting fresh: {str(e)}")
 
     def _persist_memory_data(self):
@@ -1280,7 +1280,7 @@ class EnhancedMemorySystem:
             self.logger.error(f"Serialization error persisting memory data: {str(e)}")
         except OSError as e:
             self.logger.error(f"File system error persisting memory data: {str(e)}")
-        except Exception as e:
+        except (RuntimeError, AttributeError, KeyError) as e:
             self.logger.error(f"Unexpected error persisting memory data: {str(e)}")
 
     def __del__(self):

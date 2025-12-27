@@ -133,7 +133,7 @@ class TherapeuticFrictionVectorManager:
             
             self.logger.info(f"Initialized {len(self.vector_stores)} therapeutic friction vector stores")
             
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError, KeyError, ImportError) as e:
             self.logger.error(f"Error initializing vector stores: {str(e)}")
             raise
     
@@ -176,7 +176,7 @@ class TherapeuticFrictionVectorManager:
             self.logger.debug(f"Added document {document.document_id} to {document.document_type.value}")
             return True
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
             self.logger.error(f"Error adding document {document.document_id}: {str(e)}")
             return False
     
@@ -230,7 +230,7 @@ class TherapeuticFrictionVectorManager:
             
             return filtered_results
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
             self.logger.error(f"Error searching documents for {document_type.value}: {str(e)}")
             return []
     
@@ -266,7 +266,7 @@ class TherapeuticFrictionVectorManager:
                 try:
                     domain_results = await task
                     results[domain.value] = domain_results
-                except Exception as e:
+                except (RuntimeError, ValueError, TypeError, KeyError, asyncio.CancelledError) as e:
                     self.logger.error(f"Error in cross-domain search for {domain.value}: {str(e)}")
                     results[domain.value] = []
             
@@ -276,7 +276,7 @@ class TherapeuticFrictionVectorManager:
             
             return results
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, asyncio.CancelledError) as e:
             self.logger.error(f"Error in cross-domain search: {str(e)}")
             return {}
     
@@ -315,7 +315,7 @@ class TherapeuticFrictionVectorManager:
                 
                 return all_stats
                 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
             self.logger.error(f"Error getting domain statistics: {str(e)}")
             return {}
     
@@ -364,7 +364,7 @@ class TherapeuticFrictionVectorManager:
             self.logger.debug(f"Updated document {document_id}")
             return True
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
             self.logger.error(f"Error updating document {document_id}: {str(e)}")
             return False
     
@@ -393,7 +393,7 @@ class TherapeuticFrictionVectorManager:
             self.logger.debug(f"Deleted document {document_id}")
             return True
             
-        except Exception as e:
+        except (RuntimeError, ValueError, KeyError, AttributeError) as e:
             self.logger.error(f"Error deleting document {document_id}: {str(e)}")
             return False
     
@@ -439,7 +439,7 @@ class TherapeuticFrictionVectorManager:
                 "documents_per_second": len(documents) / processing_time if processing_time > 0 else 0
             }
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, asyncio.CancelledError) as e:
             self.logger.error(f"Error in batch document addition: {str(e)}")
             return {"error": str(e)}
     
@@ -480,7 +480,7 @@ class TherapeuticFrictionVectorManager:
             
             return recommendations[:top_k]
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
             self.logger.error(f"Error getting recommendations for {agent_type}: {str(e)}")
             return []
     
@@ -494,7 +494,7 @@ class TherapeuticFrictionVectorManager:
                 import numpy as np
                 rng = np.random.default_rng(123)
                 return list(rng.random(768, dtype=float))
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, AttributeError) as e:
             self.logger.error(f"Error getting embedding: {str(e)}")
             rng = np.random.default_rng(456)
             return list(rng.random(768, dtype=float))
@@ -566,7 +566,7 @@ class TherapeuticFrictionVectorManager:
             if related_documents:
                 self.domain_relationships[document.document_id] = related_documents
                 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError) as e:
             self.logger.error(f"Error updating cross-domain relationships: {str(e)}")
     
     def _documents_are_related(self, doc1: TherapeuticDocument, doc2: TherapeuticDocument) -> bool:
@@ -618,7 +618,7 @@ class TherapeuticFrictionVectorManager:
                 "total_documents_analyzed": len(all_documents)
             }
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
             self.logger.error(f"Error analyzing cross-domain relationships: {str(e)}")
             return {"error": str(e)}
     
@@ -762,7 +762,7 @@ class TherapeuticFrictionVectorManager:
                         "document_count": store_count
                     }
                     status["document_counts"][doc_type.value] = len(self.document_index.get(doc_type, []))
-                except Exception as e:
+                except (RuntimeError, ValueError, TypeError, AttributeError) as e:
                     status["vector_stores"][doc_type.value] = {
                         "status": "error",
                         "error": str(e)
@@ -776,7 +776,7 @@ class TherapeuticFrictionVectorManager:
             
             return status
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
             return {
                 "status": "error",
                 "error": str(e),

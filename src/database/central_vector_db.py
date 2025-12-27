@@ -114,7 +114,7 @@ class CentralVectorDB:
             else:
                 logger.warning(f"Failed to connect to central vector database for user {self.user_id}")
             return result
-        except Exception as e:
+        except (RuntimeError, OSError, ConnectionError, ValueError) as e:
             logger.error(f"Error connecting to central vector database: {str(e)}")
             return False
     
@@ -130,7 +130,7 @@ class CentralVectorDB:
                     with open(metadata_path, 'r') as f:
                         self.namespaces[namespace] = json.load(f)
                     logger.debug(f"Loaded metadata for namespace: {namespace}")
-            except Exception as e:
+            except (OSError, json.JSONDecodeError, ValueError, TypeError) as e:
                 logger.error(f"Error loading metadata for namespace {namespace}: {str(e)}")
     
     def _load_deleted_ids(self) -> None:
@@ -141,7 +141,7 @@ class CentralVectorDB:
                     deleted_list = json.load(f)
                     self._deleted_ids = set(deleted_list)
                 logger.debug(f"Loaded {len(self._deleted_ids)} deleted document IDs")
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, ValueError, TypeError) as e:
             logger.error(f"Error loading deleted IDs: {str(e)}")
             self._deleted_ids = set()
 
@@ -151,7 +151,7 @@ class CentralVectorDB:
             with open(self._deleted_ids_path, 'w') as f:
                 json.dump(list(self._deleted_ids), f)
             return True
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             logger.error(f"Error saving deleted IDs: {str(e)}")
             return False
 
@@ -167,7 +167,7 @@ class CentralVectorDB:
             
             logger.debug(f"Saved metadata for namespace: {namespace}")
             return True
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             logger.error(f"Error saving metadata for namespace {namespace}: {str(e)}")
             return False
     
@@ -226,7 +226,7 @@ class CentralVectorDB:
             
             logger.info(f"Added document to namespace {namespace}: {doc_id}")
             return doc_id
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError) as e:
             logger.error(f"Error adding document to namespace {namespace}: {str(e)}")
             return ""
     
@@ -275,7 +275,7 @@ class CentralVectorDB:
             
             logger.warning(f"Document {doc_id} not found")
             return None
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError) as e:
             logger.error(f"Error retrieving document {doc_id}: {str(e)}")
             return None
     
@@ -357,7 +357,7 @@ class CentralVectorDB:
                     break
             
             return filtered_results
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError) as e:
             logger.error(f"Error searching documents: {str(e)}")
             return []
     
@@ -405,7 +405,7 @@ class CentralVectorDB:
                 logger.warning(f"Failed to update document {doc_id} in namespace {actual_namespace}")
             
             return success
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError) as e:
             logger.error(f"Error updating document {doc_id}: {str(e)}")
             return False
     
@@ -447,7 +447,7 @@ class CentralVectorDB:
 
             logger.info(f"Soft-deleted document {doc_id} from namespace {namespace}")
             return True
-        except Exception as e:
+        except (RuntimeError, ValueError, KeyError, OSError) as e:
             logger.error(f"Error deleting document {doc_id}: {str(e)}")
             return False
     
@@ -798,7 +798,7 @@ class CentralVectorDB:
             logger.info(f"CentralVectorDB closed for user {self.user_id}")
             return True
 
-        except Exception as e:
+        except (RuntimeError, AttributeError, OSError) as e:
             logger.error(f"Error closing CentralVectorDB: {str(e)}")
             return False
 

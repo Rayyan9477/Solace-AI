@@ -139,7 +139,7 @@ class FaissVectorStore(BaseVectorStore):
                     else:
                         self.embedder = SentenceTransformer(model_name)
                         logger.info(f"SentenceTransformer embedder initialized: {model_name}")
-                except Exception as e:
+                except (ImportError, RuntimeError, OSError, ValueError) as e:
                     logger.warning(f"SentenceTransformer unavailable ({e}). Falling back to simple embedder.")
                     self.embedder = None
 
@@ -157,7 +157,7 @@ class FaissVectorStore(BaseVectorStore):
                 self._error_count = 0  # Reset error count on successful connection
                 return True
 
-            except Exception as e:
+            except (RuntimeError, OSError, ValueError, TypeError, ConnectionError) as e:
                 logger.error(f"Failed to initialize vector store: {str(e)}", exc_info=True)
                 self.is_connected = False
 
@@ -244,7 +244,7 @@ class FaissVectorStore(BaseVectorStore):
                 logger.info(f"Added {len(documents)} documents. Memory usage: {self._memory_usage_mb:.2f}MB")
                 return True
 
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError, KeyError, MemoryError) as e:
                 self._handle_error(e)
                 logger.error(f"Error adding documents to FAISS: {str(e)}", exc_info=True)
 
@@ -341,7 +341,7 @@ class FaissVectorStore(BaseVectorStore):
                     
             return results
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError) as e:
             logger.error(f"Error searching FAISS: {str(e)}")
             return []
 
@@ -408,7 +408,7 @@ class FaissVectorStore(BaseVectorStore):
             # Return the ID of the newly added document
             return str(len(self.documents) - 1)
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, json.JSONDecodeError) as e:
             logger.error(f"Error storing processed result: {str(e)}")
             return ""
     
@@ -451,7 +451,7 @@ class FaissVectorStore(BaseVectorStore):
                     
             return similar_results
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError) as e:
             logger.error(f"Error finding similar results: {str(e)}")
             return []
             
@@ -470,7 +470,7 @@ class FaissVectorStore(BaseVectorStore):
             self._rebuild_index()
             return True
             
-        except Exception as e:
+        except (RuntimeError, ValueError, KeyError, OSError) as e:
             logger.error(f"Error deleting documents from FAISS: {str(e)}")
             return False
             
@@ -488,7 +488,7 @@ class FaissVectorStore(BaseVectorStore):
             self._save_index()
             return True
             
-        except Exception as e:
+        except (RuntimeError, ValueError, OSError) as e:
             logger.error(f"Error clearing FAISS index: {str(e)}")
             return False
             
@@ -557,7 +557,7 @@ class FaissVectorStore(BaseVectorStore):
                     self.query_cache = {}
                     self.cache_expiry = {}
                     
-        except Exception as e:
+        except (RuntimeError, ValueError, OSError, json.JSONDecodeError, KeyError) as e:
             logger.error(f"Error loading FAISS index: {str(e)}")
             self.index = faiss.IndexFlatL2(self.dimension)
             self.documents = {}
@@ -755,7 +755,7 @@ class QdrantVectorStore(BaseVectorStore):
         try:
             from qdrant_client import QdrantClient
             self.client = QdrantClient("localhost", port=6333)
-        except Exception as e:
+        except (ImportError, RuntimeError, ConnectionError, OSError) as e:
             logger.warning(f"Failed to load QdrantClient: {e}")
             self.client = None
             
@@ -764,7 +764,7 @@ class QdrantVectorStore(BaseVectorStore):
         try:
             from sentence_transformers import SentenceTransformer
             self.embedder = SentenceTransformer(AppConfig.EMBEDDING_CONFIG["model_name"])
-        except Exception as e:
+        except (ImportError, RuntimeError, OSError, ValueError) as e:
             logger.warning(f"Failed to load SentenceTransformer: {e}")
             self.embedder = None
         
@@ -795,8 +795,8 @@ class QdrantVectorStore(BaseVectorStore):
                 points=points
             )
             return True
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, ConnectionError, AttributeError) as e:
             logging.error(f"Error adding documents to Qdrant: {str(e)}")
             return False
             
@@ -820,8 +820,8 @@ class QdrantVectorStore(BaseVectorStore):
                 }
                 for hit in results
             ]
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, ConnectionError, AttributeError) as e:
             logging.error(f"Error searching Qdrant: {str(e)}")
             return []
             
@@ -832,8 +832,8 @@ class QdrantVectorStore(BaseVectorStore):
                 points_selector=ids
             )
             return True
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, ConnectionError, AttributeError) as e:
             logging.error(f"Error deleting documents from Qdrant: {str(e)}")
             return False
             
@@ -842,8 +842,8 @@ class QdrantVectorStore(BaseVectorStore):
             self.client.delete_collection(self.collection_name)
             self._ensure_collection()
             return True
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, ConnectionError, AttributeError) as e:
             logging.error(f"Error clearing Qdrant collection: {str(e)}")
             return False
             
