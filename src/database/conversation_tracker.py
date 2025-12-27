@@ -8,6 +8,7 @@ import os
 import json
 import logging
 import numpy as np
+import threading
 from typing import Dict, Any, List, Optional, Union, Tuple
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -70,7 +71,10 @@ class ConversationTracker:
         
         # Initialize FAISS store
         self.vector_store = FaissVectorStore(dimension=dimension)
-        
+
+        # Thread safety lock for metadata operations
+        self._metadata_lock = threading.RLock()
+
         # Internal state
         self.is_connected = False
         self.conversation_metadata = {}  # Stores metadata for quick access without vector search
@@ -104,14 +108,27 @@ class ConversationTracker:
             return False
     
     def _load_metadata(self) -> None:
-        """Load conversation metadata from disk"""
-        try:
-            if self.metadata_path.exists():
-                with open(self.metadata_path, 'r') as f:
-                    self.conversation_metadata = json.load(f)
-                logger.info(f"Loaded conversation metadata for user {self.user_id}")
-            else:
-                logger.info(f"No existing metadata found for user {self.user_id}")
+        """Load conversation metadata from disk (thread-safe)"""
+        with self._metadata_lock:
+            try:
+                if self.metadata_path.exists():
+                    with open(self.metadata_path, 'r') as f:
+                        self.conversation_metadata = json.load(f)
+                    logger.info(f"Loaded conversation metadata for user {self.user_id}")
+                else:
+                    logger.info(f"No existing metadata found for user {self.user_id}")
+                    self.conversation_metadata = {
+                        "conversations": {},
+                        "statistics": {
+                            "total_conversations": 0,
+                            "total_messages": 0,
+                            "emotion_counts": {},
+                            "first_conversation": None,
+                            "last_conversation": None
+                        }
+                    }
+            except Exception as e:
+                logger.error(f"Error loading conversation metadata: {str(e)}")
                 self.conversation_metadata = {
                     "conversations": {},
                     "statistics": {
@@ -122,29 +139,18 @@ class ConversationTracker:
                         "last_conversation": None
                     }
                 }
-        except Exception as e:
-            logger.error(f"Error loading conversation metadata: {str(e)}")
-            self.conversation_metadata = {
-                "conversations": {},
-                "statistics": {
-                    "total_conversations": 0,
-                    "total_messages": 0,
-                    "emotion_counts": {},
-                    "first_conversation": None,
-                    "last_conversation": None
-                }
-            }
     
     def _save_metadata(self) -> bool:
-        """Save conversation metadata to disk"""
-        try:
-            with open(self.metadata_path, 'w') as f:
-                json.dump(self.conversation_metadata, f, indent=2)
-            logger.info(f"Saved conversation metadata for user {self.user_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Error saving conversation metadata: {str(e)}")
-            return False
+        """Save conversation metadata to disk (thread-safe)"""
+        with self._metadata_lock:
+            try:
+                with open(self.metadata_path, 'w') as f:
+                    json.dump(self.conversation_metadata, f, indent=2)
+                logger.info(f"Saved conversation metadata for user {self.user_id}")
+                return True
+            except Exception as e:
+                logger.error(f"Error saving conversation metadata: {str(e)}")
+                return False
     
     def add_conversation(self, 
                         user_message: str, 
@@ -210,35 +216,36 @@ class ConversationTracker:
             return "" 
     
     def _update_metadata(self, conversation_id: str, document: Dict[str, Any]) -> None:
-        """Update metadata with new conversation information"""
-        try:
-            # Store conversation metadata for quick access
-            self.conversation_metadata["conversations"][conversation_id] = {
-                "timestamp": document["timestamp"],
-                "primary_emotion": document.get("primary_emotion"),
-                "user_message": document["user_message"][:100] + "..." if len(document["user_message"]) > 100 else document["user_message"],
-                "assistant_response": document["assistant_response"][:100] + "..." if len(document["assistant_response"]) > 100 else document["assistant_response"]
-            }
-            
-            # Update statistics
-            stats = self.conversation_metadata["statistics"]
-            stats["total_conversations"] += 1
-            stats["total_messages"] += 1
-            
-            # Update emotion counts
-            if document.get("primary_emotion"):
-                emotion = document["primary_emotion"]
-                stats["emotion_counts"][emotion] = stats["emotion_counts"].get(emotion, 0) + 1
-            
-            # Update first/last conversation timestamps
-            if stats["first_conversation"] is None:
-                stats["first_conversation"] = document["timestamp"]
-            stats["last_conversation"] = document["timestamp"]
-            
-            # Save updated metadata
-            self._save_metadata()
-        except Exception as e:
-            logger.error(f"Error updating metadata: {str(e)}")
+        """Update metadata with new conversation information (thread-safe)"""
+        with self._metadata_lock:
+            try:
+                # Store conversation metadata for quick access
+                self.conversation_metadata["conversations"][conversation_id] = {
+                    "timestamp": document["timestamp"],
+                    "primary_emotion": document.get("primary_emotion"),
+                    "user_message": document["user_message"][:100] + "..." if len(document["user_message"]) > 100 else document["user_message"],
+                    "assistant_response": document["assistant_response"][:100] + "..." if len(document["assistant_response"]) > 100 else document["assistant_response"]
+                }
+
+                # Update statistics
+                stats = self.conversation_metadata["statistics"]
+                stats["total_conversations"] += 1
+                stats["total_messages"] += 1
+
+                # Update emotion counts
+                if document.get("primary_emotion"):
+                    emotion = document["primary_emotion"]
+                    stats["emotion_counts"][emotion] = stats["emotion_counts"].get(emotion, 0) + 1
+
+                # Update first/last conversation timestamps
+                if stats["first_conversation"] is None:
+                    stats["first_conversation"] = document["timestamp"]
+                stats["last_conversation"] = document["timestamp"]
+
+                # Save updated metadata (lock is reentrant, so this is safe)
+                self._save_metadata()
+            except Exception as e:
+                logger.error(f"Error updating metadata: {str(e)}")
     
     def search_conversations(self, 
                             query: str, 
@@ -301,7 +308,7 @@ class ConversationTracker:
             if result.get('user_id') != self.user_id:
                 return False
             return True
-        except Exception:
+        except (KeyError, TypeError, AttributeError):
             return False
 
     def _within_date_range(self, timestamp_iso: Optional[str], start_date: Optional[str], end_date: Optional[str]) -> bool:
@@ -317,7 +324,7 @@ class ConversationTracker:
             if end_date and ts > datetime.fromisoformat(end_date):
                 return False
             return True
-        except Exception:
+        except (ValueError, TypeError):
             return False
 
     def _matches_emotion(self, result: Dict[str, Any], emotion: str) -> bool:
@@ -326,7 +333,7 @@ class ConversationTracker:
             if not emotion:
                 return True
             return result.get("primary_emotion") == emotion
-        except Exception:
+        except (KeyError, TypeError, AttributeError):
             return False
     
     def get_conversation_by_id(self, conversation_id: str) -> Optional[Dict[str, Any]]:
@@ -440,9 +447,9 @@ class ConversationTracker:
                         # Break if we have enough
                         if len(matching) >= limit:
                             break
-                except Exception:
+                except (KeyError, TypeError, ValueError):
                     continue
-            
+
             return matching
         except Exception as e:
             logger.error(f"Error retrieving conversations by date: {str(e)}") 
@@ -476,11 +483,11 @@ class ConversationTracker:
                         conversation = self.get_conversation_by_id(conv_id)
                         if conversation:
                             matching.append(conversation)
-                            
+
                         # Break if we have enough
                         if len(matching) >= limit:
                             break
-                except Exception:
+                except (KeyError, TypeError, AttributeError):
                     continue
             
             return matching
@@ -519,7 +526,7 @@ class ConversationTracker:
                     emotion = meta.get("primary_emotion")
                     if emotion:
                         emotion_counts[emotion] = emotion_counts.get(emotion, 0) + 1
-                except Exception:
+                except (KeyError, TypeError, AttributeError):
                     continue
 
             return emotion_counts
@@ -567,7 +574,7 @@ class ConversationTracker:
                     conversation = self.get_conversation_by_id(conv_id)
                     if conversation:
                         export_data["conversations"].append(conversation)
-                except Exception:
+                except (KeyError, TypeError, ValueError):
                     continue
 
             # Save to file
@@ -608,7 +615,7 @@ class ConversationTracker:
                     timestamp = datetime.fromisoformat(meta["timestamp"])
                     if timestamp < cutoff_date:
                         to_remove.append(conv_id)
-                except Exception:
+                except (KeyError, ValueError, TypeError):
                     continue
             
             # Remove conversations

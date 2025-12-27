@@ -91,7 +91,8 @@ class OpenAIProvider(LLMInterface):
                 max_tokens=1
             )
             return response.choices[0].message.content is not None
-        except Exception:
+        except (LLMConnectionError, LLMAuthenticationError, LLMRateLimitError,
+                OSError, TimeoutError, RuntimeError):
             return False
     
     def _convert_messages_to_openai_format(self, messages: List[Message]) -> List[Dict[str, str]]:
@@ -225,7 +226,8 @@ class OpenAIProvider(LLMInterface):
         
         try:
             return await self._test_connection()
-        except Exception:
+        except (LLMConnectionError, LLMAuthenticationError, LLMRateLimitError,
+                OSError, TimeoutError, RuntimeError):
             return False
     
     def get_model_info(self) -> Dict[str, Any]:

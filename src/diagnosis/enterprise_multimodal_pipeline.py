@@ -369,6 +369,10 @@ class EnterpriseMultiModalDiagnosticPipeline:
         self.session_metrics = defaultdict(list)
         self.performance_history = deque(maxlen=1000)
         self.error_tracker = defaultdict(int)
+
+        # Thread safety lock for shared metrics state (using threading.Lock for sync methods)
+        import threading
+        self._metrics_lock = threading.Lock()
         
         # Privacy and security
         self.encryption_key = self._generate_encryption_key()
@@ -1403,7 +1407,7 @@ class EnterpriseMultiModalDiagnosticPipeline:
             # In production, this would be written to secure audit log storage
 
     def _log_performance_metrics(self, results: Dict[str, Any]):
-        """Log performance metrics for monitoring"""
+        """Log performance metrics for monitoring (thread-safe)"""
         if self.enable_monitoring:
             metrics = {
                 'timestamp': datetime.now().isoformat(),
@@ -1413,35 +1417,37 @@ class EnterpriseMultiModalDiagnosticPipeline:
                 'conditions_detected': len(results.get('diagnostic_results', {}).get('conditions', [])),
                 'confidence_level': results.get('confidence_level', 'unknown')
             }
-            
-            self.performance_history.append(metrics)
-            
-            # Update session metrics
-            for key, value in metrics.items():
-                if isinstance(value, (int, float)):
-                    self.session_metrics[key].append(value)
+
+            with self._metrics_lock:
+                self.performance_history.append(metrics)
+
+                # Update session metrics
+                for key, value in metrics.items():
+                    if isinstance(value, (int, float)):
+                        self.session_metrics[key].append(value)
 
     # Additional utility methods for enterprise features
 
     def get_performance_summary(self) -> Dict[str, Any]:
-        """Get performance summary for monitoring dashboard"""
-        if not self.performance_history:
-            return {'message': 'No performance data available'}
-        
-        recent_metrics = list(self.performance_history)[-100:]  # Last 100 operations
-        
-        processing_times = [m['processing_time'] for m in recent_metrics if 'processing_time' in m]
-        success_rate = sum(1 for m in recent_metrics if m.get('success', False)) / len(recent_metrics)
-        
-        return {
-            'total_operations': len(self.performance_history),
-            'recent_operations': len(recent_metrics),
-            'success_rate': success_rate,
-            'avg_processing_time': np.mean(processing_times) if processing_times else 0,
-            'p95_processing_time': np.percentile(processing_times, 95) if processing_times else 0,
-            'error_counts': dict(self.error_tracker),
-            'timestamp': datetime.now().isoformat()
-        }
+        """Get performance summary for monitoring dashboard (thread-safe)"""
+        with self._metrics_lock:
+            if not self.performance_history:
+                return {'message': 'No performance data available'}
+
+            recent_metrics = list(self.performance_history)[-100:]  # Last 100 operations
+
+            processing_times = [m['processing_time'] for m in recent_metrics if 'processing_time' in m]
+            success_rate = sum(1 for m in recent_metrics if m.get('success', False)) / len(recent_metrics)
+
+            return {
+                'total_operations': len(self.performance_history),
+                'recent_operations': len(recent_metrics),
+                'success_rate': success_rate,
+                'avg_processing_time': np.mean(processing_times) if processing_times else 0,
+                'p95_processing_time': np.percentile(processing_times, 95) if processing_times else 0,
+                'error_counts': dict(self.error_tracker),
+                'timestamp': datetime.now().isoformat()
+            }
 
     def setup_ab_test(self, test_name: str, variants: Dict[str, Any]) -> bool:
         """Setup A/B test for model improvements"""

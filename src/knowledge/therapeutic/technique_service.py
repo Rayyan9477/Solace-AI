@@ -40,8 +40,8 @@ class TherapeuticTechniqueService:
         self.vector_store = VectorStore.create()
         try:
             self.vector_store.connect()
-        except Exception:
-            logger.warning("Vector store connect() failed; continuing with fallback if available")
+        except (ConnectionError, RuntimeError, OSError) as conn_err:
+            logger.warning(f"Vector store connect() failed: {conn_err}; continuing with fallback if available")
         
         # Initialize enhanced therapeutic friction vector manager
         self.friction_vector_manager = TherapeuticFrictionVectorManager(
@@ -108,9 +108,9 @@ class TherapeuticTechniqueService:
                 return maybe_obj
             try:
                 return list(maybe_obj)
-            except Exception:
+            except (TypeError, ValueError):
                 return None
-        except Exception:
+        except (TypeError, ValueError, RuntimeError):
             return None
 
     def _get_embedding(self, text: str) -> List[float]:

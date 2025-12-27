@@ -342,7 +342,7 @@ class VoiceAI:
             try:
                 import torchaudio  # type: ignore
                 speech_array, sampling_rate = torchaudio.load(audio_file)
-            except Exception:
+            except (ImportError, RuntimeError, OSError):
                 # Fallback to soundfile/librosa
                 import soundfile as _sf
                 data, sr = _sf.read(audio_file)
@@ -351,14 +351,14 @@ class VoiceAI:
                     data = _np.mean(data, axis=1)
                 speech_array = torch.tensor(data).unsqueeze(0)
                 sampling_rate = sr
-            
+
             # Resample if needed
             if sampling_rate != 16000:
                 try:
                     import torchaudio  # type: ignore
                     resampler = torchaudio.transforms.Resample(sampling_rate, 16000)
                     speech_array = resampler(speech_array)
-                except Exception:
+                except (ImportError, RuntimeError):
                     import librosa as _librosa
                     speech_array = torch.tensor(
                         _librosa.resample(
@@ -411,8 +411,8 @@ class VoiceAI:
                     data = librosa.resample(data.astype(float), orig_sr=sr, target_sr=16000)
                 if data.ndim > 1:
                     data = np.mean(data, axis=1)
-            except Exception:
-                # Assume raw int16 mono at provided sample_rate
+            except (RuntimeError, ValueError, OSError):
+                # Assume raw int16 mono at provided sample_rate (soundfile decode failed)
                 data = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
                 if sample_rate != 16000:
                     import librosa

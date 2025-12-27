@@ -21,6 +21,7 @@ from io import BytesIO
 # Dashboard configuration
 API_BASE_URL = "http://localhost:8000/api"
 REFRESH_INTERVAL = 30  # seconds
+REQUEST_TIMEOUT = 10  # seconds - timeout for all HTTP requests to prevent hanging
 
 def main():
     """Main dashboard application."""
@@ -725,7 +726,7 @@ def show_alerts_page():
 def get_supervision_status() -> Optional[Dict]:
     """Get supervision system status."""
     try:
-        response = requests.get(f"{API_BASE_URL}/supervision/status")
+        response = requests.get(f"{API_BASE_URL}/supervision/status", timeout=REQUEST_TIMEOUT)
         if response.status_code == 200:
             return response.json()
     except (requests.RequestException, ConnectionError, TimeoutError, ValueError):
@@ -737,7 +738,8 @@ def get_supervision_summary(time_window_hours: int = 24) -> Optional[Dict]:
     try:
         response = requests.get(
             f"{API_BASE_URL}/supervision/summary",
-            params={"time_window_hours": time_window_hours}
+            params={"time_window_hours": time_window_hours},
+            timeout=REQUEST_TIMEOUT
         )
         if response.status_code == 200:
             return response.json()
@@ -749,10 +751,16 @@ def get_agent_quality_report(agent_name: Optional[str]) -> Optional[Dict]:
     """Get agent quality report."""
     try:
         if agent_name:
-            response = requests.get(f"{API_BASE_URL}/supervision/agent-quality/{agent_name}")
+            response = requests.get(
+                f"{API_BASE_URL}/supervision/agent-quality/{agent_name}",
+                timeout=REQUEST_TIMEOUT
+            )
         else:
             # Get report for all agents
-            response = requests.get(f"{API_BASE_URL}/supervision/agent-quality/all")
+            response = requests.get(
+                f"{API_BASE_URL}/supervision/agent-quality/all",
+                timeout=REQUEST_TIMEOUT
+            )
 
         if response.status_code == 200:
             return response.json()
@@ -763,7 +771,10 @@ def get_agent_quality_report(agent_name: Optional[str]) -> Optional[Dict]:
 def get_session_analysis(session_id: str) -> Optional[Dict]:
     """Get session analysis."""
     try:
-        response = requests.get(f"{API_BASE_URL}/supervision/session-analysis/{session_id}")
+        response = requests.get(
+            f"{API_BASE_URL}/supervision/session-analysis/{session_id}",
+            timeout=REQUEST_TIMEOUT
+        )
         if response.status_code == 200:
             return response.json()
     except (requests.RequestException, ConnectionError, TimeoutError, ValueError):
@@ -779,7 +790,8 @@ def generate_compliance_report(standard: str, start_date: str, end_date: str) ->
                 "compliance_standard": standard,
                 "start_date": start_date,
                 "end_date": end_date
-            }
+            },
+            timeout=REQUEST_TIMEOUT
         )
         if response.status_code == 200:
             return response.json()
@@ -790,7 +802,10 @@ def generate_compliance_report(standard: str, start_date: str, end_date: str) ->
 def get_active_alerts() -> Optional[Dict]:
     """Get active alerts."""
     try:
-        response = requests.get(f"{API_BASE_URL}/supervision/alerts")
+        response = requests.get(
+            f"{API_BASE_URL}/supervision/alerts",
+            timeout=REQUEST_TIMEOUT
+        )
         if response.status_code == 200:
             return response.json()
     except (requests.RequestException, ConnectionError, TimeoutError, ValueError):
@@ -800,7 +815,10 @@ def get_active_alerts() -> Optional[Dict]:
 def resolve_alert(alert_id: str) -> bool:
     """Resolve an alert."""
     try:
-        response = requests.post(f"{API_BASE_URL}/supervision/alerts/{alert_id}/resolve")
+        response = requests.post(
+            f"{API_BASE_URL}/supervision/alerts/{alert_id}/resolve",
+            timeout=REQUEST_TIMEOUT
+        )
         return response.status_code == 200
     except (requests.RequestException, ConnectionError, TimeoutError):
         return False

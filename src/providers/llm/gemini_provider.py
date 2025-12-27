@@ -97,7 +97,8 @@ class GeminiProvider(LLMInterface):
             # Try a simple generation request
             response = self.model.generate_content("Test connection")
             return hasattr(response, 'text') and response.text is not None
-        except Exception:
+        except (LLMConnectionError, LLMAuthenticationError, LLMRateLimitError,
+                OSError, TimeoutError, RuntimeError):
             return False
     
     def _convert_messages_to_gemini_format(self, messages: List[Message]) -> List[Dict[str, Any]]:
@@ -240,9 +241,10 @@ class GeminiProvider(LLMInterface):
         
         try:
             return await self._test_connection()
-        except Exception:
+        except (LLMConnectionError, LLMAuthenticationError, LLMRateLimitError,
+                OSError, TimeoutError, RuntimeError):
             return False
-    
+
     def get_model_info(self) -> Dict[str, Any]:
         """Get information about the Gemini model."""
         return {
@@ -285,8 +287,8 @@ class GeminiProvider(LLMInterface):
                 self._token_count_cache = dict(items[-50:])
             
             return token_count
-            
-        except Exception:
+
+        except (AttributeError, TypeError, ValueError, RuntimeError):
             # Fallback to word-based estimation
             return int(len(text.split()) * 1.3)
     

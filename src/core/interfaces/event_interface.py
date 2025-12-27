@@ -150,30 +150,30 @@ class EventBus(EventInterface):
             await self._event_queue.put(event)
             self._stats['events_published'] += 1
             return True
-        except Exception:
+        except (asyncio.QueueFull, RuntimeError, TypeError):
             return False
-    
+
     async def subscribe(self, subscription: EventSubscription) -> bool:
         """Subscribe to events of a specific type."""
         try:
             event_type = subscription.event_type
             if event_type not in self._subscriptions:
                 self._subscriptions[event_type] = []
-            
+
             # Remove existing subscription if it exists
             self._subscriptions[event_type] = [
                 sub for sub in self._subscriptions[event_type]
                 if sub.subscriber_id != subscription.subscriber_id
             ]
-            
+
             self._subscriptions[event_type].append(subscription)
             self._stats['active_subscriptions'] = sum(
                 len(subs) for subs in self._subscriptions.values()
             )
             return True
-        except Exception:
+        except (KeyError, TypeError, AttributeError):
             return False
-    
+
     async def unsubscribe(self, subscriber_id: str, event_type: str) -> bool:
         """Unsubscribe from events."""
         try:
@@ -182,15 +182,15 @@ class EventBus(EventInterface):
                     sub for sub in self._subscriptions[event_type]
                     if sub.subscriber_id != subscriber_id
                 ]
-                
+
                 if not self._subscriptions[event_type]:
                     del self._subscriptions[event_type]
-                
+
                 self._stats['active_subscriptions'] = sum(
                     len(subs) for subs in self._subscriptions.values()
                 )
             return True
-        except Exception:
+        except (KeyError, TypeError, AttributeError):
             return False
     
     async def get_subscriptions(self, subscriber_id: str) -> List[EventSubscription]:
