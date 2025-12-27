@@ -102,12 +102,14 @@ def extract_emotion_data(tracker: ConversationTracker, days: int = 30) -> pd.Dat
                         emotion = emotion_info.get("primary_emotion")
             
             if emotion:
-                # Add to the list
+                # Add to the list - safely extract message with None handling
+                user_message = conv.get("user_message") or ""
+                message_snippet = str(user_message)[:50] if user_message else ""
                 emotion_data.append({
                     "timestamp": timestamp,
                     "emotion": emotion,
                     "category": categorize_emotion(emotion),
-                    "message": conv.get("user_message", "")[:50]  # Include snippet of message for context
+                    "message": message_snippet  # Include snippet of message for context
                 })
         except Exception as e:
             print(f"Error processing conversation: {e}")

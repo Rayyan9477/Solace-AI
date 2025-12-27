@@ -226,12 +226,46 @@ class FileHelper:
 
 class ValidationHelper:
     """Helper class for data validation"""
-    
+
     @staticmethod
     def validate_metadata(metadata: Dict[str, Any]) -> bool:
-        """Validate metadata structure and content"""
+        """
+        Validate metadata structure and content.
+
+        Args:
+            metadata: Metadata dictionary to validate
+
+        Returns:
+            True if metadata is valid, False otherwise
+        """
+        # Type validation
+        if metadata is None:
+            return False
+
+        if not isinstance(metadata, dict):
+            return False
+
+        # Required fields validation
         required_fields = ['timestamp', 'source']
-        return all(field in metadata for field in required_fields)
+        for field in required_fields:
+            if field not in metadata:
+                return False
+
+        # Timestamp validation
+        timestamp = metadata.get('timestamp')
+        if timestamp is not None:
+            if not isinstance(timestamp, (str, int, float)):
+                return False
+            # If string, check it's not empty
+            if isinstance(timestamp, str) and not timestamp.strip():
+                return False
+
+        # Source validation
+        source = metadata.get('source')
+        if not isinstance(source, str) or not source.strip():
+            return False
+
+        return True
         
     @staticmethod
     def validate_document(doc: Dict[str, Any]) -> bool:

@@ -93,12 +93,17 @@ class CentralVectorDB:
             DocumentType.EMOTION_RECORD.value: {},
             DocumentType.CUSTOM.value: {}
         }
-        
+
+        # Soft-delete tracking (FAISS doesn't support true deletion)
+        self._deleted_ids: set = set()
+        self._deleted_ids_path = self.data_dir / f"{self.user_id}_deleted_ids.json"
+
         # Initialize connection to vector store
         self._connect()
-        
-        # Load namespace metadata
+
+        # Load namespace metadata and deleted IDs
         self._load_namespace_metadata()
+        self._load_deleted_ids()
     
     def _connect(self) -> bool:
         """Connect to the main vector store"""
@@ -128,13 +133,35 @@ class CentralVectorDB:
             except Exception as e:
                 logger.error(f"Error loading metadata for namespace {namespace}: {str(e)}")
     
+    def _load_deleted_ids(self) -> None:
+        """Load soft-deleted document IDs from storage"""
+        try:
+            if self._deleted_ids_path.exists():
+                with open(self._deleted_ids_path, 'r') as f:
+                    deleted_list = json.load(f)
+                    self._deleted_ids = set(deleted_list)
+                logger.debug(f"Loaded {len(self._deleted_ids)} deleted document IDs")
+        except Exception as e:
+            logger.error(f"Error loading deleted IDs: {str(e)}")
+            self._deleted_ids = set()
+
+    def _save_deleted_ids(self) -> bool:
+        """Save soft-deleted document IDs to storage"""
+        try:
+            with open(self._deleted_ids_path, 'w') as f:
+                json.dump(list(self._deleted_ids), f)
+            return True
+        except Exception as e:
+            logger.error(f"Error saving deleted IDs: {str(e)}")
+            return False
+
     def _save_namespace_metadata(self, namespace: str) -> bool:
         """Save namespace metadata to storage"""
         try:
             namespace_dir = self.data_dir / namespace
             namespace_dir.mkdir(parents=True, exist_ok=True)
             metadata_path = namespace_dir / f"{self.user_id}_metadata.json"
-            
+
             with open(metadata_path, 'w') as f:
                 json.dump(self.namespaces[namespace], f, indent=2)
             
@@ -281,14 +308,19 @@ class CentralVectorDB:
             filtered_results = []
             
             for result in results:
+                # Filter out soft-deleted documents
+                doc_id = result.get("doc_id") or result.get("id")
+                if doc_id and doc_id in self._deleted_ids:
+                    continue
+
                 # Filter by namespace if provided
                 if namespace and result.get("namespace") != namespace:
                     continue
-                
+
                 # Filter by user_id
                 if result.get("user_id") != self.user_id:
                     continue
-                
+
                 # Apply custom filters if provided
                 if filters:
                     skip = False
@@ -379,19 +411,22 @@ class CentralVectorDB:
     
     def delete_document(self, doc_id: str, namespace: Union[str, DocumentType] = None) -> bool:
         """
-        Delete a document from the vector database
-        
+        Delete a document from the vector database.
+
+        Uses soft-delete approach since FAISS doesn't support true vector deletion.
+        Deleted document IDs are tracked and filtered out from search results.
+
         Args:
             doc_id: Document ID
             namespace: Document namespace (searches all if not provided)
-            
+
         Returns:
             True if successful, False otherwise
         """
         # Extract namespace string if Enum provided
         if isinstance(namespace, DocumentType):
             namespace = namespace.value
-            
+
         try:
             # Determine the namespace if not provided
             if not namespace:
@@ -400,16 +435,17 @@ class CentralVectorDB:
                     logger.warning(f"Document {doc_id} not found for deletion")
                     return False
                 namespace = doc.get("namespace", DocumentType.CUSTOM.value)
-            
+
             # Remove from namespace metadata
             if namespace in self.namespaces and doc_id in self.namespaces[namespace]:
                 del self.namespaces[namespace][doc_id]
                 self._save_namespace_metadata(namespace)
-            
-            # Note: FAISS doesn't support true deletion without rebuilding the index
-            # For a production system, consider implementing proper deletion
-            # by rebuilding the index periodically or using a database with deletion support
-            logger.info(f"Removed document {doc_id} from namespace {namespace} metadata")
+
+            # Add to soft-delete tracking (vectors remain in FAISS but are filtered from results)
+            self._deleted_ids.add(doc_id)
+            self._save_deleted_ids()
+
+            logger.info(f"Soft-deleted document {doc_id} from namespace {namespace}")
             return True
         except Exception as e:
             logger.error(f"Error deleting document {doc_id}: {str(e)}")

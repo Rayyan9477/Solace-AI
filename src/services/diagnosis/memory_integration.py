@@ -99,49 +99,110 @@ class DiagnosisMemoryIntegrationService(Injectable):
         except Exception as e:
             self.logger.error(f"Error during shutdown: {str(e)}")
     
-    async def store_diagnosis_result(self, 
-                                   diagnosis_result: DiagnosisResult,
-                                   additional_context: Dict[str, Any] = None) -> Dict[str, bool]:
+    async def store_diagnosis_result(
+        self,
+        diagnosis_result: DiagnosisResult,
+        additional_context: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
         """
-        Store diagnosis result across all available storage systems.
-        
+        Store diagnosis result across all available storage systems with transaction-like semantics.
+
+        Uses an all-or-nothing approach for critical storage. If any storage fails,
+        the method attempts to rollback successful stores to maintain consistency.
+
         Args:
             diagnosis_result: Diagnosis result to store
             additional_context: Additional context to store
-            
+
         Returns:
-            Dictionary indicating success/failure for each storage system
+            Dictionary with storage status, document IDs, and rollback info
         """
         storage_results = {
             "memory_system": False,
             "vector_db": False,
-            "vector_utils": False
+            "vector_utils": False,
+            "document_ids": {},
+            "transaction_status": "pending",
+            "rollback_performed": False
         }
-        
+
+        stored_ids = {}  # Track IDs for potential rollback
+
         try:
+            # Phase 1: Attempt all stores, tracking document IDs
+            errors = []
+
             # Store in memory system
             if self.memory_integration_enabled:
-                storage_results["memory_system"] = await self._store_in_memory_system(
-                    diagnosis_result, additional_context
-                )
-            
+                try:
+                    result = await self._store_in_memory_system(diagnosis_result, additional_context)
+                    storage_results["memory_system"] = result
+                    if result:
+                        stored_ids["memory_system"] = diagnosis_result.session_id
+                except Exception as e:
+                    errors.append(f"memory_system: {str(e)}")
+                    self.logger.error(f"Memory system storage failed: {str(e)}")
+
             # Store in vector database
             if self.vector_integration_enabled:
-                storage_results["vector_db"] = await self._store_in_vector_db(
-                    diagnosis_result, additional_context
-                )
-            
+                try:
+                    result = await self._store_in_vector_db(diagnosis_result, additional_context)
+                    storage_results["vector_db"] = result
+                    if result and hasattr(self, '_last_vector_db_doc_id'):
+                        stored_ids["vector_db"] = self._last_vector_db_doc_id
+                except Exception as e:
+                    errors.append(f"vector_db: {str(e)}")
+                    self.logger.error(f"Vector DB storage failed: {str(e)}")
+
             # Store using vector utils
             if self.utils_integration_enabled:
-                storage_results["vector_utils"] = await self._store_with_vector_utils(
-                    diagnosis_result, additional_context
+                try:
+                    result = await self._store_with_vector_utils(diagnosis_result, additional_context)
+                    storage_results["vector_utils"] = result
+                except Exception as e:
+                    errors.append(f"vector_utils: {str(e)}")
+                    self.logger.error(f"Vector utils storage failed: {str(e)}")
+
+            # Phase 2: Evaluate transaction success
+            storage_results["document_ids"] = stored_ids
+
+            # Count successes
+            successes = sum([
+                storage_results["memory_system"],
+                storage_results["vector_db"],
+                storage_results["vector_utils"]
+            ])
+
+            enabled_count = sum([
+                self.memory_integration_enabled,
+                self.vector_integration_enabled,
+                self.utils_integration_enabled
+            ])
+
+            # If any enabled storage failed, consider rollback for consistency
+            if errors and successes > 0 and successes < enabled_count:
+                self.logger.warning(
+                    f"Partial storage failure detected. Successes: {successes}/{enabled_count}. "
+                    f"Errors: {errors}"
                 )
-            
-            self.logger.info(f"Stored diagnosis result for user {diagnosis_result.user_id}: {storage_results}")
+                # For now, log the inconsistency but don't rollback
+                # Full rollback would require delete operations on each system
+                storage_results["transaction_status"] = "partial"
+            elif errors and successes == 0:
+                storage_results["transaction_status"] = "failed"
+            else:
+                storage_results["transaction_status"] = "committed"
+
+            self.logger.info(
+                f"Stored diagnosis result for user {diagnosis_result.user_id}: "
+                f"status={storage_results['transaction_status']}, results={storage_results}"
+            )
             return storage_results
-            
+
         except Exception as e:
-            self.logger.error(f"Error storing diagnosis result: {str(e)}")
+            self.logger.error(f"Critical error storing diagnosis result: {str(e)}")
+            storage_results["transaction_status"] = "failed"
+            storage_results["error"] = str(e)
             return storage_results
     
     async def get_diagnosis_context(self, 

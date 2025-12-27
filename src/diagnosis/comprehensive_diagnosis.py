@@ -458,7 +458,14 @@ class ComprehensiveDiagnosisModule:
             symptoms = []
             try:
                 # Try to extract JSON from the response
-                response_text = response.get("choices", [{}])[0].get("text", "")
+                # Safely extract text from response structure
+                response_text = ""
+                if response and isinstance(response, dict):
+                    choices = response.get("choices", [])
+                    if choices and isinstance(choices, list) and len(choices) > 0:
+                        first_choice = choices[0]
+                        if isinstance(first_choice, dict):
+                            response_text = first_choice.get("text", "")
                 
                 # Find JSON content (may be embedded in explanatory text)
                 import re
@@ -977,8 +984,16 @@ class ComprehensiveDiagnosisModule:
                 
                 # Get response from LLM
                 response = await self.llm.agenerate(prompt)
-                response_text = response.get("choices", [{}])[0].get("text", "")
-                
+
+                # Safely extract text from response structure
+                response_text = ""
+                if response and isinstance(response, dict):
+                    choices = response.get("choices", [])
+                    if choices and isinstance(choices, list) and len(choices) > 0:
+                        first_choice = choices[0]
+                        if isinstance(first_choice, dict):
+                            response_text = first_choice.get("text", "")
+
                 # Extract recommendations from the response
                 import re
                 llm_recommendations = []

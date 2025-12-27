@@ -9,6 +9,7 @@ import re
 import html
 import json
 import logging
+import threading
 from typing import Any, Dict, List, Optional, Union, Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -522,15 +523,35 @@ class InputValidator:
             return html.escape(html_content)
 
 
-# Singleton instance
+# Singleton instance with thread safety
 _input_validator: Optional[InputValidator] = None
+_validator_lock = threading.Lock()
 
 
 def get_input_validator(strict_mode: bool = True) -> InputValidator:
-    """Get the global input validator instance"""
+    """
+    Get the global input validator instance with thread-safe initialization.
+
+    Uses double-checked locking pattern for efficient thread-safe singleton.
+
+    Args:
+        strict_mode: If True, applies more restrictive validation rules
+
+    Returns:
+        InputValidator: The singleton validator instance
+    """
     global _input_validator
-    if _input_validator is None:
-        _input_validator = InputValidator(strict_mode=strict_mode)
+
+    # Fast path: instance already exists
+    if _input_validator is not None:
+        return _input_validator
+
+    # Slow path: need to create instance with lock
+    with _validator_lock:
+        # Double-check after acquiring lock (another thread may have created it)
+        if _input_validator is None:
+            _input_validator = InputValidator(strict_mode=strict_mode)
+
     return _input_validator
 
 
