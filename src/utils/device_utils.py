@@ -81,7 +81,7 @@ class DeviceManager:
         """Check if CUDA is available and being used"""
         try:
             return getattr(self._device, 'type', str(self._device)) == "cuda"
-        except Exception:
+        except (AttributeError, TypeError):
             return False
     
     def get_device_info(self) -> dict:

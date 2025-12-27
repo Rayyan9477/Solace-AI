@@ -285,15 +285,15 @@ class SentimentExtractor(BaseFeatureExtractor):
             try:
                 nltk.download('vader_lexicon', quiet=True)
                 self.analyzer = SentimentIntensityAnalyzer()
-            except Exception:
+            except (ImportError, LookupError, OSError, RuntimeError):
                 logger.warning("Could not initialize NLTK sentiment analyzer")
                 
         # Fallback to transformers-based sentiment analysis
         if not self.analyzer:
             try:
-                self.analyzer = pipeline("sentiment-analysis", 
+                self.analyzer = pipeline("sentiment-analysis",
                                        model="cardiffnlp/twitter-roberta-base-sentiment-latest")
-            except Exception:
+            except (ImportError, OSError, RuntimeError, ValueError):
                 logger.warning("Could not initialize transformers sentiment analyzer")
     
     def extract(self, data: Any, **kwargs) -> FeatureExtractionResult:

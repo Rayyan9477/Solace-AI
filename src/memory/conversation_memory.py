@@ -357,7 +357,7 @@ class ConversationMemory:
                         try:
                             dt = datetime.fromisoformat(conv["timestamp"])
                             timestamp = dt.strftime("%b %d, %Y")
-                        except Exception:
+                        except (ValueError, TypeError, AttributeError):
                             pass
 
                     relevant_parts.append(f"[From {timestamp}]")

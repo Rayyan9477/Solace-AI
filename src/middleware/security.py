@@ -338,7 +338,7 @@ class CSRFProtectionMiddleware(BaseHTTPMiddleware):
             # Verify submitted token matches
             return hmac.compare_digest(token, submitted_token)
 
-        except Exception:
+        except (ValueError, TypeError, AttributeError, UnicodeError):
             return False
 
     def _is_exempt(self, request: Request) -> bool:
@@ -403,7 +403,7 @@ class CSRFProtectionMiddleware(BaseHTTPMiddleware):
                 if "application/x-www-form-urlencoded" in content_type:
                     form_data = await request.form()
                     submitted_token = form_data.get(self.CSRF_FORM_FIELD, "")
-            except Exception:
+            except (ValueError, KeyError, RuntimeError, TypeError):
                 pass
 
         if not self._verify_token(cookie_token, submitted_token):

@@ -445,7 +445,7 @@ class FaissVectorStore(BaseVectorStore):
                         else:
                             parsed_content = content
                         result['parsed_content'] = parsed_content
-                    except Exception:
+                    except (json.JSONDecodeError, ValueError, TypeError):
                         result['parsed_content'] = content
                     similar_results.append(result)
                     

@@ -118,7 +118,7 @@ class AuditTrail:
         try:
             if os.name == 'nt' and os.environ.get('PYTEST_CURRENT_TEST'):
                 self._db_uri = f"file:audit_{id(self)}?mode=memory&cache=shared"
-        except Exception:
+        except (KeyError, OSError, TypeError):
             self._db_uri = None
         self._initialize_database()
         

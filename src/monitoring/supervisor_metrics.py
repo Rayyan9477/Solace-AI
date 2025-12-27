@@ -140,7 +140,7 @@ class MetricsCollector:
                 app = getattr(validation_result, "appropriateness_score", 0.7)
                 con = getattr(validation_result, "consistency_score", 0.7)
                 overall_score = float(np.mean([acc, app, con]))
-            except Exception:
+            except (AttributeError, TypeError, ValueError):
                 overall_score = 0.7
         self.record_metric("validation_accuracy", overall_score,
                           MetricType.VALIDATION_PERFORMANCE,
@@ -174,7 +174,7 @@ class MetricsCollector:
                 else:
                     risk_numeric = 1.0
                 overall_risk_value = clinical_val or "minimal"
-            except Exception:
+            except (AttributeError, TypeError, ValueError, KeyError):
                 risk_numeric = 3.0
                 overall_risk_value = "moderate"
         else:

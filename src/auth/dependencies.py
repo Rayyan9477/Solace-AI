@@ -198,7 +198,7 @@ async def get_optional_user(
         return jwt_manager.verify_token(credentials.credentials)
     except SecurityExceptions.InvalidTokenError:
         return None
-    except Exception:
+    except (ValueError, TypeError, KeyError, AttributeError):
         return None
 
 

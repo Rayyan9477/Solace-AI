@@ -167,7 +167,7 @@ class ConfigManager:
                 provider_section = provider.get_section(section)
                 if provider_section:
                     merged_section.update(provider_section)
-            except Exception:
+            except (KeyError, AttributeError, TypeError):
                 continue
         
         return merged_section

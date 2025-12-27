@@ -135,7 +135,7 @@ class JWTManager:
         """Verify a password against its hash"""
         try:
             return self.pwd_context.verify(plain_password, hashed_password)
-        except Exception:
+        except (ValueError, TypeError, AttributeError):
             return False
     
     def get_password_hash(self, password: str) -> str:

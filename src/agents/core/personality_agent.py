@@ -464,7 +464,7 @@ Provide an interpretation of these results, focusing on:
                 elif current_section and not any(header in lower_line for header in ["key", "strength", "growth", "communication", "stress", "emotion", "mental"]):
                     # Add non-header text to current section
                     sections[current_section].append(line)
-        except Exception:
+        except (ValueError, IndexError, KeyError, AttributeError, TypeError):
             # If parsing fails, return the raw text
             return {
                 "raw_interpretation": text,

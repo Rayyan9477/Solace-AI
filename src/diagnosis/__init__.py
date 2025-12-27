@@ -112,21 +112,21 @@ def create_diagnosis_module(use_agentic_rag=True, use_cache=True, **kwargs):
         # Try new enhanced integrated system first
         if EnhancedIntegratedDiagnosticSystem is not None:
             return EnhancedIntegratedDiagnosticSystem(**kwargs)
-    except Exception:
+    except (TypeError, ValueError, RuntimeError, AttributeError):
         pass
-    
+
     try:
         # Fallback to comprehensive diagnosis module
         if ComprehensiveDiagnosisModule is not None:
             return ComprehensiveDiagnosisModule()
-    except Exception:
+    except (TypeError, ValueError, RuntimeError, AttributeError):
         pass
 
     try:
         # Fallback to basic diagnosis module
         if DiagnosisModule is not None:
             return DiagnosisModule()
-    except Exception:
+    except (TypeError, ValueError, RuntimeError, AttributeError):
         pass
     
     # If all else fails, return None and let caller handle

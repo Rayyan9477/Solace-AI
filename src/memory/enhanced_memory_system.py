@@ -1287,6 +1287,6 @@ class EnhancedMemorySystem:
         """Ensure data is persisted when object is destroyed"""
         try:
             self._persist_memory_data()
-        except Exception:
+        except (OSError, IOError, ValueError, TypeError, RuntimeError):
             # Silently ignore errors during cleanup - logging may not be available
             pass
