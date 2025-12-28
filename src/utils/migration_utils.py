@@ -147,17 +147,17 @@ def migrate_conversations(source_path: Optional[str] = None, user_id: str = "def
                             logger.debug(f"Migrated conversation to vector DB: {doc_id}")
                         else:
                             logger.warning(f"Failed to migrate conversation from {file_path}")
-                            
-                    except Exception as e:
+
+                    except (RuntimeError, ValueError, TypeError, KeyError) as e:
                         logger.error(f"Error migrating individual conversation: {str(e)}")
-                
-            except Exception as e:
+
+            except (OSError, json.JSONDecodeError, ValueError, TypeError) as e:
                 logger.error(f"Error processing conversation file {file_path}: {str(e)}")
         
         logger.info(f"Successfully migrated {success_count} conversations for user {user_id}")
         return success_count
-        
-    except Exception as e:
+
+    except (OSError, ValueError, TypeError, RuntimeError) as e:
         logger.error(f"Error migrating conversations: {str(e)}")
         return 0
         
@@ -221,14 +221,14 @@ def migrate_personality_data(source_path: Optional[str] = None, user_id: str = "
                     logger.debug(f"Migrated personality data to vector DB: {doc_id}")
                 else:
                     logger.warning(f"Failed to migrate personality data from {file_path}")
-                    
-            except Exception as e:
+
+            except (OSError, json.JSONDecodeError, ValueError, TypeError) as e:
                 logger.error(f"Error processing personality file {file_path}: {str(e)}")
         
         logger.info(f"Successfully migrated {success_count} personality assessments for user {user_id}")
         return success_count
-        
-    except Exception as e:
+
+    except (OSError, ValueError, TypeError, RuntimeError) as e:
         logger.error(f"Error migrating personality data: {str(e)}")
         return 0
         
@@ -292,14 +292,14 @@ def migrate_diagnostic_data(source_path: Optional[str] = None, user_id: str = "d
                     logger.debug(f"Migrated diagnostic data to vector DB: {doc_id}")
                 else:
                     logger.warning(f"Failed to migrate diagnostic data from {file_path}")
-                    
-            except Exception as e:
+
+            except (OSError, json.JSONDecodeError, ValueError, TypeError) as e:
                 logger.error(f"Error processing diagnostic file {file_path}: {str(e)}")
         
         logger.info(f"Successfully migrated {success_count} diagnostic assessments for user {user_id}")
         return success_count
-        
-    except Exception as e:
+
+    except (OSError, ValueError, TypeError, RuntimeError) as e:
         logger.error(f"Error migrating diagnostic data: {str(e)}")
         return 0
 
@@ -371,15 +371,15 @@ def migrate_knowledge_base(source_path: Optional[str] = None) -> int:
                     logger.debug(f"Migrated knowledge item: {file_path.name}")
                 else:
                     logger.warning(f"Failed to migrate knowledge item: {file_path.name}")
-                
-            except Exception as e:
+
+            except (OSError, json.JSONDecodeError, ValueError, TypeError) as e:
                 logger.error(f"Error migrating knowledge file {file_path.name}: {str(e)}")
                 continue
         
         logger.info(f"Migrated {success_count} knowledge items")
         return success_count
-        
-    except Exception as e:
+
+    except (OSError, ValueError, TypeError, RuntimeError) as e:
         logger.error(f"Error migrating knowledge base: {str(e)}")
         return 0
 
@@ -451,15 +451,15 @@ def migrate_therapy_resources(source_path: Optional[str] = None) -> int:
                     logger.debug(f"Migrated therapy resource: {file_path.name}")
                 else:
                     logger.warning(f"Failed to migrate therapy resource: {file_path.name}")
-                
-            except Exception as e:
+
+            except (OSError, json.JSONDecodeError, ValueError, TypeError) as e:
                 logger.error(f"Error migrating therapy resource {file_path.name}: {str(e)}")
                 continue
         
         logger.info(f"Migrated {success_count} therapy resources")
         return success_count
-        
-    except Exception as e:
+
+    except (OSError, ValueError, TypeError, RuntimeError) as e:
         logger.error(f"Error migrating therapy resources: {str(e)}")
         return 0
 

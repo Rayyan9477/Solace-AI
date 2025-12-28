@@ -111,7 +111,7 @@ class ContextAwareMemoryAdapter:
                 await self.generate_summary()
 
             return memory_id
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
             logger.error(f"Error adding message to memory: {str(e)}")
             return -1
 
@@ -150,7 +150,7 @@ class ContextAwareMemoryAdapter:
             # and extract key themes, emotional patterns, etc.
 
             return summary
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
             logger.error(f"Error generating summary: {str(e)}")
             return {
                 "summary_text": f"Error generating summary: {str(e)}",
@@ -176,7 +176,7 @@ class ContextAwareMemoryAdapter:
                 memory_type="conversation",
                 top_k=top_k
             )
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
             logger.error(f"Error searching conversations: {str(e)}")
             return []
 
@@ -217,7 +217,7 @@ class ContextAwareMemoryAdapter:
             }
 
             return context
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
             logger.error(f"Error getting relevant context: {str(e)}")
             return {
                 "relevant_memories": [],
@@ -243,7 +243,7 @@ class ContextAwareMemoryAdapter:
             # Adjust personality based on emotion if needed
             if emotion_data.get("primary_emotion"):
                 await self._adjust_personality_for_emotion(emotion_data)
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
             logger.error(f"Error updating emotion context: {str(e)}")
 
     async def update_personality_context(self, personality_data: Dict[str, Any]) -> None:
@@ -258,7 +258,7 @@ class ContextAwareMemoryAdapter:
 
             # Store in memory for future reference
             self.memory_manager.add_memory(personality_data, memory_type="assessment")
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
             logger.error(f"Error updating personality context: {str(e)}")
 
     async def _adjust_personality_for_emotion(self, emotion_data: Dict[str, Any]) -> None:
@@ -315,7 +315,7 @@ class ContextAwareMemoryAdapter:
             # Update personality adaptations
             self.personality_adaptations.update(adaptations)
 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError) as e:
             logger.error(f"Error adjusting personality for emotion: {str(e)}")
 
     def get_current_personality_adjustments(self) -> Dict[str, Any]:
@@ -394,6 +394,6 @@ class ContextAwareMemoryAdapter:
             self.summaries = []
             self.conversation_context = []
             return result
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, AttributeError) as e:
             logger.error(f"Error clearing memory: {str(e)}")
             return False

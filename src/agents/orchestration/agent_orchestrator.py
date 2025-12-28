@@ -215,7 +215,7 @@ class MessageBus:
                 self.message_queue.task_done()
             except asyncio.TimeoutError:
                 continue
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError, AttributeError) as e:
                 self.logger.error(f"Error processing message: {str(e)}")
     
     async def _route_message(self, message: Message):
@@ -229,7 +229,7 @@ class MessageBus:
                     await handler(message)
                 else:
                     handler(message)
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError, AttributeError) as e:
                 self.logger.error(f"Handler error for {message.type.value}: {str(e)}")
 
 class ValidatorRegistry:
@@ -288,8 +288,8 @@ class ValidatorRegistry:
                     # Update success count
                     with self.lock:
                         self.validator_configs[validator_id]["success_count"] += 1
-                        
-            except Exception as e:
+
+            except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
                 self.logger.error(f"Validator {validator_id} failed: {str(e)}")
                 with self.lock:
                     self.validator_configs[validator_id]["failure_count"] += 1
@@ -366,8 +366,8 @@ class CircuitBreaker:
                                           timeout=self.config.timeout)
             await self._on_success()
             return result
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, asyncio.TimeoutError, ConnectionError, OSError) as e:
             await self._on_failure()
             raise
     
@@ -648,7 +648,7 @@ class AgentOrchestrator(Module):
                 self.audit_trail = AuditTrail()
                 
                 self.logger.info("Supervision system initialized successfully")
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError, AttributeError, ImportError) as e:
                 self.logger.error(f"Failed to initialize supervision system: {str(e)}")
                 self.supervision_enabled = False
         
@@ -693,8 +693,8 @@ class AgentOrchestrator(Module):
             self.logger.info("Retry manager initialized")
             
             self.logger.info("Enhanced features initialized successfully")
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError, ImportError) as e:
             self.logger.error(f"Failed to initialize enhanced features: {str(e)}")
             self.enhanced_features_enabled = False
 
@@ -754,7 +754,7 @@ class AgentOrchestrator(Module):
             self.diagnosis_adapter = await container.resolve(IDiagnosisAgentAdapter)
             
             self.logger.info("Diagnosis system integration initialized successfully")
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, AttributeError, ImportError) as e:
             self.logger.error(f"Failed to initialize diagnosis integration: {str(e)}")
             self.diagnosis_integration_enabled = False
     
@@ -945,7 +945,7 @@ class AgentOrchestrator(Module):
                 try:
                     self._register_workflows()
                     self.logger.info("Standard workflows lazily registered")
-                except Exception as e:
+                except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
                     self.logger.error(f"Failed lazy workflow registration: {str(e)}")
             # Re-check after lazy registration
             if workflow_id not in self.workflows:
@@ -1028,7 +1028,7 @@ class AgentOrchestrator(Module):
                     # Calculate processing time
                     agent_processing_time = time.time() - agent_start_time
                     
-                except Exception as e:
+                except (RuntimeError, ValueError, TypeError, AttributeError, KeyError, ConnectionError) as e:
                     error_msg = f"Diagnosis service execution failed: {str(e)}"
                     self.logger.error(error_msg, {"session_id": session_id})
                     workflow_state["status"] = "failed"
@@ -1070,7 +1070,7 @@ class AgentOrchestrator(Module):
                     # Calculate processing time
                     agent_processing_time = time.time() - agent_start_time
                     
-                except Exception as e:
+                except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
                     error_msg = f"Error processing agent {agent_id}: {str(e)}"
                     self.logger.error(error_msg, {"session_id": session_id, "exception": str(e)})
                     workflow_state["status"] = "failed"
@@ -1268,7 +1268,7 @@ class AgentOrchestrator(Module):
             
             return response
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, AttributeError) as e:
             error_msg = f"Error sending message from {sender_id} to {recipient_id}: {str(e)}"
             self.logger.error(error_msg)
             return {"error": error_msg}
@@ -1386,7 +1386,7 @@ class AgentOrchestrator(Module):
                           {"session_id": session_id, "context_keys": list(context_data.keys())})
             return True
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, AttributeError) as e:
             self.logger.error(f"Error updating context for session {session_id}: {str(e)}")
             return False
             
@@ -1477,7 +1477,7 @@ class AgentOrchestrator(Module):
                     self.logger.info(f"Cleaned up {cleaned} expired audit records")
                 
                 self.logger.info("Supervision system shutdown complete")
-            except Exception as e:
+            except (RuntimeError, OSError, AttributeError, ImportError) as e:
                 self.logger.error(f"Error during supervision system shutdown: {str(e)}")
         
         # Shutdown enhanced components
@@ -1532,8 +1532,8 @@ class AgentOrchestrator(Module):
             if latest_personality:
                 initial_context["personality"] = latest_personality
                 self.logger.debug("Added personality profile to context")
-                
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, ImportError) as e:
             self.logger.warning(f"Error enhancing context from vector DB: {str(e)}")
         
         # Execute the workflow
@@ -1589,7 +1589,7 @@ class AgentOrchestrator(Module):
                             result["conversation_id"] = conversation_id
                 else:
                     self.logger.warning("Conversation tracker not available")
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError, AttributeError) as e:
                 self.logger.error(f"Error tracking conversation: {str(e)}")
         
         return result
@@ -1642,8 +1642,8 @@ class AgentOrchestrator(Module):
                 }
             
             return summary
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError, ImportError, KeyError) as e:
             self.logger.error(f"Error generating supervision summary: {str(e)}")
             return {"error": f"Failed to generate summary: {str(e)}"}
     
@@ -1663,8 +1663,8 @@ class AgentOrchestrator(Module):
             )
             
             return report
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError, ImportError) as e:
             self.logger.error(f"Error generating agent quality report: {str(e)}")
             return {"error": f"Failed to generate report: {str(e)}"}
     
@@ -1711,8 +1711,8 @@ class AgentOrchestrator(Module):
                 analysis["supervisor_summary"] = supervisor_summary
             
             return analysis
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
             self.logger.error(f"Error generating session analysis: {str(e)}")
             return {"error": f"Failed to generate analysis: {str(e)}"}
     
@@ -1768,8 +1768,8 @@ class AgentOrchestrator(Module):
                 "export_path": export_path,
                 "generated_timestamp": compliance_report.generated_timestamp.isoformat()
             }
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError, KeyError, OSError) as e:
             self.logger.error(f"Error exporting compliance report: {str(e)}")
             return {"error": f"Failed to export report: {str(e)}"}
     
@@ -1802,8 +1802,8 @@ class AgentOrchestrator(Module):
             
             self.logger.info(f"Supervision configuration updated: {result['configured']}")
             return result
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
             self.logger.error(f"Error configuring supervision: {str(e)}")
             return {"error": f"Configuration failed: {str(e)}"}
     
@@ -1854,8 +1854,8 @@ class AgentOrchestrator(Module):
             
             self.logger.info(f"Diagnosis service executed successfully for session {workflow_state['session_id']}")
             return adapted_result
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError, KeyError, ConnectionError) as e:
             self.logger.error(f"Error executing diagnosis service: {str(e)}")
             raise
     
@@ -1896,8 +1896,8 @@ class AgentOrchestrator(Module):
             )
             
             return adapted_result
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError, KeyError, ConnectionError) as e:
             self.logger.error(f"Error in direct diagnosis: {str(e)}")
             return {"error": str(e)}
     
@@ -1940,7 +1940,7 @@ class AgentOrchestrator(Module):
                 try:
                     self._register_workflows()
                     self.logger.info("Standard workflows lazily registered")
-                except Exception as e:
+                except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
                     self.logger.error(f"Failed lazy workflow registration: {str(e)}")
             # Re-check after lazy registration
             if workflow_id not in self.workflows:
@@ -2055,8 +2055,8 @@ class AgentOrchestrator(Module):
                 # Update data for next agent
                 current_data = result
                 workflow_state["steps_completed"] += 1
-                
-            except Exception as e:
+
+            except (RuntimeError, ValueError, TypeError, AttributeError, KeyError, PermissionError, ConnectionError) as e:
                 # Enhanced error handling
                 await self._handle_agent_error(agent_id, e, workflow_state, session_id)
                 
@@ -2293,8 +2293,8 @@ class AgentOrchestrator(Module):
                         correlation_id=message.id
                     )
                     await self.message_bus.publish(response)
-        
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
             self.logger.error(f"Error handling validation request: {str(e)}")
     
     async def _handle_error_event(self, message: Message):
@@ -2316,7 +2316,7 @@ class AgentOrchestrator(Module):
                     payload.get("value", 0),
                     metadata=payload.get("metadata", {})
                 )
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
             self.logger.error(f"Error handling metrics event: {str(e)}")
     
     # Enhanced Service Methods
@@ -2330,7 +2330,7 @@ class AgentOrchestrator(Module):
         try:
             self.validator_registry.register_validator(validator_id, validator, validator_types, weight)
             return {"success": True, "validator_id": validator_id}
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, AttributeError) as e:
             return {"error": str(e)}
     
     async def send_event(self, event_type: str, payload: Dict[str, Any], 
@@ -2352,10 +2352,10 @@ class AgentOrchestrator(Module):
             
             await self.message_bus.publish(message)
             return {"success": True, "message_id": message.id}
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError) as e:
             return {"error": str(e)}
-    
+
     async def get_agent_health(self, agent_name: str = None) -> Dict[str, Any]:
         """Get agent health status from performance monitor."""
         if not self.performance_monitoring_enabled or not self.performance_monitor:
@@ -2370,10 +2370,10 @@ class AgentOrchestrator(Module):
                 "recent_alerts": alerts,
                 "timestamp": datetime.now().isoformat()
             }
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
             return {"error": str(e)}
-    
+
     async def get_performance_metrics(self, time_window_hours: int = 1) -> Dict[str, Any]:
         """Get comprehensive performance metrics."""
         if not self.performance_monitoring_enabled or not self.performance_monitor:
@@ -2402,10 +2402,10 @@ class AgentOrchestrator(Module):
             }
             
             return metrics
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
             return {"error": str(e)}
-    
+
     def get_enhanced_features_status(self) -> Dict[str, Any]:
         """Get status of all enhanced features."""
         return {

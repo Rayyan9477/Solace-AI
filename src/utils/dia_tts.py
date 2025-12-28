@@ -101,7 +101,7 @@ class DiaTTS:
                 else:
                     logger.info("Official Dia package not found, using Transformers implementation")
                     self.use_official_package = False
-        except Exception as e:
+        except (ImportError, OSError, AttributeError, RuntimeError) as e:
             logger.warning(f"Error checking for Dia package: {str(e)}")
             self.use_official_package = False
             
@@ -129,7 +129,7 @@ class DiaTTS:
             
             logger.info("Dia package installed successfully")
             return True
-        except Exception as e:
+        except (subprocess.CalledProcessError, OSError, RuntimeError, FileNotFoundError) as e:
             logger.error(f"Failed to install Dia package: {str(e)}")
             return False
         
@@ -181,8 +181,8 @@ class DiaTTS:
                 self.initialization_error = result["error"]
                 logger.error(f"Failed to load Dia 1.6B model: {self.initialization_error}")
                 return False
-                
-        except Exception as e:
+
+        except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as e:
             self.initialization_error = str(e)
             logger.error(f"Error initializing Dia 1.6B model: {str(e)}", exc_info=True)
             return False
@@ -205,13 +205,13 @@ class DiaTTS:
                 "model": model,
                 "error": None
             }
-        except Exception as e:
+        except (ImportError, RuntimeError, OSError, ValueError, TypeError) as e:
             return {
                 "success": False,
                 "model": None,
                 "error": str(e)
             }
-            
+
     def _load_model(self) -> Dict[str, Any]:
         """
         Load the model and processor using Transformers (runs in a separate thread)
@@ -248,15 +248,15 @@ class DiaTTS:
                 "model": model,
                 "error": None
             }
-            
-        except Exception as e:
+
+        except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as e:
             return {
                 "success": False,
                 "processor": None,
                 "model": None,
                 "error": str(e)
             }
-            
+
     async def generate_speech(self, text: str, style: Optional[str] = None) -> Dict[str, Any]:
         """
         Generate speech from text
@@ -289,8 +289,8 @@ class DiaTTS:
                 return await self._generate_speech_official(text, style)
             else:
                 return await self._generate_speech_transformers(text, style)
-                
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError, OSError) as e:
             logger.error(f"Error generating speech: {str(e)}", exc_info=True)
             return {
                 "success": False,
@@ -371,14 +371,14 @@ class DiaTTS:
                 "audio_bytes": audio_bytes,
                 "sample_rate": 44100
             }
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as e:
             logger.error(f"Error in official Dia generation: {str(e)}")
             return {
                 "success": False,
                 "error": str(e),
                 "audio_bytes": b""
             }
-    
+
     async def _generate_speech_transformers(self, text: str, style: Optional[str] = None) -> Dict[str, Any]:
         """
         Generate speech using the Transformers implementation
@@ -466,7 +466,7 @@ class DiaTTS:
                     "sample_rate": 24000  # Dia 1.6B uses 24kHz
                 }
 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, AttributeError, OSError) as e:
             logger.error(f"Error in audio generation: {str(e)}")
             return {
                 "success": False,
@@ -504,10 +504,10 @@ class DiaTTS:
             # Get bytes from buffer
             wav_buffer.seek(0)
             wav_bytes = wav_buffer.read()
-            
+
             return wav_bytes
-            
-        except Exception as e:
+
+        except (RuntimeError, OSError, ValueError, TypeError) as e:
             logger.error(f"Failed to convert speech to WAV: {str(e)}")
             return b""
             
@@ -585,17 +585,17 @@ class DiaTTS:
                 None,
                 lambda: self._run_voice_cloning(reference_audio_path, full_prompt)
             )
-            
+
             return result
-            
-        except Exception as e:
+
+        except (RuntimeError, OSError, ValueError, ImportError, TypeError) as e:
             logger.error(f"Error in voice cloning: {str(e)}", exc_info=True)
             return {
                 "success": False,
                 "error": str(e),
                 "audio_bytes": b""
             }
-    
+
     def _run_voice_cloning(self, reference_audio_path: str, prompt_text: str) -> Dict[str, Any]:
         """
         Run voice cloning with the official Dia package (in a separate thread)
@@ -629,7 +629,7 @@ class DiaTTS:
                 "audio_bytes": audio_bytes,
                 "sample_rate": 44100
             }
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError, ImportError, TypeError, AttributeError) as e:
             logger.error(f"Error in voice cloning: {str(e)}")
             return {
                 "success": False,

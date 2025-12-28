@@ -65,7 +65,7 @@ class SemanticMemoryManager:
                 raise ValueError("EMBEDDING_MODEL_NAME must be set via environment or passed explicitly")
             self.embedding_model = SentenceTransformer(resolved_model)
             logger.info(f"Loaded embedding model: {resolved_model}")
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError, TypeError, KeyError) as e:
             logger.error(f"Failed to load embedding model: {str(e)}")
             # Fallback to simpler mechanisms if model fails to load
             self.embedding_model = None
@@ -95,7 +95,7 @@ class SemanticMemoryManager:
             else:
                 logger.warning(f"Unknown index type: {self.index_type}, using flat index")
                 return faiss.IndexFlatIP(self.embedding_dimension)
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError) as e:
             logger.error(f"Error creating FAISS index: {str(e)}")
             return faiss.IndexFlatIP(self.embedding_dimension)
     
@@ -128,7 +128,7 @@ class SemanticMemoryManager:
                 self.memory_entries = []
                 self.id_to_entry = {}
                 self.next_id = 0
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.error(f"Error loading memories: {str(e)}")
             # If loading fails, start with empty memories
             self.memory_entries = []
@@ -153,7 +153,7 @@ class SemanticMemoryManager:
                 json.dump(serialized_data, f, indent=2)
 
             logger.info(f"Saved {len(self.memory_entries)} memories to {entries_path}")
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             logger.error(f"Error saving memories: {str(e)}")
 
     def _serialize_entries(self, entries: List[Dict]) -> List[Dict]:
@@ -212,7 +212,7 @@ class SemanticMemoryManager:
         try:
             embedding = self.embedding_model.encode(text, convert_to_numpy=True)
             return embedding.astype(np.float32)
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, AttributeError) as e:
             logger.error(f"Error generating embedding: {str(e)}")
             return np.random.randn(self.embedding_dimension).astype(np.float32)
     
@@ -272,9 +272,9 @@ class SemanticMemoryManager:
             # Save memories periodically
             if self.next_id % 10 == 0:
                 self._save_memories()
-            
+
             return memory_id
-        except Exception as e:
+        except (ValueError, RuntimeError, TypeError, KeyError) as e:
             logger.error(f"Error adding memory: {str(e)}")
             return -1
     
@@ -307,9 +307,9 @@ class SemanticMemoryManager:
             self.memory_entries = new_entries
             self.id_to_entry = new_id_to_entry
             self.index = new_index
-            
+
             logger.info(f"Pruned {excess} old memories")
-        except Exception as e:
+        except (RuntimeError, KeyError, TypeError, ValueError) as e:
             logger.error(f"Error pruning memories: {str(e)}")
     
     def _create_searchable_text(self, content: Dict[str, Any], memory_type: str) -> str:
@@ -399,9 +399,9 @@ class SemanticMemoryManager:
             
             # Sort by similarity score
             results.sort(key=lambda x: x['similarity'], reverse=True)
-            
+
             return results
-        except Exception as e:
+        except (RuntimeError, ValueError, KeyError, TypeError, IndexError) as e:
             logger.error(f"Error searching memories: {str(e)}")
             return []
     
@@ -418,7 +418,7 @@ class SemanticMemoryManager:
                     'timestamp': memory_entry['timestamp']
                 }
             return None
-        except Exception as e:
+        except (KeyError, TypeError, AttributeError) as e:
             logger.error(f"Error getting memory by ID: {str(e)}")
             return None
     
@@ -463,9 +463,9 @@ class SemanticMemoryManager:
                     'content': memory['content'],
                     'timestamp': memory['timestamp']
                 })
-            
+
             return results
-        except Exception as e:
+        except (KeyError, TypeError, AttributeError) as e:
             logger.error(f"Error getting recent memories: {str(e)}")
             return []
     
@@ -517,9 +517,9 @@ class SemanticMemoryManager:
             
             # Store the summary
             self.add_memory(summary, memory_type="summary")
-            
+
             return summary
-        except Exception as e:
+        except (RuntimeError, ValueError, KeyError, TypeError, AttributeError) as e:
             logger.error(f"Error generating conversation summary: {str(e)}")
             return {
                 "summary_text": f"Error generating summary: {str(e)}",
@@ -541,8 +541,8 @@ class SemanticMemoryManager:
             
             # Save empty state
             self._save_memories()
-            
+
             return True
-        except Exception as e:
+        except (RuntimeError, OSError, TypeError) as e:
             logger.error(f"Error clearing memories: {str(e)}")
             return False

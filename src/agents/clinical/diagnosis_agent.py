@@ -66,7 +66,7 @@ def _load_spacy_model():
             model = spacy.load(model_name)
             logger.info(f"Successfully loaded spaCy model: {model_name}")
             return model
-        except Exception as e:
+        except (OSError, ImportError, RuntimeError, ValueError) as e:
             logger.debug(f"Failed to load spaCy model '{model_name}': {str(e)}")
             continue
 
@@ -126,7 +126,7 @@ def _load_classifier_models():
             )
             logger.info(f"Successfully loaded transformer model: {model_name}")
             return symptom_clf, diagnostic_clf
-        except Exception as e:
+        except (OSError, ImportError, RuntimeError, ValueError, TypeError) as e:
             logger.debug(f"Failed to load transformer model '{model_name}': {str(e)}")
             continue
 
@@ -265,7 +265,7 @@ async def enhanced_diagnosis(text: str, context: Optional[Dict[str, Any]] = None
                 knowledge_base_dir=str(kb_dir)
             )
             logger.info("Initialized Agentic RAG system for enhanced diagnosis")
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError, ImportError, TypeError) as e:
             logger.error(f"Failed to initialize RAG system: {str(e)}")
             return {
                 "error": f"Failed to initialize diagnostic system: {str(e)}",
@@ -276,7 +276,7 @@ async def enhanced_diagnosis(text: str, context: Optional[Dict[str, Any]] = None
         # Use the Agentic RAG system for diagnosis
         result = await enhanced_diagnosis.rag_system.enhance_diagnosis(text, context)
         return result
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
         logger.error(f"Error in enhanced diagnosis: {str(e)}")
         return {
             "error": str(e),
@@ -397,7 +397,7 @@ class EnhancedDiagnosisAgent(BaseAgent):
                 knowledge_base_dir=str(kb_dir)
             )
             logger.info("Initialized Agentic RAG system for EnhancedDiagnosisAgent")
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError, ImportError, TypeError) as e:
             logger.error(f"Failed to initialize AgenticRAG: {str(e)}")
             self.rag_system = None
     
@@ -427,7 +427,7 @@ class EnhancedDiagnosisAgent(BaseAgent):
             )
             
             logger.info(f"Enhanced diagnosis agent {self.agent_id} subscribed to events")
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, AttributeError) as e:
             logger.error(f"Failed to set up event subscriptions: {e}")
             self.metrics['integration_errors'] += 1
     
@@ -568,8 +568,8 @@ Additional Considerations: [important factors to consider]""")
             })
             
             return diagnosis_result
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
             logger.error(f"Error in integrated diagnosis {diagnosis_id}: {str(e)}")
             self.metrics['integration_errors'] += 1
             
@@ -632,8 +632,8 @@ Additional Considerations: [important factors to consider]""")
                 "method": "legacy",
                 **legacy_result
             }
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
             logger.error(f"Error in diagnosis process: {str(e)}")
             return {
                 "success": False,
@@ -718,8 +718,8 @@ Additional Considerations: [important factors to consider]""")
                 "severity": severity,
                 "recommendations": recommendations
             }
-        
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
             logger.error(f"Error in legacy diagnosis: {str(e)}")
             return self._fallback_diagnosis(" ".join(symptoms))
 
@@ -958,8 +958,8 @@ Additional Considerations: [important factors to consider]""")
                     diagnosis_result['supervision_confidence'] = validation_result.confidence
             
             return diagnosis_result
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
             logger.error(f"Supervision validation error: {e}")
             self.metrics['validation_failures'] += 1
             diagnosis_result['supervision_error'] = str(e)
@@ -1028,8 +1028,8 @@ Additional Considerations: [important factors to consider]""")
                     self.metrics['friction_coordinations'] += 1
             
             return diagnosis_result
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
             logger.error(f"Friction coordination error: {e}")
             diagnosis_result['friction_error'] = str(e)
             return diagnosis_result
@@ -1089,8 +1089,8 @@ Additional Considerations: [important factors to consider]""")
                         'diagnosis_result': result
                     }
                 ))
-        
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
             logger.error(f"Error handling diagnosis request: {e}")
             self.metrics['integration_errors'] += 1
     
@@ -1105,8 +1105,8 @@ Additional Considerations: [important factors to consider]""")
                 if session_data.get('diagnosis_id') == request_id:
                     session_data['validation_result'] = result_data
                     break
-        
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
             logger.error(f"Error handling validation result: {e}")
     
     async def _handle_friction_update(self, event: Event) -> None:
@@ -1123,8 +1123,8 @@ Additional Considerations: [important factors to consider]""")
             if update_data.get('action') == 'end_coordination':
                 # Clean up coordination resources
                 logger.info(f"Friction coordination {coordination_id} ended")
-        
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
             logger.error(f"Error handling friction update: {e}")
     
     def get_metrics(self) -> Dict[str, Any]:
@@ -1211,8 +1211,8 @@ Additional Considerations: [important factors to consider]""")
                 logger.warning(f"Failed to update memory: {str(memory_error)}")
             
             return parsed_response
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
             logger.error(f"Error generating response: {str(e)}")
             return {
                 "error": str(e),

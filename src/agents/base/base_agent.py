@@ -144,18 +144,18 @@ class BaseAgent(Agent):
             try:
                 if hasattr(self, 'store_to_vector_db') and callable(self.store_to_vector_db):
                     await self.store_to_vector_db(query, response, context)
-            except Exception as store_error:
+            except (RuntimeError, ValueError, TypeError, ConnectionError, OSError) as store_error:
                 logger.error(f"Error storing data in vector DB: {str(store_error)}")
             
             # Update memory
             try:
                 await self._update_memory(query, response)
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError, AttributeError) as e:
                 logger.warning(f"Failed to update memory: {str(e)}")
             
             return result
             
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
             logger.error(f"Error processing query: {str(e)}")
             return {
                 'error': str(e),
@@ -174,13 +174,13 @@ class BaseAgent(Agent):
         """Get relevant context from memory and knowledge"""
         try:
             memory_context = await self.memory.get("chat_history", [])
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
             logger.warning(f"Failed to get memory context: {str(e)}")
             memory_context = []
             
         try:
             knowledge_context = await self.knowledge.search(query)
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
             logger.warning(f"Failed to get knowledge context: {str(e)}")
             knowledge_context = []
         
@@ -202,7 +202,7 @@ class BaseAgent(Agent):
                 self.memory.chat_memory.add_ai_message(response.get('response', ''))
             else:
                 logger.warning("Memory does not have chat_memory attribute")
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, AttributeError) as e:
             logger.warning(f"Failed to update memory: {str(e)}")
         
     def _calculate_confidence(self, response: Dict[str, Any]) -> float:
@@ -302,7 +302,7 @@ class BaseAgent(Agent):
                 }
             }
 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, AttributeError, KeyError) as e:
             logger.error(f"Error in {self.name} sync response generation: {str(e)}", exc_info=True)
             processing_time = (datetime.now() - processing_start).total_seconds()
 

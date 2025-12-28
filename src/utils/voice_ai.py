@@ -160,11 +160,11 @@ class VoiceAI:
             else:
                 logger.error(f"Failed to initialize Whisper: {result['error']}")
                 return False
-                
-        except Exception as e:
+
+        except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as e:
             logger.error(f"Error initializing speech recognition: {str(e)}", exc_info=True)
             return False
-    
+
     async def initialize_tts(self) -> bool:
         """
         Initialize text-to-speech components
@@ -196,11 +196,11 @@ class VoiceAI:
             else:
                 logger.error(f"Failed to initialize SpeechT5: {result['error']}")
                 return False
-                
-        except Exception as e:
+
+        except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as e:
             logger.error(f"Error initializing text-to-speech: {str(e)}", exc_info=True)
             return False
-            
+
     async def initialize_dia(self) -> bool:
         """
         Initialize Dia 1.6B text-to-speech
@@ -220,13 +220,13 @@ class VoiceAI:
                 logger.info("Dia 1.6B text-to-speech initialized successfully")
             else:
                 logger.error(f"Failed to initialize Dia 1.6B: {self.dia_tts.initialization_error}")
-                
+
             return success
-                
-        except Exception as e:
+
+        except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as e:
             logger.error(f"Error initializing Dia 1.6B: {str(e)}", exc_info=True)
             return False
-    
+
     def _load_whisper_model(self) -> Dict[str, Any]:
         """
         Load Whisper model for speech recognition
@@ -258,14 +258,14 @@ class VoiceAI:
                 "model": model,
                 "error": None
             }
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as e:
             return {
                 "success": False,
                 "processor": None,
                 "model": None,
                 "error": str(e)
             }
-    
+
     def _load_speecht5_model(self) -> Dict[str, Any]:
         """
         Load SpeechT5 model for text-to-speech
@@ -301,7 +301,7 @@ class VoiceAI:
                 "speaker_embeddings": speaker_embeddings,
                 "error": None
             }
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as e:
             return {
                 "success": False,
                 "processor": None,
@@ -310,7 +310,7 @@ class VoiceAI:
                 "speaker_embeddings": None,
                 "error": str(e)
             }
-    
+
     async def transcribe_audio(self, audio_file: str) -> Dict[str, Any]:
         """
         Transcribe speech from audio file
@@ -383,8 +383,8 @@ class VoiceAI:
             )
             
             return result
-        
-        except Exception as e:
+
+        except (RuntimeError, OSError, ValueError, TypeError, AttributeError, ImportError) as e:
             logger.error(f"Error transcribing audio: {str(e)}", exc_info=True)
             return {
                 "success": False,
@@ -418,7 +418,7 @@ class VoiceAI:
                     import librosa
                     data = librosa.resample(data, orig_sr=sample_rate, target_sr=16000)
             return self._transcribe_audio_whisper(data.astype(np.float32))
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError, TypeError, AttributeError, ImportError) as e:
             logger.error(f"Error in speech_to_text: {str(e)}", exc_info=True)
             return {"success": False, "text": "", "error": str(e)}
     
@@ -457,15 +457,15 @@ class VoiceAI:
                 "success": True,
                 "text": transcription
             }
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError) as e:
             logger.error(f"Error in Whisper transcription: {str(e)}")
             return {
                 "success": False,
                 "text": "",
                 "error": str(e)
             }
-            
+
     async def text_to_speech(self, text: str, voice_style: str = "default") -> Dict[str, Any]:
         """
         Convert text to speech
@@ -516,20 +516,20 @@ class VoiceAI:
             
             # Process text in a separate thread to avoid blocking
             result = await loop.run_in_executor(
-                None, 
+                None,
                 lambda: self._synthesize_speech_speecht5(text, voice_style)
             )
-            
+
             return result
-            
-        except Exception as e:
+
+        except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as e:
             logger.error(f"Error in text-to-speech: {str(e)}", exc_info=True)
             return {
                 "success": False,
                 "audio_bytes": b"",
                 "error": str(e)
             }
-    
+
     def _synthesize_speech_speecht5(self, text: str, voice_style: str = "default") -> Dict[str, Any]:
         """
         Synthesize speech using SpeechT5
@@ -564,15 +564,15 @@ class VoiceAI:
                 "audio_bytes": audio_bytes,
                 "sample_rate": sample_rate
             }
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, AttributeError, OSError) as e:
             logger.error(f"Error in SpeechT5 synthesis: {str(e)}")
             return {
                 "success": False,
                 "audio_bytes": b"",
                 "error": str(e)
             }
-    
+
     def _convert_to_wav(self, speech_array: np.ndarray, sample_rate: int) -> bytes:
         """
         Convert speech array to WAV format bytes
@@ -594,13 +594,13 @@ class VoiceAI:
             # Get bytes from buffer
             wav_buffer.seek(0)
             wav_bytes = wav_buffer.read()
-            
+
             return wav_bytes
-            
-        except Exception as e:
+
+        except (RuntimeError, OSError, ValueError, TypeError) as e:
             logger.error(f"Failed to convert speech to WAV: {str(e)}")
             return b""
-    
+
     async def speak_text(self, text: str, voice_style: str = "default", blocking: bool = False) -> Dict[str, Any]:
         """
         Convert text to speech and play it
@@ -638,14 +638,14 @@ class VoiceAI:
             return {
                 "success": True
             }
-            
-        except Exception as e:
+
+        except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as e:
             logger.error(f"Error speaking text: {str(e)}", exc_info=True)
             return {
                 "success": False,
                 "error": str(e)
             }
-    
+
     def set_preferred_tts(self, tts_system: str) -> bool:
         """
         Set preferred TTS system
@@ -737,7 +737,7 @@ class VoiceManager:
                 else:
                     logger.info("Dia 1.6B TTS initialized successfully")
                     self.use_dia = True
-            except Exception as dia_error:
+            except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as dia_error:
                 logger.warning(f"Failed to initialize Dia 1.6B TTS: {str(dia_error)}")
                 self.use_dia = False
             
@@ -755,8 +755,8 @@ class VoiceManager:
                 "dia_tts": self.dia_tts if self.use_dia else None,
                 "error": None
             }
-            
-        except Exception as e:
+
+        except (RuntimeError, OSError, ValueError, TypeError, AttributeError, ImportError) as e:
             self.initialization_error = str(e)
             logger.error(f"Voice initialization error: {str(e)}", exc_info=True)
             return {
@@ -765,7 +765,7 @@ class VoiceManager:
                 "voice_ai": None,
                 "dia_tts": None
             }
-    
+
     async def text_to_speech(self, text: str, style: Optional[str] = None) -> Dict[str, Any]:
         """
         Convert text to speech using the best available TTS system
@@ -787,10 +787,10 @@ class VoiceManager:
                 result = await self.dia_tts.generate_speech(text, style)
                 if result["success"]:
                     return result
-                
+
                 # If Dia fails, log the error and fall back to standard TTS
                 logger.warning(f"Dia TTS failed: {result.get('error', 'Unknown error')}, falling back to standard TTS")
-            except Exception as e:
+            except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as e:
                 logger.warning(f"Error using Dia TTS: {str(e)}, falling back to standard TTS")
         
         # Fall back to standard TTS
@@ -798,7 +798,7 @@ class VoiceManager:
             try:
                 logger.info(f"Using standard TTS for text ({len(text)} chars)")
                 return await self.voice_ai.text_to_speech(text, style)
-            except Exception as e:
+            except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as e:
                 logger.error(f"Error in text-to-speech conversion: {str(e)}")
                 return {
                     "success": False,
@@ -843,11 +843,11 @@ class VoiceManager:
             sd.play(data, sample_rate)
             sd.wait()  # Wait until audio finishes playing
             return True
-            
-        except Exception as e:
+
+        except (RuntimeError, OSError, ValueError, TypeError, ImportError) as e:
             logger.error(f"Failed to play audio: {str(e)}")
             return False
-    
+
     async def speak_text(self, text: str, style: Optional[str] = None) -> bool:
         """
         Convert text to speech and play it
@@ -874,11 +874,11 @@ class VoiceManager:
                 return False
                 
             return await self.play_audio(audio_bytes)
-            
-        except Exception as e:
+
+        except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as e:
             logger.error(f"Error in speak_text: {str(e)}")
             return False
-    
+
     def get_initialization_status(self) -> Dict[str, Any]:
         """
         Get current initialization status

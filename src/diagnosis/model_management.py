@@ -126,8 +126,8 @@ class ModelManager:
                         self.model_registry[model_id].append(checkpoint)
                 
                 logger.info(f"Loaded {len(self.model_registry)} models from registry")
-                
-            except Exception as e:
+
+            except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                 logger.error(f"Error loading model registry: {str(e)}")
                 self.model_registry = {}
 
@@ -215,10 +215,10 @@ class ModelManager:
             
             with open(registry_path, 'w') as f:
                 json.dump(registry_data, f, indent=2)
-                
+
             logger.info("Model registry saved successfully")
-            
-        except Exception as e:
+
+        except (OSError, TypeError, ValueError) as e:
             logger.error(f"Error saving model registry: {str(e)}")
 
     def save_model_checkpoint(self, 
@@ -269,7 +269,7 @@ class ModelManager:
                 with open(extractors_path, 'w', encoding='utf-8') as f:
                     json.dump(serialized, f, indent=2)
                 model_files['feature_extractors'] = str(extractors_path)
-            except Exception as e:
+            except (OSError, TypeError, ValueError) as e:
                 logger.warning(f"Could not save feature extractors: {str(e)}")
             
             # Save pipeline configuration
@@ -326,8 +326,8 @@ class ModelManager:
             
             logger.info(f"Model checkpoint saved: {model_id} v{version}")
             return checkpoint
-            
-        except Exception as e:
+
+        except (OSError, TypeError, ValueError, RuntimeError) as e:
             logger.error(f"Error saving model checkpoint: {str(e)}")
             raise
 
@@ -393,7 +393,7 @@ class ModelManager:
                     with open(extractors_path, 'r', encoding='utf-8') as f:
                         serialized = json.load(f)
                     pipeline.feature_extractors = self._deserialize_feature_extractors(serialized)
-                except Exception as e:
+                except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
                     logger.warning(f"Could not load feature extractors: {str(e)}")
             elif legacy_extractors_path.exists():
                 # SEC: Skip loading legacy pickle files due to security risk (CWE-502)
@@ -410,8 +410,8 @@ class ModelManager:
             
             logger.info(f"Model checkpoint loaded: {model_id} v{checkpoint.version}")
             return pipeline
-            
-        except Exception as e:
+
+        except (OSError, json.JSONDecodeError, TypeError, ValueError, RuntimeError, KeyError) as e:
             logger.error(f"Error loading model checkpoint: {str(e)}")
             raise
 
@@ -485,7 +485,7 @@ class ModelManager:
                         'processing_time': processing_time
                     })
                     
-                except Exception as e:
+                except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as e:
                     logger.error(f"Error processing validation sample: {str(e)}")
                     results['failed_predictions'] += 1
             
@@ -506,8 +506,8 @@ class ModelManager:
             
             logger.info(f"Model validation completed: {results['success_rate']:.3f} success rate")
             return results
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
             logger.error(f"Error in model validation: {str(e)}")
             return {'error': str(e)}
 
@@ -546,7 +546,7 @@ class ModelManager:
                     
                     comparison_results['results'][f"{model_id}_v{version}"] = validation_results
                     
-                except Exception as e:
+                except (RuntimeError, ValueError, TypeError, KeyError, OSError) as e:
                     logger.error(f"Error validating {model_id} v{version}: {str(e)}")
                     comparison_results['results'][f"{model_id}_v{version}"] = {'error': str(e)}
             
@@ -559,8 +559,8 @@ class ModelManager:
             )
             
             return comparison_results
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, KeyError, OSError) as e:
             logger.error(f"Error in model comparison: {str(e)}")
             return {'error': str(e)}
 
@@ -636,8 +636,8 @@ class ModelManager:
                 logger.info(f"Model {model_id} auto-update skipped (improvement {improvement:.3f} < {update_threshold})")
             
             return update_results
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, KeyError, OSError) as e:
             logger.error(f"Error in auto-update: {str(e)}")
             return {'error': str(e)}
 
@@ -702,8 +702,8 @@ class ModelManager:
             
             logger.info(f"Model {model_id} rolled back from {checkpoints[0].version} to {target_checkpoint.version}")
             return rollback_results
-            
-        except Exception as e:
+
+        except (RuntimeError, ValueError, TypeError, KeyError, OSError) as e:
             logger.error(f"Error in model rollback: {str(e)}")
             return {'error': str(e)}
 
@@ -777,7 +777,7 @@ class ModelManager:
                     # Remove from registry
                     self.model_registry[model_id].remove(checkpoint)
                     
-                except Exception as e:
+                except (OSError, PermissionError, shutil.Error, KeyError, ValueError) as e:
                     cleanup_results['errors'].append(f"Error removing {checkpoint.file_path}: {str(e)}")
         
         # Save updated registry
@@ -830,7 +830,7 @@ class ModelManager:
                 try:
                     shutil.rmtree(version_dir)
                     logger.info(f"Removed old checkpoint: {version_dir}")
-                except Exception as e:
+                except (OSError, PermissionError, shutil.Error) as e:
                     logger.error(f"Error removing {version_dir}: {str(e)}")
 
     def _calculate_performance_metrics(self, predictions: List[Dict], ground_truths: List[Dict]) -> Dict[str, float]:
@@ -866,8 +866,8 @@ class ModelManager:
             metrics['confidence_std'] = np.std(confidences)
             
             return metrics
-            
-        except Exception as e:
+
+        except (ValueError, TypeError, KeyError, IndexError, RuntimeError) as e:
             logger.error(f"Error calculating performance metrics: {str(e)}")
             return {'error': str(e)}
 
