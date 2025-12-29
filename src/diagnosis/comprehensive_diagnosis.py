@@ -65,7 +65,13 @@ class ComprehensiveDiagnosisModule:
         try:
             self.llm = get_llm()
             logger.info("Successfully initialized LLM for diagnosis")
-        except Exception as e:
+        except (ImportError, ModuleNotFoundError) as e:
+            logger.warning(f"Could not initialize LLM - missing dependency: {str(e)}. Some features will be limited.")
+            self.llm = None
+        except (ValueError, TypeError, AttributeError) as e:
+            logger.warning(f"Could not initialize LLM - configuration error: {str(e)}. Some features will be limited.")
+            self.llm = None
+        except (RuntimeError, OSError) as e:
             logger.warning(f"Could not initialize LLM: {str(e)}. Some features will be limited.")
             self.llm = None
         
@@ -75,7 +81,15 @@ class ComprehensiveDiagnosisModule:
                 self.vector_store = VectorStore.create("faiss")
                 self.vector_store.connect()
                 logger.info("Successfully initialized vector store for diagnosis caching")
-            except Exception as e:
+            except (ImportError, ModuleNotFoundError) as e:
+                logger.warning(f"Could not initialize vector store - missing dependency: {str(e)}")
+                self.vector_store = None
+                self.use_vector_cache = False
+            except (ValueError, TypeError, AttributeError) as e:
+                logger.warning(f"Could not initialize vector store - configuration error: {str(e)}")
+                self.vector_store = None
+                self.use_vector_cache = False
+            except (RuntimeError, OSError, IOError) as e:
                 logger.warning(f"Could not initialize vector store: {str(e)}")
                 self.vector_store = None
                 self.use_vector_cache = False
@@ -118,7 +132,9 @@ class ComprehensiveDiagnosisModule:
                     logger.info(f"Successfully initialized symptom embeddings for {len(self.symptom_embeddings)} symptoms")
             else:
                 logger.warning("LLM does not support embeddings, using keyword matching only")
-        except Exception as e:
+        except (ValueError, TypeError, KeyError) as e:
+            logger.error(f"Error initializing symptom embeddings - data error: {str(e)}")
+        except (RuntimeError, AttributeError) as e:
             logger.error(f"Error initializing symptom embeddings: {str(e)}")
     
     async def generate_diagnosis(
@@ -232,11 +248,15 @@ class ComprehensiveDiagnosisModule:
                                 # Check if this symptom is already in the list
                                 if not any(s["text"].lower() == symptom_text.lower() for s in all_indicators):
                                     all_indicators.append({
-                                        "text": symptom_text, 
+                                        "text": symptom_text,
                                         "source": source,
                                         "confidence": confidence
                                     })
-            except Exception as e:
+            except (KeyError, ValueError, TypeError) as e:
+                logger.error(f"Error in AgenticRAG processing - data error: {str(e)}")
+            except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+                logger.error(f"Error in AgenticRAG processing - async error: {str(e)}")
+            except (RuntimeError, AttributeError) as e:
                 logger.error(f"Error in AgenticRAG processing: {str(e)}")
         
         # Add LLM-based symptom extraction if available
@@ -422,9 +442,12 @@ class ComprehensiveDiagnosisModule:
                             "confidence": confidence,
                             "distance": float(distance)
                         })
-            
+
             return symptoms
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, IndexError) as e:
+            logger.error(f"Error in vector symptom detection - data error: {str(e)}")
+            return []
+        except (RuntimeError, AttributeError) as e:
             logger.error(f"Error in vector symptom detection: {str(e)}")
             return []
     
@@ -486,11 +509,17 @@ class ComprehensiveDiagnosisModule:
                                     "source": "llm_extraction",
                                     "confidence": confidence
                                 })
-            except Exception as e:
+            except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                 logger.warning(f"Error parsing LLM symptom response: {str(e)}")
-            
+
             return symptoms
-        except Exception as e:
+        except (KeyError, ValueError, TypeError) as e:
+            logger.error(f"Error in LLM symptom extraction - data error: {str(e)}")
+            return []
+        except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+            logger.error(f"Error in LLM symptom extraction - async error: {str(e)}")
+            return []
+        except (RuntimeError, AttributeError) as e:
             logger.error(f"Error in LLM symptom extraction: {str(e)}")
             return []
     
@@ -1010,8 +1039,12 @@ class ComprehensiveDiagnosisModule:
                 
                 # Add LLM-generated recommendations
                 recommendations.extend(llm_recommendations)
-                
-            except Exception as e:
+
+            except (KeyError, ValueError, TypeError) as e:
+                logger.error(f"Error generating LLM recommendations - data error: {str(e)}")
+            except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+                logger.error(f"Error generating LLM recommendations - async error: {str(e)}")
+            except (RuntimeError, AttributeError) as e:
                 logger.error(f"Error generating LLM recommendations: {str(e)}")
         
         # Remove duplicates and limit number of recommendations
@@ -1173,9 +1206,13 @@ class ComprehensiveDiagnosisModule:
                     cached_result["from_cache"] = True
                     cached_result["cache_key"] = cache_key
                     return cached_result
-        except Exception as e:
+        except (KeyError, ValueError, TypeError) as e:
+            logger.error(f"Error checking diagnosis cache - data error: {str(e)}")
+        except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+            logger.error(f"Error checking diagnosis cache - async error: {str(e)}")
+        except (IOError, OSError, RuntimeError) as e:
             logger.error(f"Error checking diagnosis cache: {str(e)}")
-        
+
         return None
     
     async def _cache_diagnosis(self, cache_key: str, result: Dict[str, Any]) -> bool:
@@ -1187,7 +1224,13 @@ class ComprehensiveDiagnosisModule:
             await self.vector_store.add_processed_result(cache_key, result)
             logger.info(f"Cached diagnosis with key: {cache_key}")
             return True
-        except Exception as e:
+        except (KeyError, ValueError, TypeError) as e:
+            logger.error(f"Error caching diagnosis - data error: {str(e)}")
+            return False
+        except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+            logger.error(f"Error caching diagnosis - async error: {str(e)}")
+            return False
+        except (IOError, OSError, RuntimeError) as e:
             logger.error(f"Error caching diagnosis: {str(e)}")
             return False
 
@@ -1235,7 +1278,11 @@ def create_diagnosis_module(use_agentic_rag: bool = True, use_cache: bool = True
             from utils.agentic_rag import AgenticRAG
             agentic_rag = AgenticRAG.create_for_mental_health()
             logger.info("Successfully initialized AgenticRAG for diagnosis")
-        except Exception as e:
+        except (ImportError, ModuleNotFoundError) as e:
+            logger.warning(f"Could not initialize AgenticRAG - missing dependency: {str(e)}")
+        except (ValueError, TypeError, AttributeError) as e:
+            logger.warning(f"Could not initialize AgenticRAG - configuration error: {str(e)}")
+        except (RuntimeError, OSError) as e:
             logger.warning(f"Could not initialize AgenticRAG: {str(e)}")
     
     # Create and return the module

@@ -140,7 +140,15 @@ class Application:
                 self.logger.error("Application initialization failed")
             
             return success
-        except Exception as e:
+        except (ImportError, ModuleNotFoundError) as e:
+            self.logger.error(f"Error during application initialization - missing module: {str(e)}")
+            self.initialized = False
+            return False
+        except (ValueError, TypeError, AttributeError) as e:
+            self.logger.error(f"Error during application initialization - configuration error: {str(e)}")
+            self.initialized = False
+            return False
+        except (RuntimeError, OSError) as e:
             self.logger.error(f"Error during application initialization: {str(e)}")
             self.initialized = False
             return False
@@ -183,8 +191,10 @@ class Application:
                 self.logger.debug("Registered UIManager type")
             except ImportError:
                 self.logger.warning("Could not import UIManager")
-                
-        except Exception as e:
+
+        except (ValueError, TypeError, AttributeError) as e:
+            self.logger.error(f"Error registering core module types - configuration error: {str(e)}")
+        except (RuntimeError, OSError) as e:
             self.logger.error(f"Error registering core module types: {str(e)}")
     
     async def _initialize_modules_with_fallback(self):
@@ -203,7 +213,16 @@ class Application:
                     if not success:
                         self.logger.error(f"Failed to initialize essential module: {module_id}")
                         all_success = False
-                except Exception as e:
+                except (ImportError, ModuleNotFoundError) as e:
+                    self.logger.error(f"Error initializing module {module_id} - missing dependency: {str(e)}")
+                    all_success = False
+                except (ValueError, TypeError, AttributeError) as e:
+                    self.logger.error(f"Error initializing module {module_id} - configuration error: {str(e)}")
+                    all_success = False
+                except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+                    self.logger.error(f"Error initializing module {module_id} - async error: {str(e)}")
+                    all_success = False
+                except (RuntimeError, OSError) as e:
                     self.logger.error(f"Error initializing module {module_id}: {str(e)}")
                     all_success = False
             else:
@@ -218,7 +237,13 @@ class Application:
                     success = await module.initialize()
                     if not success:
                         self.logger.warning(f"Failed to initialize optional module: {module_id}")
-                except Exception as e:
+                except (ImportError, ModuleNotFoundError) as e:
+                    self.logger.warning(f"Error initializing optional module {module_id} - missing dependency: {str(e)}")
+                except (ValueError, TypeError, AttributeError) as e:
+                    self.logger.warning(f"Error initializing optional module {module_id} - configuration error: {str(e)}")
+                except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+                    self.logger.warning(f"Error initializing optional module {module_id} - async error: {str(e)}")
+                except (RuntimeError, OSError) as e:
                     self.logger.warning(f"Error initializing optional module {module_id}: {str(e)}")
         
         # Initialize remaining modules
@@ -228,7 +253,13 @@ class Application:
                     success = await module.initialize()
                     if not success:
                         self.logger.warning(f"Failed to initialize module: {module_id}")
-                except Exception as e:
+                except (ImportError, ModuleNotFoundError) as e:
+                    self.logger.warning(f"Error initializing module {module_id} - missing dependency: {str(e)}")
+                except (ValueError, TypeError, AttributeError) as e:
+                    self.logger.warning(f"Error initializing module {module_id} - configuration error: {str(e)}")
+                except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+                    self.logger.warning(f"Error initializing module {module_id} - async error: {str(e)}")
+                except (RuntimeError, OSError) as e:
                     self.logger.warning(f"Error initializing module {module_id}: {str(e)}")
         
         return all_success
@@ -331,7 +362,9 @@ class Application:
                     if self.optimization_enabled:
                         self.logger.debug(f"Using optimized model for {agent_name}_agent: "
                                        f"{agent_config.get('model_config', {}).get('model', 'default')}")
-                except Exception as e:
+                except (ValueError, TypeError, AttributeError) as e:
+                    self.logger.warning(f"Could not register {agent_name}_agent - configuration error: {e}")
+                except (RuntimeError, KeyError) as e:
                     self.logger.warning(f"Could not register {agent_name}_agent: {e}")
 
         # Create UI module
@@ -373,7 +406,10 @@ class Application:
                     "bottlenecks_detected": len(recommendations.get("bottlenecks", [])),
                     "cache_opportunities": len(recommendations.get("cache_opportunities", []))
                 }
-            except Exception as e:
+            except (KeyError, ValueError, TypeError) as e:
+                self.logger.warning(f"Error getting optimization metrics - data error: {e}")
+                health_info["optimization"] = {"enabled": True, "error": str(e)}
+            except (RuntimeError, AttributeError) as e:
                 self.logger.warning(f"Error getting optimization metrics: {e}")
                 health_info["optimization"] = {"enabled": True, "error": str(e)}
         else:
@@ -412,8 +448,14 @@ class Application:
 
             # Start the application
             self.start_application()
-            
-        except Exception as e:
+
+        except (ImportError, ModuleNotFoundError) as e:
+            self.logger.critical(f"Fatal error in application - missing module: {str(e)}")
+            raise
+        except (EnvironmentError, ValueError, TypeError) as e:
+            self.logger.critical(f"Fatal error in application - configuration error: {str(e)}")
+            raise
+        except (RuntimeError, OSError, IOError) as e:
             self.logger.critical(f"Fatal error in application: {str(e)}")
             raise
     
@@ -429,14 +471,18 @@ class Application:
         try:
             # Run migration
             results = migrate_all_user_data(user_id=user_id)
-            
+
             # Log results
             total = sum(results.values())
             self.logger.info(f"Migration complete: {total} total items migrated.")
             for data_type, count in results.items():
                 self.logger.info(f"  - {data_type}: {count} items")
-                
-        except Exception as e:
+
+        except (KeyError, ValueError, TypeError) as e:
+            self.logger.error(f"Error during migration - data error: {str(e)}")
+        except (IOError, OSError) as e:
+            self.logger.error(f"Error during migration - I/O error: {str(e)}")
+        except (RuntimeError, AttributeError) as e:
             self.logger.error(f"Error during migration: {str(e)}")
             
         self.logger.info("Migration process finished.")
@@ -483,9 +529,17 @@ def main():
         # Create and run application
         app = Application()
         app.run()
-    except Exception as e:
-        logger.critical(f"Unhandled exception in main application: {str(e)}", exc_info=True)
-        print(f"An unexpected error occurred: {str(e)}")
+    except (ImportError, ModuleNotFoundError) as e:
+        logger.critical(f"Unhandled import error in main application: {str(e)}", exc_info=True)
+        print(f"An import error occurred: {str(e)}")
+        print("Please check dependencies and reinstall if necessary.")
+    except (EnvironmentError, ValueError, TypeError) as e:
+        logger.critical(f"Unhandled configuration error in main application: {str(e)}", exc_info=True)
+        print(f"A configuration error occurred: {str(e)}")
+        print("Please check your configuration and environment variables.")
+    except (RuntimeError, OSError, IOError) as e:
+        logger.critical(f"Unhandled runtime error in main application: {str(e)}", exc_info=True)
+        print(f"A runtime error occurred: {str(e)}")
         print("Please check the logs or contact support.")
 
 def initialize_components(config=None):
@@ -539,19 +593,33 @@ def initialize_components(config=None):
                 logger.warning(f"Some agent modules could not be imported: {e}")
         except ImportError as e:
             logger.warning(f"Some core modules could not be imported: {e}")
-        
+
         # Create and initialize the application
         app = Application()
         asyncio.run(app.initialize())
         return app
-    except Exception as e:
+    except (ImportError, ModuleNotFoundError) as e:
+        logger.error(f"Error initializing components - missing module: {str(e)}")
+        raise
+    except (ValueError, TypeError, AttributeError) as e:
+        logger.error(f"Error initializing components - configuration error: {str(e)}")
+        raise
+    except (RuntimeError, OSError) as e:
         logger.error(f"Error initializing components: {str(e)}")
         raise
 
 if __name__ == "__main__":
     try:
         main()
-    except Exception as e:
-        logger.critical(f"Unhandled exception in main application: {str(e)}", exc_info=True)
-        print(f"An unexpected error occurred: {str(e)}")
+    except (ImportError, ModuleNotFoundError) as e:
+        logger.critical(f"Unhandled import error in main application: {str(e)}", exc_info=True)
+        print(f"An import error occurred: {str(e)}")
+        print("Please check dependencies and reinstall if necessary.")
+    except (EnvironmentError, ValueError, TypeError) as e:
+        logger.critical(f"Unhandled configuration error in main application: {str(e)}", exc_info=True)
+        print(f"A configuration error occurred: {str(e)}")
+        print("Please check your configuration and environment variables.")
+    except (RuntimeError, OSError, IOError) as e:
+        logger.critical(f"Unhandled runtime error in main application: {str(e)}", exc_info=True)
+        print(f"A runtime error occurred: {str(e)}")
         print("Please check the logs or contact support.")

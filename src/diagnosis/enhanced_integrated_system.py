@@ -118,11 +118,20 @@ class EnhancedIntegratedDiagnosticSystem:
                 setattr(self, system_name, initializer())
                 self.systems_initialized[system_name] = True
                 self.logger.info(f"Successfully initialized {system_name}")
-            except Exception as e:
+            except (ImportError, ModuleNotFoundError) as e:
                 self.systems_initialized[system_name] = False
                 self.initialization_errors[system_name] = str(e)
-                self.logger.error(f"Failed to initialize {system_name}: {str(e)}")
-                # Set a fallback system
+                self.logger.error(f"Failed to initialize {system_name} - missing dependency: {str(e)}")
+                setattr(self, system_name, None)
+            except (ValueError, TypeError, AttributeError) as e:
+                self.systems_initialized[system_name] = False
+                self.initialization_errors[system_name] = str(e)
+                self.logger.error(f"Failed to initialize {system_name} - configuration error: {str(e)}")
+                setattr(self, system_name, None)
+            except (RuntimeError, OSError) as e:
+                self.systems_initialized[system_name] = False
+                self.initialization_errors[system_name] = str(e)
+                self.logger.error(f"Failed to initialize {system_name} - runtime error: {str(e)}")
                 setattr(self, system_name, None)
     
     async def generate_comprehensive_diagnosis(self,
@@ -164,7 +173,13 @@ class EnhancedIntegratedDiagnosticSystem:
                     cultural_profile = await self.cultural_sensitivity.assess_cultural_context(
                         user_id, user_message, conversation_history, cultural_info
                     )
-                except Exception as e:
+                except (ValueError, KeyError, TypeError) as e:
+                    warnings.append(f"Cultural assessment validation error: {str(e)}")
+                    self.logger.warning(f"Cultural assessment failed - data error: {str(e)}")
+                except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+                    warnings.append(f"Cultural assessment timeout: {str(e)}")
+                    self.logger.warning(f"Cultural assessment failed - async error: {str(e)}")
+                except (RuntimeError, AttributeError) as e:
                     warnings.append(f"Cultural assessment error: {str(e)}")
                     self.logger.warning(f"Cultural assessment failed: {str(e)}")
             else:
@@ -179,14 +194,20 @@ class EnhancedIntegratedDiagnosticSystem:
                     session_continuity = await self.memory_system.get_session_continuity_context(
                         user_id, session_id
                     )
-                    
+
                     # Get relevant therapeutic insights
                     contextual_memory = await self.memory_system.get_contextual_memory(
                         user_id, "significant", lookback_days=30
                     )
                     relevant_insights = contextual_memory.get("significant_insights", [])
-                    
-                except Exception as e:
+
+                except (KeyError, ValueError, TypeError) as e:
+                    warnings.append(f"Memory system data error: {str(e)}")
+                    self.logger.warning(f"Memory system failed - data error: {str(e)}")
+                except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+                    warnings.append(f"Memory system timeout: {str(e)}")
+                    self.logger.warning(f"Memory system failed - async error: {str(e)}")
+                except (IOError, OSError, RuntimeError) as e:
                     warnings.append(f"Memory system error: {str(e)}")
                     self.logger.warning(f"Memory system failed: {str(e)}")
             else:
@@ -223,8 +244,14 @@ class EnhancedIntegratedDiagnosticSystem:
                         trajectory_prediction = await self.temporal_analysis.predict_symptom_trajectory(
                             user_id, main_symptom, prediction_days=7
                         )
-                    
-                except Exception as e:
+
+                except (KeyError, ValueError, TypeError) as e:
+                    warnings.append(f"Temporal analysis data error: {str(e)}")
+                    self.logger.warning(f"Temporal analysis failed - data error: {str(e)}")
+                except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+                    warnings.append(f"Temporal analysis timeout: {str(e)}")
+                    self.logger.warning(f"Temporal analysis failed - async error: {str(e)}")
+                except (RuntimeError, AttributeError) as e:
                     warnings.append(f"Temporal analysis error: {str(e)}")
                     self.logger.warning(f"Temporal analysis failed: {str(e)}")
             else:
@@ -255,14 +282,20 @@ class EnhancedIntegratedDiagnosticSystem:
                     
                     if not diagnosis_result.get("error"):
                         differential_diagnoses = [
-                            self._dict_to_differential_diagnosis(d) 
+                            self._dict_to_differential_diagnosis(d)
                             for d in diagnosis_result.get("differential_diagnoses", [])
                         ]
                         if differential_diagnoses:
                             primary_diagnosis = differential_diagnoses[0]
                         confidence_score = diagnosis_result.get("diagnostic_confidence", 0.0)
-                    
-                except Exception as e:
+
+                except (KeyError, ValueError, TypeError) as e:
+                    warnings.append(f"Differential diagnosis data error: {str(e)}")
+                    self.logger.warning(f"Differential diagnosis failed - data error: {str(e)}")
+                except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+                    warnings.append(f"Differential diagnosis timeout: {str(e)}")
+                    self.logger.warning(f"Differential diagnosis failed - async error: {str(e)}")
+                except (RuntimeError, AttributeError) as e:
                     warnings.append(f"Differential diagnosis error: {str(e)}")
                     self.logger.warning(f"Differential diagnosis failed: {str(e)}")
             else:
@@ -293,8 +326,14 @@ class EnhancedIntegratedDiagnosticSystem:
                         # Update response with cultural adaptations
                         therapeutic_response.response_text = cultural_adaptation.adapted_approach
                         cultural_adaptations = asdict(cultural_adaptation)
-                    
-                except Exception as e:
+
+                except (KeyError, ValueError, TypeError) as e:
+                    warnings.append(f"Therapeutic response data error: {str(e)}")
+                    self.logger.warning(f"Therapeutic response failed - data error: {str(e)}")
+                except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+                    warnings.append(f"Therapeutic response timeout: {str(e)}")
+                    self.logger.warning(f"Therapeutic response failed - async error: {str(e)}")
+                except (RuntimeError, AttributeError) as e:
                     warnings.append(f"Therapeutic response error: {str(e)}")
                     self.logger.warning(f"Therapeutic response failed: {str(e)}")
             else:
@@ -325,8 +364,14 @@ class EnhancedIntegratedDiagnosticSystem:
                             primary_diagnosis.condition_name,
                             patient_characteristics
                         )
-                    
-                except Exception as e:
+
+                except (KeyError, ValueError, TypeError) as e:
+                    warnings.append(f"Research integration data error: {str(e)}")
+                    self.logger.warning(f"Research integration failed - data error: {str(e)}")
+                except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+                    warnings.append(f"Research integration timeout: {str(e)}")
+                    self.logger.warning(f"Research integration failed - async error: {str(e)}")
+                except (RuntimeError, AttributeError, IOError) as e:
                     warnings.append(f"Research integration error: {str(e)}")
                     self.logger.warning(f"Research integration failed: {str(e)}")
             else:
@@ -360,8 +405,14 @@ class EnhancedIntegratedDiagnosticSystem:
                         await self._record_intervention_outcome(
                             user_id, session_id, user_message, emotional_context
                         )
-                    
-                except Exception as e:
+
+                except (KeyError, ValueError, TypeError) as e:
+                    warnings.append(f"Adaptive learning data error: {str(e)}")
+                    self.logger.warning(f"Adaptive learning failed - data error: {str(e)}")
+                except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+                    warnings.append(f"Adaptive learning timeout: {str(e)}")
+                    self.logger.warning(f"Adaptive learning failed - async error: {str(e)}")
+                except (RuntimeError, AttributeError) as e:
                     warnings.append(f"Adaptive learning error: {str(e)}")
                     self.logger.warning(f"Adaptive learning failed: {str(e)}")
             else:
@@ -388,8 +439,14 @@ class EnhancedIntegratedDiagnosticSystem:
                     }
                     
                     await self.memory_system.record_session_memory(user_id, session_id, session_data)
-                    
-                except Exception as e:
+
+                except (KeyError, ValueError, TypeError) as e:
+                    warnings.append(f"Memory storage data error: {str(e)}")
+                    self.logger.warning(f"Memory storage failed - data error: {str(e)}")
+                except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+                    warnings.append(f"Memory storage timeout: {str(e)}")
+                    self.logger.warning(f"Memory storage failed - async error: {str(e)}")
+                except (IOError, OSError, RuntimeError) as e:
                     warnings.append(f"Memory storage error: {str(e)}")
                     self.logger.warning(f"Memory storage failed: {str(e)}")
             
@@ -406,7 +463,11 @@ class EnhancedIntegratedDiagnosticSystem:
             if self.systems_initialized.get("memory_system", False):
                 try:
                     progress_tracking = await self.memory_system.track_progress_milestones(user_id)
-                except Exception as e:
+                except (KeyError, ValueError, TypeError) as e:
+                    warnings.append(f"Progress tracking data error: {str(e)}")
+                except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+                    warnings.append(f"Progress tracking timeout: {str(e)}")
+                except (RuntimeError, AttributeError) as e:
                     warnings.append(f"Progress tracking error: {str(e)}")
             
             # Compile comprehensive result
@@ -438,11 +499,13 @@ class EnhancedIntegratedDiagnosticSystem:
             
             self.logger.info(f"Comprehensive diagnosis completed for user {user_id} in {processing_time:.1f}ms")
             return result
-            
-        except Exception as e:
-            self.logger.error(f"Critical error in comprehensive diagnosis: {str(e)}")
+
+        except (KeyError, ValueError, TypeError, asyncio.TimeoutError, asyncio.CancelledError,
+                RuntimeError, AttributeError, IOError, OSError) as e:
+            error_type = type(e).__name__
+            self.logger.error(f"Critical {error_type} in comprehensive diagnosis: {str(e)}")
             self.logger.error(traceback.format_exc())
-            
+
             # Return minimal result with error information
             return ComprehensiveDiagnosticResult(
                 user_id=user_id,
@@ -466,7 +529,7 @@ class EnhancedIntegratedDiagnosticSystem:
                 integration_confidence=0.0,
                 system_reliability=0.0,
                 processing_time_ms=(datetime.now() - start_time).total_seconds() * 1000,
-                warnings=[f"Critical system error: {str(e)}"],
+                warnings=[f"Critical {error_type}: {str(e)}"],
                 limitations=["System experiencing technical difficulties"]
             )
     
@@ -528,12 +591,14 @@ class EnhancedIntegratedDiagnosticSystem:
                 )
             
             return validation_results
-            
-        except Exception as e:
-            self.logger.error(f"Error validating system integration: {str(e)}")
+
+        except (KeyError, ValueError, TypeError, RuntimeError, AttributeError) as e:
+            error_type = type(e).__name__
+            self.logger.error(f"{error_type} validating system integration: {str(e)}")
             return {
                 "overall_status": "error",
                 "error": str(e),
+                "error_type": error_type,
                 "recommendations": ["System validation failed. Manual inspection required."]
             }
     
@@ -668,8 +733,12 @@ class EnhancedIntegratedDiagnosticSystem:
                         user_response=user_message,
                         engagement_metrics=engagement_metrics
                     )
-        
-        except Exception as e:
+
+        except (KeyError, ValueError, TypeError) as e:
+            self.logger.warning(f"Could not record intervention outcome - data error: {str(e)}")
+        except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+            self.logger.warning(f"Could not record intervention outcome - async error: {str(e)}")
+        except (RuntimeError, AttributeError) as e:
             self.logger.warning(f"Could not record intervention outcome: {str(e)}")
     
     def _calculate_integration_confidence(self,
@@ -786,8 +855,14 @@ class EnhancedIntegratedDiagnosticSystem:
                     # Re-initialize the system
                     self._initialize_systems()  # This will re-attempt all initializations
                     restart_results[system_name] = self.systems_initialized.get(system_name, False)
-                except Exception as e:
+                except (ImportError, ModuleNotFoundError) as e:
+                    self.logger.error(f"Failed to restart {system_name} - missing dependency: {str(e)}")
+                    restart_results[system_name] = False
+                except (ValueError, TypeError, AttributeError) as e:
+                    self.logger.error(f"Failed to restart {system_name} - configuration error: {str(e)}")
+                    restart_results[system_name] = False
+                except (RuntimeError, OSError) as e:
                     self.logger.error(f"Failed to restart {system_name}: {str(e)}")
                     restart_results[system_name] = False
-        
+
         return restart_results

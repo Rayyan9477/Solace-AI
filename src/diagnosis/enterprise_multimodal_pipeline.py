@@ -474,9 +474,15 @@ class EnterpriseMultiModalDiagnosticPipeline:
             ).to(self.device)
             
             logger.info("Neural network models initialized successfully")
-            
-        except Exception as e:
-            logger.error(f"Error initializing models: {str(e)}")
+
+        except (ImportError, ModuleNotFoundError) as e:
+            logger.error(f"Error initializing models - missing dependency: {str(e)}")
+            raise
+        except (ValueError, TypeError, AttributeError) as e:
+            logger.error(f"Error initializing models - configuration error: {str(e)}")
+            raise
+        except (RuntimeError, torch.cuda.CudaError if hasattr(torch, 'cuda') else RuntimeError) as e:
+            logger.error(f"Error initializing models - GPU/runtime error: {str(e)}")
             raise
     
     def _initialize_feature_extractors(self):
@@ -498,8 +504,14 @@ class EnterpriseMultiModalDiagnosticPipeline:
             self.feature_extractors['temporal'] = self._create_temporal_analyzer()
             
             logger.info("Feature extractors initialized successfully")
-            
-        except Exception as e:
+
+        except (ImportError, ModuleNotFoundError) as e:
+            logger.error(f"Error initializing feature extractors - missing dependency: {str(e)}")
+            raise
+        except (ValueError, TypeError, AttributeError) as e:
+            logger.error(f"Error initializing feature extractors - configuration error: {str(e)}")
+            raise
+        except (RuntimeError, OSError) as e:
             logger.error(f"Error initializing feature extractors: {str(e)}")
             raise
     
@@ -636,8 +648,14 @@ class EnterpriseMultiModalDiagnosticPipeline:
                 )
             
             logger.info("Vector stores initialized successfully")
-            
-        except Exception as e:
+
+        except (ImportError, ModuleNotFoundError) as e:
+            logger.error(f"Error initializing vector stores - missing dependency: {str(e)}")
+            self._initialize_faiss_fallback()
+        except (ValueError, TypeError, AttributeError) as e:
+            logger.error(f"Error initializing vector stores - configuration error: {str(e)}")
+            self._initialize_faiss_fallback()
+        except (RuntimeError, OSError, ConnectionError) as e:
             logger.error(f"Error initializing vector stores: {str(e)}")
             # Fallback to FAISS
             self._initialize_faiss_fallback()
@@ -889,14 +907,34 @@ class EnterpriseMultiModalDiagnosticPipeline:
             final_results['legacy_format'] = await self._convert_to_legacy_format(final_results)
             
             return final_results
-            
-        except Exception as e:
-            logger.error(f"Error in multi-modal processing: {str(e)}")
+
+        except (KeyError, ValueError, TypeError) as e:
+            logger.error(f"Error in multi-modal processing - data error: {str(e)}")
             self.error_tracker[type(e).__name__] += 1
-            
             return {
                 'success': False,
                 'error': str(e),
+                'error_type': 'data_error',
+                'timestamp': datetime.now().isoformat(),
+                'processing_time': time.time() - start_time
+            }
+        except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+            logger.error(f"Error in multi-modal processing - async error: {str(e)}")
+            self.error_tracker[type(e).__name__] += 1
+            return {
+                'success': False,
+                'error': str(e),
+                'error_type': 'async_error',
+                'timestamp': datetime.now().isoformat(),
+                'processing_time': time.time() - start_time
+            }
+        except (RuntimeError, AttributeError, torch.cuda.CudaError if hasattr(torch, 'cuda') else RuntimeError) as e:
+            logger.error(f"Error in multi-modal processing: {str(e)}")
+            self.error_tracker[type(e).__name__] += 1
+            return {
+                'success': False,
+                'error': str(e),
+                'error_type': 'runtime_error',
                 'timestamp': datetime.now().isoformat(),
                 'processing_time': time.time() - start_time
             }
@@ -1347,8 +1385,12 @@ class EnterpriseMultiModalDiagnosticPipeline:
             }
             
             # In production, this would be stored in user's personalized model cache
-            
-        except Exception as e:
+
+        except (KeyError, ValueError, TypeError) as e:
+            logger.error(f"Error updating personalized models - data error: {str(e)}")
+        except (IOError, OSError) as e:
+            logger.error(f"Error updating personalized models - I/O error: {str(e)}")
+        except (RuntimeError, AttributeError) as e:
             logger.error(f"Error updating personalized models: {str(e)}")
 
     async def _convert_to_legacy_format(self, results: Dict[str, Any]) -> Dict[str, Any]:
@@ -1386,10 +1428,13 @@ class EnterpriseMultiModalDiagnosticPipeline:
             }
             
             return legacy_format
-            
-        except Exception as e:
+
+        except (KeyError, ValueError, TypeError, IndexError) as e:
+            logger.error(f"Error converting to legacy format - data error: {str(e)}")
+            return {'success': False, 'error': 'Format conversion failed', 'error_type': 'data_error'}
+        except (RuntimeError, AttributeError) as e:
             logger.error(f"Error converting to legacy format: {str(e)}")
-            return {'success': False, 'error': 'Format conversion failed'}
+            return {'success': False, 'error': 'Format conversion failed', 'error_type': 'runtime_error'}
 
     def _log_access(self, user_id: str, session_id: str, operation: str):
         """Log access for audit trail (HIPAA compliance)"""
@@ -1459,7 +1504,10 @@ class EnterpriseMultiModalDiagnosticPipeline:
             }
             logger.info(f"A/B test '{test_name}' setup with variants: {list(variants.keys())}")
             return True
-        except Exception as e:
+        except (KeyError, ValueError, TypeError) as e:
+            logger.error(f"Error setting up A/B test - configuration error: {str(e)}")
+            return False
+        except (RuntimeError, AttributeError) as e:
             logger.error(f"Error setting up A/B test: {str(e)}")
             return False
 
@@ -1550,7 +1598,13 @@ def create_enterprise_pipeline(config: Optional[Dict[str, Any]] = None) -> Enter
         pipeline = EnterpriseMultiModalDiagnosticPipeline(config=config)
         logger.info("Enterprise Multi-Modal Diagnostic Pipeline created successfully")
         return pipeline
-    except Exception as e:
+    except (ImportError, ModuleNotFoundError) as e:
+        logger.error(f"Failed to create enterprise pipeline - missing dependency: {str(e)}")
+        raise
+    except (ValueError, TypeError, AttributeError) as e:
+        logger.error(f"Failed to create enterprise pipeline - configuration error: {str(e)}")
+        raise
+    except (RuntimeError, OSError) as e:
         logger.error(f"Failed to create enterprise pipeline: {str(e)}")
         raise
 
@@ -1593,8 +1647,14 @@ class IntegratedDiagnosticSystem:
                     # Fallback to legacy system
                     logger.warning("Enterprise system failed, falling back to legacy system")
                     return await self.legacy_system.generate_diagnosis(**kwargs)
-                    
-            except Exception as e:
+
+            except (KeyError, ValueError, TypeError) as e:
+                logger.error(f"Enterprise system data error: {str(e)}, falling back to legacy")
+                return await self.legacy_system.generate_diagnosis(**kwargs)
+            except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+                logger.error(f"Enterprise system async error: {str(e)}, falling back to legacy")
+                return await self.legacy_system.generate_diagnosis(**kwargs)
+            except (RuntimeError, AttributeError) as e:
                 logger.error(f"Enterprise system error: {str(e)}, falling back to legacy")
                 return await self.legacy_system.generate_diagnosis(**kwargs)
         else:
