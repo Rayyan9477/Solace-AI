@@ -1,5 +1,32 @@
 # Solace-AI Diagnosis Module - Master Architecture Diagrams
 
+> **Version**: 2.0  
+> **Date**: December 30, 2025  
+> **Purpose**: Visual Reference for Diagnosis Module Architecture
+
+---
+
+## Quick Reference
+
+| Diagram | Description |
+|---------|-------------|
+| [1. System Architecture](#1-complete-system-architecture-overview) | High-level system overview |
+| [2. Multi-Agent Flow](#2-multi-agent-orchestration-flow) | Agent orchestration patterns |
+| [3. Chain-of-Reasoning](#3-chain-of-reasoning-pipeline) | 4-step reasoning process |
+| [4. Phase State Machine](#4-dialogue-phase-state-machine) | Interview phase transitions |
+| [5. Clinical Knowledge](#5-clinical-knowledge-integration) | DSM-5/HiTOP integration |
+| [6. Memory Architecture](#6-memory-architecture) | 4-tier memory system |
+| [7. Safety Detection](#7-safety--crisis-detection) | 3-layer crisis detection |
+| [8. Anti-Sycophancy](#8-anti-sycophancy-framework) | Bias prevention |
+| [9. Confidence Calibration](#9-confidence-calibration) | Scoring methodology |
+| [10. Data Flow](#10-data-flow-overview) | End-to-end processing |
+| [11. Module Integration](#11-module-integration) | Cross-module communication |
+| [12. Event Architecture](#12-event-driven-communication) | Event-driven patterns |
+| [13. Deployment](#13-deployment-architecture) | Container architecture |
+| [14. System Context](#14-system-context) | External integrations |
+
+---
+
 ## 1. Complete System Architecture Overview
 
 ```mermaid
@@ -523,4 +550,100 @@ flowchart TB
 
 ---
 
-*Generated for Solace-AI Diagnosis Module v2.0*
+## 13. Deployment Architecture
+
+```mermaid
+flowchart TB
+    subgraph KUBERNETES["Kubernetes Cluster"]
+        direction TB
+        
+        subgraph INGRESS["Ingress Layer"]
+            IG["Nginx Ingress"]
+            SSL["SSL Termination"]
+        end
+        
+        subgraph SERVICES["Service Pods"]
+            subgraph DIAGNOSIS_SVC["Diagnosis Service"]
+                D_POD1["Pod 1"]
+                D_POD2["Pod 2"]
+                D_POD3["Pod 3"]
+            end
+            
+            subgraph SAFETY_SVC["Safety Service"]
+                S_POD1["Pod 1"]
+                S_POD2["Pod 2"]
+            end
+            
+            subgraph MEMORY_SVC["Memory Service"]
+                M_POD1["Pod 1"]
+                M_POD2["Pod 2"]
+            end
+        end
+        
+        subgraph DATA["Data Layer"]
+            REDIS[("Redis Cluster")]
+            POSTGRES[("PostgreSQL")]
+            CHROMA[("ChromaDB")]
+        end
+        
+        subgraph MONITORING["Monitoring"]
+            PROM["Prometheus"]
+            GRAF["Grafana"]
+            ALERT["AlertManager"]
+        end
+    end
+
+    subgraph EXTERNAL_DEPS["External Dependencies"]
+        LLM_API["LLM API"]
+        EMBED_API["Embedding API"]
+    end
+
+    INGRESS --> SERVICES
+    SERVICES --> DATA
+    SERVICES --> EXTERNAL_DEPS
+    SERVICES --> MONITORING
+```
+
+---
+
+## 14. System Context
+
+```mermaid
+flowchart TB
+    subgraph USERS["Users"]
+        USER["User<br/>Person seeking support"]
+        CLINICIAN["Clinician<br/>Mental health professional"]
+    end
+
+    subgraph SOLACE["Solace-AI System"]
+        CORE["Solace-AI<br/>Mental Health AI Companion"]
+    end
+
+    subgraph EXTERNAL["External Systems"]
+        LLM["LLM Provider"]
+        CRISIS["Crisis Services"]
+        EHR["EHR Systems"]
+    end
+
+    USER -->|"Text/Voice"| CORE
+    CORE -->|"Insights"| USER
+    CLINICIAN -->|"Oversight"| CORE
+    CORE -->|"API"| LLM
+    CORE -->|"Escalation"| CRISIS
+    CORE -.->|"FHIR"| EHR
+
+    style SOLACE fill:#4ecdc4,color:#fff
+    style CRISIS fill:#ff6b6b,color:#fff
+```
+
+---
+
+## Cross-Reference
+
+For detailed explanations of each component, refer to:
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Complete technical blueprint
+
+---
+
+*Generated for Solace-AI Diagnosis Module v2.0*  
+*Last Updated: December 30, 2025*

@@ -175,24 +175,31 @@ flowchart TB
 ### 2.2 System Context Diagram
 
 ```mermaid
-C4Context
-    title System Context - Solace-AI Diagnosis Module
+flowchart TB
+    subgraph USERS["Users"]
+        USER["User<br/>Person seeking mental health support"]
+        CLINICIAN["Clinician<br/>Mental health professional"]
+    end
 
-    Person(user, "User", "Person seeking mental health support")
-    Person(clinician, "Clinician", "Mental health professional (optional oversight)")
-    
-    System(solace, "Solace-AI", "Mental health AI companion")
-    
-    System_Ext(llm, "LLM Provider", "Language model API (Gemini/Claude/GPT)")
-    System_Ext(crisis, "Crisis Services", "Emergency hotlines & resources")
-    System_Ext(ehr, "EHR Systems", "Electronic Health Records (future)")
-    
-    Rel(user, solace, "Converses with", "Text/Voice")
-    Rel(solace, user, "Provides insights", "Diagnosis/Guidance")
-    Rel(solace, llm, "Generates responses", "API")
-    Rel(solace, crisis, "Escalates", "Crisis Protocol")
-    Rel(clinician, solace, "Reviews/Oversees", "Dashboard")
-    Rel(solace, ehr, "Exports data", "FHIR (future)")
+    subgraph SOLACE["Solace-AI System"]
+        CORE["Solace-AI<br/>Mental Health AI Companion"]
+    end
+
+    subgraph EXTERNAL["External Systems"]
+        LLM["LLM Provider<br/>Gemini/Claude/GPT"]
+        CRISIS["Crisis Services<br/>Emergency Hotlines"]
+        EHR["EHR Systems<br/>FHIR Integration"]
+    end
+
+    USER -->|"Converses via Text/Voice"| CORE
+    CORE -->|"Provides Insights & Guidance"| USER
+    CLINICIAN -->|"Reviews & Oversees"| CORE
+    CORE -->|"API Calls"| LLM
+    CORE -->|"Crisis Escalation"| CRISIS
+    CORE -.->|"Future: FHIR Export"| EHR
+
+    style SOLACE fill:#4ecdc4,color:#fff
+    style CRISIS fill:#ff6b6b,color:#fff
 ```
 
 ---
