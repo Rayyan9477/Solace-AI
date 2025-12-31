@@ -1,10 +1,6 @@
 # Solace-AI: Therapy Module
 ## Complete System Architecture & Design
 
-> **Version**: 2.0  
-> **Date**: December 30, 2025  
-> **Author**: System Architecture Team  
-> **Status**: Technical Blueprint  
 > **Dependency**: Diagnosis Module v2.0
 
 ---
@@ -24,27 +20,6 @@ This document presents the complete architecture for the Therapy Module of Solac
 | **Safety Architecture** | Multi-Layer Guardrails | Comprehensive protection at all stages |
 | **Outcome Tracking** | Measurement-Based Care | Continuous validated assessment |
 | **Integration Pattern** | Event-Driven + Sync API | Loose coupling with real-time capability |
-
----
-
-## Table of Contents
-
-1. [Architecture Philosophy](#1-architecture-philosophy)
-2. [High-Level System Architecture](#2-high-level-system-architecture)
-3. [Component Architecture](#3-component-architecture)
-4. [Therapeutic Technique Library](#4-therapeutic-technique-library)
-5. [Technique Selection Engine](#5-technique-selection-engine)
-6. [Session Management System](#6-session-management-system)
-7. [Treatment Planning Architecture](#7-treatment-planning-architecture)
-8. [Therapeutic Conversation Engine](#8-therapeutic-conversation-engine)
-9. [Safety & Contraindication System](#9-safety--contraindication-system)
-10. [Diagnosis Module Integration](#10-diagnosis-module-integration)
-11. [Memory & Context Architecture](#11-memory--context-architecture)
-12. [Outcome Tracking System](#12-outcome-tracking-system)
-13. [Data Flow Architecture](#13-data-flow-architecture)
-14. [Event-Driven Architecture](#14-event-driven-architecture)
-15. [API & Interface Contracts](#15-api--interface-contracts)
-16. [System Integration](#16-system-integration)
 
 ---
 
@@ -2589,8 +2564,4 @@ flowchart LR
 | Alliance rupture (SRS <36) | 🟡 Elevated | Address directly, repair focus |
 
 ---
-
-*Document Version: 2.0*  
-*Last Updated: December 30, 2025*  
-*Status: Technical Blueprint for Implementation*  
 *Dependencies: Diagnosis Module v2.0, Memory Module, Personality Module*

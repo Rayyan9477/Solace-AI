@@ -1,9 +1,13 @@
+# ==================== SOLACE-AI MICROSERVICES ====================
+# Production-ready .gitignore for mental health AI platform
+
+# ==================== PYTHON ====================
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-key.py
+
 # C extensions
 *.egg-info/
 *.egg
@@ -25,8 +29,71 @@ wheels/
 share/python-wheels/
 *.manifest
 *.spec
+pip-wheel-metadata/
+MANIFEST
 
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+myenv/
+.myenv/
+new_venv/
+__pypackages__/
+.installed.cfg
 
+# ==================== SECRETS & CREDENTIALS ====================
+# CRITICAL: Never commit secrets
+*.env
+.env.*
+!.env.example
+!.env.template
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+credentials/
+key.py
+*.secret
+.secrets/
+service-account*.json
+*-credentials.json
+
+# ==================== IDE & EDITORS ====================
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm / IntelliJ
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+.#*
+
+# Spyder
+.spyderproject
+.spyproject
+
+# Rope
+.ropeproject
+
+# ==================== TESTING ====================
 # Unit test / coverage reports
 htmlcov/
 .tox/
@@ -41,143 +108,178 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+pytest-report.html
+test-results/
+junit*.xml
 
-# Translations
-*.mo
-*.pot
+# ==================== TYPE CHECKING ====================
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+.pyre/
+pyrightconfig.json
 
-# Django stuff
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-
-# Flask stuff
-instance/
-.webassets-cache
-
-# Scrapy stuff
-.scrapy
-
-# Sphinx documentation
+# ==================== BUILD & DOCUMENTATION ====================
 docs/_build/
+site/
+*.md.backup
 
 # PyBuilder
 .pybuilder/
 target/
 
-# Jupyter Notebook
-.ipynb_checkpoints
+# ==================== JUPYTER ====================
+.ipynb_checkpoints/
 *.ipynb
+!notebooks/*.ipynb
 
 # IPython
 profile_default/
 ipython_config.py
 
-# Environments
-.env
-.venv
-myenv/
-.myenv
-new_venv/
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
+# ==================== LOGS & DATABASES ====================
+*.log
+logs/
+log/
+*.sqlite3
+*.sqlite3-journal
+*.db
+chatbot.log
 
-# VSCode
-.vscode/
+# ==================== DOCKER ====================
+# Don't ignore Dockerfiles, but ignore build artifacts
+*.dockerfile.bak
+docker-compose.override.yml
+.docker/
 
-# PyCharm
-.idea/
+# ==================== KUBERNETES ====================
+# Don't ignore k8s manifests, but ignore generated files
+*.kubeconfig
+kubeconfig
+.kube/
 
-# Spyder
-.spyderproject
-.spyproject
+# ==================== MICROSERVICES DATA ====================
+# Service-specific data directories
+services/*/data/
+services/*/logs/
+services/*/cache/
 
-# Rope
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# pytype static type analyzer
-.pytype/
-
-# Cython debug symbols
-cython_debug/
-
-# Pyre type checker
-.pyre/
-
-# Coverage
-htmlcov/
-
-# Temporary files
-*.tmp
-*.bak
-*.swp
-*.swo
-*.orig
-
-# MacOS files
-.DS_Store
-
-# Windows files
-Thumbs.db
-
-# Model files and binaries
+# ==================== AI/ML MODELS ====================
+# Large model files (use Git LFS or external storage)
 *.bin
 *.safetensors
 *.pt
 *.pth
+*.onnx
+*.h5
+*.pb
+*.tflite
 pytorch_model.bin
 tf_model.h5
+model.ckpt*
 checkpoint/
 checkpoint*
-cache
+fine_tuned_model/
+fine_tuned_model_checkpoint/
+models/cache/
+models/downloaded/
+*.gguf
+*.ggml
 
-# Data files
+# ==================== VECTOR DATABASE ====================
+# Vector store data (should be in external volume)
+data/vector_store/
+weaviate_data/
+chromadb_data/
+qdrant_data/
+faiss_index/
+
+# ==================== CACHE ====================
+cache/
+.cache/
+*.cache
+redis_data/
+__pycache__/
+
+# ==================== TEMPORARY FILES ====================
+*.tmp
+*.bak
+*.orig
+*.backup
+tmp/
+temp/
+
+# ==================== OS-SPECIFIC ====================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+nul
+
+# Linux
+*~
+.fuse_hidden*
+.Trash-*
+
+# ==================== DATA FILES ====================
 data.pth
 *.dat
 *.pk
+*.pickle
+*.parquet
+*.feather
 
-# Logs and databases
-*.log
-*.sqlite3
+# Uploaded files
+uploads/
+media/
 
-# Ignore the fine-tuned model directory
-fine_tuned_model/
-fine_tuned_model_checkpoint/
+# ==================== MONITORING ====================
+# Prometheus data
+prometheus_data/
 
-# Ignore virtual environment
-__pypackages__/
+# Grafana data
+grafana_data/
 
-# Ignore the chatbot log file
-chatbot.log
+# Jaeger data
+jaeger_data/
 
-# Environment variables
-*.env
+# ==================== KAFKA ====================
+kafka_data/
+kafka-logs/
+zookeeper_data/
 
-# Virtual Environment
-.installed.cfg
+# ==================== POSTGRES ====================
+postgres_data/
+pgdata/
 
-# Model files and caches
-models/cache/
-data/vector_store/
-*.onnx
+# ==================== REDIS ====================
+redis_data/
+dump.rdb
+appendonly.aof
 
-# IDE
-*~
+# ==================== CLAUDE CODE ====================
+.claude/
+.claude-code/
 
-# Logs
-logs/
-/log/
-.claude
-nul
+# ==================== MISC ====================
+*.bak
+*.swp
+.history/
+.ionide/
+
+# ==================== GENERATED FILES ====================
+# OpenAPI generated clients
+generated/
+openapi_client/
+
+# Alembic migrations should be committed, but not auto-generated files
+# alembic/versions/*.pyc
