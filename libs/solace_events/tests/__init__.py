@@ -1,0 +1,1 @@
+"""Solace-Events Test Package."""

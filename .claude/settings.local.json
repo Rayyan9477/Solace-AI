@@ -23,7 +23,9 @@
       "Bash(done)",
       "Bash(tree:*)",
       "Bash(git checkout:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(PYTHONPATH=\"$PWD/libs:$PYTHONPATH\" python:*)",
+      "Bash(PYTHONPATH=\"$PWD/libs:$PYTHONPATH\" python -m pytest:*)"
     ],
     "deny": []
   }
