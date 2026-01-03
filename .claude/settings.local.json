@@ -26,7 +26,8 @@
       "Bash(wc:*)",
       "Bash(PYTHONPATH=\"$PWD/libs:$PYTHONPATH\" python:*)",
       "Bash(PYTHONPATH=\"$PWD/libs:$PYTHONPATH\" python -m pytest:*)",
-      "Bash(PYTHONPATH=\"$PWD/libs/src:$PYTHONPATH\" python -m pytest:*)"
+      "Bash(PYTHONPATH=\"$PWD/libs/src:$PYTHONPATH\" python -m pytest:*)",
+      "Bash(for file in src/solace_infrastructure/*.py)"
     ],
     "deny": []
   }
