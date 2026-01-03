@@ -3,8 +3,8 @@
 import pytest
 from uuid import uuid4
 
-from solace_events.src.config import KafkaSettings, ProducerSettings
-from solace_events.src.publisher import (
+from solace_events.config import KafkaSettings, ProducerSettings
+from solace_events.publisher import (
     EventPublisher,
     InMemoryOutboxStore,
     MockKafkaProducerAdapter,
@@ -13,7 +13,7 @@ from solace_events.src.publisher import (
     OutboxStatus,
     create_publisher,
 )
-from solace_events.src.schemas import SessionStartedEvent
+from solace_events.schemas import SessionStartedEvent
 
 
 class TestOutboxRecord:

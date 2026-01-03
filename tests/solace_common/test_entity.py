@@ -6,7 +6,7 @@ import pytest
 import uuid
 from datetime import datetime, timezone, timedelta
 
-from solace_common.src.domain.entity import (
+from solace_common.domain.entity import (
     AuditableMixin,
     Entity,
     EntityId,

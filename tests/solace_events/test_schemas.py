@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
 
-from solace_events.src.schemas import (
+from solace_events.schemas import (
     AssessmentCompletedEvent,
     BaseEvent,
     ClinicalHypothesis,

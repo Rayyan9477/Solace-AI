@@ -4,8 +4,8 @@ import pytest
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 
-from solace_events.src.config import SolaceTopic
-from solace_events.src.dead_letter import (
+from solace_events.config import SolaceTopic
+from solace_events.dead_letter import (
     DeadLetterHandler,
     DeadLetterRecord,
     DeadLetterStore,
@@ -14,7 +14,7 @@ from solace_events.src.dead_letter import (
     create_dead_letter_handler,
     get_dlq_topic,
 )
-from solace_events.src.schemas import SessionStartedEvent
+from solace_events.schemas import SessionStartedEvent
 
 
 class TestRetryPolicy:

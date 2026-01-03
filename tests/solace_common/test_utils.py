@@ -6,7 +6,7 @@ import pytest
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 
-from solace_common.src.utils import (
+from solace_common.utils import (
     CollectionUtils,
     CryptoUtils,
     DateTimeUtils,

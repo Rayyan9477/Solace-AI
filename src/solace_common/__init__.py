@@ -1,50 +1,30 @@
 """
 Solace-AI Common Library.
 
-Provides shared domain primitives, exceptions, and utilities used across
-all Solace-AI microservices.
-
-Modules:
-    domain: Entity, ValueObject, AggregateRoot base classes
-    exceptions: Structured exception hierarchy
-    utils: Common utilities (datetime, crypto, validation)
+Enterprise-grade DDD primitives and shared utilities:
+- Entity base classes with identity and lifecycle management
+- Value objects with immutability and validation
+- Aggregate roots with domain events and invariant protection
+- Structured exception hierarchy with correlation tracking
+- Utility functions for validation, datetime, crypto, and retry logic
 """
 
-from .domain.aggregate import (
+from .domain import (
     AggregateEvent,
     AggregateRepository,
     AggregateRoot,
     DomainEvent,
+    Entity,
     EntityCreatedEvent,
     EntityDeletedEvent,
+    EntityId,
+    EntityMetadata,
     EntityUpdatedEvent,
     EventEnvelope,
     EventStore,
     InMemoryEventStore,
-    SnapshotStore,
-)
-from .domain.entity import (
-    AuditableMixin,
-    Entity,
-    EntityId,
-    EntityMetadata,
     MutableEntity,
-    TimestampedMixin,
-)
-from .domain.value_object import (
-    CorrelationId,
-    DateRange,
-    EmailAddress,
-    HashedValue,
-    Percentage,
-    PhoneNumber,
-    Score,
-    SessionId,
-    Severity,
-    SeverityScore,
-    SingleValueObject,
-    UserId,
-    ValueObject,
+    SnapshotStore,
 )
 from .exceptions import (
     ApplicationError,
@@ -80,33 +60,48 @@ from .utils import (
     ValidationUtils,
     retry_async,
 )
+from .domain import (
+    AuditableMixin,
+    CorrelationId,
+    DateRange,
+    EmailAddress,
+    HashedValue,
+    Percentage,
+    PhoneNumber,
+    Score,
+    SessionId,
+    Severity,
+    SeverityScore,
+    SingleValueObject,
+    TimestampedMixin,
+    UserId,
+    ValueObject,
+)
 
-__version__ = "1.0.0"
+__version__ = "0.1.0"
 
 __all__ = [
-    # Version
-    "__version__",
     # Domain - Entity
     "Entity",
+    "MutableEntity",
     "EntityId",
     "EntityMetadata",
-    "MutableEntity",
-    "TimestampedMixin",
-    "AuditableMixin",
-    # Domain - Value Objects
+    # Domain - Value Object
     "ValueObject",
     "SingleValueObject",
+    "TimestampedMixin",
+    "AuditableMixin",
+    "UserId",
+    "SessionId",
+    "CorrelationId",
     "EmailAddress",
     "PhoneNumber",
     "Percentage",
     "Score",
-    "DateRange",
     "Severity",
     "SeverityScore",
+    "DateRange",
     "HashedValue",
-    "UserId",
-    "SessionId",
-    "CorrelationId",
     # Domain - Aggregate
     "AggregateRoot",
     "DomainEvent",
@@ -115,10 +110,10 @@ __all__ = [
     "EntityUpdatedEvent",
     "EntityDeletedEvent",
     "EventEnvelope",
-    "EventStore",
-    "SnapshotStore",
     "AggregateRepository",
+    "EventStore",
     "InMemoryEventStore",
+    "SnapshotStore",
     # Exceptions
     "SolaceError",
     "ErrorSeverity",
@@ -143,12 +138,12 @@ __all__ = [
     "LLMServiceError",
     "ConfigurationError",
     # Utils
-    "DateTimeUtils",
-    "CryptoUtils",
     "ValidationUtils",
     "ValidationPatterns",
+    "DateTimeUtils",
     "StringUtils",
+    "CryptoUtils",
+    "CollectionUtils",
     "RetryConfig",
     "retry_async",
-    "CollectionUtils",
 ]

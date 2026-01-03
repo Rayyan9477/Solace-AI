@@ -1,25 +1,5 @@
-"""
-Solace-AI Domain Module.
+"""Solace-AI Domain Primitives."""
 
-Provides Domain-Driven Design building blocks:
-- Entity: Identity-based domain objects
-- ValueObject: Immutable value objects
-- AggregateRoot: Transactional consistency boundaries with events
-"""
-
-from .aggregate import (
-    AggregateEvent,
-    AggregateRepository,
-    AggregateRoot,
-    DomainEvent,
-    EntityCreatedEvent,
-    EntityDeletedEvent,
-    EntityUpdatedEvent,
-    EventEnvelope,
-    EventStore,
-    InMemoryEventStore,
-    SnapshotStore,
-)
 from .entity import (
     AuditableMixin,
     Entity,
@@ -43,29 +23,42 @@ from .value_object import (
     UserId,
     ValueObject,
 )
+from .aggregate import (
+    AggregateEvent,
+    AggregateRepository,
+    AggregateRoot,
+    DomainEvent,
+    EntityCreatedEvent,
+    EntityDeletedEvent,
+    EntityUpdatedEvent,
+    EventEnvelope,
+    EventStore,
+    InMemoryEventStore,
+    SnapshotStore,
+)
 
 __all__ = [
     # Entity
     "Entity",
+    "MutableEntity",
     "EntityId",
     "EntityMetadata",
-    "MutableEntity",
     "TimestampedMixin",
     "AuditableMixin",
-    # Value Objects
+    # Value Object
     "ValueObject",
     "SingleValueObject",
+    "UserId",
+    "SessionId",
+    "CorrelationId",
     "EmailAddress",
     "PhoneNumber",
     "Percentage",
     "Score",
-    "DateRange",
     "Severity",
     "SeverityScore",
+    "DateRange",
     "HashedValue",
-    "UserId",
-    "SessionId",
-    "CorrelationId",
     # Aggregate
     "AggregateRoot",
     "DomainEvent",
@@ -74,8 +67,8 @@ __all__ = [
     "EntityUpdatedEvent",
     "EntityDeletedEvent",
     "EventEnvelope",
-    "EventStore",
-    "SnapshotStore",
     "AggregateRepository",
+    "EventStore",
     "InMemoryEventStore",
+    "SnapshotStore",
 ]

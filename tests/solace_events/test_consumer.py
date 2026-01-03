@@ -4,8 +4,8 @@ import pytest
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from solace_events.src.config import ConsumerSettings, KafkaSettings, SolaceTopic
-from solace_events.src.consumer import (
+from solace_events.config import ConsumerSettings, KafkaSettings, SolaceTopic
+from solace_events.consumer import (
     ConsumerMetrics,
     EventConsumer,
     MockKafkaConsumerAdapter,
@@ -14,7 +14,7 @@ from solace_events.src.consumer import (
     ProcessingStatus,
     create_consumer,
 )
-from solace_events.src.schemas import SessionStartedEvent
+from solace_events.schemas import SessionStartedEvent
 
 
 class TestProcessingResult:

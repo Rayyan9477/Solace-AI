@@ -2,7 +2,7 @@
 
 import pytest
 
-from solace_events.src.config import (
+from solace_events.config import (
     CompressionType,
     ConsumerGroup,
     ConsumerSettings,

@@ -5,7 +5,7 @@ Unit tests for Solace-AI Exception Hierarchy.
 import pytest
 from datetime import datetime, timezone
 
-from solace_common.src.exceptions import (
+from solace_common.exceptions import (
     ApplicationError,
     AuthenticationError,
     AuthorizationError,

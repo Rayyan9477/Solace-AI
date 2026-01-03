@@ -6,7 +6,7 @@ import pytest
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 
-from solace_common.src.domain.value_object import (
+from solace_common.domain.value_object import (
     CorrelationId,
     DateRange,
     EmailAddress,

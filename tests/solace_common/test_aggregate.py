@@ -6,7 +6,7 @@ import pytest
 from datetime import datetime, timezone
 from typing import Any
 
-from solace_common.src.domain.aggregate import (
+from solace_common.domain.aggregate import (
     AggregateEvent,
     AggregateRoot,
     DomainEvent,
@@ -16,7 +16,7 @@ from solace_common.src.domain.aggregate import (
     EventEnvelope,
     InMemoryEventStore,
 )
-from solace_common.src.domain.entity import EntityId
+from solace_common.domain.entity import EntityId
 
 
 class ConcreteEntityId(EntityId):
@@ -46,10 +46,10 @@ class UserAggregate(AggregateRoot[ConcreteEntityId]):
     def validate_invariants(self) -> None:
         """Validate user invariants."""
         if not self.name:
-            from solace_common.src.exceptions import InvariantViolationError
+            from solace_common.exceptions import InvariantViolationError
             raise InvariantViolationError("User name cannot be empty")
         if not self.email or "@" not in self.email:
-            from solace_common.src.exceptions import InvariantViolationError
+            from solace_common.exceptions import InvariantViolationError
             raise InvariantViolationError("User must have valid email")
 
     def update_name(self, new_name: str) -> None:
@@ -188,7 +188,7 @@ class TestAggregateRoot:
 
     def test_validate_invariants_failure(self) -> None:
         """Test invariant validation fails for invalid state."""
-        from solace_common.src.exceptions import InvariantViolationError
+        from solace_common.exceptions import InvariantViolationError
 
         user = UserAggregate(
             id=ConcreteEntityId.generate(),
