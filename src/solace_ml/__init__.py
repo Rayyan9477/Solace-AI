@@ -1,0 +1,163 @@
+"""Solace-AI ML Library - LLM clients, embeddings, and inference utilities."""
+from solace_ml.llm_client import (
+    LLMProvider,
+    MessageRole,
+    FinishReason,
+    Message,
+    ToolParameter,
+    ToolDefinition,
+    ToolCall,
+    TokenUsage,
+    LLMResponse,
+    StreamChunk,
+    LLMSettings,
+    RetryPolicy,
+    LLMError,
+    RateLimitError,
+    LLMClient,
+    MultiProviderClient,
+    build_messages,
+    extract_tool_calls,
+    measure_latency,
+)
+from solace_ml.anthropic import (
+    AnthropicSettings,
+    AnthropicClient,
+    create_anthropic_client,
+)
+from solace_ml.openai import (
+    OpenAISettings,
+    OpenAIClient,
+    ToolChoice,
+    create_openai_client,
+)
+from solace_ml.gemini import (
+    GeminiSettings,
+    GeminiClient,
+    create_gemini_client,
+)
+from solace_ml.deepseek import (
+    DeepSeekSettings,
+    DeepSeekClient,
+    create_deepseek_client,
+)
+from solace_ml.xai import (
+    XAISettings,
+    XAIClient,
+    create_xai_client,
+)
+from solace_ml.minimax import (
+    MinimaxSettings,
+    MinimaxClient,
+    create_minimax_client,
+)
+from solace_ml.embeddings import (
+    EmbeddingProvider,
+    EmbeddingModel,
+    EmbeddingSettings,
+    EmbeddingResult,
+    EmbeddingError,
+    EmbeddingCache,
+    EmbeddingClient,
+    OpenAIEmbeddingClient,
+    EmbeddingService,
+    create_embedding_client,
+    create_embedding_service,
+)
+from solace_ml.inference import (
+    OutputFormat,
+    ParseError,
+    OutputParser,
+    JSONOutputParser,
+    PydanticOutputParser,
+    ListOutputParser,
+    PromptTemplate,
+    ChatPromptTemplate,
+    ToolExecutor,
+    InferenceChain,
+    StructuredInference,
+    ConversationMemory,
+    InferenceLogger,
+    create_json_parser,
+    create_pydantic_parser,
+    create_prompt_template,
+    generate_with_tools,
+)
+
+__all__ = [
+    # LLM Client Core
+    "LLMProvider",
+    "MessageRole",
+    "FinishReason",
+    "Message",
+    "ToolParameter",
+    "ToolDefinition",
+    "ToolCall",
+    "TokenUsage",
+    "LLMResponse",
+    "StreamChunk",
+    "LLMSettings",
+    "RetryPolicy",
+    "LLMError",
+    "RateLimitError",
+    "LLMClient",
+    "MultiProviderClient",
+    "build_messages",
+    "extract_tool_calls",
+    "measure_latency",
+    # Anthropic
+    "AnthropicSettings",
+    "AnthropicClient",
+    "create_anthropic_client",
+    # OpenAI
+    "OpenAISettings",
+    "OpenAIClient",
+    "ToolChoice",
+    "create_openai_client",
+    # Gemini
+    "GeminiSettings",
+    "GeminiClient",
+    "create_gemini_client",
+    # DeepSeek
+    "DeepSeekSettings",
+    "DeepSeekClient",
+    "create_deepseek_client",
+    # xAI
+    "XAISettings",
+    "XAIClient",
+    "create_xai_client",
+    # Minimax
+    "MinimaxSettings",
+    "MinimaxClient",
+    "create_minimax_client",
+    # Embeddings
+    "EmbeddingProvider",
+    "EmbeddingModel",
+    "EmbeddingSettings",
+    "EmbeddingResult",
+    "EmbeddingError",
+    "EmbeddingCache",
+    "EmbeddingClient",
+    "OpenAIEmbeddingClient",
+    "EmbeddingService",
+    "create_embedding_client",
+    "create_embedding_service",
+    # Inference
+    "OutputFormat",
+    "ParseError",
+    "OutputParser",
+    "JSONOutputParser",
+    "PydanticOutputParser",
+    "ListOutputParser",
+    "PromptTemplate",
+    "ChatPromptTemplate",
+    "ToolExecutor",
+    "InferenceChain",
+    "StructuredInference",
+    "ConversationMemory",
+    "InferenceLogger",
+    "create_json_parser",
+    "create_pydantic_parser",
+    "create_prompt_template",
+    "generate_with_tools",
+]
