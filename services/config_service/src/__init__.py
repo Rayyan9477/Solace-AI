@@ -1,0 +1,87 @@
+"""
+Solace-AI Configuration Service.
+Centralized configuration, secrets, and feature flag management.
+"""
+from .settings import (
+    ConfigEnvironment,
+    ConfigSource,
+    ConfigMetadata,
+    ConfigValue,
+    ConfigServiceSettings,
+    DatabaseConfig,
+    RedisConfig,
+    KafkaConfig,
+    WeaviateConfig,
+    LLMConfig,
+    SecurityConfig,
+    ObservabilityConfig,
+    ApplicationConfig,
+    ConfigurationManager,
+    get_config_manager,
+    initialize_config,
+)
+from .secrets import (
+    SecretProvider,
+    SecretMetadata,
+    CachedSecret,
+    SecretsSettings,
+    SecretAccessEvent,
+    SecretsManager,
+    create_secrets_manager,
+)
+from .feature_flags import (
+    FlagStatus,
+    RolloutStrategy,
+    TargetingOperator,
+    TargetingRule,
+    TargetingGroup,
+    FeatureFlag,
+    FeatureFlagSettings,
+    EvaluationResult,
+    FeatureFlagManager,
+    get_feature_flag_manager,
+    initialize_feature_flags,
+)
+from .main import app, create_application, run_server
+
+__all__ = [
+    "ConfigEnvironment",
+    "ConfigSource",
+    "ConfigMetadata",
+    "ConfigValue",
+    "ConfigServiceSettings",
+    "DatabaseConfig",
+    "RedisConfig",
+    "KafkaConfig",
+    "WeaviateConfig",
+    "LLMConfig",
+    "SecurityConfig",
+    "ObservabilityConfig",
+    "ApplicationConfig",
+    "ConfigurationManager",
+    "get_config_manager",
+    "initialize_config",
+    "SecretProvider",
+    "SecretMetadata",
+    "CachedSecret",
+    "SecretsSettings",
+    "SecretAccessEvent",
+    "SecretsManager",
+    "create_secrets_manager",
+    "FlagStatus",
+    "RolloutStrategy",
+    "TargetingOperator",
+    "TargetingRule",
+    "TargetingGroup",
+    "FeatureFlag",
+    "FeatureFlagSettings",
+    "EvaluationResult",
+    "FeatureFlagManager",
+    "get_feature_flag_manager",
+    "initialize_feature_flags",
+    "app",
+    "create_application",
+    "run_server",
+]
+
+__version__ = "1.0.0"

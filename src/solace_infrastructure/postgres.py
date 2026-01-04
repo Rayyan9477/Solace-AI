@@ -36,7 +36,7 @@ class PostgresSettings(BaseSettings):
     statement_cache_size: int = Field(default=100, ge=0)
     max_cached_statement_lifetime: int = Field(default=300, ge=0)
     ssl_mode: str = Field(default="prefer")
-    schema: str = Field(default="public")
+    db_schema: str = Field(default="public")
     model_config = SettingsConfigDict(env_prefix="POSTGRES_", env_file=".env", extra="ignore")
 
     def get_dsn(self) -> str:

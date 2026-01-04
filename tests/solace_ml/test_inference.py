@@ -69,13 +69,13 @@ class TestJSONOutputParser:
 class TestPydanticOutputParser:
     """Tests for PydanticOutputParser class."""
 
-    class TestModel(BaseModel):
+    class SampleModel(BaseModel):
         name: str
         age: int
 
     @pytest.fixture
     def parser(self):
-        return PydanticOutputParser(self.TestModel)
+        return PydanticOutputParser(self.SampleModel)
 
     def test_parse_valid_json(self, parser):
         result = parser.parse('{"name": "John", "age": 30}')
