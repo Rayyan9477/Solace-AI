@@ -1,6 +1,15 @@
-"""Solace-AI Infrastructure Library - Database clients, caching, and observability utilities."""
-from solace_infrastructure.kafka import (
-    # Topics
+"""
+Solace-AI Kafka Infrastructure Library.
+
+Enterprise-grade Kafka infrastructure management for Solace-AI microservices:
+- Topic management with admin operations and validation
+- Schema registry integration with compatibility enforcement
+- Custom partitioning strategies for optimal message routing
+- HIPAA-compliant retention policy management
+- Comprehensive monitoring and alerting
+"""
+
+from .topics import (
     CleanupPolicy,
     CompressionCodec,
     TimestampType,
@@ -13,7 +22,8 @@ from solace_infrastructure.kafka import (
     KafkaAdminAdapter,
     TopicManager,
     create_topic_manager,
-    # Schemas
+)
+from .schemas import (
     SchemaType,
     CompatibilityLevel,
     SchemaFormat,
@@ -29,7 +39,8 @@ from solace_infrastructure.kafka import (
     SchemaRegistryAdapter,
     SchemaManager,
     create_schema_manager,
-    # Partitioning
+)
+from .partitioning import (
     PartitionStrategy,
     PartitionResult,
     PartitionerConfig,
@@ -42,7 +53,8 @@ from solace_infrastructure.kafka import (
     PartitionerFactory,
     TopicPartitionRouter,
     create_partition_router,
-    # Retention
+)
+from .retention import (
     RetentionType,
     ComplianceCategory,
     RetentionPriority,
@@ -53,10 +65,12 @@ from solace_infrastructure.kafka import (
     PRESET_POLICIES,
     create_retention_manager,
     get_hipaa_policy,
-    # Monitoring
+)
+from .monitoring import (
+    HealthStatus,
     AlertSeverity,
     BrokerMetrics,
-    TopicMetrics as KafkaTopicMetrics,
+    TopicMetrics,
     ConsumerGroupMetrics,
     ConsumerLag,
     KafkaAlert,
@@ -67,66 +81,9 @@ from solace_infrastructure.kafka import (
     KafkaMonitor,
     create_kafka_monitor,
 )
-from solace_infrastructure.postgres import (
-    PostgresClient,
-    PostgresRepository,
-    PostgresSettings,
-    IsolationLevel,
-    QueryResult,
-    create_postgres_client,
-)
-from solace_infrastructure.redis import (
-    RedisClient,
-    RedisSettings,
-    RedisMode,
-    CacheEntry,
-    create_redis_client,
-)
-from solace_infrastructure.weaviate import (
-    WeaviateClient,
-    WeaviateSettings,
-    CollectionConfig,
-    PropertyConfig,
-    PropertyDataType,
-    VectorDistanceMetric,
-    SearchResult,
-    create_weaviate_client,
-)
-from solace_infrastructure.health import (
-    HealthMonitor,
-    HealthChecker,
-    ClientHealthChecker,
-    CallableHealthChecker,
-    HealthCheckResult,
-    ComponentHealth,
-    HealthStatus,
-    ComponentType,
-    HealthCheckable,
-    create_health_monitor,
-)
-from solace_infrastructure.observability import (
-    ObservabilitySettings,
-    LogLevel,
-    MetricType,
-    MetricValue,
-    MetricsRegistry,
-    Span,
-    Tracer,
-    configure_logging,
-    get_correlation_id,
-    set_correlation_id,
-    get_trace_context,
-    set_trace_context,
-    add_log_context,
-    get_metrics_registry,
-    get_tracer,
-    traced,
-    timed,
-    counted,
-)
 
 __all__ = [
-    # Kafka Topics
+    # Topics
     "CleanupPolicy",
     "CompressionCodec",
     "TimestampType",
@@ -139,7 +96,7 @@ __all__ = [
     "KafkaAdminAdapter",
     "TopicManager",
     "create_topic_manager",
-    # Kafka Schemas
+    # Schemas
     "SchemaType",
     "CompatibilityLevel",
     "SchemaFormat",
@@ -155,7 +112,7 @@ __all__ = [
     "SchemaRegistryAdapter",
     "SchemaManager",
     "create_schema_manager",
-    # Kafka Partitioning
+    # Partitioning
     "PartitionStrategy",
     "PartitionResult",
     "PartitionerConfig",
@@ -168,7 +125,7 @@ __all__ = [
     "PartitionerFactory",
     "TopicPartitionRouter",
     "create_partition_router",
-    # Kafka Retention
+    # Retention
     "RetentionType",
     "ComplianceCategory",
     "RetentionPriority",
@@ -179,10 +136,11 @@ __all__ = [
     "PRESET_POLICIES",
     "create_retention_manager",
     "get_hipaa_policy",
-    # Kafka Monitoring
+    # Monitoring
+    "HealthStatus",
     "AlertSeverity",
     "BrokerMetrics",
-    "KafkaTopicMetrics",
+    "TopicMetrics",
     "ConsumerGroupMetrics",
     "ConsumerLag",
     "KafkaAlert",
@@ -192,56 +150,6 @@ __all__ = [
     "KafkaMonitorAdapter",
     "KafkaMonitor",
     "create_kafka_monitor",
-    # PostgreSQL
-    "PostgresClient",
-    "PostgresRepository",
-    "PostgresSettings",
-    "IsolationLevel",
-    "QueryResult",
-    "create_postgres_client",
-    # Redis
-    "RedisClient",
-    "RedisSettings",
-    "RedisMode",
-    "CacheEntry",
-    "create_redis_client",
-    # Weaviate
-    "WeaviateClient",
-    "WeaviateSettings",
-    "CollectionConfig",
-    "PropertyConfig",
-    "PropertyDataType",
-    "VectorDistanceMetric",
-    "SearchResult",
-    "create_weaviate_client",
-    # Health
-    "HealthMonitor",
-    "HealthChecker",
-    "ClientHealthChecker",
-    "CallableHealthChecker",
-    "HealthCheckResult",
-    "ComponentHealth",
-    "HealthStatus",
-    "ComponentType",
-    "HealthCheckable",
-    "create_health_monitor",
-    # Observability
-    "ObservabilitySettings",
-    "LogLevel",
-    "MetricType",
-    "MetricValue",
-    "MetricsRegistry",
-    "Span",
-    "Tracer",
-    "configure_logging",
-    "get_correlation_id",
-    "set_correlation_id",
-    "get_trace_context",
-    "set_trace_context",
-    "add_log_context",
-    "get_metrics_registry",
-    "get_tracer",
-    "traced",
-    "timed",
-    "counted",
 ]
+
+__version__ = "1.0.0"
