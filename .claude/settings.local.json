@@ -31,7 +31,10 @@
       "Bash(for file in tests/solace_infrastructure/*.py)",
       "Bash(PYTHONPATH=\"$PWD/src:$PYTHONPATH\" python -m pytest:*)",
       "Bash(PYTHONPATH=\"$PWD/src:$PWD/services:$PYTHONPATH\" python -m pytest:*)",
-      "Bash(PYTHONPATH=\"$PWD/src:$PYTHONPATH\" python:*)"
+      "Bash(PYTHONPATH=\"$PWD/src:$PYTHONPATH\" python:*)",
+      "Bash(export PYTHONPATH:*)",
+      "Bash(PYTHONPATH=\"$PWD/src\" python:*)",
+      "Bash(PYTHONPATH=\"$PWD/src\" python -m pytest:*)"
     ],
     "deny": []
   }
