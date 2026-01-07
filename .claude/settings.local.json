@@ -34,7 +34,8 @@
       "Bash(PYTHONPATH=\"$PWD/src:$PYTHONPATH\" python:*)",
       "Bash(export PYTHONPATH:*)",
       "Bash(PYTHONPATH=\"$PWD/src\" python:*)",
-      "Bash(PYTHONPATH=\"$PWD/src\" python -m pytest:*)"
+      "Bash(PYTHONPATH=\"$PWD/src\" python -m pytest:*)",
+      "Bash(PYTHONPATH=\"$PWD/src:$PWD/services\" python -m pytest:*)"
     ],
     "deny": []
   }
