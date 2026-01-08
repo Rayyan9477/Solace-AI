@@ -36,7 +36,9 @@
       "Bash(PYTHONPATH=\"$PWD/src\" python:*)",
       "Bash(PYTHONPATH=\"$PWD/src\" python -m pytest:*)",
       "Bash(PYTHONPATH=\"$PWD/src:$PWD/services\" python -m pytest:*)",
-      "Bash(PYTHONPATH=\"$PWD\" python -m pytest:*)"
+      "Bash(PYTHONPATH=\"$PWD\" python -m pytest:*)",
+      "Bash(PYTHONPATH=\"$PWD/src:$PWD/services:$PYTHONPATH\" python:*)",
+      "Bash(PYTHONPATH=\"$PWD/src:$PWD/services:$PYTHONPATH\" python -c:*)"
     ],
     "deny": []
   }
