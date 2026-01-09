@@ -1,0 +1,76 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2026-01-08",
+  "description": "Crisis keyword database with severity levels and categories",
+  "keywords": {
+    "CRITICAL": {
+      "SUICIDAL_IDEATION": [
+        "kill myself",
+        "end my life",
+        "suicide",
+        "want to die",
+        "better off dead",
+        "no reason to live",
+        "take my life",
+        "end it all"
+      ],
+      "PLAN_INTENT": [
+        "hanging myself",
+        "overdose",
+        "have a plan"
+      ]
+    },
+    "HIGH": {
+      "SELF_HARM": [
+        "self-harm",
+        "hurt myself",
+        "cutting",
+        "cut myself",
+        "burning myself"
+      ],
+      "HOPELESSNESS": [
+        "don't want to live",
+        "no hope",
+        "hopeless",
+        "give up",
+        "burden",
+        "worthless"
+      ],
+      "FAREWELL": [
+        "goodbye forever"
+      ],
+      "MEANS_ACCESS": [
+        "pills",
+        "rope",
+        "gun",
+        "knife",
+        "bridge"
+      ]
+    },
+    "ELEVATED": {
+      "EMOTIONAL_DISTRESS": [
+        "depressed",
+        "anxious",
+        "overwhelmed",
+        "can't cope",
+        "falling apart",
+        "breaking down",
+        "losing control",
+        "panic",
+        "scared",
+        "terrified"
+      ]
+    },
+    "LOW": {
+      "EMOTIONAL_DISTRESS": [
+        "sad",
+        "stressed",
+        "worried",
+        "upset",
+        "frustrated",
+        "tired",
+        "exhausted"
+      ]
+    }
+  }
+}

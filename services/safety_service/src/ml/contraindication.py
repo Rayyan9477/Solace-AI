@@ -1,17 +1,35 @@
 """
 Solace-AI Contraindication Checker - Technique-condition contraindication validation.
 Implements clinical rules engine for safe therapeutic technique selection.
+Supports PostgreSQL backend with graceful fallback to hardcoded rules.
 """
 from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
+
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
+
+if TYPE_CHECKING:
+    from safety_service.src.db.contraindication_db import ContraindicationDatabase, ContraindicationRuleDTO
+
+try:
+    from safety_service.src.observability.telemetry import traced, get_telemetry
+    TELEMETRY_AVAILABLE = True
+except ImportError:
+    TELEMETRY_AVAILABLE = False
+
+    def traced(*args, **kwargs):
+        """No-op decorator when telemetry unavailable."""
+        def decorator(func):
+            return func
+        return decorator
 
 logger = structlog.get_logger(__name__)
 
@@ -81,6 +99,7 @@ class ContraindicationResult(BaseModel):
 
 class ContraindicationConfig(BaseSettings):
     """Configuration for contraindication checker."""
+
     enable_absolute_checks: bool = Field(default=True, description="Check absolute contraindications")
     enable_relative_checks: bool = Field(default=True, description="Check relative contraindications")
     enable_timing_checks: bool = Field(default=True, description="Check timing appropriateness")
@@ -88,6 +107,10 @@ class ContraindicationConfig(BaseSettings):
     enable_prerequisite_checks: bool = Field(default=True, description="Check prerequisites")
     absolute_block_threshold: Decimal = Field(default=Decimal("0.9"), description="Threshold for absolute blocking")
     relative_caution_threshold: Decimal = Field(default=Decimal("0.6"), description="Threshold for caution")
+
+    # Database configuration
+    use_database: bool = Field(default=False, description="Load rules from PostgreSQL database")
+    database_fallback_to_hardcoded: bool = Field(default=True, description="Fall back to hardcoded rules if DB unavailable")
 
     model_config = SettingsConfigDict(env_prefix="CONTRAINDICATION_", env_file=".env", extra="ignore")
 
@@ -108,13 +131,100 @@ class ContraindicationChecker:
     """
     Clinical rules engine for therapeutic technique contraindication checking.
     Validates technique safety based on user conditions, severity, and timing.
+    Supports PostgreSQL database with graceful fallback to hardcoded rules.
     """
 
-    def __init__(self, config: ContraindicationConfig | None = None) -> None:
-        """Initialize contraindication checker with clinical rules."""
+    def __init__(
+        self,
+        config: ContraindicationConfig | None = None,
+        database: "ContraindicationDatabase | None" = None
+    ) -> None:
+        """
+        Initialize contraindication checker with clinical rules.
+
+        Args:
+            config: Configuration settings
+            database: Optional database instance for loading rules from PostgreSQL
+        """
         self._config = config or ContraindicationConfig()
+        self._database = database
+        self._db_rules_loaded = False
+
+        # Always load hardcoded rules as baseline/fallback
         self._rules = self._load_contraindication_rules()
-        logger.info("contraindication_checker_initialized", rules_count=len(self._rules))
+        logger.info(
+            "contraindication_checker_initialized",
+            rules_count=len(self._rules),
+            use_database=self._config.use_database
+        )
+
+    async def initialize_from_database(self) -> bool:
+        """
+        Load rules from database asynchronously.
+        Call this after initialization if using database mode.
+
+        Returns:
+            True if database rules loaded successfully, False otherwise
+        """
+        if not self._config.use_database or not self._database:
+            return False
+
+        try:
+            db_rules = await self._load_rules_from_database()
+            if db_rules:
+                self._rules = db_rules
+                self._db_rules_loaded = True
+                logger.info(
+                    "rules_loaded_from_database",
+                    count=len(self._rules)
+                )
+                return True
+
+            if self._config.database_fallback_to_hardcoded:
+                logger.warning(
+                    "database_rules_empty",
+                    fallback="hardcoded",
+                    count=len(self._rules)
+                )
+                return False
+
+        except Exception as e:
+            logger.error("database_load_failed", error=str(e))
+            if self._config.database_fallback_to_hardcoded:
+                logger.warning("using_hardcoded_fallback", count=len(self._rules))
+            return False
+
+        return False
+
+    async def _load_rules_from_database(self) -> list[ContraindicationRule]:
+        """Load all active rules from database and convert to internal format."""
+        if not self._database or not self._database.is_initialized:
+            return []
+
+        dto_rules = await self._database.get_all_active_rules()
+        return [self._dto_to_rule(dto) for dto in dto_rules]
+
+    def _dto_to_rule(self, dto: "ContraindicationRuleDTO") -> ContraindicationRule:
+        """Convert database DTO to internal rule format."""
+        return ContraindicationRule(
+            technique=TherapyTechnique[dto.technique],
+            condition=MentalHealthCondition[dto.condition],
+            contraindication_type=ContraindicationType[dto.contraindication_type],
+            severity=dto.severity,
+            rationale=dto.rationale,
+            alternatives=[TherapyTechnique[alt] for alt in dto.alternatives if alt in TherapyTechnique.__members__],
+            prerequisites=dto.prerequisites
+        )
+
+    @property
+    def is_database_backed(self) -> bool:
+        """Check if rules are loaded from database."""
+        return self._db_rules_loaded
+
+    @property
+    def rules_count(self) -> int:
+        """Get number of loaded rules."""
+        return len(self._rules)
 
     def _load_contraindication_rules(self) -> list[ContraindicationRule]:
         """Load clinical contraindication rules."""
@@ -219,6 +329,7 @@ class ContraindicationChecker:
 
         return rules
 
+    @traced(name="contraindication_checker.check", attributes={"component": "contraindication_checker"})
     def check(self, technique: TherapyTechnique, conditions: list[MentalHealthCondition],
              user_id: UUID | None = None, context: dict[str, Any] | None = None) -> ContraindicationResult:
         """

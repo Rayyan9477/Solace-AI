@@ -1,6 +1,6 @@
 """
 Solace-AI LLM Assessor - Deep risk assessment using LLM with structured output.
-Uses Claude API for nuanced clinical assessment of crisis risk.
+Uses Claude API (via LangChain) for nuanced clinical assessment of crisis risk.
 """
 from __future__ import annotations
 from datetime import datetime, timezone
@@ -12,6 +12,26 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import json
 import structlog
+
+try:
+    from langchain_anthropic import ChatAnthropic
+    from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
+    from langchain_core.output_parsers import JsonOutputParser
+    LANGCHAIN_AVAILABLE = True
+except ImportError:
+    LANGCHAIN_AVAILABLE = False
+
+try:
+    from safety_service.src.observability.telemetry import traced, get_telemetry
+    TELEMETRY_AVAILABLE = True
+except ImportError:
+    TELEMETRY_AVAILABLE = False
+
+    def traced(*args, **kwargs):
+        """No-op decorator when telemetry unavailable."""
+        def decorator(func):
+            return func
+        return decorator
 
 logger = structlog.get_logger(__name__)
 
@@ -93,13 +113,40 @@ class LLMAssessor:
 
         Args:
             config: Configuration settings
-            anthropic_client: Optional Anthropic client instance
+            anthropic_client: Optional Anthropic client instance (deprecated, use LangChain instead)
         """
         self._config = config or LLMAssessorConfig()
-        self._client = anthropic_client
         self._assessment_cache: dict[str, RiskAssessment] = {}
         self._cache_timestamps: dict[str, datetime] = {}
-        logger.info("llm_assessor_initialized", model=self._config.model_name)
+
+        # Initialize LangChain components
+        if LANGCHAIN_AVAILABLE:
+            try:
+                self._llm = ChatAnthropic(
+                    model=self._config.model_name,
+                    max_tokens=self._config.max_tokens,
+                    temperature=float(self._config.temperature),
+                    timeout=self._config.api_timeout_seconds
+                )
+                self._output_parser = JsonOutputParser()
+                self._use_langchain = True
+                logger.info("llm_assessor_initialized", mode="langchain", model=self._config.model_name)
+            except Exception as e:
+                logger.warning("langchain_init_failed", error=str(e), fallback="mock")
+                self._llm = None
+                self._output_parser = None
+                self._use_langchain = False
+        else:
+            logger.warning("langchain_unavailable", fallback="mock")
+            self._llm = None
+            self._output_parser = None
+            self._use_langchain = False
+
+        # Fallback to legacy client if provided
+        if not self._use_langchain and anthropic_client:
+            self._client = anthropic_client
+        else:
+            self._client = None
 
     def _build_system_prompt(self) -> str:
         """Build system prompt for risk assessment."""
@@ -128,30 +175,30 @@ Provide an overall risk level (CRITICAL, HIGH, ELEVATED, MODERATE, LOW, MINIMAL)
 If CRITICAL or HIGH risk, mark as requiring immediate intervention.
 
 Output must be valid JSON matching this schema:
-{
+{{
   "risk_level": "CRITICAL|HIGH|ELEVATED|MODERATE|LOW|MINIMAL",
   "risk_score": 0.0-1.0,
   "confidence": 0.0-1.0,
   "risk_factors": [
-    {
+    {{
       "dimension": "SUICIDAL_IDEATION|SELF_HARM|...",
       "severity": 0.0-1.0,
       "evidence": "quoted text from input",
       "rationale": "clinical reasoning"
-    }
+    }}
   ],
   "protective_factors": [
-    {
+    {{
       "factor": "description",
       "strength": 0.0-1.0,
       "evidence": "quoted text"
-    }
+    }}
   ],
   "clinical_summary": "brief clinical interpretation",
   "recommended_actions": ["action1", "action2"],
   "immediate_risk": true|false,
   "contextual_notes": "additional context"
-}
+}}
 
 Be conservative: when uncertain, err on the side of caution and assess higher risk."""
 
@@ -165,6 +212,7 @@ Be conservative: when uncertain, err on the side of caution and assess higher ri
         prompt += "\n\nProvide your risk assessment as JSON:"
         return prompt
 
+    @traced(name="llm_assessor.assess", attributes={"component": "llm_assessor"})
     async def assess(self, text: str, user_id: UUID | None = None,
                     context: dict[str, Any] | None = None) -> RiskAssessment:
         """
@@ -217,31 +265,56 @@ Be conservative: when uncertain, err on the side of caution and assess higher ri
 
     async def _call_llm(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
         """
-        Call LLM API for assessment.
+        Call LLM API for assessment using LangChain.
 
-        Note: This is a mock implementation. In production, this would call the Anthropic API:
-        ```python
-        response = await self._client.messages.create(
-            model=self._config.model_name,
-            max_tokens=self._config.max_tokens,
-            temperature=float(self._config.temperature),
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}]
-        )
-        return json.loads(response.content[0].text)
-        ```
+        Uses LangChain's ChatAnthropic with structured output parsing.
+        Falls back to mock response if LangChain is unavailable.
         """
-        # Mock response for demonstration (production would use actual API)
+        if self._use_langchain and self._llm:
+            try:
+                # Create prompt template
+                prompt = ChatPromptTemplate.from_messages([
+                    ("system", system_prompt),
+                    ("human", user_prompt)
+                ])
+
+                # Create chain: prompt | llm | output_parser
+                chain = prompt | self._llm | self._output_parser
+
+                # Invoke chain (LangChain handles retries and error handling)
+                response = await chain.ainvoke({})
+
+                return response
+
+            except Exception as e:
+                logger.error("langchain_call_failed", error=str(e), fallback="mock")
+                # Fall through to mock response
+
+        # Legacy client fallback (if provided)
+        if self._client:
+            try:
+                response = await self._client.messages.create(
+                    model=self._config.model_name,
+                    max_tokens=self._config.max_tokens,
+                    temperature=float(self._config.temperature),
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": user_prompt}]
+                )
+                return json.loads(response.content[0].text)
+            except Exception as e:
+                logger.error("anthropic_call_failed", error=str(e), fallback="mock")
+
+        # Mock response for testing/fallback
         mock_response = {
             "risk_level": "MODERATE",
             "risk_score": 0.5,
             "confidence": 0.8,
             "risk_factors": [],
             "protective_factors": [],
-            "clinical_summary": "Assessment completed via rule-based fallback",
+            "clinical_summary": "Assessment completed via fallback (LangChain not configured)",
             "recommended_actions": ["Continue monitoring", "Provide support resources"],
             "immediate_risk": False,
-            "contextual_notes": "LLM assessment not configured"
+            "contextual_notes": "LLM assessment not configured - using fallback"
         }
         return mock_response
 

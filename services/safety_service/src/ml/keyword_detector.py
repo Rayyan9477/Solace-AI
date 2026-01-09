@@ -1,17 +1,37 @@
 """
 Solace-AI Keyword Detector - Fast multi-pattern crisis keyword detection.
-Uses trie-based algorithm for efficient O(n) detection of crisis keywords in text.
+Uses FlashText library (Aho-Corasick algorithm) for efficient O(n) detection of crisis keywords in text.
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
+from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
+import json
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
+
+try:
+    from flashtext import KeywordProcessor
+    FLASHTEXT_AVAILABLE = True
+except ImportError:
+    FLASHTEXT_AVAILABLE = False
+
+try:
+    from safety_service.src.observability.telemetry import traced, get_telemetry
+    TELEMETRY_AVAILABLE = True
+except ImportError:
+    TELEMETRY_AVAILABLE = False
+
+    def traced(*args, **kwargs):
+        """No-op decorator when telemetry unavailable."""
+        def decorator(func):
+            return func
+        return decorator
 
 logger = structlog.get_logger(__name__)
 
@@ -65,34 +85,89 @@ class KeywordDetectorConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="KEYWORD_DETECTOR_", env_file=".env", extra="ignore")
 
 
-@dataclass
-class TrieNode:
-    """Node in the keyword trie for efficient multi-pattern matching."""
-    children: dict[str, TrieNode] = field(default_factory=dict)
-    is_end: bool = False
-    keyword: str | None = None
-    severity: KeywordSeverity | None = None
-    category: KeywordCategory | None = None
-
-
 class KeywordDetector:
     """
-    Fast keyword-based crisis detection using trie data structure.
+    Fast keyword-based crisis detection using FlashText library.
     Implements O(n) multi-pattern matching for real-time crisis detection.
     """
 
     def __init__(self, config: KeywordDetectorConfig | None = None) -> None:
         """Initialize keyword detector with configuration."""
         self._config = config or KeywordDetectorConfig()
-        self._trie_root = TrieNode()
         self._keyword_database = self._load_keyword_database()
-        self._build_trie()
+
+        # Initialize FlashText processor
+        if FLASHTEXT_AVAILABLE:
+            self._processor = KeywordProcessor(
+                case_sensitive=not self._config.enable_case_insensitive
+            )
+            # Add keywords with metadata to FlashText
+            for keyword, (severity, category) in self._keyword_database.items():
+                # FlashText stores clean_name as key, returns it on match
+                # We store metadata separately
+                self._processor.add_keyword(keyword, keyword)
+            self._engine = "flashtext"
+        else:
+            # Fallback to dict-based search (slower but works)
+            self._processor = None
+            self._engine = "dict_based"
+            logger.warning("flashtext_unavailable", fallback="dict_based_search")
+
         logger.info("keyword_detector_initialized",
                    keywords_loaded=len(self._keyword_database),
-                   case_insensitive=self._config.enable_case_insensitive)
+                   case_insensitive=self._config.enable_case_insensitive,
+                   engine=self._engine)
 
     def _load_keyword_database(self) -> dict[str, tuple[KeywordSeverity, KeywordCategory]]:
-        """Load comprehensive crisis keyword database with severity and category."""
+        """
+        Load comprehensive crisis keyword database with severity and category.
+        Attempts to load from JSON config file, falls back to hardcoded defaults.
+        """
+        # Try to load from JSON config first
+        config_path = Path(__file__).parent.parent.parent / "config" / "keywords.json"
+
+        if config_path.exists():
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+
+                # Parse JSON structure into our dict format
+                keyword_db: dict[str, tuple[KeywordSeverity, KeywordCategory]] = {}
+
+                for severity_name, categories in data.get("keywords", {}).items():
+                    try:
+                        severity = KeywordSeverity[severity_name]
+                    except KeyError:
+                        logger.warning("invalid_severity_in_json", severity=severity_name)
+                        continue
+
+                    for category_name, keywords in categories.items():
+                        try:
+                            category = KeywordCategory[category_name]
+                        except KeyError:
+                            logger.warning("invalid_category_in_json", category=category_name)
+                            continue
+
+                        for keyword in keywords:
+                            keyword_db[keyword] = (severity, category)
+
+                logger.info("keywords_loaded_from_json",
+                           path=str(config_path),
+                           count=len(keyword_db),
+                           version=data.get("version"))
+                return keyword_db
+
+            except Exception as e:
+                logger.warning("json_load_failed",
+                             path=str(config_path),
+                             error=str(e),
+                             fallback="hardcoded")
+        else:
+            logger.info("json_config_not_found",
+                       path=str(config_path),
+                       fallback="hardcoded")
+
+        # Fallback to hardcoded keywords
         return {
             # CRITICAL - Immediate suicidal ideation
             "kill myself": (KeywordSeverity.CRITICAL, KeywordCategory.SUICIDAL_IDEATION),
@@ -150,28 +225,10 @@ class KeywordDetector:
             "bridge": (KeywordSeverity.HIGH, KeywordCategory.MEANS_ACCESS),
         }
 
-    def _build_trie(self) -> None:
-        """Build trie from keyword database for efficient matching."""
-        for keyword, (severity, category) in self._keyword_database.items():
-            key = keyword.lower() if self._config.enable_case_insensitive else keyword
-            self._insert_keyword(key, keyword, severity, category)
-
-    def _insert_keyword(self, key: str, original: str, severity: KeywordSeverity,
-                       category: KeywordCategory) -> None:
-        """Insert keyword into trie."""
-        node = self._trie_root
-        for char in key:
-            if char not in node.children:
-                node.children[char] = TrieNode()
-            node = node.children[char]
-        node.is_end = True
-        node.keyword = original
-        node.severity = severity
-        node.category = category
-
+    @traced(name="keyword_detector.detect", attributes={"component": "keyword_detector"})
     def detect(self, text: str, user_id: UUID | None = None) -> list[KeywordMatch]:
         """
-        Detect crisis keywords in text using trie-based matching.
+        Detect crisis keywords in text using FlashText (Aho-Corasick algorithm).
 
         Args:
             text: Input text to analyze
@@ -183,54 +240,95 @@ class KeywordDetector:
         if not text:
             return []
 
-        search_text = text.lower() if self._config.enable_case_insensitive else text
         matches: list[KeywordMatch] = []
 
-        # Scan text for keyword matches
-        for i in range(len(search_text)):
-            # Check for word boundary if required
-            if self._config.match_whole_words and i > 0 and search_text[i-1].isalnum():
-                continue
+        if self._processor and FLASHTEXT_AVAILABLE:
+            # Use FlashText for efficient O(n) matching
+            # extract_keywords returns: [(keyword, start_pos, end_pos), ...]
+            found_keywords = self._processor.extract_keywords(text, span_info=True)
 
-            # Try to match from this position
-            node = self._trie_root
-            j = i
+            for keyword, start_pos, end_pos in found_keywords:
+                # Get metadata from our database
+                if keyword in self._keyword_database:
+                    severity, category = self._keyword_database[keyword]
+                else:
+                    # Shouldn't happen, but handle gracefully
+                    continue
 
-            while j < len(search_text) and search_text[j] in node.children:
-                node = node.children[search_text[j]]
-                j += 1
+                # Extract context
+                context_start = max(0, start_pos - self._config.context_window_chars)
+                context_end = min(len(text), end_pos + self._config.context_window_chars)
+                context = text[context_start:context_end].strip()
 
-                # Check if we found a complete keyword
-                if node.is_end:
-                    # Verify word boundary at end
-                    if self._config.match_whole_words and j < len(search_text) and search_text[j].isalnum():
-                        continue
+                # Get severity weight
+                weight = self._get_severity_weight(severity)
+
+                match = KeywordMatch(
+                    keyword=keyword,
+                    position=start_pos,
+                    severity=severity,
+                    category=category,
+                    confidence=Decimal("0.9"),  # High confidence for exact matches
+                    context_snippet=context,
+                    weight=weight
+                )
+                matches.append(match)
+
+                # Stop after max matches
+                if len(matches) >= self._config.max_matches_per_text:
+                    break
+        else:
+            # Fallback to simple substring search if FlashText unavailable
+            search_text = text.lower() if self._config.enable_case_insensitive else text
+
+            for keyword, (severity, category) in self._keyword_database.items():
+                search_keyword = keyword.lower() if self._config.enable_case_insensitive else keyword
+
+                # Simple substring search
+                pos = 0
+                while True:
+                    pos = search_text.find(search_keyword, pos)
+                    if pos == -1:
+                        break
+
+                    # Check word boundaries if required
+                    if self._config.match_whole_words:
+                        # Check start boundary
+                        if pos > 0 and search_text[pos - 1].isalnum():
+                            pos += 1
+                            continue
+                        # Check end boundary
+                        end_pos = pos + len(search_keyword)
+                        if end_pos < len(search_text) and search_text[end_pos].isalnum():
+                            pos += 1
+                            continue
 
                     # Extract context
-                    context_start = max(0, i - self._config.context_window_chars)
-                    context_end = min(len(text), j + self._config.context_window_chars)
+                    end_pos = pos + len(search_keyword)
+                    context_start = max(0, pos - self._config.context_window_chars)
+                    context_end = min(len(text), end_pos + self._config.context_window_chars)
                     context = text[context_start:context_end].strip()
 
-                    # Get severity weight
-                    weight = self._get_severity_weight(node.severity)
+                    weight = self._get_severity_weight(severity)
 
                     match = KeywordMatch(
-                        keyword=node.keyword,
-                        position=i,
-                        severity=node.severity,
-                        category=node.category,
-                        confidence=Decimal("0.9"),  # High confidence for exact matches
+                        keyword=keyword,
+                        position=pos,
+                        severity=severity,
+                        category=category,
+                        confidence=Decimal("0.9"),
                         context_snippet=context,
                         weight=weight
                     )
                     matches.append(match)
 
-                    # Stop after max matches
                     if len(matches) >= self._config.max_matches_per_text:
                         break
 
-            if len(matches) >= self._config.max_matches_per_text:
-                break
+                    pos += 1
+
+                if len(matches) >= self._config.max_matches_per_text:
+                    break
 
         # Sort by severity (critical first) then position
         severity_order = {

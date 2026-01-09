@@ -7,8 +7,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
+from pathlib import Path
 from typing import Any
 from uuid import UUID
+import json
 import re
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -20,6 +22,24 @@ try:
     SPACY_AVAILABLE = True
 except Exception:  # Catch all exceptions including dependency issues
     SPACY_AVAILABLE = False
+
+try:
+    from transformers import pipeline
+    TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    TRANSFORMERS_AVAILABLE = False
+
+try:
+    from safety_service.src.observability.telemetry import traced, get_telemetry
+    TELEMETRY_AVAILABLE = True
+except ImportError:
+    TELEMETRY_AVAILABLE = False
+
+    def traced(*args, **kwargs):
+        """No-op decorator when telemetry unavailable."""
+        def decorator(func):
+            return func
+        return decorator
 
 logger = structlog.get_logger(__name__)
 
@@ -38,6 +58,21 @@ class PatternType(str, Enum):
     TRAUMA_FLASHBACK = "TRAUMA_FLASHBACK"  # PTSD/trauma indicators
 
 
+# Emotion-to-crisis mapping for transformer model (SamLowe/roberta-base-go_emotions)
+# Maps GoEmotions labels to crisis indicators with severity weights
+CRISIS_EMOTION_MAP: dict[str, tuple[PatternType, Decimal]] = {
+    "grief": (PatternType.HOPELESSNESS_EXPRESSION, Decimal("0.85")),
+    "sadness": (PatternType.HOPELESSNESS_EXPRESSION, Decimal("0.7")),
+    "fear": (PatternType.HOPELESSNESS_EXPRESSION, Decimal("0.65")),
+    "nervousness": (PatternType.HOPELESSNESS_EXPRESSION, Decimal("0.55")),
+    "disappointment": (PatternType.HOPELESSNESS_EXPRESSION, Decimal("0.5")),
+    "remorse": (PatternType.HOPELESSNESS_EXPRESSION, Decimal("0.6")),
+    "disgust": (PatternType.SOCIAL_WITHDRAWAL, Decimal("0.5")),
+    "anger": (PatternType.HOPELESSNESS_EXPRESSION, Decimal("0.55")),
+    "disapproval": (PatternType.SOCIAL_WITHDRAWAL, Decimal("0.45")),
+}
+
+
 class PatternMatch(BaseModel):
     """Represents a detected pattern match."""
     pattern_type: PatternType = Field(..., description="Type of pattern detected")
@@ -54,6 +89,14 @@ class PatternMatcherConfig(BaseSettings):
     # spaCy NLP settings (for better linguistic understanding)
     use_spacy: bool = Field(default=True, description="Use spaCy for linguistic pattern matching (better accuracy)")
     spacy_model: str = Field(default="en_core_web_sm", description="spaCy model to use")
+
+    # Transformer emotion classifier settings (GoEmotions for crisis-relevant emotion detection)
+    use_emotion_classifier: bool = Field(default=True, description="Use transformer-based emotion classifier")
+    emotion_model: str = Field(
+        default="SamLowe/roberta-base-go_emotions",
+        description="HuggingFace model for emotion classification (28 emotions)"
+    )
+    emotion_threshold: Decimal = Field(default=Decimal("0.4"), description="Minimum emotion probability threshold")
 
     # Pattern matching settings
     enable_case_insensitive: bool = Field(default=True, description="Case-insensitive matching")
@@ -78,8 +121,10 @@ class CompiledPattern:
 
 class PatternMatcher:
     """
-    Advanced crisis detection using hybrid spaCy NLP + regex patterns.
-    spaCy provides linguistic analysis; regex ensures comprehensive crisis phrase coverage.
+    Advanced crisis detection using hybrid spaCy NLP + regex patterns + transformer emotion classification.
+    - spaCy provides linguistic analysis
+    - Regex ensures comprehensive crisis phrase coverage
+    - Transformer model detects crisis-relevant emotions (grief, sadness, fear, etc.)
     """
 
     def __init__(self, config: PatternMatcherConfig | None = None) -> None:
@@ -90,31 +135,107 @@ class PatternMatcher:
         # Initialize spaCy NLP and Matcher if available (better linguistic understanding)
         self._nlp = None
         self._spacy_matcher = None
+        self._emotion_classifier = None
+        self._mode = "regex_only"
+
         if self._config.use_spacy and SPACY_AVAILABLE:
             try:
                 self._nlp = spacy.load(self._config.spacy_model)
                 self._spacy_matcher = Matcher(self._nlp.vocab)
                 self._add_spacy_patterns()
-                logger.info("pattern_matcher_initialized",
-                           mode="hybrid_spacy",
-                           spacy_model=self._config.spacy_model,
-                           regex_patterns=len(self._patterns))
+                self._mode = "hybrid_spacy"
             except Exception as e:
                 logger.warning("spacy_load_failed", error=str(e), fallback="regex_only")
                 self._nlp = None
                 self._spacy_matcher = None
 
-        if self._nlp is None:
-            logger.info("pattern_matcher_initialized",
-                       mode="regex_only",
-                       pattern_count=len(self._patterns))
+        # Initialize transformer-based emotion classifier (GoEmotions)
+        if self._config.use_emotion_classifier and TRANSFORMERS_AVAILABLE:
+            try:
+                self._emotion_classifier = pipeline(
+                    task="text-classification",
+                    model=self._config.emotion_model,
+                    top_k=None,  # Return all 28 emotion scores
+                    truncation=True
+                )
+                self._mode = f"{self._mode}_emotion" if self._mode != "regex_only" else "hybrid_emotion"
+                logger.info("emotion_classifier_initialized",
+                           model=self._config.emotion_model,
+                           threshold=float(self._config.emotion_threshold))
+            except Exception as e:
+                logger.warning("emotion_classifier_load_failed",
+                             error=str(e),
+                             model=self._config.emotion_model)
+                self._emotion_classifier = None
+
+        logger.info("pattern_matcher_initialized",
+                   mode=self._mode,
+                   spacy_available=self._nlp is not None,
+                   emotion_classifier_available=self._emotion_classifier is not None,
+                   regex_patterns=len(self._patterns))
 
     def _compile_patterns(self) -> list[CompiledPattern]:
-        """Compile comprehensive crisis detection patterns using regex."""
+        """
+        Compile comprehensive crisis detection patterns using regex.
+        Attempts to load from JSON config file, falls back to hardcoded defaults.
+        """
         patterns: list[CompiledPattern] = []
         flags = re.IGNORECASE if self._config.enable_case_insensitive else 0
 
-        # Critical explicit crisis phrases
+        # Try to load from JSON config first
+        config_path = Path(__file__).parent.parent.parent / "config" / "patterns.json"
+
+        if config_path.exists():
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+
+                # Parse JSON structure into CompiledPattern objects
+                for severity_level, pattern_types in data.get("patterns", {}).items():
+                    for pattern_type_name, pattern_list in pattern_types.items():
+                        try:
+                            ptype = PatternType[pattern_type_name]
+                        except KeyError:
+                            logger.warning("invalid_pattern_type_in_json", pattern_type=pattern_type_name)
+                            continue
+
+                        for pattern_def in pattern_list:
+                            try:
+                                regex = pattern_def["regex"]
+                                severity = Decimal(pattern_def["severity"])
+                                confidence = Decimal(pattern_def["confidence"])
+                                explanation = pattern_def["explanation"]
+
+                                patterns.append(CompiledPattern(
+                                    pattern=re.compile(regex, flags),
+                                    pattern_type=ptype,
+                                    severity=severity,
+                                    confidence=confidence,
+                                    explanation=explanation
+                                ))
+                            except (KeyError, ValueError, re.error) as e:
+                                logger.warning("invalid_pattern_in_json",
+                                             pattern_type=pattern_type_name,
+                                             error=str(e))
+                                continue
+
+                logger.info("patterns_loaded_from_json",
+                           path=str(config_path),
+                           count=len(patterns),
+                           version=data.get("version"))
+                return patterns
+
+            except Exception as e:
+                logger.warning("json_load_failed",
+                             path=str(config_path),
+                             error=str(e),
+                             fallback="hardcoded")
+        else:
+            logger.info("json_config_not_found",
+                       path=str(config_path),
+                       fallback="hardcoded")
+
+        # Fallback to hardcoded patterns
         crisis_patterns = [
             # Suicidal ideation (explicit and with want/die patterns)
             (r"\b(kill\s+myself|commit\s+suicide|end\s+my\s+life)\b",
@@ -257,9 +378,61 @@ class PatternMatcher:
 
         return matches
 
+    def _detect_emotion_patterns(self, text: str) -> list[PatternMatch]:
+        """
+        Detect crisis-relevant emotions using transformer model (GoEmotions).
+        Maps emotions like grief, sadness, fear to crisis indicators.
+        """
+        if not self._emotion_classifier:
+            return []
+
+        matches: list[PatternMatch] = []
+
+        try:
+            # Get all 28 emotion scores
+            results = self._emotion_classifier(text, truncation=True, max_length=512)
+            if not results:
+                return []
+
+            # Results is a list of dicts with 'label' and 'score'
+            emotions = results[0] if isinstance(results[0], list) else results
+
+            for emotion_result in emotions:
+                label = emotion_result.get("label", "")
+                score = emotion_result.get("score", 0.0)
+
+                # Check if this emotion is crisis-relevant and above threshold
+                if label in CRISIS_EMOTION_MAP and Decimal(str(score)) >= self._config.emotion_threshold:
+                    pattern_type, base_severity = CRISIS_EMOTION_MAP[label]
+
+                    # Scale severity by emotion confidence
+                    severity = base_severity * Decimal(str(score))
+                    confidence = Decimal(str(score))
+
+                    matches.append(PatternMatch(
+                        pattern_type=pattern_type,
+                        matched_text=f"[emotion:{label}]",
+                        position=0,  # Emotion applies to whole text
+                        severity=severity,
+                        confidence=confidence,
+                        context=text[:120] if len(text) > 120 else text,
+                        explanation=f"Detected {label} emotion (confidence: {score:.2f}) indicating potential {pattern_type.value.lower().replace('_', ' ')}"
+                    ))
+
+            if matches:
+                logger.debug("emotion_patterns_detected",
+                           count=len(matches),
+                           emotions=[m.matched_text for m in matches])
+
+        except Exception as e:
+            logger.warning("emotion_detection_failed", error=str(e))
+
+        return matches
+
+    @traced(name="pattern_matcher.detect", attributes={"component": "pattern_matcher"})
     def detect(self, text: str, user_id: UUID | None = None) -> list[PatternMatch]:
         """
-        Detect crisis patterns using hybrid spaCy + regex approach.
+        Detect crisis patterns using hybrid spaCy + regex + transformer emotion approach.
 
         Args:
             text: Input text to analyze
@@ -273,7 +446,12 @@ class PatternMatcher:
 
         matches: list[PatternMatch] = []
 
-        # First: Use spaCy patterns if available (better linguistic understanding)
+        # First: Use transformer emotion classifier if available (deep emotional understanding)
+        if self._emotion_classifier:
+            emotion_matches = self._detect_emotion_patterns(text)
+            matches.extend(emotion_matches)
+
+        # Second: Use spaCy patterns if available (linguistic understanding)
         if self._nlp:
             spacy_matches = self._detect_spacy_patterns(text)
             matches.extend(spacy_matches)

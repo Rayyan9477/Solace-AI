@@ -1,0 +1,106 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2026-01-08",
+  "description": "Crisis detection patterns using regex. Supports case-insensitive matching when enabled.",
+  "patterns": {
+    "CRITICAL": {
+      "SUICIDAL_IDEATION": [
+        {
+          "regex": "\\b(kill\\s+myself|commit\\s+suicide|end\\s+my\\s+life)\\b",
+          "severity": "0.95",
+          "confidence": "0.9",
+          "explanation": "Explicit suicide expression"
+        },
+        {
+          "regex": "\\b(want|wanted|wanting)\\s+to\\s+die\\b",
+          "severity": "0.95",
+          "confidence": "0.9",
+          "explanation": "Want to die expression"
+        },
+        {
+          "regex": "\\bwish\\s+(i\\s+)?(was|were)\\s+dead\\b",
+          "severity": "0.9",
+          "confidence": "0.85",
+          "explanation": "Death wish"
+        },
+        {
+          "regex": "\\bbetter\\s+off\\s+without\\s+me\\b",
+          "severity": "0.85",
+          "confidence": "0.85",
+          "explanation": "Perceived burdensomeness"
+        }
+      ],
+      "PLAN_INDICATOR": [
+        {
+          "regex": "\\b(have|got)\\s+.{0,10}(plan|method)\\s+to\\s+(die|end)\\b",
+          "severity": "0.95",
+          "confidence": "0.95",
+          "explanation": "Articulated plan"
+        },
+        {
+          "regex": "\\bsuicide\\s+note\\b",
+          "severity": "0.95",
+          "confidence": "0.95",
+          "explanation": "Suicide note mention"
+        }
+      ],
+      "TIMEFRAME_URGENCY": [
+        {
+          "regex": "\\b(tonight|today).{0,30}(die|end\\s+it|over)\\b",
+          "severity": "0.95",
+          "confidence": "0.9",
+          "explanation": "Immediate timeframe"
+        }
+      ],
+      "FAREWELL_MESSAGE": [
+        {
+          "regex": "\\b(goodbye|farewell)\\s+(everyone|world)\\b",
+          "severity": "0.9",
+          "confidence": "0.85",
+          "explanation": "Farewell message"
+        }
+      ]
+    },
+    "HIGH": {
+      "HOPELESSNESS_EXPRESSION": [
+        {
+          "regex": "\\bcan't\\s+take\\s+(it|this)\\s+anymore\\b",
+          "severity": "0.8",
+          "confidence": "0.85",
+          "explanation": "Overwhelm expression"
+        },
+        {
+          "regex": "\\b(never|won't)\\s+.{0,20}(get\\s+)?better\\b",
+          "severity": "0.75",
+          "confidence": "0.8",
+          "explanation": "Things won't improve"
+        },
+        {
+          "regex": "\\bfeel\\s+hopeless\\b",
+          "severity": "0.8",
+          "confidence": "0.85",
+          "explanation": "Feeling hopeless"
+        }
+      ],
+      "SELF_HARM_INTENT": [
+        {
+          "regex": "\\b(cutting|cut|hurt)\\s+myself\\b",
+          "severity": "0.8",
+          "confidence": "0.85",
+          "explanation": "Self-harm behavior"
+        }
+      ],
+      "MEANS_ACCESS": [
+        {
+          "regex": "\\b(gun|pills|rope)\\b",
+          "severity": "0.75",
+          "confidence": "0.8",
+          "explanation": "Lethal means mention"
+        }
+      ]
+    }
+  },
+  "spacy_patterns": {
+    "note": "spaCy linguistic patterns are defined programmatically in code due to their complex token-level structure. They complement the regex patterns above for better linguistic understanding."
+  }
+}

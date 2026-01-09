@@ -7,10 +7,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+import json
 import re
 import structlog
 
@@ -20,6 +22,18 @@ try:
     CUDA_AVAILABLE = torch.cuda.is_available()
 except Exception:
     CUDA_AVAILABLE = False
+
+try:
+    from safety_service.src.observability.telemetry import traced, get_telemetry
+    TELEMETRY_AVAILABLE = True
+except ImportError:
+    TELEMETRY_AVAILABLE = False
+
+    def traced(*args, **kwargs):
+        """No-op decorator when telemetry unavailable."""
+        def decorator(func):
+            return func
+        return decorator
 
 # Try to load transformer model if CUDA available
 TRANSFORMERS_AVAILABLE = False
@@ -165,7 +179,51 @@ class SentimentAnalyzer:
                        clinical_terms=sum(1 for e in self._lexicon.values() if e.is_clinical))
 
     def _build_clinical_lexicon(self) -> dict[str, LexiconEntry]:
-        """Build mental health-focused sentiment lexicon (clinical terms only for ML augmentation)."""
+        """
+        Build mental health-focused sentiment lexicon.
+        Attempts to load from JSON config file, falls back to hardcoded defaults.
+        """
+        # Try to load from JSON config first
+        config_path = Path(__file__).parent.parent.parent / "config" / "clinical_lexicon.json"
+
+        if config_path.exists():
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+
+                lexicon: dict[str, LexiconEntry] = {}
+
+                for category_name, category_data in data.get("lexicon", {}).items():
+                    is_clinical = category_data.get("is_clinical", False)
+                    is_crisis = category_data.get("is_crisis", False)
+
+                    for word, score in category_data.get("terms", {}).items():
+                        lexicon[word] = LexiconEntry(
+                            word=word,
+                            score=Decimal(str(score)),
+                            is_clinical=is_clinical,
+                            is_crisis=is_crisis
+                        )
+
+                logger.info("clinical_lexicon_loaded_from_json",
+                           path=str(config_path),
+                           total_terms=len(lexicon),
+                           clinical_terms=sum(1 for e in lexicon.values() if e.is_clinical),
+                           crisis_terms=sum(1 for e in lexicon.values() if e.is_crisis),
+                           version=data.get("version"))
+                return lexicon
+
+            except Exception as e:
+                logger.warning("json_lexicon_load_failed",
+                             path=str(config_path),
+                             error=str(e),
+                             fallback="hardcoded")
+        else:
+            logger.info("json_lexicon_not_found",
+                       path=str(config_path),
+                       fallback="hardcoded")
+
+        # Fallback to hardcoded lexicon
         lexicon: dict[str, LexiconEntry] = {}
 
         # Crisis terms - highest priority for mental health detection
@@ -197,7 +255,19 @@ class SentimentAnalyzer:
         return lexicon
 
     def _load_negation_words(self) -> set[str]:
-        """Load negation words for sentiment reversal."""
+        """Load negation words for sentiment reversal from JSON or fallback to hardcoded."""
+        config_path = Path(__file__).parent.parent.parent / "config" / "clinical_lexicon.json"
+
+        if config_path.exists():
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                negation_list = data.get("negation_words", [])
+                if negation_list:
+                    return set(negation_list)
+            except Exception:
+                pass  # Fall through to hardcoded
+
         return {
             "not", "no", "never", "none", "nobody", "nothing", "neither", "nowhere",
             "hardly", "scarcely", "barely", "doesn't", "isn't", "wasn't", "shouldn't",
@@ -205,7 +275,19 @@ class SentimentAnalyzer:
         }
 
     def _load_intensifiers(self) -> dict[str, Decimal]:
-        """Load intensifier words with boost factors."""
+        """Load intensifier words with boost factors from JSON or fallback to hardcoded."""
+        config_path = Path(__file__).parent.parent.parent / "config" / "clinical_lexicon.json"
+
+        if config_path.exists():
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                intensifiers = data.get("intensifiers", {})
+                if intensifiers:
+                    return {word: Decimal(str(boost)) for word, boost in intensifiers.items()}
+            except Exception:
+                pass  # Fall through to hardcoded
+
         return {
             "very": Decimal("1.5"), "extremely": Decimal("1.8"), "absolutely": Decimal("1.7"),
             "completely": Decimal("1.6"), "totally": Decimal("1.6"), "really": Decimal("1.4"),
@@ -258,6 +340,7 @@ class SentimentAnalyzer:
             logger.warning("vader_sentiment_failed", error=str(e))
             return Decimal("0.0"), Decimal("0.0")
 
+    @traced(name="sentiment_analyzer.analyze", attributes={"component": "sentiment_analyzer"})
     def analyze(self, text: str, user_id: UUID | None = None) -> SentimentResult:
         """
         Analyze sentiment of text with clinical psychology focus using hybrid approach.
