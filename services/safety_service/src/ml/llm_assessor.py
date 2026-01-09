@@ -22,7 +22,7 @@ except ImportError:
     LANGCHAIN_AVAILABLE = False
 
 try:
-    from safety_service.src.observability.telemetry import traced, get_telemetry
+    from safety_service.src.infrastructure.telemetry import traced, get_telemetry
     TELEMETRY_AVAILABLE = True
 except ImportError:
     TELEMETRY_AVAILABLE = False

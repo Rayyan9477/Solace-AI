@@ -24,7 +24,7 @@ except Exception:
     CUDA_AVAILABLE = False
 
 try:
-    from safety_service.src.observability.telemetry import traced, get_telemetry
+    from safety_service.src.infrastructure.telemetry import traced, get_telemetry
     TELEMETRY_AVAILABLE = True
 except ImportError:
     TELEMETRY_AVAILABLE = False
@@ -180,119 +180,84 @@ class SentimentAnalyzer:
 
     def _build_clinical_lexicon(self) -> dict[str, LexiconEntry]:
         """
-        Build mental health-focused sentiment lexicon.
-        Attempts to load from JSON config file, falls back to hardcoded defaults.
+        Build mental health-focused sentiment lexicon from JSON configuration.
+        JSON config is the single source of truth for scalability.
         """
-        # Try to load from JSON config first
         config_path = Path(__file__).parent.parent.parent / "config" / "clinical_lexicon.json"
 
-        if config_path.exists():
-            try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
+        if not config_path.exists():
+            logger.error("clinical_lexicon_config_missing",
+                        path=str(config_path),
+                        action="create config/clinical_lexicon.json")
+            raise FileNotFoundError(
+                f"Clinical lexicon configuration not found: {config_path}. "
+                "Please create the JSON config file for scalable deployment."
+            )
 
-                lexicon: dict[str, LexiconEntry] = {}
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
 
-                for category_name, category_data in data.get("lexicon", {}).items():
-                    is_clinical = category_data.get("is_clinical", False)
-                    is_crisis = category_data.get("is_crisis", False)
+            lexicon: dict[str, LexiconEntry] = {}
 
-                    for word, score in category_data.get("terms", {}).items():
-                        lexicon[word] = LexiconEntry(
-                            word=word,
-                            score=Decimal(str(score)),
-                            is_clinical=is_clinical,
-                            is_crisis=is_crisis
-                        )
+            for category_name, category_data in data.get("lexicon", {}).items():
+                is_clinical = category_data.get("is_clinical", False)
+                is_crisis = category_data.get("is_crisis", False)
 
-                logger.info("clinical_lexicon_loaded_from_json",
-                           path=str(config_path),
-                           total_terms=len(lexicon),
-                           clinical_terms=sum(1 for e in lexicon.values() if e.is_clinical),
-                           crisis_terms=sum(1 for e in lexicon.values() if e.is_crisis),
-                           version=data.get("version"))
-                return lexicon
+                for word, score in category_data.get("terms", {}).items():
+                    lexicon[word] = LexiconEntry(
+                        word=word,
+                        score=Decimal(str(score)),
+                        is_clinical=is_clinical,
+                        is_crisis=is_crisis
+                    )
 
-            except Exception as e:
-                logger.warning("json_lexicon_load_failed",
-                             path=str(config_path),
-                             error=str(e),
-                             fallback="hardcoded")
-        else:
-            logger.info("json_lexicon_not_found",
+            if not lexicon:
+                raise ValueError("Lexicon is empty - check JSON structure")
+
+            logger.info("clinical_lexicon_loaded",
                        path=str(config_path),
-                       fallback="hardcoded")
+                       total_terms=len(lexicon),
+                       clinical_terms=sum(1 for e in lexicon.values() if e.is_clinical),
+                       crisis_terms=sum(1 for e in lexicon.values() if e.is_crisis),
+                       version=data.get("version"))
+            return lexicon
 
-        # Fallback to hardcoded lexicon
-        lexicon: dict[str, LexiconEntry] = {}
-
-        # Crisis terms - highest priority for mental health detection
-        crisis_terms = {
-            "suicide": -1.0, "die": -0.95, "kill": -0.95, "hopeless": -0.9,
-            "worthless": -0.9, "burden": -0.85, "despair": -0.9,
-        }
-        for word, score in crisis_terms.items():
-            lexicon[word] = LexiconEntry(word, Decimal(str(score)), is_clinical=True, is_crisis=True)
-
-        # Clinical terms - important for mental health context
-        clinical_terms = {
-            "depressed": -0.8, "anxious": -0.75, "panic": -0.8, "trauma": -0.75,
-            "ptsd": -0.7, "dissociate": -0.7, "flashback": -0.75, "overwhelmed": -0.75,
-            "hope": 0.7, "hopeful": 0.75, "better": 0.6, "improving": 0.7,
-            "grateful": 0.7, "supported": 0.65, "safe": 0.7, "coping": 0.6,
-        }
-        for word, score in clinical_terms.items():
-            lexicon[word] = LexiconEntry(word, Decimal(str(score)), is_clinical=True, is_crisis=False)
-
-        # Common positive/negative terms for basic sentiment (used by tests)
-        basic_terms = {
-            "happy": 0.7, "good": 0.5, "great": 0.7, "sad": -0.6,
-            "worried": -0.6, "stressed": -0.65,
-        }
-        for word, score in basic_terms.items():
-            lexicon[word] = LexiconEntry(word, Decimal(str(score)), is_clinical=False, is_crisis=False)
-
-        return lexicon
+        except json.JSONDecodeError as e:
+            logger.error("clinical_lexicon_invalid_json", path=str(config_path), error=str(e))
+            raise ValueError(f"Invalid JSON in clinical lexicon config: {e}")
 
     def _load_negation_words(self) -> set[str]:
-        """Load negation words for sentiment reversal from JSON or fallback to hardcoded."""
+        """Load negation words for sentiment reversal from JSON configuration."""
         config_path = Path(__file__).parent.parent.parent / "config" / "clinical_lexicon.json"
 
-        if config_path.exists():
-            try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                negation_list = data.get("negation_words", [])
-                if negation_list:
-                    return set(negation_list)
-            except Exception:
-                pass  # Fall through to hardcoded
-
-        return {
-            "not", "no", "never", "none", "nobody", "nothing", "neither", "nowhere",
-            "hardly", "scarcely", "barely", "doesn't", "isn't", "wasn't", "shouldn't",
-            "wouldn't", "couldn't", "won't", "can't", "don't", "didn't",
-        }
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            negation_list = data.get("negation_words", [])
+            if negation_list:
+                return set(negation_list)
+            logger.warning("negation_words_empty", path=str(config_path))
+            return set()
+        except Exception as e:
+            logger.warning("negation_words_load_failed", error=str(e))
+            return set()
 
     def _load_intensifiers(self) -> dict[str, Decimal]:
-        """Load intensifier words with boost factors from JSON or fallback to hardcoded."""
+        """Load intensifier words with boost factors from JSON configuration."""
         config_path = Path(__file__).parent.parent.parent / "config" / "clinical_lexicon.json"
 
-        if config_path.exists():
-            try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                intensifiers = data.get("intensifiers", {})
-                if intensifiers:
-                    return {word: Decimal(str(boost)) for word, boost in intensifiers.items()}
-            except Exception:
-                pass  # Fall through to hardcoded
-
-        return {
-            "very": Decimal("1.5"), "extremely": Decimal("1.8"), "absolutely": Decimal("1.7"),
-            "completely": Decimal("1.6"), "totally": Decimal("1.6"), "really": Decimal("1.4"),
-            "so": Decimal("1.3"), "quite": Decimal("1.2"), "incredibly": Decimal("1.7"),
-        }
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            intensifiers = data.get("intensifiers", {})
+            if intensifiers:
+                return {word: Decimal(str(boost)) for word, boost in intensifiers.items()}
+            logger.warning("intensifiers_empty", path=str(config_path))
+            return {}
+        except Exception as e:
+            logger.warning("intensifiers_load_failed", error=str(e))
+            return {}
 
     def _get_ml_sentiment(self, text: str) -> tuple[Decimal, Decimal]:
         """

@@ -22,7 +22,7 @@ except ImportError:
     FLASHTEXT_AVAILABLE = False
 
 try:
-    from safety_service.src.observability.telemetry import traced, get_telemetry
+    from safety_service.src.infrastructure.telemetry import traced, get_telemetry
     TELEMETRY_AVAILABLE = True
 except ImportError:
     TELEMETRY_AVAILABLE = False
@@ -120,110 +120,55 @@ class KeywordDetector:
 
     def _load_keyword_database(self) -> dict[str, tuple[KeywordSeverity, KeywordCategory]]:
         """
-        Load comprehensive crisis keyword database with severity and category.
-        Attempts to load from JSON config file, falls back to hardcoded defaults.
+        Load crisis keyword database from JSON configuration.
+        JSON config is the single source of truth for scalability.
         """
-        # Try to load from JSON config first
         config_path = Path(__file__).parent.parent.parent / "config" / "keywords.json"
 
-        if config_path.exists():
-            try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
+        if not config_path.exists():
+            logger.error("keywords_config_missing",
+                        path=str(config_path),
+                        action="create config/keywords.json")
+            raise FileNotFoundError(
+                f"Keywords configuration not found: {config_path}. "
+                "Please create the JSON config file for scalable deployment."
+            )
 
-                # Parse JSON structure into our dict format
-                keyword_db: dict[str, tuple[KeywordSeverity, KeywordCategory]] = {}
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
 
-                for severity_name, categories in data.get("keywords", {}).items():
+            keyword_db: dict[str, tuple[KeywordSeverity, KeywordCategory]] = {}
+
+            for severity_name, categories in data.get("keywords", {}).items():
+                try:
+                    severity = KeywordSeverity[severity_name]
+                except KeyError:
+                    logger.warning("invalid_severity_in_json", severity=severity_name)
+                    continue
+
+                for category_name, keywords in categories.items():
                     try:
-                        severity = KeywordSeverity[severity_name]
+                        category = KeywordCategory[category_name]
                     except KeyError:
-                        logger.warning("invalid_severity_in_json", severity=severity_name)
+                        logger.warning("invalid_category_in_json", category=category_name)
                         continue
 
-                    for category_name, keywords in categories.items():
-                        try:
-                            category = KeywordCategory[category_name]
-                        except KeyError:
-                            logger.warning("invalid_category_in_json", category=category_name)
-                            continue
+                    for keyword in keywords:
+                        keyword_db[keyword] = (severity, category)
 
-                        for keyword in keywords:
-                            keyword_db[keyword] = (severity, category)
+            if not keyword_db:
+                raise ValueError("Keyword database is empty - check JSON structure")
 
-                logger.info("keywords_loaded_from_json",
-                           path=str(config_path),
-                           count=len(keyword_db),
-                           version=data.get("version"))
-                return keyword_db
-
-            except Exception as e:
-                logger.warning("json_load_failed",
-                             path=str(config_path),
-                             error=str(e),
-                             fallback="hardcoded")
-        else:
-            logger.info("json_config_not_found",
+            logger.info("keywords_loaded_from_json",
                        path=str(config_path),
-                       fallback="hardcoded")
+                       count=len(keyword_db),
+                       version=data.get("version"))
+            return keyword_db
 
-        # Fallback to hardcoded keywords
-        return {
-            # CRITICAL - Immediate suicidal ideation
-            "kill myself": (KeywordSeverity.CRITICAL, KeywordCategory.SUICIDAL_IDEATION),
-            "end my life": (KeywordSeverity.CRITICAL, KeywordCategory.SUICIDAL_IDEATION),
-            "suicide": (KeywordSeverity.CRITICAL, KeywordCategory.SUICIDAL_IDEATION),
-            "want to die": (KeywordSeverity.CRITICAL, KeywordCategory.SUICIDAL_IDEATION),
-            "better off dead": (KeywordSeverity.CRITICAL, KeywordCategory.SUICIDAL_IDEATION),
-            "no reason to live": (KeywordSeverity.CRITICAL, KeywordCategory.SUICIDAL_IDEATION),
-            "take my life": (KeywordSeverity.CRITICAL, KeywordCategory.SUICIDAL_IDEATION),
-            "end it all": (KeywordSeverity.CRITICAL, KeywordCategory.SUICIDAL_IDEATION),
-            "hanging myself": (KeywordSeverity.CRITICAL, KeywordCategory.PLAN_INTENT),
-            "overdose": (KeywordSeverity.CRITICAL, KeywordCategory.PLAN_INTENT),
-
-            # HIGH - Self-harm and high-risk behaviors
-            "self-harm": (KeywordSeverity.HIGH, KeywordCategory.SELF_HARM),
-            "hurt myself": (KeywordSeverity.HIGH, KeywordCategory.SELF_HARM),
-            "cutting": (KeywordSeverity.HIGH, KeywordCategory.SELF_HARM),
-            "cut myself": (KeywordSeverity.HIGH, KeywordCategory.SELF_HARM),
-            "burning myself": (KeywordSeverity.HIGH, KeywordCategory.SELF_HARM),
-            "don't want to live": (KeywordSeverity.HIGH, KeywordCategory.HOPELESSNESS),
-            "no hope": (KeywordSeverity.HIGH, KeywordCategory.HOPELESSNESS),
-            "hopeless": (KeywordSeverity.HIGH, KeywordCategory.HOPELESSNESS),
-            "give up": (KeywordSeverity.HIGH, KeywordCategory.HOPELESSNESS),
-            "burden": (KeywordSeverity.HIGH, KeywordCategory.HOPELESSNESS),
-            "worthless": (KeywordSeverity.HIGH, KeywordCategory.HOPELESSNESS),
-            "goodbye forever": (KeywordSeverity.HIGH, KeywordCategory.FAREWELL),
-
-            # ELEVATED - Moderate distress indicators
-            "depressed": (KeywordSeverity.ELEVATED, KeywordCategory.EMOTIONAL_DISTRESS),
-            "anxious": (KeywordSeverity.ELEVATED, KeywordCategory.EMOTIONAL_DISTRESS),
-            "overwhelmed": (KeywordSeverity.ELEVATED, KeywordCategory.EMOTIONAL_DISTRESS),
-            "can't cope": (KeywordSeverity.ELEVATED, KeywordCategory.EMOTIONAL_DISTRESS),
-            "falling apart": (KeywordSeverity.ELEVATED, KeywordCategory.EMOTIONAL_DISTRESS),
-            "breaking down": (KeywordSeverity.ELEVATED, KeywordCategory.EMOTIONAL_DISTRESS),
-            "losing control": (KeywordSeverity.ELEVATED, KeywordCategory.EMOTIONAL_DISTRESS),
-            "panic": (KeywordSeverity.ELEVATED, KeywordCategory.EMOTIONAL_DISTRESS),
-            "scared": (KeywordSeverity.ELEVATED, KeywordCategory.EMOTIONAL_DISTRESS),
-            "terrified": (KeywordSeverity.ELEVATED, KeywordCategory.EMOTIONAL_DISTRESS),
-
-            # LOW - Mild distress
-            "sad": (KeywordSeverity.LOW, KeywordCategory.EMOTIONAL_DISTRESS),
-            "stressed": (KeywordSeverity.LOW, KeywordCategory.EMOTIONAL_DISTRESS),
-            "worried": (KeywordSeverity.LOW, KeywordCategory.EMOTIONAL_DISTRESS),
-            "upset": (KeywordSeverity.LOW, KeywordCategory.EMOTIONAL_DISTRESS),
-            "frustrated": (KeywordSeverity.LOW, KeywordCategory.EMOTIONAL_DISTRESS),
-            "tired": (KeywordSeverity.LOW, KeywordCategory.EMOTIONAL_DISTRESS),
-            "exhausted": (KeywordSeverity.LOW, KeywordCategory.EMOTIONAL_DISTRESS),
-
-            # PLAN/MEANS indicators
-            "have a plan": (KeywordSeverity.CRITICAL, KeywordCategory.PLAN_INTENT),
-            "pills": (KeywordSeverity.HIGH, KeywordCategory.MEANS_ACCESS),
-            "rope": (KeywordSeverity.HIGH, KeywordCategory.MEANS_ACCESS),
-            "gun": (KeywordSeverity.HIGH, KeywordCategory.MEANS_ACCESS),
-            "knife": (KeywordSeverity.HIGH, KeywordCategory.MEANS_ACCESS),
-            "bridge": (KeywordSeverity.HIGH, KeywordCategory.MEANS_ACCESS),
-        }
+        except json.JSONDecodeError as e:
+            logger.error("keywords_invalid_json", path=str(config_path), error=str(e))
+            raise ValueError(f"Invalid JSON in keywords config: {e}")
 
     @traced(name="keyword_detector.detect", attributes={"component": "keyword_detector"})
     def detect(self, text: str, user_id: UUID | None = None) -> list[KeywordMatch]:

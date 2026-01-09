@@ -30,7 +30,7 @@ except ImportError:
     TRANSFORMERS_AVAILABLE = False
 
 try:
-    from safety_service.src.observability.telemetry import traced, get_telemetry
+    from safety_service.src.infrastructure.telemetry import traced, get_telemetry
     TELEMETRY_AVAILABLE = True
 except ImportError:
     TELEMETRY_AVAILABLE = False
@@ -176,125 +176,67 @@ class PatternMatcher:
 
     def _compile_patterns(self) -> list[CompiledPattern]:
         """
-        Compile comprehensive crisis detection patterns using regex.
-        Attempts to load from JSON config file, falls back to hardcoded defaults.
+        Compile crisis detection patterns from JSON configuration.
+        JSON config is the single source of truth for scalability.
         """
-        patterns: list[CompiledPattern] = []
+        config_path = Path(__file__).parent.parent.parent / "config" / "patterns.json"
         flags = re.IGNORECASE if self._config.enable_case_insensitive else 0
 
-        # Try to load from JSON config first
-        config_path = Path(__file__).parent.parent.parent / "config" / "patterns.json"
+        if not config_path.exists():
+            logger.error("patterns_config_missing",
+                        path=str(config_path),
+                        action="create config/patterns.json")
+            raise FileNotFoundError(
+                f"Patterns configuration not found: {config_path}. "
+                "Please create the JSON config file for scalable deployment."
+            )
 
-        if config_path.exists():
-            try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
 
-                # Parse JSON structure into CompiledPattern objects
-                for severity_level, pattern_types in data.get("patterns", {}).items():
-                    for pattern_type_name, pattern_list in pattern_types.items():
+            patterns: list[CompiledPattern] = []
+
+            for severity_level, pattern_types in data.get("patterns", {}).items():
+                for pattern_type_name, pattern_list in pattern_types.items():
+                    try:
+                        ptype = PatternType[pattern_type_name]
+                    except KeyError:
+                        logger.warning("invalid_pattern_type_in_json", pattern_type=pattern_type_name)
+                        continue
+
+                    for pattern_def in pattern_list:
                         try:
-                            ptype = PatternType[pattern_type_name]
-                        except KeyError:
-                            logger.warning("invalid_pattern_type_in_json", pattern_type=pattern_type_name)
+                            regex = pattern_def["regex"]
+                            severity = Decimal(pattern_def["severity"])
+                            confidence = Decimal(pattern_def["confidence"])
+                            explanation = pattern_def["explanation"]
+
+                            patterns.append(CompiledPattern(
+                                pattern=re.compile(regex, flags),
+                                pattern_type=ptype,
+                                severity=severity,
+                                confidence=confidence,
+                                explanation=explanation
+                            ))
+                        except (KeyError, ValueError, re.error) as e:
+                            logger.warning("invalid_pattern_in_json",
+                                         pattern_type=pattern_type_name,
+                                         error=str(e))
                             continue
 
-                        for pattern_def in pattern_list:
-                            try:
-                                regex = pattern_def["regex"]
-                                severity = Decimal(pattern_def["severity"])
-                                confidence = Decimal(pattern_def["confidence"])
-                                explanation = pattern_def["explanation"]
+            if not patterns:
+                raise ValueError("Pattern list is empty - check JSON structure")
 
-                                patterns.append(CompiledPattern(
-                                    pattern=re.compile(regex, flags),
-                                    pattern_type=ptype,
-                                    severity=severity,
-                                    confidence=confidence,
-                                    explanation=explanation
-                                ))
-                            except (KeyError, ValueError, re.error) as e:
-                                logger.warning("invalid_pattern_in_json",
-                                             pattern_type=pattern_type_name,
-                                             error=str(e))
-                                continue
-
-                logger.info("patterns_loaded_from_json",
-                           path=str(config_path),
-                           count=len(patterns),
-                           version=data.get("version"))
-                return patterns
-
-            except Exception as e:
-                logger.warning("json_load_failed",
-                             path=str(config_path),
-                             error=str(e),
-                             fallback="hardcoded")
-        else:
-            logger.info("json_config_not_found",
+            logger.info("patterns_loaded_from_json",
                        path=str(config_path),
-                       fallback="hardcoded")
+                       count=len(patterns),
+                       version=data.get("version"))
+            return patterns
 
-        # Fallback to hardcoded patterns
-        crisis_patterns = [
-            # Suicidal ideation (explicit and with want/die patterns)
-            (r"\b(kill\s+myself|commit\s+suicide|end\s+my\s+life)\b",
-             PatternType.SUICIDAL_IDEATION, Decimal("0.95"), Decimal("0.9"), "Explicit suicide expression"),
-            (r"\b(want|wanted|wanting)\s+to\s+die\b",
-             PatternType.SUICIDAL_IDEATION, Decimal("0.95"), Decimal("0.9"), "Want to die expression"),
-            (r"\bwish\s+(i\s+)?(was|were)\s+dead\b",
-             PatternType.SUICIDAL_IDEATION, Decimal("0.9"), Decimal("0.85"), "Death wish"),
-            (r"\bbetter\s+off\s+without\s+me\b",
-             PatternType.SUICIDAL_IDEATION, Decimal("0.85"), Decimal("0.85"), "Perceived burdensomeness"),
-
-            # Plan indicators
-            (r"\b(have|got)\s+.{0,10}(plan|method)\s+to\s+(die|end)\b",
-             PatternType.PLAN_INDICATOR, Decimal("0.95"), Decimal("0.95"), "Articulated plan"),
-            (r"\bsuicide\s+note\b",
-             PatternType.PLAN_INDICATOR, Decimal("0.95"), Decimal("0.95"), "Suicide note mention"),
-
-            # Temporal urgency
-            (r"\b(tonight|today).{0,30}(die|end\s+it|over)\b",
-             PatternType.TIMEFRAME_URGENCY, Decimal("0.95"), Decimal("0.9"), "Immediate timeframe"),
-
-            # Hopelessness expressions
-            (r"\bcan't\s+take\s+(it|this)\s+anymore\b",
-             PatternType.HOPELESSNESS_EXPRESSION, Decimal("0.8"), Decimal("0.85"), "Overwhelm expression"),
-            (r"\b(never|won't)\s+.{0,20}(get\s+)?better\b",
-             PatternType.HOPELESSNESS_EXPRESSION, Decimal("0.75"), Decimal("0.8"), "Things won't improve"),
-            (r"\bfeel\s+hopeless\b",
-             PatternType.HOPELESSNESS_EXPRESSION, Decimal("0.8"), Decimal("0.85"), "Feeling hopeless"),
-        ]
-
-        for regex, ptype, severity, confidence, explanation in crisis_patterns:
-            patterns.append(CompiledPattern(
-                pattern=re.compile(regex, flags),
-                pattern_type=ptype,
-                severity=severity,
-                confidence=confidence,
-                explanation=explanation
-            ))
-
-        # Additional critical phrases (farewell, self-harm, means access)
-        additional_patterns = [
-            (r"\b(goodbye|farewell)\s+(everyone|world)\b",
-             PatternType.FAREWELL_MESSAGE, Decimal("0.9"), Decimal("0.85"), "Farewell message"),
-            (r"\b(cutting|cut|hurt)\s+myself\b",
-             PatternType.SELF_HARM_INTENT, Decimal("0.8"), Decimal("0.85"), "Self-harm behavior"),
-            (r"\b(gun|pills|rope)\b",
-             PatternType.MEANS_ACCESS, Decimal("0.75"), Decimal("0.8"), "Lethal means mention"),
-        ]
-
-        for regex, ptype, severity, confidence, explanation in additional_patterns:
-            patterns.append(CompiledPattern(
-                pattern=re.compile(regex, flags),
-                pattern_type=ptype,
-                severity=severity,
-                confidence=confidence,
-                explanation=explanation
-            ))
-
-        return patterns
+        except json.JSONDecodeError as e:
+            logger.error("patterns_invalid_json", path=str(config_path), error=str(e))
+            raise ValueError(f"Invalid JSON in patterns config: {e}")
 
     def _add_spacy_patterns(self) -> None:
         """Add spaCy Matcher patterns for linguistic analysis."""

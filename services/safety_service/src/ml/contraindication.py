@@ -17,10 +17,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
 
 if TYPE_CHECKING:
-    from safety_service.src.db.contraindication_db import ContraindicationDatabase, ContraindicationRuleDTO
+    from safety_service.src.infrastructure.database import ContraindicationRepository, ContraindicationRuleRecord
 
 try:
-    from safety_service.src.observability.telemetry import traced, get_telemetry
+    from safety_service.src.infrastructure.telemetry import traced, get_telemetry
     TELEMETRY_AVAILABLE = True
 except ImportError:
     TELEMETRY_AVAILABLE = False
@@ -137,7 +137,7 @@ class ContraindicationChecker:
     def __init__(
         self,
         config: ContraindicationConfig | None = None,
-        database: "ContraindicationDatabase | None" = None
+        database: "ContraindicationRepository | None" = None
     ) -> None:
         """
         Initialize contraindication checker with clinical rules.
@@ -204,7 +204,7 @@ class ContraindicationChecker:
         dto_rules = await self._database.get_all_active_rules()
         return [self._dto_to_rule(dto) for dto in dto_rules]
 
-    def _dto_to_rule(self, dto: "ContraindicationRuleDTO") -> ContraindicationRule:
+    def _dto_to_rule(self, dto: "ContraindicationRuleRecord") -> ContraindicationRule:
         """Convert database DTO to internal rule format."""
         return ContraindicationRule(
             technique=TherapyTechnique[dto.technique],
