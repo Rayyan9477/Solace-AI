@@ -38,7 +38,10 @@
       "Bash(PYTHONPATH=\"$PWD/src:$PWD/services\" python -m pytest:*)",
       "Bash(PYTHONPATH=\"$PWD\" python -m pytest:*)",
       "Bash(PYTHONPATH=\"$PWD/src:$PWD/services:$PYTHONPATH\" python:*)",
-      "Bash(PYTHONPATH=\"$PWD/src:$PWD/services:$PYTHONPATH\" python -c:*)"
+      "Bash(PYTHONPATH=\"$PWD/src:$PWD/services:$PYTHONPATH\" python -c:*)",
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "Bash(powershell:*)",
+      "Bash(pip show:*)"
     ],
     "deny": []
   }
