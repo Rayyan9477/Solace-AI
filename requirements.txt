@@ -53,8 +53,12 @@ faiss-cpu>=1.9.0
 redis>=5.2.0
 # Docs: https://aiokafka.readthedocs.io/
 aiokafka>=0.12.0
-# Docs: mem0
+# Docs: https://github.com/mem0ai/mem0
 mem0>=1.0.0
+
+# ==================== SEARCH & RETRIEVAL ====================
+# Docs: https://github.com/xhluca/bm25s - 500x faster BM25
+bm25s>=0.2.0
 
 # ==================== HTTP CLIENT ====================
 # Docs: https://www.python-httpx.org/

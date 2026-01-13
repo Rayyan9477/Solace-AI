@@ -1,0 +1,371 @@
+"""
+Solace-AI Diagnosis Service - DSM-5-TR/HiTOP Differential Generation.
+Generates clinical hypotheses with confidence scores and dimensional mapping.
+"""
+from __future__ import annotations
+from dataclasses import dataclass, field
+from decimal import Decimal
+from typing import Any
+from uuid import UUID, uuid4
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+import structlog
+
+from ..schemas import SymptomDTO, HypothesisDTO, SymptomType, SeverityLevel
+
+logger = structlog.get_logger(__name__)
+
+
+class DifferentialSettings(BaseSettings):
+    """Differential generator configuration."""
+    max_hypotheses: int = Field(default=5)
+    min_confidence_threshold: float = Field(default=0.3)
+    enable_hitop_mapping: bool = Field(default=True)
+    enable_dsm5_mapping: bool = Field(default=True)
+    confidence_decay_rate: float = Field(default=0.1)
+    comorbidity_boost: float = Field(default=0.1)
+    model_config = SettingsConfigDict(env_prefix="DIFFERENTIAL_", env_file=".env", extra="ignore")
+
+
+@dataclass
+class DifferentialResult:
+    """Result from differential generation."""
+    hypotheses: list[HypothesisDTO] = field(default_factory=list)
+    missing_info: list[str] = field(default_factory=list)
+    hitop_scores: dict[str, Decimal] = field(default_factory=dict)
+    recommended_questions: list[str] = field(default_factory=list)
+
+
+class DifferentialGenerator:
+    """Generates differential diagnoses using DSM-5-TR criteria and HiTOP dimensions."""
+
+    def __init__(self, settings: DifferentialSettings | None = None) -> None:
+        self._settings = settings or DifferentialSettings()
+        self._dsm5_criteria = self._build_dsm5_criteria()
+        self._hitop_dimensions = self._build_hitop_dimensions()
+        self._question_bank = self._build_question_bank()
+        self._stats = {"generations": 0, "hypotheses_generated": 0}
+
+    def _build_dsm5_criteria(self) -> dict[str, dict[str, Any]]:
+        """Build DSM-5-TR diagnostic criteria mapping."""
+        return {
+            "major_depressive_disorder": {
+                "dsm5_code": "F32",
+                "icd11_code": "6A70",
+                "required_symptoms": ["depressed_mood", "anhedonia"],
+                "supporting_symptoms": ["sleep_disturbance", "fatigue", "appetite_change",
+                                       "concentration_difficulty", "guilt", "psychomotor"],
+                "min_criteria": 5,
+                "duration_requirement": "2_weeks",
+                "exclusions": ["bipolar_history", "substance_induced"],
+                "severity_thresholds": {
+                    SeverityLevel.MILD: 5,
+                    SeverityLevel.MODERATE: 6,
+                    SeverityLevel.SEVERE: 8,
+                },
+            },
+            "generalized_anxiety_disorder": {
+                "dsm5_code": "F41.1",
+                "icd11_code": "6B00",
+                "required_symptoms": ["anxiety"],
+                "supporting_symptoms": ["restlessness", "fatigue", "concentration_difficulty",
+                                       "irritability", "physical_tension", "sleep_disturbance"],
+                "min_criteria": 3,
+                "duration_requirement": "6_months",
+                "exclusions": ["panic_disorder", "social_anxiety"],
+                "severity_thresholds": {
+                    SeverityLevel.MILD: 3,
+                    SeverityLevel.MODERATE: 4,
+                    SeverityLevel.SEVERE: 6,
+                },
+            },
+            "panic_disorder": {
+                "dsm5_code": "F41.0",
+                "icd11_code": "6B01",
+                "required_symptoms": ["panic", "physical_tension"],
+                "supporting_symptoms": ["anxiety", "avoidance", "fear"],
+                "min_criteria": 4,
+                "duration_requirement": "1_month",
+                "exclusions": ["medical_condition"],
+                "severity_thresholds": {
+                    SeverityLevel.MILD: 4,
+                    SeverityLevel.MODERATE: 6,
+                    SeverityLevel.SEVERE: 8,
+                },
+            },
+            "social_anxiety_disorder": {
+                "dsm5_code": "F40.10",
+                "icd11_code": "6B04",
+                "required_symptoms": ["anxiety", "social_withdrawal"],
+                "supporting_symptoms": ["fear", "avoidance", "physical_tension"],
+                "min_criteria": 2,
+                "duration_requirement": "6_months",
+                "exclusions": ["autism_spectrum"],
+                "severity_thresholds": {
+                    SeverityLevel.MILD: 2,
+                    SeverityLevel.MODERATE: 3,
+                    SeverityLevel.SEVERE: 5,
+                },
+            },
+            "adjustment_disorder": {
+                "dsm5_code": "F43.2",
+                "icd11_code": "6B43",
+                "required_symptoms": [],
+                "supporting_symptoms": ["depressed_mood", "anxiety", "irritability",
+                                       "concentration_difficulty", "sleep_disturbance"],
+                "min_criteria": 1,
+                "duration_requirement": "3_months",
+                "exclusions": ["major_depression", "gad"],
+                "severity_thresholds": {
+                    SeverityLevel.MILD: 1,
+                    SeverityLevel.MODERATE: 2,
+                    SeverityLevel.SEVERE: 4,
+                },
+            },
+            "persistent_depressive_disorder": {
+                "dsm5_code": "F34.1",
+                "icd11_code": "6A72",
+                "required_symptoms": ["depressed_mood"],
+                "supporting_symptoms": ["appetite_change", "sleep_disturbance", "fatigue",
+                                       "concentration_difficulty", "hopelessness"],
+                "min_criteria": 2,
+                "duration_requirement": "2_years",
+                "exclusions": ["bipolar", "psychotic"],
+                "severity_thresholds": {
+                    SeverityLevel.MILD: 2,
+                    SeverityLevel.MODERATE: 3,
+                    SeverityLevel.SEVERE: 5,
+                },
+            },
+            "ptsd": {
+                "dsm5_code": "F43.10",
+                "icd11_code": "6B40",
+                "required_symptoms": ["intrusive_thoughts", "avoidance"],
+                "supporting_symptoms": ["anxiety", "sleep_disturbance", "irritability",
+                                       "concentration_difficulty", "hypervigilance"],
+                "min_criteria": 4,
+                "duration_requirement": "1_month",
+                "exclusions": ["substance_induced"],
+                "severity_thresholds": {
+                    SeverityLevel.MILD: 4,
+                    SeverityLevel.MODERATE: 6,
+                    SeverityLevel.SEVERE: 8,
+                },
+            },
+        }
+
+    def _build_hitop_dimensions(self) -> dict[str, dict[str, Any]]:
+        """Build HiTOP dimensional model mapping."""
+        return {
+            "internalizing": {
+                "subfactors": ["distress", "fear"],
+                "symptoms": ["depressed_mood", "anxiety", "guilt", "hopelessness", "anhedonia"],
+                "description": "Tendency toward negative emotionality and inward focus",
+            },
+            "thought_disorder": {
+                "subfactors": ["psychoticism"],
+                "symptoms": ["intrusive_thoughts", "disorganization", "hallucinations"],
+                "description": "Disruption in thinking and perception",
+            },
+            "disinhibited_externalizing": {
+                "subfactors": ["impulsivity", "distractibility"],
+                "symptoms": ["impulsivity", "concentration_difficulty", "risk_taking"],
+                "description": "Difficulty with impulse control and attention",
+            },
+            "antagonistic_externalizing": {
+                "subfactors": ["hostility", "manipulativeness"],
+                "symptoms": ["irritability", "aggression", "interpersonal_conflict"],
+                "description": "Interpersonal hostility and callousness",
+            },
+            "detachment": {
+                "subfactors": ["withdrawal", "anhedonia"],
+                "symptoms": ["social_withdrawal", "anhedonia", "emotional_flatness"],
+                "description": "Social withdrawal and emotional detachment",
+            },
+            "somatoform": {
+                "subfactors": ["somatic_symptoms"],
+                "symptoms": ["physical_tension", "fatigue", "appetite_change", "sleep_disturbance"],
+                "description": "Physical symptom manifestation",
+            },
+        }
+
+    def _build_question_bank(self) -> dict[str, list[str]]:
+        """Build recommended questions by symptom gap."""
+        return {
+            "duration": ["How long have you been experiencing these feelings?",
+                        "When did you first notice these changes?"],
+            "severity": ["On a scale of 0-10, how intense are these feelings?",
+                        "How much do these symptoms affect your daily life?"],
+            "frequency": ["How often do you experience this?",
+                         "Is this something you feel constantly or does it come and go?"],
+            "triggers": ["Have you noticed anything that makes it better or worse?",
+                        "Are there specific situations that bring this on?"],
+            "function": ["How is this affecting your work/school/relationships?",
+                        "Are you still able to do the things you need to do?"],
+            "history": ["Have you experienced anything like this before?",
+                       "Is there a history of mental health concerns in your family?"],
+            "coping": ["What have you tried to help with this?",
+                      "Is there anything that provides relief?"],
+            "support": ["Do you have people you can talk to about this?",
+                       "Who do you turn to for support?"],
+        }
+
+    async def generate(self, symptoms: list[SymptomDTO],
+                       user_context: dict[str, Any]) -> DifferentialResult:
+        """Generate differential diagnosis from symptoms."""
+        self._stats["generations"] += 1
+        result = DifferentialResult()
+        symptom_names = {s.name for s in symptoms}
+        hypotheses: list[tuple[str, float, dict[str, Any]]] = []
+        for disorder, criteria in self._dsm5_criteria.items():
+            confidence, details = self._calculate_match_confidence(symptom_names, symptoms, criteria)
+            if confidence >= self._settings.min_confidence_threshold:
+                hypotheses.append((disorder, confidence, details))
+        hypotheses.sort(key=lambda x: x[1], reverse=True)
+        for disorder, confidence, details in hypotheses[:self._settings.max_hypotheses]:
+            criteria = self._dsm5_criteria[disorder]
+            severity = self._determine_severity(details["criteria_met_count"], criteria)
+            hypothesis = HypothesisDTO(
+                hypothesis_id=uuid4(),
+                name=self._format_disorder_name(disorder),
+                dsm5_code=criteria["dsm5_code"],
+                icd11_code=criteria["icd11_code"],
+                confidence=Decimal(str(round(confidence, 2))),
+                confidence_interval=(Decimal(str(max(0, confidence - 0.1))),
+                                   Decimal(str(min(1, confidence + 0.1)))),
+                criteria_met=details["criteria_met"],
+                criteria_missing=details["criteria_missing"],
+                supporting_evidence=[s.description for s in symptoms if s.name in details["criteria_met"]],
+                severity=severity,
+                hitop_dimensions=self._calculate_hitop_scores(symptoms),
+            )
+            result.hypotheses.append(hypothesis)
+        self._stats["hypotheses_generated"] += len(result.hypotheses)
+        if self._settings.enable_hitop_mapping:
+            result.hitop_scores = self._calculate_hitop_scores(symptoms)
+        result.missing_info = self._identify_missing_info(symptoms, hypotheses)
+        result.recommended_questions = self._generate_recommended_questions(result.missing_info)
+        logger.debug("differential_generated", hypotheses=len(result.hypotheses),
+                    missing_info=len(result.missing_info))
+        return result
+
+    def _calculate_match_confidence(self, symptom_names: set[str], symptoms: list[SymptomDTO],
+                                     criteria: dict[str, Any]) -> tuple[float, dict[str, Any]]:
+        """Calculate confidence score for diagnosis match."""
+        required = set(criteria["required_symptoms"])
+        supporting = set(criteria["supporting_symptoms"])
+        all_criteria = required | supporting
+        met = symptom_names & all_criteria
+        missing = all_criteria - symptom_names
+        required_met = required & symptom_names
+        required_met_ratio = len(required_met) / len(required) if required else 1.0
+        total_met_ratio = len(met) / len(all_criteria) if all_criteria else 0.0
+        base_confidence = (required_met_ratio * 0.6) + (total_met_ratio * 0.4)
+        severity_scores = {s.name: s.severity for s in symptoms if s.name in met}
+        severity_boost = sum(
+            0.05 if sev in [SeverityLevel.MODERATE, SeverityLevel.MODERATELY_SEVERE, SeverityLevel.SEVERE] else 0
+            for sev in severity_scores.values()
+        )
+        confidence = min(base_confidence + severity_boost, 0.95)
+        if len(required_met) < len(required):
+            confidence *= 0.7
+        details = {
+            "criteria_met": list(met),
+            "criteria_missing": list(missing),
+            "criteria_met_count": len(met),
+            "required_met": list(required_met),
+        }
+        return confidence, details
+
+    def _determine_severity(self, criteria_met: int, criteria: dict[str, Any]) -> SeverityLevel:
+        """Determine severity based on criteria met."""
+        thresholds = criteria.get("severity_thresholds", {})
+        if criteria_met >= thresholds.get(SeverityLevel.SEVERE, 99):
+            return SeverityLevel.SEVERE
+        if criteria_met >= thresholds.get(SeverityLevel.MODERATE, 99):
+            return SeverityLevel.MODERATE
+        if criteria_met >= thresholds.get(SeverityLevel.MILD, 99):
+            return SeverityLevel.MILD
+        return SeverityLevel.MINIMAL
+
+    def _calculate_hitop_scores(self, symptoms: list[SymptomDTO]) -> dict[str, Decimal]:
+        """Calculate HiTOP dimensional scores."""
+        scores: dict[str, float] = {dim: 0.0 for dim in self._hitop_dimensions}
+        symptom_names = {s.name for s in symptoms}
+        for dimension, config in self._hitop_dimensions.items():
+            dim_symptoms = set(config["symptoms"])
+            overlap = symptom_names & dim_symptoms
+            if overlap:
+                score = len(overlap) / len(dim_symptoms)
+                for symptom in symptoms:
+                    if symptom.name in overlap:
+                        severity_multiplier = {
+                            SeverityLevel.MINIMAL: 0.2,
+                            SeverityLevel.MILD: 0.4,
+                            SeverityLevel.MODERATE: 0.6,
+                            SeverityLevel.MODERATELY_SEVERE: 0.8,
+                            SeverityLevel.SEVERE: 1.0,
+                        }
+                        score += severity_multiplier.get(symptom.severity, 0.5) * 0.2
+                scores[dimension] = min(score, 1.0)
+        return {k: Decimal(str(round(v, 2))) for k, v in scores.items()}
+
+    def _identify_missing_info(self, symptoms: list[SymptomDTO],
+                                hypotheses: list[tuple[str, float, dict[str, Any]]]) -> list[str]:
+        """Identify missing information for diagnosis."""
+        missing: list[str] = []
+        has_duration = any(s.duration for s in symptoms)
+        has_onset = any(s.onset for s in symptoms)
+        has_triggers = any(s.triggers for s in symptoms)
+        if not has_duration:
+            missing.append("duration")
+        if not has_onset:
+            missing.append("onset")
+        if not has_triggers:
+            missing.append("triggers")
+        if hypotheses:
+            top_hypothesis = hypotheses[0]
+            details = top_hypothesis[2]
+            if details["criteria_missing"]:
+                missing.append(f"symptoms:{details['criteria_missing'][0]}")
+        return missing
+
+    def _generate_recommended_questions(self, missing_info: list[str]) -> list[str]:
+        """Generate recommended questions based on missing info."""
+        questions: list[str] = []
+        for info in missing_info[:3]:
+            category = info.split(":")[0] if ":" in info else info
+            if category in self._question_bank:
+                questions.extend(self._question_bank[category][:1])
+        return questions
+
+    def _format_disorder_name(self, key: str) -> str:
+        """Format disorder key to readable name."""
+        return key.replace("_", " ").title()
+
+    def get_dsm5_criteria(self, disorder: str) -> dict[str, Any] | None:
+        """Get DSM-5 criteria for a specific disorder."""
+        return self._dsm5_criteria.get(disorder)
+
+    def get_hitop_dimension(self, dimension: str) -> dict[str, Any] | None:
+        """Get HiTOP dimension details."""
+        return self._hitop_dimensions.get(dimension)
+
+    def calculate_comorbidity_likelihood(self, hypotheses: list[HypothesisDTO]) -> dict[str, float]:
+        """Calculate likelihood of comorbidity between hypotheses."""
+        comorbidity_patterns = {
+            ("major_depressive_disorder", "generalized_anxiety_disorder"): 0.7,
+            ("major_depressive_disorder", "social_anxiety_disorder"): 0.5,
+            ("panic_disorder", "generalized_anxiety_disorder"): 0.4,
+            ("ptsd", "major_depressive_disorder"): 0.6,
+        }
+        result: dict[str, float] = {}
+        names = [h.name.lower().replace(" ", "_") for h in hypotheses]
+        for (d1, d2), likelihood in comorbidity_patterns.items():
+            if d1 in names and d2 in names:
+                result[f"{d1}+{d2}"] = likelihood
+        return result
+
+    def get_statistics(self) -> dict[str, int]:
+        """Get generation statistics."""
+        return self._stats.copy()

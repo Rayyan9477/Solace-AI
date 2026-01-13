@@ -183,8 +183,8 @@ class TestBM25Index:
         index = BM25Index()
         doc = SearchDocument(doc_id=uuid4(), content="The quick brown fox jumps over the lazy dog")
         index.add_document(doc)
-        assert index._total_docs == 1
-        assert "quick" in index._inverted_index
+        assert len(index._documents) == 1
+        assert index.get_document(doc.doc_id) is not None
 
     def test_basic_search(self) -> None:
         index = BM25Index()
@@ -200,10 +200,10 @@ class TestBM25Index:
         index = BM25Index()
         doc = SearchDocument(doc_id=uuid4(), content="test document content")
         index.add_document(doc)
-        assert index._total_docs == 1
+        assert len(index._documents) == 1
         removed = index.remove_document(doc.doc_id)
         assert removed is True
-        assert index._total_docs == 0
+        assert len(index._documents) == 0
 
     def test_empty_query(self) -> None:
         index = BM25Index()
@@ -217,9 +217,9 @@ class TestBM25Index:
         for i in range(5):
             doc = SearchDocument(doc_id=uuid4(), content=f"document {i}")
             index.add_document(doc)
-        assert index._total_docs == 5
+        assert len(index._documents) == 5
         index.clear()
-        assert index._total_docs == 0
+        assert len(index._documents) == 0
 
 
 class TestSemanticSearcher:
@@ -497,17 +497,17 @@ class TestSearchDocument:
 
     def test_automatic_tokenization(self) -> None:
         doc = SearchDocument(doc_id=uuid4(), content="Hello world, this is a test!")
-        assert "hello" in doc.term_frequencies
-        assert "world" in doc.term_frequencies
+        assert "hello" in doc.tokens
+        assert "world" in doc.tokens
         assert doc.doc_length > 0
 
     def test_special_characters_removed(self) -> None:
         doc = SearchDocument(doc_id=uuid4(), content="Hello! World? Test...")
-        assert "hello" in doc.term_frequencies
-        assert "!" not in "".join(doc.term_frequencies.keys())
+        assert "hello" in doc.tokens
+        assert "!" not in "".join(doc.tokens)
 
     def test_short_tokens_filtered(self) -> None:
         doc = SearchDocument(doc_id=uuid4(), content="I am a test")
-        assert "i" not in doc.term_frequencies
-        assert "a" not in doc.term_frequencies
-        assert "am" in doc.term_frequencies
+        assert "i" not in doc.tokens
+        assert "a" not in doc.tokens
+        assert "am" in doc.tokens

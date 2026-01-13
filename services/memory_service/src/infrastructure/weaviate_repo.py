@@ -96,7 +96,7 @@ class WeaviateRepository:
         if not self._client:
             return
         try:
-            from weaviate.classes.config import Configure, Property, DataType
+            from weaviate.classes.config import Configure, Property, DataType, VectorDistances
             schemas = {
                 CollectionName.CONVERSATION_MEMORY.value: [
                     Property(name="user_id", data_type=DataType.TEXT),
@@ -125,7 +125,9 @@ class WeaviateRepository:
             }
             for name, properties in schemas.items():
                 if not self._client.collections.exists(name):
-                    self._client.collections.create(name=name, vectorizer_config=Configure.Vectorizer.none(), properties=properties)
+                    self._client.collections.create(name=name, properties=properties,
+                        vector_config=Configure.Vectors.none(name="default"),
+                        vector_index_config=Configure.VectorIndex.hnsw(distance_metric=VectorDistances.COSINE))
                 self._collections[name] = self._client.collections.get(name)
         except Exception as e:
             logger.error("collection_creation_failed", error=str(e))

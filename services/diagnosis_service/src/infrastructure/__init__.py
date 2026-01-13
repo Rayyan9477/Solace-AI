@@ -1,0 +1,1 @@
+"""Diagnosis Service infrastructure layer."""
