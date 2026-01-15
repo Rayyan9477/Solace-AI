@@ -31,6 +31,9 @@ anthropic>=0.42.0
 langchain-openai>=0.3.0
 openai>=1.58.1
 langsmith>=0.2.11
+# Docs: https://github.com/Portkey-AI/gateway - Unified LLM Gateway
+# Provides fallbacks, load balancing, caching, and observability across 250+ LLM providers
+portkey-ai>=1.9.0
 
 # ==================== DATABASE & ORM ====================
 # Docs: https://docs.sqlalchemy.org/en/21/

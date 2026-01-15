@@ -21,6 +21,7 @@ from .response_generator import ResponseGenerator
 if TYPE_CHECKING:
     from .technique_selector import TechniqueSelector
     from .session_manager import SessionManager
+    from services.shared.infrastructure import UnifiedLLMClient
 
 logger = structlog.get_logger(__name__)
 
@@ -49,10 +50,12 @@ class TherapyOrchestrator:
         settings: TherapyOrchestratorSettings | None = None,
         technique_selector: TechniqueSelector | None = None,
         session_manager: SessionManager | None = None,
+        llm_client: UnifiedLLMClient | None = None,
     ) -> None:
         self._settings = settings or TherapyOrchestratorSettings()
         self._technique_selector = technique_selector
         self._session_manager = session_manager
+        self._llm_client = llm_client
         self._treatment_plans: dict[UUID, TreatmentPlanDTO] = {}
         self._initialized = False
         self._stats = {
@@ -62,6 +65,8 @@ class TherapyOrchestrator:
             "techniques_applied": 0,
             "crisis_interventions": 0,
             "homework_assigned": 0,
+            "llm_responses": 0,
+            "llm_fallbacks": 0,
         }
 
     async def initialize(self) -> None:
@@ -71,6 +76,7 @@ class TherapyOrchestrator:
         logger.info("therapy_orchestrator_initialized", settings={
             "safety_checks": self._settings.enable_safety_checks,
             "homework_enabled": self._settings.enable_homework_assignment,
+            "llm_enabled": self._llm_client is not None,
         })
 
     async def shutdown(self) -> None:
@@ -148,10 +154,11 @@ class TherapyOrchestrator:
             conversation_history=conversation_history,
         )
 
-        response_text = ResponseGenerator.generate_therapeutic_response(
+        response_text = await self._generate_response(
             session=session,
             message=message,
             technique=technique_result.get("technique"),
+            treatment_plan=treatment_plan,
             conversation_history=conversation_history,
         )
 
@@ -232,6 +239,59 @@ class TherapyOrchestrator:
             current_phase=SessionPhase.CLOSING, technique_applied=None, safety_alerts=safety_result["alerts"],
             next_steps=["Contact crisis services", "Ensure immediate safety", "Consider emergency services"],
             processing_time_ms=50,
+        )
+
+    async def _generate_response(
+        self,
+        session: Any,
+        message: str,
+        technique: TechniqueDTO | None,
+        treatment_plan: TreatmentPlanDTO,
+        conversation_history: list[dict[str, str]],
+    ) -> str:
+        """
+        Generate therapeutic response using LLM with fallback to templates.
+
+        Uses Portkey AI Gateway for resilient LLM access with automatic fallbacks.
+        Falls back to template-based generation if LLM is unavailable.
+        """
+        if self._llm_client and self._llm_client.is_available:
+            try:
+                from ..infrastructure import get_therapy_prompt
+                system_prompt = get_therapy_prompt(
+                    treatment_plan.primary_modality.value,
+                    is_crisis=session.current_risk in [RiskLevel.HIGH, RiskLevel.IMMINENT],
+                )
+                context = None
+                if technique:
+                    context = f"Current Technique: {technique.name}\n{technique.description}"
+                session_phase_str = session.current_phase.value if hasattr(session.current_phase, "value") else str(session.current_phase)
+                context = f"{context}\n\nSession Phase: {session_phase_str}" if context else f"Session Phase: {session_phase_str}"
+                response = await self._llm_client.generate(
+                    system_prompt=system_prompt,
+                    user_message=message,
+                    conversation_history=conversation_history,
+                    context=context,
+                    service_name="therapy_service",
+                    metadata={
+                        "session_id": str(session.session_id),
+                        "user_id": str(session.user_id),
+                        "modality": treatment_plan.primary_modality.value,
+                        "session_number": session.session_number,
+                    },
+                )
+                if response:
+                    self._stats["llm_responses"] += 1
+                    logger.debug("llm_response_generated", session_id=str(session.session_id))
+                    return response
+            except Exception as e:
+                logger.warning("llm_generation_failed_using_fallback", error=str(e))
+                self._stats["llm_fallbacks"] += 1
+        return ResponseGenerator.generate_therapeutic_response(
+            session=session,
+            message=message,
+            technique=technique,
+            conversation_history=conversation_history,
         )
 
     async def _select_and_apply_technique(

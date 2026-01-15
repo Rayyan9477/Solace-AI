@@ -77,23 +77,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from .domain.service import TherapyOrchestrator, TherapyOrchestratorSettings
     from .domain.technique_selector import TechniqueSelector, TechniqueSelectorSettings
     from .domain.session_manager import SessionManager, SessionManagerSettings
+    from services.shared.infrastructure import UnifiedLLMClient, LLMClientSettings
     technique_selector = TechniqueSelector(TechniqueSelectorSettings())
     session_manager = SessionManager(SessionManagerSettings())
+    llm_client = UnifiedLLMClient(LLMClientSettings())
+    await llm_client.initialize()
     therapy_orchestrator = TherapyOrchestrator(
         settings=TherapyOrchestratorSettings(),
         technique_selector=technique_selector,
         session_manager=session_manager,
+        llm_client=llm_client,
     )
     await therapy_orchestrator.initialize()
     app.state.settings = settings
     app.state.therapy_orchestrator = therapy_orchestrator
     app.state.technique_selector = technique_selector
     app.state.session_manager = session_manager
+    app.state.llm_client = llm_client
     logger.info("therapy_service_started", environment=settings.environment,
                 hybrid_mode=settings.hybrid_mode, stepped_care=settings.enable_stepped_care)
     yield
     logger.info("therapy_service_stopping")
     await therapy_orchestrator.shutdown()
+    await llm_client.shutdown()
     logger.info("therapy_service_stopped")
 
 
