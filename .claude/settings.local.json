@@ -43,7 +43,8 @@
       "Bash(powershell:*)",
       "Bash(pip show:*)",
       "mcp__plugin_context7_context7__query-docs",
-      "Bash(xargs:*)"
+      "Bash(xargs:*)",
+      "mcp__plugin_exa-mcp-server_exa__web_search_exa"
     ],
     "deny": []
   }
