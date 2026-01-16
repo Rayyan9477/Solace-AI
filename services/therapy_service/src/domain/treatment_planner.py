@@ -12,28 +12,12 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
 
-from ..schemas import TherapyModality, SeverityLevel, RiskLevel
+from ..schemas import (
+    TherapyModality, SeverityLevel, RiskLevel, SteppedCareLevel,
+    TreatmentPhase, GoalStatus, ResponseStatus,
+)
 
 logger = structlog.get_logger(__name__)
-
-
-class TreatmentPhase(str, Enum):
-    """Stepped care treatment phases."""
-    ASSESSMENT = "assessment"
-    STABILIZATION = "stabilization"
-    SKILL_BUILDING = "skill_building"
-    CONSOLIDATION = "consolidation"
-    MAINTENANCE = "maintenance"
-    TERMINATION = "termination"
-
-
-class GoalStatus(str, Enum):
-    """Treatment goal status."""
-    NOT_STARTED = "not_started"
-    IN_PROGRESS = "in_progress"
-    ACHIEVED = "achieved"
-    REVISED = "revised"
-    DISCONTINUED = "discontinued"
 
 
 @dataclass
@@ -70,15 +54,20 @@ class TreatmentPlan:
     primary_diagnosis: str = ""
     secondary_diagnoses: list[str] = field(default_factory=list)
     severity: SeverityLevel = SeverityLevel.MODERATE
+    stepped_care_level: SteppedCareLevel = SteppedCareLevel.MEDIUM_INTENSITY
     primary_modality: TherapyModality = TherapyModality.CBT
     adjunct_modalities: list[TherapyModality] = field(default_factory=list)
-    current_phase: TreatmentPhase = TreatmentPhase.ASSESSMENT
+    current_phase: TreatmentPhase = TreatmentPhase.FOUNDATION
     phase_sessions_completed: int = 0
     total_sessions_completed: int = 0
+    session_frequency_per_week: int = 1
+    response_status: ResponseStatus = ResponseStatus.NOT_STARTED
     goals: list[TreatmentGoal] = field(default_factory=list)
     skills_acquired: list[str] = field(default_factory=list)
     skills_in_progress: list[str] = field(default_factory=list)
     contraindications: list[str] = field(default_factory=list)
+    baseline_phq9: int | None = None
+    latest_phq9: int | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     target_completion: datetime | None = None
@@ -113,43 +102,97 @@ class TreatmentPlanner:
         logger.info("treatment_planner_initialized", stepped_care=self._settings.enable_stepped_care)
 
     def _initialize_phase_configs(self) -> dict[TreatmentPhase, PhaseConfig]:
-        """Initialize phase configurations."""
+        """Initialize phase configurations aligned with architecture spec."""
         return {
-            TreatmentPhase.ASSESSMENT: PhaseConfig(
-                phase=TreatmentPhase.ASSESSMENT, min_sessions=1, max_sessions=2,
-                required_skills=[], focus_areas=["symptom_assessment", "history_gathering", "goal_setting"],
-                advancement_criteria={"assessment_complete": True, "goals_set": True},
-            ),
-            TreatmentPhase.STABILIZATION: PhaseConfig(
-                phase=TreatmentPhase.STABILIZATION, min_sessions=2, max_sessions=4,
+            TreatmentPhase.FOUNDATION: PhaseConfig(
+                phase=TreatmentPhase.FOUNDATION, min_sessions=2, max_sessions=4,
                 required_skills=["grounding", "safety_planning"],
-                focus_areas=["crisis_management", "routine_building", "psychoeducation"],
-                advancement_criteria={"crisis_stabilized": True, "basic_skills": 2},
+                focus_areas=["therapeutic_alliance", "assessment", "baseline", "goal_setting", "psychoeducation"],
+                advancement_criteria={"alliance_rating": 36, "goals_set": True, "baseline_complete": True},
             ),
-            TreatmentPhase.SKILL_BUILDING: PhaseConfig(
-                phase=TreatmentPhase.SKILL_BUILDING, min_sessions=4, max_sessions=12,
+            TreatmentPhase.ACTIVE_TREATMENT: PhaseConfig(
+                phase=TreatmentPhase.ACTIVE_TREATMENT, min_sessions=6, max_sessions=16,
                 required_skills=["cognitive_restructuring", "behavioral_activation", "emotion_regulation"],
-                focus_areas=["core_techniques", "skill_practice", "homework_integration"],
-                advancement_criteria={"skills_acquired": 3, "symptom_reduction": 30},
+                focus_areas=["core_techniques", "skill_practice", "homework_integration", "real_world_application"],
+                advancement_criteria={"skills_acquired": 3, "symptom_reduction_percent": 50, "homework_completion": 60},
             ),
             TreatmentPhase.CONSOLIDATION: PhaseConfig(
                 phase=TreatmentPhase.CONSOLIDATION, min_sessions=2, max_sessions=4,
-                required_skills=["independent_practice", "relapse_prevention"],
-                focus_areas=["skill_generalization", "future_planning", "setback_preparation"],
-                advancement_criteria={"skills_generalized": True, "goals_achieved_percent": 70},
+                required_skills=["independent_practice", "relapse_prevention", "early_warning_recognition"],
+                focus_areas=["skill_generalization", "relapse_prevention", "future_planning", "independence_building"],
+                advancement_criteria={"skills_generalized": True, "goals_achieved_percent": 70, "relapse_plan": True},
             ),
             TreatmentPhase.MAINTENANCE: PhaseConfig(
-                phase=TreatmentPhase.MAINTENANCE, min_sessions=2, max_sessions=6,
-                required_skills=["self_monitoring", "early_warning_recognition"],
-                focus_areas=["progress_monitoring", "booster_sessions", "independence_building"],
-                advancement_criteria={"stable_symptoms": True, "independence_score": 80},
-            ),
-            TreatmentPhase.TERMINATION: PhaseConfig(
-                phase=TreatmentPhase.TERMINATION, min_sessions=1, max_sessions=2,
-                required_skills=[], focus_areas=["termination_processing", "future_planning", "referral_setup"],
-                advancement_criteria={"termination_complete": True},
+                phase=TreatmentPhase.MAINTENANCE, min_sessions=2, max_sessions=12,
+                required_skills=["self_monitoring", "booster_skills"],
+                focus_areas=["monthly_checkins", "skill_refreshers", "booster_sessions", "self_management"],
+                advancement_criteria={"stable_symptoms": True, "self_management_score": 80},
             ),
         }
+
+    def calculate_stepped_care_level(self, phq9_score: int) -> SteppedCareLevel:
+        """
+        Calculate stepped care level from PHQ-9 score.
+
+        PHQ-9 Ranges:
+        - 0-4: Wellness (Step 0)
+        - 5-9: Low Intensity (Step 1)
+        - 10-14: Medium Intensity (Step 2)
+        - 15-19: High Intensity (Step 3)
+        - 20+: Intensive + Referral (Step 4)
+        """
+        if phq9_score <= 4:
+            return SteppedCareLevel.WELLNESS
+        elif phq9_score <= 9:
+            return SteppedCareLevel.LOW_INTENSITY
+        elif phq9_score <= 14:
+            return SteppedCareLevel.MEDIUM_INTENSITY
+        elif phq9_score <= 19:
+            return SteppedCareLevel.HIGH_INTENSITY
+        else:
+            return SteppedCareLevel.INTENSIVE_REFERRAL
+
+    def get_stepped_care_recommendations(self, level: SteppedCareLevel) -> dict[str, Any]:
+        """Get recommendations for a stepped care level."""
+        recommendations = {
+            SteppedCareLevel.WELLNESS: {
+                "description": "Wellness Focus",
+                "session_frequency": "monthly",
+                "content": ["self_guided_resources", "mood_tracking", "wellness_tips"],
+                "homework_intensity": "light",
+                "human_involvement": "none",
+            },
+            SteppedCareLevel.LOW_INTENSITY: {
+                "description": "Low Intensity",
+                "session_frequency": "bi-weekly",
+                "content": ["self_guided_psychoeducation", "basic_coping_skills", "activity_tracking"],
+                "homework_intensity": "light",
+                "human_involvement": "minimal",
+            },
+            SteppedCareLevel.MEDIUM_INTENSITY: {
+                "description": "Medium Intensity",
+                "session_frequency": "1-2x/week",
+                "content": ["guided_digital_cbt", "structured_skill_modules", "progress_monitoring"],
+                "homework_intensity": "weekly",
+                "human_involvement": "periodic_review",
+            },
+            SteppedCareLevel.HIGH_INTENSITY: {
+                "description": "High Intensity",
+                "session_frequency": "2-3x/week",
+                "content": ["intensive_protocol", "daily_practice", "crisis_plan_active"],
+                "homework_intensity": "daily",
+                "human_involvement": "coach_checkins",
+            },
+            SteppedCareLevel.INTENSIVE_REFERRAL: {
+                "description": "Intensive Care",
+                "session_frequency": "daily_monitoring",
+                "content": ["ai_as_adjunct_only", "human_therapist_primary", "safety_planning_priority"],
+                "homework_intensity": "as_tolerated",
+                "human_involvement": "required",
+                "referral_required": True,
+            },
+        }
+        return recommendations.get(level, recommendations[SteppedCareLevel.MEDIUM_INTENSITY])
 
     def create_plan(
         self,
@@ -157,18 +200,20 @@ class TreatmentPlanner:
         diagnosis: str,
         severity: SeverityLevel,
         modality: TherapyModality,
+        phq9_score: int | None = None,
         initial_goals: list[str] | None = None,
         secondary_diagnoses: list[str] | None = None,
         contraindications: list[str] | None = None,
     ) -> TreatmentPlan:
         """
-        Create new treatment plan.
+        Create new treatment plan with stepped care routing.
 
         Args:
             user_id: User identifier
             diagnosis: Primary diagnosis
             severity: Symptom severity
             modality: Primary therapy modality
+            phq9_score: Baseline PHQ-9 score for stepped care routing
             initial_goals: Initial treatment goals
             secondary_diagnoses: Secondary diagnoses
             contraindications: Treatment contraindications
@@ -176,18 +221,24 @@ class TreatmentPlanner:
         Returns:
             Created treatment plan
         """
+        stepped_care_level = self.calculate_stepped_care_level(phq9_score) if phq9_score else self._severity_to_stepped_care(severity)
         initial_phase = self._determine_initial_phase(severity)
         adjunct_modalities = self._recommend_adjunct_modalities(diagnosis, modality, severity)
         target_weeks = self._estimate_treatment_duration(severity)
+        session_frequency = self._determine_session_frequency(stepped_care_level)
 
         plan = TreatmentPlan(
             user_id=user_id,
             primary_diagnosis=diagnosis,
             secondary_diagnoses=secondary_diagnoses or [],
             severity=severity,
+            stepped_care_level=stepped_care_level,
             primary_modality=modality,
             adjunct_modalities=adjunct_modalities,
             current_phase=initial_phase,
+            session_frequency_per_week=session_frequency,
+            baseline_phq9=phq9_score,
+            latest_phq9=phq9_score,
             contraindications=contraindications or [],
             target_completion=datetime.now(timezone.utc) + timedelta(weeks=target_weeks),
             review_date=datetime.now(timezone.utc) + timedelta(days=self._settings.goal_review_interval_days),
@@ -201,14 +252,35 @@ class TreatmentPlanner:
         logger.info(
             "treatment_plan_created", plan_id=str(plan.plan_id), user_id=str(user_id),
             diagnosis=diagnosis, severity=severity.value, modality=modality.value,
+            stepped_care_level=stepped_care_level.value,
         )
         return plan
 
+    def _severity_to_stepped_care(self, severity: SeverityLevel) -> SteppedCareLevel:
+        """Map severity level to stepped care level when PHQ-9 unavailable."""
+        mapping = {
+            SeverityLevel.MINIMAL: SteppedCareLevel.WELLNESS,
+            SeverityLevel.MILD: SteppedCareLevel.LOW_INTENSITY,
+            SeverityLevel.MODERATE: SteppedCareLevel.MEDIUM_INTENSITY,
+            SeverityLevel.MODERATELY_SEVERE: SteppedCareLevel.HIGH_INTENSITY,
+            SeverityLevel.SEVERE: SteppedCareLevel.INTENSIVE_REFERRAL,
+        }
+        return mapping.get(severity, SteppedCareLevel.MEDIUM_INTENSITY)
+
+    def _determine_session_frequency(self, level: SteppedCareLevel) -> int:
+        """Determine session frequency per week based on stepped care level."""
+        frequency_map = {
+            SteppedCareLevel.WELLNESS: 0,  # Monthly
+            SteppedCareLevel.LOW_INTENSITY: 1,  # Bi-weekly to weekly
+            SteppedCareLevel.MEDIUM_INTENSITY: 2,  # 1-2x per week
+            SteppedCareLevel.HIGH_INTENSITY: 3,  # 2-3x per week
+            SteppedCareLevel.INTENSIVE_REFERRAL: 5,  # Daily monitoring
+        }
+        return frequency_map.get(level, 1)
+
     def _determine_initial_phase(self, severity: SeverityLevel) -> TreatmentPhase:
         """Determine initial treatment phase based on severity."""
-        if severity in [SeverityLevel.SEVERE, SeverityLevel.MODERATELY_SEVERE]:
-            return TreatmentPhase.STABILIZATION
-        return TreatmentPhase.ASSESSMENT
+        return TreatmentPhase.FOUNDATION
 
     def _recommend_adjunct_modalities(
         self,
@@ -353,9 +425,9 @@ class TreatmentPlanner:
         return {"all_met": all_met, "details": details}
 
     def _get_next_phase(self, current: TreatmentPhase) -> TreatmentPhase | None:
-        """Get next treatment phase."""
-        order = [TreatmentPhase.ASSESSMENT, TreatmentPhase.STABILIZATION, TreatmentPhase.SKILL_BUILDING,
-                 TreatmentPhase.CONSOLIDATION, TreatmentPhase.MAINTENANCE, TreatmentPhase.TERMINATION]
+        """Get next treatment phase following three-phase protocol."""
+        order = [TreatmentPhase.FOUNDATION, TreatmentPhase.ACTIVE_TREATMENT,
+                 TreatmentPhase.CONSOLIDATION, TreatmentPhase.MAINTENANCE]
         try:
             idx = order.index(current)
             return order[idx + 1] if idx < len(order) - 1 else None
@@ -414,15 +486,79 @@ class TreatmentPlanner:
     def _get_phase_techniques(self, phase: TreatmentPhase, modality: TherapyModality) -> list[str]:
         """Get recommended techniques for phase and modality."""
         techniques = {
-            (TreatmentPhase.ASSESSMENT, TherapyModality.CBT): ["Psychoeducation", "Goal Setting", "Mood Monitoring"],
-            (TreatmentPhase.STABILIZATION, TherapyModality.CBT): ["Grounding", "Safety Planning", "Routine Building"],
-            (TreatmentPhase.SKILL_BUILDING, TherapyModality.CBT): ["Thought Record", "Behavioral Activation", "Cognitive Restructuring"],
+            (TreatmentPhase.FOUNDATION, TherapyModality.CBT): ["Psychoeducation", "Goal Setting", "Mood Monitoring", "Safety Planning"],
+            (TreatmentPhase.FOUNDATION, TherapyModality.DBT): ["Psychoeducation", "Mindfulness Basics", "Safety Planning"],
+            (TreatmentPhase.ACTIVE_TREATMENT, TherapyModality.CBT): ["Thought Record", "Behavioral Activation", "Cognitive Restructuring", "Exposure"],
+            (TreatmentPhase.ACTIVE_TREATMENT, TherapyModality.DBT): ["STOP Skill", "DEAR MAN", "Radical Acceptance", "Emotion Regulation"],
+            (TreatmentPhase.ACTIVE_TREATMENT, TherapyModality.ACT): ["Values Clarification", "Cognitive Defusion", "Committed Action"],
+            (TreatmentPhase.ACTIVE_TREATMENT, TherapyModality.MI): ["Motivational Interviewing", "Change Talk", "Decisional Balance"],
             (TreatmentPhase.CONSOLIDATION, TherapyModality.CBT): ["Skill Integration", "Relapse Prevention", "Future Planning"],
-            (TreatmentPhase.SKILL_BUILDING, TherapyModality.DBT): ["STOP Skill", "DEAR MAN", "Radical Acceptance"],
-            (TreatmentPhase.SKILL_BUILDING, TherapyModality.ACT): ["Values Clarification", "Cognitive Defusion", "Committed Action"],
-            (TreatmentPhase.SKILL_BUILDING, TherapyModality.MI): ["Motivational Interviewing", "Change Talk", "Decisional Balance"],
+            (TreatmentPhase.MAINTENANCE, TherapyModality.CBT): ["Booster Review", "Self-Monitoring", "Early Warning Recognition"],
         }
         return techniques.get((phase, modality), ["Mindfulness", "Grounding", "Psychoeducation"])
+
+    def update_outcome_score(self, plan_id: UUID, phq9_score: int) -> dict[str, Any]:
+        """
+        Update PHQ-9 outcome score and evaluate treatment response.
+
+        Args:
+            plan_id: Treatment plan ID
+            phq9_score: New PHQ-9 score
+
+        Returns:
+            Response evaluation with recommendations
+        """
+        plan = self._plans.get(plan_id)
+        if not plan:
+            return {"success": False, "error": "Plan not found"}
+        previous_score = plan.latest_phq9
+        plan.latest_phq9 = phq9_score
+        plan.updated_at = datetime.now(timezone.utc)
+        response_status, recommendations = self._evaluate_treatment_response(plan, previous_score, phq9_score)
+        plan.response_status = response_status
+        new_stepped_care = self.calculate_stepped_care_level(phq9_score)
+        step_change = new_stepped_care != plan.stepped_care_level
+        if step_change:
+            old_level = plan.stepped_care_level
+            plan.stepped_care_level = new_stepped_care
+            plan.session_frequency_per_week = self._determine_session_frequency(new_stepped_care)
+            logger.info("stepped_care_adjusted", plan_id=str(plan_id), old=old_level.value, new=new_stepped_care.value)
+        return {
+            "success": True,
+            "previous_score": previous_score,
+            "current_score": phq9_score,
+            "response_status": response_status.value,
+            "step_change": step_change,
+            "recommendations": recommendations,
+        }
+
+    def _evaluate_treatment_response(
+        self, plan: TreatmentPlan, previous: int | None, current: int
+    ) -> tuple[ResponseStatus, list[str]]:
+        """Evaluate treatment response based on PHQ-9 change."""
+        recommendations = []
+        if plan.baseline_phq9 is None or previous is None:
+            return ResponseStatus.NOT_STARTED, ["Establish baseline before evaluating response"]
+        baseline = plan.baseline_phq9
+        reduction_percent = ((baseline - current) / baseline) * 100 if baseline > 0 else 0
+        if current < previous:
+            if reduction_percent >= 50:
+                recommendations = ["Continue current approach", "Begin consolidation phase", "Introduce relapse prevention"]
+                return ResponseStatus.RESPONDING, recommendations
+            elif reduction_percent >= 25:
+                recommendations = ["Augment with adjunct modality", "Increase homework focus", "Extend treatment duration"]
+                return ResponseStatus.PARTIAL_RESPONSE, recommendations
+        if current > previous:
+            if current > baseline:
+                recommendations = ["Immediate safety assessment", "Pause standard interventions", "Human clinician consultation"]
+                return ResponseStatus.DETERIORATING, recommendations
+        if reduction_percent < 25:
+            recommendations = ["Reassess diagnosis accuracy", "Consider modality switch", "Explore treatment barriers"]
+            return ResponseStatus.NON_RESPONSE, recommendations
+        if current <= 4:
+            recommendations = ["Transition to maintenance", "Prepare for termination", "Develop relapse prevention plan"]
+            return ResponseStatus.REMISSION, recommendations
+        return ResponseStatus.RESPONDING, ["Continue monitoring"]
 
     def delete_plan(self, plan_id: UUID) -> bool:
         """Delete treatment plan."""

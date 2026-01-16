@@ -12,7 +12,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
 
-from ..schemas import TherapyModality
+from ..schemas import TherapyModality, HomeworkStatus, TechniqueCategory
 
 logger = structlog.get_logger(__name__)
 
@@ -27,10 +27,12 @@ class HomeworkType(str, Enum):
     EXPOSURE = "exposure"
     MONITORING = "monitoring"
     VALUES = "values"
+    RELAXATION = "relaxation"
+    INTERPERSONAL = "interpersonal"
 
 
 class CompletionStatus(str, Enum):
-    """Homework completion status."""
+    """Homework completion status (aligned with HomeworkStatus)."""
     ASSIGNED = "assigned"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"

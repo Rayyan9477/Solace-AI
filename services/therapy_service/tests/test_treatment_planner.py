@@ -11,10 +11,11 @@ from services.therapy_service.src.domain.treatment_planner import (
     TreatmentPlannerSettings,
     TreatmentPlan,
     TreatmentGoal,
-    TreatmentPhase,
-    GoalStatus,
 )
-from services.therapy_service.src.schemas import TherapyModality, SeverityLevel
+from services.therapy_service.src.schemas import (
+    TherapyModality, SeverityLevel, TreatmentPhase, GoalStatus,
+    SteppedCareLevel, ResponseStatus,
+)
 
 
 class TestTreatmentPlannerSettings:
@@ -45,8 +46,8 @@ class TestTreatmentPlanner:
     def test_planner_initialization(self) -> None:
         """Test planner initializes correctly."""
         planner = TreatmentPlanner()
-        assert len(planner._phase_configs) == 6
-        assert TreatmentPhase.ASSESSMENT in planner._phase_configs
+        assert len(planner._phase_configs) == 4  # FOUNDATION, ACTIVE_TREATMENT, CONSOLIDATION, MAINTENANCE
+        assert TreatmentPhase.FOUNDATION in planner._phase_configs
 
     def test_create_plan_basic(self) -> None:
         """Test basic treatment plan creation."""
@@ -62,18 +63,29 @@ class TestTreatmentPlanner:
         assert plan.primary_diagnosis == "Depression"
         assert plan.severity == SeverityLevel.MODERATE
         assert plan.primary_modality == TherapyModality.CBT
-        assert plan.current_phase == TreatmentPhase.ASSESSMENT
+        assert plan.current_phase == TreatmentPhase.FOUNDATION
 
-    def test_create_plan_severe_starts_stabilization(self) -> None:
-        """Test severe cases start in stabilization phase."""
+    def test_create_plan_with_phq9_sets_stepped_care(self) -> None:
+        """Test PHQ-9 score determines stepped care level."""
         planner = TreatmentPlanner()
         plan = planner.create_plan(
             user_id=uuid4(),
             diagnosis="Depression",
-            severity=SeverityLevel.SEVERE,
+            severity=SeverityLevel.MODERATE,
             modality=TherapyModality.CBT,
+            phq9_score=14,
         )
-        assert plan.current_phase == TreatmentPhase.STABILIZATION
+        assert plan.stepped_care_level == SteppedCareLevel.MEDIUM_INTENSITY
+        assert plan.baseline_phq9 == 14
+
+    def test_calculate_stepped_care_level(self) -> None:
+        """Test stepped care level calculation from PHQ-9."""
+        planner = TreatmentPlanner()
+        assert planner.calculate_stepped_care_level(3) == SteppedCareLevel.WELLNESS
+        assert planner.calculate_stepped_care_level(7) == SteppedCareLevel.LOW_INTENSITY
+        assert planner.calculate_stepped_care_level(12) == SteppedCareLevel.MEDIUM_INTENSITY
+        assert planner.calculate_stepped_care_level(17) == SteppedCareLevel.HIGH_INTENSITY
+        assert planner.calculate_stepped_care_level(22) == SteppedCareLevel.INTENSIVE_REFERRAL
 
     def test_create_plan_with_goals(self) -> None:
         """Test plan creation with initial goals."""
@@ -196,9 +208,10 @@ class TestTreatmentPlanner:
         )
         # Complete minimum sessions
         planner.record_session_completion(plan.plan_id)
+        planner.record_session_completion(plan.plan_id)
         result = planner.advance_phase(plan.plan_id, force=True)
         assert result["success"] is True
-        assert plan.current_phase == TreatmentPhase.STABILIZATION
+        assert plan.current_phase == TreatmentPhase.ACTIVE_TREATMENT
 
     def test_advance_phase_respects_min_sessions(self) -> None:
         """Test phase advancement respects minimum sessions."""
@@ -250,6 +263,68 @@ class TestTreatmentPlanner:
             modality=TherapyModality.CBT,
         )
         planner.record_session_completion(plan.plan_id, skills_practiced=["grounding"])
+        planner.record_session_completion(plan.plan_id, skills_practiced=["grounding"])
         planner.advance_phase(plan.plan_id, force=True)
         assert "grounding" in plan.skills_acquired
         assert len(plan.skills_in_progress) == 0
+
+
+class TestSteppedCareAndOutcomes:
+    """Tests for stepped care level management and outcome tracking."""
+
+    def test_update_outcome_score_improves_response(self) -> None:
+        """Test outcome score update evaluates treatment response."""
+        planner = TreatmentPlanner()
+        plan = planner.create_plan(
+            user_id=uuid4(),
+            diagnosis="Depression",
+            severity=SeverityLevel.MODERATE,
+            modality=TherapyModality.CBT,
+            phq9_score=16,
+        )
+        result = planner.update_outcome_score(plan.plan_id, phq9_score=8)
+        assert result["success"] is True
+        assert result["response_status"] == ResponseStatus.RESPONDING.value
+
+    def test_update_outcome_triggers_step_down(self) -> None:
+        """Test improving score triggers stepped care level reduction."""
+        planner = TreatmentPlanner()
+        plan = planner.create_plan(
+            user_id=uuid4(),
+            diagnosis="Depression",
+            severity=SeverityLevel.MODERATELY_SEVERE,
+            modality=TherapyModality.CBT,
+            phq9_score=18,
+        )
+        assert plan.stepped_care_level == SteppedCareLevel.HIGH_INTENSITY
+        result = planner.update_outcome_score(plan.plan_id, phq9_score=8)
+        assert result["step_change"] is True
+        assert plan.stepped_care_level == SteppedCareLevel.LOW_INTENSITY
+
+    def test_deterioration_detected(self) -> None:
+        """Test deterioration is detected when scores worsen."""
+        planner = TreatmentPlanner()
+        plan = planner.create_plan(
+            user_id=uuid4(),
+            diagnosis="Depression",
+            severity=SeverityLevel.MODERATE,
+            modality=TherapyModality.CBT,
+            phq9_score=12,
+        )
+        result = planner.update_outcome_score(plan.plan_id, phq9_score=18)
+        assert result["response_status"] == ResponseStatus.DETERIORATING.value
+        assert any("safety" in r.lower() for r in result["recommendations"])
+
+    def test_get_stepped_care_recommendations(self) -> None:
+        """Test getting recommendations for stepped care level."""
+        planner = TreatmentPlanner()
+        recs = planner.get_stepped_care_recommendations(SteppedCareLevel.HIGH_INTENSITY)
+        assert recs["session_frequency"] == "2-3x/week"
+        assert recs["homework_intensity"] == "daily"
+
+    def test_intensive_referral_flag(self) -> None:
+        """Test intensive referral is flagged for severe cases."""
+        planner = TreatmentPlanner()
+        recs = planner.get_stepped_care_recommendations(SteppedCareLevel.INTENSIVE_REFERRAL)
+        assert recs.get("referral_required") is True
+        assert recs["human_involvement"] == "required"
