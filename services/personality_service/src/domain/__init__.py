@@ -1,0 +1,1 @@
+"""Personality Service - Domain Layer."""
