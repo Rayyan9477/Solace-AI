@@ -1,0 +1,71 @@
+"""
+Solace-AI User Service.
+User profile management, authentication, and preference handling.
+"""
+from .domain.service import (
+    UserService,
+    UserServiceSettings,
+    User,
+    UserPreferences,
+    UserProgress,
+    ConsentRecord,
+    UserSession,
+    UserRole,
+    AccountStatus,
+    CreateUserResult,
+    UpdateUserResult,
+    UpdatePreferencesResult,
+    ConsentResult,
+    DeleteUserResult,
+    PasswordChangeResult,
+    EmailVerificationResult,
+)
+from .auth import (
+    SessionManager,
+    SessionConfig,
+    TokenService,
+    TokenClaims,
+    TokenType,
+    AuthResult,
+    TokenValidationResult,
+)
+from .infrastructure.repository import (
+    UserRepository,
+    UserPreferencesRepository,
+    InMemoryUserRepository,
+    InMemoryUserPreferencesRepository,
+    UserRepositoryFactory,
+    UserRepositoryConfig,
+)
+
+__all__ = [
+    "UserService",
+    "UserServiceSettings",
+    "User",
+    "UserPreferences",
+    "UserProgress",
+    "ConsentRecord",
+    "UserSession",
+    "UserRole",
+    "AccountStatus",
+    "CreateUserResult",
+    "UpdateUserResult",
+    "UpdatePreferencesResult",
+    "ConsentResult",
+    "DeleteUserResult",
+    "PasswordChangeResult",
+    "EmailVerificationResult",
+    "SessionManager",
+    "SessionConfig",
+    "TokenService",
+    "TokenClaims",
+    "TokenType",
+    "AuthResult",
+    "TokenValidationResult",
+    "UserRepository",
+    "UserPreferencesRepository",
+    "InMemoryUserRepository",
+    "InMemoryUserPreferencesRepository",
+    "UserRepositoryFactory",
+    "UserRepositoryConfig",
+]
