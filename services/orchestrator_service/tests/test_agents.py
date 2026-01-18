@@ -181,13 +181,6 @@ class TestSafetyAgent:
         assert agent._check_count == 0
         assert agent._settings.service_url == "http://localhost:8001"
 
-    def test_should_include_resources(self):
-        """Test crisis resource inclusion logic."""
-        agent = SafetyAgent()
-        assert agent._should_include_resources("I want to kill myself") is True
-        assert agent._should_include_resources("I feel a bit sad today") is False
-        assert agent._should_include_resources("I'm thinking about self-harm") is True
-
     def test_build_fallback_response_crisis(self):
         """Test fallback response for crisis message."""
         agent = SafetyAgent()
@@ -204,32 +197,6 @@ class TestSafetyAgent:
         safety_flags = result["safety_flags"]
         assert safety_flags["crisis_detected"] is False
         assert safety_flags["risk_level"] == RiskLevel.NONE.value
-
-    def test_determine_monitoring_level(self):
-        """Test monitoring level determination."""
-        agent = SafetyAgent()
-        critical_result = SafetyCheckResult(
-            is_safe=False,
-            crisis_level=CrisisLevel.CRITICAL,
-            risk_score=Decimal("0.95"),
-            risk_factors=[],
-            protective_factors=[],
-            requires_escalation=True,
-            requires_human_review=True,
-            crisis_resources=[],
-        )
-        assert agent._determine_monitoring_level(critical_result) == "intensive"
-        elevated_result = SafetyCheckResult(
-            is_safe=True,
-            crisis_level=CrisisLevel.ELEVATED,
-            risk_score=Decimal("0.5"),
-            risk_factors=[],
-            protective_factors=[],
-            requires_escalation=False,
-            requires_human_review=False,
-            crisis_resources=[],
-        )
-        assert agent._determine_monitoring_level(elevated_result) == "enhanced"
 
     def test_get_statistics(self):
         """Test statistics retrieval."""

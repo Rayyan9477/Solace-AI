@@ -84,30 +84,10 @@ class TechniqueDTO:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TechniqueDTO:
-        """Create from dictionary."""
-        return cls(
-            technique_id=data.get("technique_id", str(uuid4())),
-            name=data.get("name", ""),
-            modality=TherapyModality(data.get("modality", "CBT")),
-            category=TechniqueCategory(data.get("category", "COGNITIVE_RESTRUCTURING")),
-            description=data.get("description", ""),
-            duration_minutes=data.get("duration_minutes", 15),
-            requires_homework=data.get("requires_homework", False),
-            contraindications=data.get("contraindications", []),
-        )
+        return cls(technique_id=data.get("technique_id", str(uuid4())), name=data.get("name", ""), modality=TherapyModality(data.get("modality", "CBT")), category=TechniqueCategory(data.get("category", "COGNITIVE_RESTRUCTURING")), description=data.get("description", ""), duration_minutes=data.get("duration_minutes", 15), requires_homework=data.get("requires_homework", False), contraindications=data.get("contraindications", []))
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "technique_id": self.technique_id,
-            "name": self.name,
-            "modality": self.modality.value,
-            "category": self.category.value,
-            "description": self.description,
-            "duration_minutes": self.duration_minutes,
-            "requires_homework": self.requires_homework,
-            "contraindications": self.contraindications,
-        }
+        return {"technique_id": self.technique_id, "name": self.name, "modality": self.modality.value, "category": self.category.value, "description": self.description, "duration_minutes": self.duration_minutes, "requires_homework": self.requires_homework, "contraindications": self.contraindications}
 
 
 @dataclass
@@ -122,26 +102,10 @@ class HomeworkDTO:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> HomeworkDTO:
-        """Create from dictionary."""
-        return cls(
-            homework_id=data.get("homework_id", str(uuid4())),
-            title=data.get("title", ""),
-            description=data.get("description", ""),
-            technique_id=data.get("technique_id", ""),
-            due_date=data.get("due_date"),
-            completed=data.get("completed", False),
-        )
+        return cls(homework_id=data.get("homework_id", str(uuid4())), title=data.get("title", ""), description=data.get("description", ""), technique_id=data.get("technique_id", ""), due_date=data.get("due_date"), completed=data.get("completed", False))
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "homework_id": self.homework_id,
-            "title": self.title,
-            "description": self.description,
-            "technique_id": self.technique_id,
-            "due_date": self.due_date,
-            "completed": self.completed,
-        }
+        return {"homework_id": self.homework_id, "title": self.title, "description": self.description, "technique_id": self.technique_id, "due_date": self.due_date, "completed": self.completed}
 
 
 @dataclass
@@ -157,17 +121,8 @@ class TherapyResponse:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TherapyResponse:
-        """Create from API response."""
         technique_data = data.get("technique_applied")
-        return cls(
-            response_text=data.get("response_text", ""),
-            current_phase=SessionPhase(data.get("current_phase", "WORKING")),
-            technique_applied=TechniqueDTO.from_dict(technique_data) if technique_data else None,
-            homework_assigned=[HomeworkDTO.from_dict(h) for h in data.get("homework_assigned", [])],
-            safety_alerts=data.get("safety_alerts", []),
-            next_steps=data.get("next_steps", []),
-            processing_time_ms=float(data.get("processing_time_ms", 0.0)),
-        )
+        return cls(response_text=data.get("response_text", ""), current_phase=SessionPhase(data.get("current_phase", "WORKING")), technique_applied=TechniqueDTO.from_dict(technique_data) if technique_data else None, homework_assigned=[HomeworkDTO.from_dict(h) for h in data.get("homework_assigned", [])], safety_alerts=data.get("safety_alerts", []), next_steps=data.get("next_steps", []), processing_time_ms=float(data.get("processing_time_ms", 0.0)))
 
 
 class TherapyServiceClient:

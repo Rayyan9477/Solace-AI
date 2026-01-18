@@ -77,24 +77,10 @@ class TraitScoreDTO:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TraitScoreDTO:
-        """Create from dictionary."""
-        return cls(
-            trait=PersonalityTrait(data.get("trait", "OPENNESS")),
-            value=float(data.get("value", 0.5)),
-            confidence_lower=float(data.get("confidence_lower", 0.3)),
-            confidence_upper=float(data.get("confidence_upper", 0.7)),
-            evidence_markers=data.get("evidence_markers", []),
-        )
+        return cls(trait=PersonalityTrait(data.get("trait", "OPENNESS")), value=float(data.get("value", 0.5)), confidence_lower=float(data.get("confidence_lower", 0.3)), confidence_upper=float(data.get("confidence_upper", 0.7)), evidence_markers=data.get("evidence_markers", []))
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "trait": self.trait.value,
-            "value": self.value,
-            "confidence_lower": self.confidence_lower,
-            "confidence_upper": self.confidence_upper,
-            "evidence_markers": self.evidence_markers,
-        }
+        return {"trait": self.trait.value, "value": self.value, "confidence_lower": self.confidence_lower, "confidence_upper": self.confidence_upper, "evidence_markers": self.evidence_markers}
 
 
 @dataclass
@@ -111,47 +97,21 @@ class OceanScoresDTO:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> OceanScoresDTO:
-        """Create from dictionary."""
         assessed_at = data.get("assessed_at")
         if isinstance(assessed_at, str):
             assessed_at = datetime.fromisoformat(assessed_at)
-        return cls(
-            openness=float(data.get("openness", 0.5)),
-            conscientiousness=float(data.get("conscientiousness", 0.5)),
-            extraversion=float(data.get("extraversion", 0.5)),
-            agreeableness=float(data.get("agreeableness", 0.5)),
-            neuroticism=float(data.get("neuroticism", 0.5)),
-            overall_confidence=float(data.get("overall_confidence", 0.5)),
-            assessed_at=assessed_at or datetime.now(timezone.utc),
-            trait_scores=[TraitScoreDTO.from_dict(t) for t in data.get("trait_scores", [])],
-        )
+        return cls(openness=float(data.get("openness", 0.5)), conscientiousness=float(data.get("conscientiousness", 0.5)), extraversion=float(data.get("extraversion", 0.5)), agreeableness=float(data.get("agreeableness", 0.5)), neuroticism=float(data.get("neuroticism", 0.5)), overall_confidence=float(data.get("overall_confidence", 0.5)), assessed_at=assessed_at or datetime.now(timezone.utc), trait_scores=[TraitScoreDTO.from_dict(t) for t in data.get("trait_scores", [])])
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "openness": self.openness,
-            "conscientiousness": self.conscientiousness,
-            "extraversion": self.extraversion,
-            "agreeableness": self.agreeableness,
-            "neuroticism": self.neuroticism,
-            "overall_confidence": self.overall_confidence,
-            "assessed_at": self.assessed_at.isoformat(),
-            "trait_scores": [t.to_dict() for t in self.trait_scores],
-        }
+        return {"openness": self.openness, "conscientiousness": self.conscientiousness, "extraversion": self.extraversion, "agreeableness": self.agreeableness, "neuroticism": self.neuroticism, "overall_confidence": self.overall_confidence, "assessed_at": self.assessed_at.isoformat(), "trait_scores": [t.to_dict() for t in self.trait_scores]}
 
     def dominant_traits(self, threshold: float = 0.6) -> list[PersonalityTrait]:
-        """Get traits above threshold."""
         traits = []
-        if self.openness >= threshold:
-            traits.append(PersonalityTrait.OPENNESS)
-        if self.conscientiousness >= threshold:
-            traits.append(PersonalityTrait.CONSCIENTIOUSNESS)
-        if self.extraversion >= threshold:
-            traits.append(PersonalityTrait.EXTRAVERSION)
-        if self.agreeableness >= threshold:
-            traits.append(PersonalityTrait.AGREEABLENESS)
-        if self.neuroticism >= threshold:
-            traits.append(PersonalityTrait.NEUROTICISM)
+        if self.openness >= threshold: traits.append(PersonalityTrait.OPENNESS)
+        if self.conscientiousness >= threshold: traits.append(PersonalityTrait.CONSCIENTIOUSNESS)
+        if self.extraversion >= threshold: traits.append(PersonalityTrait.EXTRAVERSION)
+        if self.agreeableness >= threshold: traits.append(PersonalityTrait.AGREEABLENESS)
+        if self.neuroticism >= threshold: traits.append(PersonalityTrait.NEUROTICISM)
         return traits
 
 
@@ -169,43 +129,14 @@ class StyleParametersDTO:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> StyleParametersDTO:
-        """Create from dictionary."""
-        return cls(
-            warmth=float(data.get("warmth", 0.6)),
-            structure=float(data.get("structure", 0.5)),
-            complexity=float(data.get("complexity", 0.5)),
-            directness=float(data.get("directness", 0.5)),
-            energy=float(data.get("energy", 0.5)),
-            validation_level=float(data.get("validation_level", 0.6)),
-            style_type=CommunicationStyleType(data.get("style_type", "BALANCED")),
-            custom_params=data.get("custom_params", {}),
-        )
+        return cls(warmth=float(data.get("warmth", 0.6)), structure=float(data.get("structure", 0.5)), complexity=float(data.get("complexity", 0.5)), directness=float(data.get("directness", 0.5)), energy=float(data.get("energy", 0.5)), validation_level=float(data.get("validation_level", 0.6)), style_type=CommunicationStyleType(data.get("style_type", "BALANCED")), custom_params=data.get("custom_params", {}))
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "warmth": self.warmth,
-            "structure": self.structure,
-            "complexity": self.complexity,
-            "directness": self.directness,
-            "energy": self.energy,
-            "validation_level": self.validation_level,
-            "style_type": self.style_type.value,
-            "custom_params": self.custom_params,
-        }
+        return {"warmth": self.warmth, "structure": self.structure, "complexity": self.complexity, "directness": self.directness, "energy": self.energy, "validation_level": self.validation_level, "style_type": self.style_type.value, "custom_params": self.custom_params}
 
     @classmethod
     def default(cls) -> StyleParametersDTO:
-        """Create default balanced style."""
-        return cls(
-            warmth=0.6,
-            structure=0.5,
-            complexity=0.5,
-            directness=0.5,
-            energy=0.5,
-            validation_level=0.6,
-            style_type=CommunicationStyleType.BALANCED,
-        )
+        return cls(warmth=0.6, structure=0.5, complexity=0.5, directness=0.5, energy=0.5, validation_level=0.6, style_type=CommunicationStyleType.BALANCED)
 
 
 @dataclass
@@ -220,15 +151,7 @@ class PersonalityDetectionResult:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PersonalityDetectionResult:
-        """Create from API response."""
-        return cls(
-            user_id=data.get("user_id", ""),
-            ocean_scores=OceanScoresDTO.from_dict(data.get("ocean_scores", {})),
-            assessment_source=AssessmentSource(data.get("assessment_source", "TEXT_ANALYSIS")),
-            confidence=float(data.get("confidence", 0.5)),
-            evidence=data.get("evidence", []),
-            processing_time_ms=float(data.get("processing_time_ms", 0.0)),
-        )
+        return cls(user_id=data.get("user_id", ""), ocean_scores=OceanScoresDTO.from_dict(data.get("ocean_scores", {})), assessment_source=AssessmentSource(data.get("assessment_source", "TEXT_ANALYSIS")), confidence=float(data.get("confidence", 0.5)), evidence=data.get("evidence", []), processing_time_ms=float(data.get("processing_time_ms", 0.0)))
 
 
 @dataclass
@@ -240,12 +163,7 @@ class StyleResponse:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> StyleResponse:
-        """Create from API response."""
-        return cls(
-            style_parameters=StyleParametersDTO.from_dict(data.get("style_parameters", {})),
-            recommendations=data.get("recommendations", []),
-            profile_confidence=float(data.get("profile_confidence", 0.5)),
-        )
+        return cls(style_parameters=StyleParametersDTO.from_dict(data.get("style_parameters", {})), recommendations=data.get("recommendations", []), profile_confidence=float(data.get("profile_confidence", 0.5)))
 
 
 class PersonalityServiceClient:

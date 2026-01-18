@@ -83,34 +83,10 @@ class SymptomDTO:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SymptomDTO:
-        """Create from dictionary."""
-        return cls(
-            symptom_id=data.get("symptom_id", str(uuid4())),
-            name=data.get("name", ""),
-            description=data.get("description", ""),
-            symptom_type=SymptomType(data.get("symptom_type", "EMOTIONAL")),
-            severity=SeverityLevel(data.get("severity", "MILD")),
-            confidence=float(data.get("confidence", 0.5)),
-            onset=data.get("onset"),
-            duration=data.get("duration"),
-            frequency=data.get("frequency"),
-            triggers=data.get("triggers", []),
-        )
+        return cls(symptom_id=data.get("symptom_id", str(uuid4())), name=data.get("name", ""), description=data.get("description", ""), symptom_type=SymptomType(data.get("symptom_type", "EMOTIONAL")), severity=SeverityLevel(data.get("severity", "MILD")), confidence=float(data.get("confidence", 0.5)), onset=data.get("onset"), duration=data.get("duration"), frequency=data.get("frequency"), triggers=data.get("triggers", []))
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "symptom_id": self.symptom_id,
-            "name": self.name,
-            "description": self.description,
-            "symptom_type": self.symptom_type.value,
-            "severity": self.severity.value,
-            "confidence": self.confidence,
-            "onset": self.onset,
-            "duration": self.duration,
-            "frequency": self.frequency,
-            "triggers": self.triggers,
-        }
+        return {"symptom_id": self.symptom_id, "name": self.name, "description": self.description, "symptom_type": self.symptom_type.value, "severity": self.severity.value, "confidence": self.confidence, "onset": self.onset, "duration": self.duration, "frequency": self.frequency, "triggers": self.triggers}
 
 
 @dataclass
@@ -129,34 +105,10 @@ class HypothesisDTO:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> HypothesisDTO:
-        """Create from dictionary."""
-        return cls(
-            hypothesis_id=data.get("hypothesis_id", str(uuid4())),
-            name=data.get("name", ""),
-            confidence=float(data.get("confidence", 0.0)),
-            dsm5_code=data.get("dsm5_code"),
-            icd11_code=data.get("icd11_code"),
-            criteria_met=data.get("criteria_met", []),
-            criteria_missing=data.get("criteria_missing", []),
-            supporting_evidence=data.get("supporting_evidence", []),
-            contra_evidence=data.get("contra_evidence", []),
-            severity=SeverityLevel(data.get("severity", "MILD")),
-        )
+        return cls(hypothesis_id=data.get("hypothesis_id", str(uuid4())), name=data.get("name", ""), confidence=float(data.get("confidence", 0.0)), dsm5_code=data.get("dsm5_code"), icd11_code=data.get("icd11_code"), criteria_met=data.get("criteria_met", []), criteria_missing=data.get("criteria_missing", []), supporting_evidence=data.get("supporting_evidence", []), contra_evidence=data.get("contra_evidence", []), severity=SeverityLevel(data.get("severity", "MILD")))
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "hypothesis_id": self.hypothesis_id,
-            "name": self.name,
-            "confidence": self.confidence,
-            "dsm5_code": self.dsm5_code,
-            "icd11_code": self.icd11_code,
-            "criteria_met": self.criteria_met,
-            "criteria_missing": self.criteria_missing,
-            "supporting_evidence": self.supporting_evidence,
-            "contra_evidence": self.contra_evidence,
-            "severity": self.severity.value,
-        }
+        return {"hypothesis_id": self.hypothesis_id, "name": self.name, "confidence": self.confidence, "dsm5_code": self.dsm5_code, "icd11_code": self.icd11_code, "criteria_met": self.criteria_met, "criteria_missing": self.criteria_missing, "supporting_evidence": self.supporting_evidence, "contra_evidence": self.contra_evidence, "severity": self.severity.value}
 
 
 @dataclass
@@ -169,23 +121,11 @@ class DifferentialDTO:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DifferentialDTO:
-        """Create from dictionary."""
         primary_data = data.get("primary")
-        return cls(
-            primary=HypothesisDTO.from_dict(primary_data) if primary_data else None,
-            alternatives=[HypothesisDTO.from_dict(h) for h in data.get("alternatives", [])],
-            ruled_out=data.get("ruled_out", []),
-            missing_info=data.get("missing_info", []),
-        )
+        return cls(primary=HypothesisDTO.from_dict(primary_data) if primary_data else None, alternatives=[HypothesisDTO.from_dict(h) for h in data.get("alternatives", [])], ruled_out=data.get("ruled_out", []), missing_info=data.get("missing_info", []))
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "primary": self.primary.to_dict() if self.primary else None,
-            "alternatives": [h.to_dict() for h in self.alternatives],
-            "ruled_out": self.ruled_out,
-            "missing_info": self.missing_info,
-        }
+        return {"primary": self.primary.to_dict() if self.primary else None, "alternatives": [h.to_dict() for h in self.alternatives], "ruled_out": self.ruled_out, "missing_info": self.missing_info}
 
 
 @dataclass
@@ -202,17 +142,7 @@ class AssessmentResult:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AssessmentResult:
-        """Create from API response."""
-        return cls(
-            extracted_symptoms=[SymptomDTO.from_dict(s) for s in data.get("extracted_symptoms", [])],
-            differential=DifferentialDTO.from_dict(data.get("differential", {})),
-            next_question=data.get("next_question"),
-            response_text=data.get("response_text", ""),
-            confidence_score=float(data.get("confidence_score", 0.0)),
-            safety_flags=data.get("safety_flags", []),
-            current_phase=DiagnosisPhase(data.get("current_phase", "RAPPORT")),
-            reasoning_steps=data.get("reasoning_chain", []),
-        )
+        return cls(extracted_symptoms=[SymptomDTO.from_dict(s) for s in data.get("extracted_symptoms", [])], differential=DifferentialDTO.from_dict(data.get("differential", {})), next_question=data.get("next_question"), response_text=data.get("response_text", ""), confidence_score=float(data.get("confidence_score", 0.0)), safety_flags=data.get("safety_flags", []), current_phase=DiagnosisPhase(data.get("current_phase", "RAPPORT")), reasoning_steps=data.get("reasoning_chain", []))
 
 
 class DiagnosisServiceClient:

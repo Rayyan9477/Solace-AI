@@ -74,50 +74,20 @@ class MessageEntry:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for LangGraph state."""
-        return {
-            "message_id": str(self.message_id),
-            "role": self.role,
-            "content": self.content,
-            "timestamp": self.timestamp.isoformat(),
-            "metadata": self.metadata,
-        }
+        return {"message_id": str(self.message_id), "role": self.role, "content": self.content, "timestamp": self.timestamp.isoformat(), "metadata": self.metadata}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> MessageEntry:
-        """Create from dictionary."""
-        timestamp = data.get("timestamp")
-        if isinstance(timestamp, str):
-            timestamp = datetime.fromisoformat(timestamp)
-        return cls(
-            message_id=UUID(data["message_id"]) if isinstance(data.get("message_id"), str) else data.get("message_id", uuid4()),
-            role=data["role"],
-            content=data["content"],
-            timestamp=timestamp or datetime.now(timezone.utc),
-            metadata=data.get("metadata", {}),
-        )
+        ts = datetime.fromisoformat(data["timestamp"]) if isinstance(data.get("timestamp"), str) else data.get("timestamp") or datetime.now(timezone.utc)
+        return cls(message_id=UUID(data["message_id"]) if isinstance(data.get("message_id"), str) else data.get("message_id", uuid4()), role=data["role"], content=data["content"], timestamp=ts, metadata=data.get("metadata", {}))
 
     @classmethod
     def user_message(cls, content: str, metadata: dict[str, Any] | None = None) -> MessageEntry:
-        """Create a user message."""
-        return cls(
-            message_id=uuid4(),
-            role="user",
-            content=content,
-            timestamp=datetime.now(timezone.utc),
-            metadata=metadata or {},
-        )
+        return cls(message_id=uuid4(), role="user", content=content, timestamp=datetime.now(timezone.utc), metadata=metadata or {})
 
     @classmethod
     def assistant_message(cls, content: str, metadata: dict[str, Any] | None = None) -> MessageEntry:
-        """Create an assistant message."""
-        return cls(
-            message_id=uuid4(),
-            role="assistant",
-            content=content,
-            timestamp=datetime.now(timezone.utc),
-            metadata=metadata or {},
-        )
+        return cls(message_id=uuid4(), role="assistant", content=content, timestamp=datetime.now(timezone.utc), metadata=metadata or {})
 
 
 @dataclass
@@ -135,46 +105,18 @@ class SafetyFlags:
     last_assessment_at: datetime | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "risk_level": self.risk_level.value,
-            "crisis_detected": self.crisis_detected,
-            "crisis_type": self.crisis_type,
-            "requires_escalation": self.requires_escalation,
-            "escalation_reason": self.escalation_reason,
-            "safety_resources_shown": self.safety_resources_shown,
-            "monitoring_level": self.monitoring_level,
-            "contraindications": self.contraindications,
-            "triggered_keywords": self.triggered_keywords,
-            "last_assessment_at": self.last_assessment_at.isoformat() if self.last_assessment_at else None,
-        }
+        return {"risk_level": self.risk_level.value, "crisis_detected": self.crisis_detected, "crisis_type": self.crisis_type, "requires_escalation": self.requires_escalation, "escalation_reason": self.escalation_reason, "safety_resources_shown": self.safety_resources_shown, "monitoring_level": self.monitoring_level, "contraindications": self.contraindications, "triggered_keywords": self.triggered_keywords, "last_assessment_at": self.last_assessment_at.isoformat() if self.last_assessment_at else None}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SafetyFlags:
-        """Create from dictionary."""
-        last_assessment = data.get("last_assessment_at")
-        if isinstance(last_assessment, str):
-            last_assessment = datetime.fromisoformat(last_assessment)
-        return cls(
-            risk_level=RiskLevel(data.get("risk_level", "none")),
-            crisis_detected=data.get("crisis_detected", False),
-            crisis_type=data.get("crisis_type"),
-            requires_escalation=data.get("requires_escalation", False),
-            escalation_reason=data.get("escalation_reason"),
-            safety_resources_shown=data.get("safety_resources_shown", False),
-            monitoring_level=data.get("monitoring_level", "standard"),
-            contraindications=data.get("contraindications", []),
-            triggered_keywords=data.get("triggered_keywords", []),
-            last_assessment_at=last_assessment,
-        )
+        la = datetime.fromisoformat(data["last_assessment_at"]) if isinstance(data.get("last_assessment_at"), str) else data.get("last_assessment_at")
+        return cls(risk_level=RiskLevel(data.get("risk_level", "none")), crisis_detected=data.get("crisis_detected", False), crisis_type=data.get("crisis_type"), requires_escalation=data.get("requires_escalation", False), escalation_reason=data.get("escalation_reason"), safety_resources_shown=data.get("safety_resources_shown", False), monitoring_level=data.get("monitoring_level", "standard"), contraindications=data.get("contraindications", []), triggered_keywords=data.get("triggered_keywords", []), last_assessment_at=la)
 
     @classmethod
     def safe(cls) -> SafetyFlags:
-        """Create safe default flags."""
         return cls(risk_level=RiskLevel.NONE, crisis_detected=False)
 
     def is_safe(self) -> bool:
-        """Check if current state is considered safe."""
         return not self.crisis_detected and self.risk_level in (RiskLevel.NONE, RiskLevel.LOW)
 
 
@@ -191,34 +133,12 @@ class AgentResult:
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "agent_type": self.agent_type.value,
-            "success": self.success,
-            "response_content": self.response_content,
-            "confidence": self.confidence,
-            "processing_time_ms": self.processing_time_ms,
-            "metadata": self.metadata,
-            "error": self.error,
-            "timestamp": self.timestamp.isoformat(),
-        }
+        return {"agent_type": self.agent_type.value, "success": self.success, "response_content": self.response_content, "confidence": self.confidence, "processing_time_ms": self.processing_time_ms, "metadata": self.metadata, "error": self.error, "timestamp": self.timestamp.isoformat()}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AgentResult:
-        """Create from dictionary."""
-        timestamp = data.get("timestamp")
-        if isinstance(timestamp, str):
-            timestamp = datetime.fromisoformat(timestamp)
-        return cls(
-            agent_type=AgentType(data["agent_type"]),
-            success=data.get("success", False),
-            response_content=data.get("response_content"),
-            confidence=data.get("confidence", 0.0),
-            processing_time_ms=data.get("processing_time_ms", 0.0),
-            metadata=data.get("metadata", {}),
-            error=data.get("error"),
-            timestamp=timestamp or datetime.now(timezone.utc),
-        )
+        ts = datetime.fromisoformat(data["timestamp"]) if isinstance(data.get("timestamp"), str) else data.get("timestamp") or datetime.now(timezone.utc)
+        return cls(agent_type=AgentType(data["agent_type"]), success=data.get("success", False), response_content=data.get("response_content"), confidence=data.get("confidence", 0.0), processing_time_ms=data.get("processing_time_ms", 0.0), metadata=data.get("metadata", {}), error=data.get("error"), timestamp=ts)
 
 
 @dataclass
@@ -236,38 +156,12 @@ class ProcessingMetadata:
     is_streaming: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "request_id": str(self.request_id),
-            "session_id": str(self.session_id) if self.session_id else None,
-            "user_id": str(self.user_id) if self.user_id else None,
-            "correlation_id": str(self.correlation_id) if self.correlation_id else None,
-            "start_time": self.start_time.isoformat(),
-            "total_processing_time_ms": self.total_processing_time_ms,
-            "active_agents": [a.value for a in self.active_agents],
-            "completed_agents": [a.value for a in self.completed_agents],
-            "retry_count": self.retry_count,
-            "is_streaming": self.is_streaming,
-        }
+        return {"request_id": str(self.request_id), "session_id": str(self.session_id) if self.session_id else None, "user_id": str(self.user_id) if self.user_id else None, "correlation_id": str(self.correlation_id) if self.correlation_id else None, "start_time": self.start_time.isoformat(), "total_processing_time_ms": self.total_processing_time_ms, "active_agents": [a.value for a in self.active_agents], "completed_agents": [a.value for a in self.completed_agents], "retry_count": self.retry_count, "is_streaming": self.is_streaming}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ProcessingMetadata:
-        """Create from dictionary."""
-        start_time = data.get("start_time")
-        if isinstance(start_time, str):
-            start_time = datetime.fromisoformat(start_time)
-        return cls(
-            request_id=UUID(data["request_id"]) if isinstance(data.get("request_id"), str) else data.get("request_id", uuid4()),
-            session_id=UUID(data["session_id"]) if data.get("session_id") else None,
-            user_id=UUID(data["user_id"]) if data.get("user_id") else None,
-            correlation_id=UUID(data["correlation_id"]) if data.get("correlation_id") else None,
-            start_time=start_time or datetime.now(timezone.utc),
-            total_processing_time_ms=data.get("total_processing_time_ms", 0.0),
-            active_agents=[AgentType(a) for a in data.get("active_agents", [])],
-            completed_agents=[AgentType(a) for a in data.get("completed_agents", [])],
-            retry_count=data.get("retry_count", 0),
-            is_streaming=data.get("is_streaming", False),
-        )
+        st = datetime.fromisoformat(data["start_time"]) if isinstance(data.get("start_time"), str) else data.get("start_time") or datetime.now(timezone.utc)
+        return cls(request_id=UUID(data["request_id"]) if isinstance(data.get("request_id"), str) else data.get("request_id", uuid4()), session_id=UUID(data["session_id"]) if data.get("session_id") else None, user_id=UUID(data["user_id"]) if data.get("user_id") else None, correlation_id=UUID(data["correlation_id"]) if data.get("correlation_id") else None, start_time=st, total_processing_time_ms=data.get("total_processing_time_ms", 0.0), active_agents=[AgentType(a) for a in data.get("active_agents", [])], completed_agents=[AgentType(a) for a in data.get("completed_agents", [])], retry_count=data.get("retry_count", 0), is_streaming=data.get("is_streaming", False))
 
 
 def add_messages(left: list[dict[str, Any]], right: list[dict[str, Any]]) -> list[dict[str, Any]]:

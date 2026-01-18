@@ -38,65 +38,24 @@ class GraphBuilderSettings(BaseSettings):
 
 
 def safety_precheck_node(state: OrchestratorState) -> dict[str, Any]:
-    """
-    Safety pre-check node - analyzes input for crisis indicators.
-    Always runs first to ensure safety-first processing.
-    """
+    """Safety pre-check node - analyzes input for crisis indicators."""
     message = state.get("current_message", "")
-    existing_flags = state.get("safety_flags", {})
     logger.info("safety_precheck_processing", message_length=len(message))
-    crisis_keywords = [
-        "suicide", "kill myself", "end my life", "want to die", "self-harm",
-        "hurt myself", "cutting", "overdose", "no reason to live", "end it all",
-    ]
-    high_risk_keywords = [
-        "plan to", "going to", "tonight", "method", "goodbye", "final",
-    ]
+    crisis_keywords = ["suicide", "kill myself", "end my life", "want to die", "self-harm", "hurt myself", "cutting", "overdose", "no reason to live", "end it all"]
+    high_risk_keywords = ["plan to", "going to", "tonight", "method", "goodbye", "final"]
     message_lower = message.lower()
     triggered = [kw for kw in crisis_keywords if kw in message_lower]
     high_risk_matches = [kw for kw in high_risk_keywords if kw in message_lower]
     crisis_detected = len(triggered) > 0
-    risk_level = RiskLevel.NONE
-    if crisis_detected:
-        if high_risk_matches:
-            risk_level = RiskLevel.CRITICAL
-        else:
-            risk_level = RiskLevel.HIGH
-    elif any(kw in message_lower for kw in ["depressed", "anxious", "hopeless"]):
-        risk_level = RiskLevel.LOW
-    safety_flags = SafetyFlags(
-        risk_level=risk_level,
-        crisis_detected=crisis_detected,
-        crisis_type="suicidal_ideation" if crisis_detected else None,
-        requires_escalation=risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL),
-        monitoring_level="intensive" if crisis_detected else "standard",
-        triggered_keywords=triggered,
-        last_assessment_at=datetime.now(timezone.utc),
-    )
-    agent_result = AgentResult(
-        agent_type=AgentType.SAFETY,
-        success=True,
-        confidence=0.9 if crisis_detected else 0.7,
-        metadata={"triggered_keywords": triggered, "phase": "precheck"},
-    )
-    logger.info(
-        "safety_precheck_complete",
-        risk_level=risk_level.value,
-        crisis_detected=crisis_detected,
-        triggered_count=len(triggered),
-    )
-    return {
-        "safety_flags": safety_flags.to_dict(),
-        "processing_phase": ProcessingPhase.SAFETY_PRECHECK.value,
-        "agent_results": [agent_result.to_dict()],
-    }
+    risk_level = RiskLevel.CRITICAL if (crisis_detected and high_risk_matches) else (RiskLevel.HIGH if crisis_detected else (RiskLevel.LOW if any(kw in message_lower for kw in ["depressed", "anxious", "hopeless"]) else RiskLevel.NONE))
+    safety_flags = SafetyFlags(risk_level=risk_level, crisis_detected=crisis_detected, crisis_type="suicidal_ideation" if crisis_detected else None, requires_escalation=risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL), monitoring_level="intensive" if crisis_detected else "standard", triggered_keywords=triggered, last_assessment_at=datetime.now(timezone.utc))
+    agent_result = AgentResult(agent_type=AgentType.SAFETY, success=True, confidence=0.9 if crisis_detected else 0.7, metadata={"triggered_keywords": triggered, "phase": "precheck"})
+    logger.info("safety_precheck_complete", risk_level=risk_level.value, crisis_detected=crisis_detected, triggered_count=len(triggered))
+    return {"safety_flags": safety_flags.to_dict(), "processing_phase": ProcessingPhase.SAFETY_PRECHECK.value, "agent_results": [agent_result.to_dict()]}
 
 
 def crisis_handler_node(state: OrchestratorState) -> dict[str, Any]:
-    """
-    Crisis handler node - generates immediate safety response.
-    Takes priority over all other processing when crisis is detected.
-    """
+    """Crisis handler node - generates immediate safety response."""
     safety_flags = state.get("safety_flags", {})
     risk_level = safety_flags.get("risk_level", "none")
     logger.warning("crisis_handler_activated", risk_level=risk_level)
@@ -108,182 +67,64 @@ If you're having thoughts of harming yourself, please reach out for immediate su
 - **Emergency Services**: Call 911 if you're in immediate danger
 
 I'm here with you, and I want you to know that these feelings can get better with the right support. Would you like to talk about what's been happening?"""
-    response_msg = MessageEntry.assistant_message(
-        content=crisis_response,
-        metadata={"is_crisis_response": True, "risk_level": risk_level},
-    )
-    updated_flags = {**safety_flags, "safety_resources_shown": True}
-    agent_result = AgentResult(
-        agent_type=AgentType.SAFETY,
-        success=True,
-        response_content=crisis_response,
-        confidence=1.0,
-        metadata={"is_crisis_response": True},
-    )
-    return {
-        "final_response": crisis_response,
-        "messages": [response_msg.to_dict()],
-        "safety_flags": updated_flags,
-        "processing_phase": ProcessingPhase.CRISIS_HANDLING.value,
-        "agent_results": [agent_result.to_dict()],
-    }
+    response_msg = MessageEntry.assistant_message(content=crisis_response, metadata={"is_crisis_response": True, "risk_level": risk_level})
+    agent_result = AgentResult(agent_type=AgentType.SAFETY, success=True, response_content=crisis_response, confidence=1.0, metadata={"is_crisis_response": True})
+    return {"final_response": crisis_response, "messages": [response_msg.to_dict()], "safety_flags": {**safety_flags, "safety_resources_shown": True}, "processing_phase": ProcessingPhase.CRISIS_HANDLING.value, "agent_results": [agent_result.to_dict()]}
 
 
 def chat_agent_node(state: OrchestratorState) -> dict[str, Any]:
-    """
-    Chat agent node - handles general conversation.
-    Provides empathetic, supportive responses for non-clinical content.
-    """
+    """Chat agent node - handles general conversation."""
     message = state.get("current_message", "")
     personality_style = state.get("personality_style", {})
     logger.info("chat_agent_processing", message_length=len(message))
     warmth = personality_style.get("warmth", 0.7)
-    if warmth > 0.7:
-        response = f"Thank you for sharing that with me. I'm here to listen and support you. "
-    else:
-        response = f"I understand. "
-    response += "How are you feeling about this?"
-    agent_result = AgentResult(
-        agent_type=AgentType.CHAT,
-        success=True,
-        response_content=response,
-        confidence=0.7,
-        metadata={"warmth": warmth},
-    )
-    return {
-        "agent_results": [agent_result.to_dict()],
-    }
+    response = ("Thank you for sharing that with me. I'm here to listen and support you. " if warmth > 0.7 else "I understand. ") + "How are you feeling about this?"
+    return {"agent_results": [AgentResult(agent_type=AgentType.CHAT, success=True, response_content=response, confidence=0.7, metadata={"warmth": warmth}).to_dict()]}
 
 
 def diagnosis_agent_node(state: OrchestratorState) -> dict[str, Any]:
-    """
-    Diagnosis agent node - coordinates with diagnosis service.
-    Handles symptom assessment and clinical screening.
-    """
-    message = state.get("current_message", "")
-    logger.info("diagnosis_agent_processing", message_length=len(message))
+    """Diagnosis agent node - coordinates with diagnosis service."""
+    logger.info("diagnosis_agent_processing", message_length=len(state.get("current_message", "")))
     response = "Based on what you've shared, it might be helpful to explore these feelings further. Would you like to talk more about when these symptoms started?"
-    agent_result = AgentResult(
-        agent_type=AgentType.DIAGNOSIS,
-        success=True,
-        response_content=response,
-        confidence=0.75,
-        metadata={"assessment_type": "symptom_exploration"},
-    )
-    return {
-        "agent_results": [agent_result.to_dict()],
-    }
+    return {"agent_results": [AgentResult(agent_type=AgentType.DIAGNOSIS, success=True, response_content=response, confidence=0.75, metadata={"assessment_type": "symptom_exploration"}).to_dict()]}
 
 
 def therapy_agent_node(state: OrchestratorState) -> dict[str, Any]:
-    """
-    Therapy agent node - coordinates with therapy service.
-    Provides evidence-based therapeutic interventions.
-    """
-    message = state.get("current_message", "")
-    intent = state.get("intent", "general_chat")
-    logger.info("therapy_agent_processing", message_length=len(message), intent=intent)
+    """Therapy agent node - provides evidence-based therapeutic interventions."""
+    logger.info("therapy_agent_processing", message_length=len(state.get("current_message", "")), intent=state.get("intent", "general_chat"))
     response = "It sounds like you're going through a difficult time. One thing that might help is to take a moment to notice how you're feeling right now, without trying to change it. Just observe your thoughts and feelings with curiosity."
-    agent_result = AgentResult(
-        agent_type=AgentType.THERAPY,
-        success=True,
-        response_content=response,
-        confidence=0.80,
-        metadata={"technique": "mindfulness_observation", "modality": "ACT"},
-    )
-    return {
-        "agent_results": [agent_result.to_dict()],
-    }
+    return {"agent_results": [AgentResult(agent_type=AgentType.THERAPY, success=True, response_content=response, confidence=0.80, metadata={"technique": "mindfulness_observation", "modality": "ACT"}).to_dict()]}
 
 
 def personality_agent_node(state: OrchestratorState) -> dict[str, Any]:
-    """
-    Personality agent node - adapts response style.
-    Applies Big Five personality adaptation to responses.
-    """
-    message = state.get("current_message", "")
-    logger.info("personality_agent_processing", message_length=len(message))
-    style = {
-        "warmth": 0.7,
-        "structure": 0.5,
-        "complexity": 0.5,
-        "directness": 0.5,
-        "energy": 0.5,
-        "validation_level": 0.6,
-        "style_type": "balanced",
-    }
-    agent_result = AgentResult(
-        agent_type=AgentType.PERSONALITY,
-        success=True,
-        confidence=0.70,
-        metadata={"style_params": style},
-    )
-    return {
-        "personality_style": style,
-        "agent_results": [agent_result.to_dict()],
-    }
+    """Personality agent node - applies Big Five personality adaptation."""
+    logger.info("personality_agent_processing", message_length=len(state.get("current_message", "")))
+    style = {"warmth": 0.7, "structure": 0.5, "complexity": 0.5, "directness": 0.5, "energy": 0.5, "validation_level": 0.6, "style_type": "balanced"}
+    return {"personality_style": style, "agent_results": [AgentResult(agent_type=AgentType.PERSONALITY, success=True, confidence=0.70, metadata={"style_params": style}).to_dict()]}
 
 
 def aggregator_node(state: OrchestratorState) -> dict[str, Any]:
-    """
-    Aggregator node - combines results from multiple agents.
-    Generates final coherent response from agent outputs.
-    """
+    """Aggregator node - combines results from multiple agents."""
     agent_results = state.get("agent_results", [])
     personality_style = state.get("personality_style", {})
     logger.info("aggregator_processing", result_count=len(agent_results))
-    responses: list[str] = []
-    for result in agent_results:
-        if result.get("response_content"):
-            responses.append(result["response_content"])
-    if responses:
-        final_response = responses[-1]
-    else:
-        final_response = "I'm here to support you. How can I help you today?"
-    warmth = personality_style.get("warmth", 0.6)
-    if warmth > 0.8:
+    responses = [r["response_content"] for r in agent_results if r.get("response_content")]
+    final_response = responses[-1] if responses else "I'm here to support you. How can I help you today?"
+    if personality_style.get("warmth", 0.6) > 0.8:
         final_response = f"I really appreciate you sharing this with me. {final_response}"
-    response_msg = MessageEntry.assistant_message(
-        content=final_response,
-        metadata={"aggregated": True, "source_count": len(responses)},
-    )
-    agent_result = AgentResult(
-        agent_type=AgentType.AGGREGATOR,
-        success=True,
-        response_content=final_response,
-        confidence=0.85,
-        metadata={"source_count": len(responses)},
-    )
-    return {
-        "final_response": final_response,
-        "messages": [response_msg.to_dict()],
-        "processing_phase": ProcessingPhase.AGGREGATION.value,
-        "agent_results": [agent_result.to_dict()],
-    }
+    response_msg = MessageEntry.assistant_message(content=final_response, metadata={"aggregated": True, "source_count": len(responses)})
+    return {"final_response": final_response, "messages": [response_msg.to_dict()], "processing_phase": ProcessingPhase.AGGREGATION.value, "agent_results": [AgentResult(agent_type=AgentType.AGGREGATOR, success=True, response_content=final_response, confidence=0.85, metadata={"source_count": len(responses)}).to_dict()]}
 
 
 def safety_postcheck_node(state: OrchestratorState) -> dict[str, Any]:
-    """
-    Safety post-check node - validates final response.
-    Ensures response doesn't contain harmful content.
-    """
+    """Safety post-check node - validates final response."""
     final_response = state.get("final_response", "")
     logger.info("safety_postcheck_processing", response_length=len(final_response))
     harmful_patterns = ["you should", "just do it", "give up", "no point"]
-    response_lower = final_response.lower()
-    needs_filtering = any(pattern in response_lower for pattern in harmful_patterns)
+    needs_filtering = any(p in final_response.lower() for p in harmful_patterns)
     if needs_filtering:
         logger.warning("safety_postcheck_filtering_applied")
-    agent_result = AgentResult(
-        agent_type=AgentType.SAFETY,
-        success=True,
-        confidence=0.9,
-        metadata={"phase": "postcheck", "filtered": needs_filtering},
-    )
-    return {
-        "processing_phase": ProcessingPhase.COMPLETED.value,
-        "agent_results": [agent_result.to_dict()],
-    }
+    return {"processing_phase": ProcessingPhase.COMPLETED.value, "agent_results": [AgentResult(agent_type=AgentType.SAFETY, success=True, confidence=0.9, metadata={"phase": "postcheck", "filtered": needs_filtering}).to_dict()]}
 
 
 def route_after_safety(state: OrchestratorState) -> Literal["crisis_handler", "supervisor"]:
