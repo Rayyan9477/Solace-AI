@@ -1,0 +1,3 @@
+"""
+User Service tests package.
+"""
