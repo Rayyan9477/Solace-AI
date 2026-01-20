@@ -47,7 +47,8 @@
       "mcp__plugin_exa-mcp-server_exa__web_search_exa",
       "Bash(pip index:*)",
       "Read(//d/Repo/Contextual-Chatbot/**)",
-      "Bash(for file in services/user-service/src/domain/entities.py services/user-service/src/domain/value_objects.py services/user-service/src/events.py services/user-service/src/config.py services/user-service/src/domain/consent.py)"
+      "Bash(for file in services/user-service/src/domain/entities.py services/user-service/src/domain/value_objects.py services/user-service/src/events.py services/user-service/src/config.py services/user-service/src/domain/consent.py)",
+      "Bash(pytest:*)"
     ],
     "deny": []
   }

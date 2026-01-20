@@ -210,12 +210,25 @@ class EmailAddress(BaseModel):
     @field_validator("value")
     @classmethod
     def validate_email(cls, v: str) -> str:
-        """Validate email format and normalize to lowercase."""
-        import re
-        email_regex = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
-        if not email_regex.match(v):
-            raise ValueError("Invalid email format")
-        return v.lower()
+        """
+        Validate email format using email-validator library.
+
+        Provides production-grade validation with:
+        - DNS domain checks (configurable)
+        - Internationalized domain support (IDN)
+        - Email normalization
+        - Deliverability checks (optional)
+        """
+        try:
+            from email_validator import validate_email, EmailNotValidError
+            # Validate and normalize email
+            # check_deliverability=False for speed (enable in production if needed)
+            emailinfo = validate_email(v, check_deliverability=False)
+            # Return normalized email (lowercased, properly formatted)
+            # Business rule: Emails are stored lowercase for consistency
+            return emailinfo.normalized.lower()
+        except EmailNotValidError as e:
+            raise ValueError(f"Invalid email format: {str(e)}")
 
     def __str__(self) -> str:
         return self.value
