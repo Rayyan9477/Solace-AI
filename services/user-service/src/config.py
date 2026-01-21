@@ -193,13 +193,43 @@ class UserServiceSettings(BaseSettings):
     All nested configurations are loaded from environment variables.
     """
 
-    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    # JWT Settings (flat for easy access)
+    jwt_secret_key: str = Field(
+        default="your-super-secret-key-minimum-32-characters-long",
+        min_length=32,
+        description="JWT secret key"
+    )
+    jwt_algorithm: str = Field(default="HS256", description="JWT algorithm")
+    access_token_expire_minutes: int = Field(default=15, ge=1, le=1440, description="Access token expiry")
+    refresh_token_expire_days: int = Field(default=30, ge=1, le=365, description="Refresh token expiry")
+
+    # Password Settings
+    argon2_time_cost: int = Field(default=2, ge=1, le=10, description="Argon2 time cost")
+    argon2_memory_cost: int = Field(default=65536, ge=1024, description="Argon2 memory cost in KB")
+
+    # Token Settings
+    verification_token_length: int = Field(default=32, ge=16, le=64, description="Verification token length")
+    verification_token_expiry_hours: int = Field(default=24, ge=1, le=168, description="Verification token expiry")
+
+    # Encryption Settings
+    field_encryption_key: str = Field(
+        default="your-32-byte-encryption-key-here",
+        min_length=32,
+        description="Field encryption key"
+    )
+
+    # Nested configurations
+    database: DatabaseConfig = Field(default_factory=lambda: DatabaseConfig(password="postgres"))
     redis: RedisConfig = Field(default_factory=RedisConfig)
-    security: SecurityConfig = Field(default_factory=SecurityConfig)
+    security: SecurityConfig = Field(default_factory=lambda: SecurityConfig(jwt_secret="your-super-secret-key-minimum-32-characters-long"))
     service: ServiceConfig = Field(default_factory=ServiceConfig)
     kafka: KafkaConfig = Field(default_factory=KafkaConfig)
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="USER_SERVICE_",
+        env_file=".env",
+        extra="ignore"
+    )
 
     def validate_all(self) -> None:
         """
