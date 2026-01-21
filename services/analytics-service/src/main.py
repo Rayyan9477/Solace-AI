@@ -55,11 +55,23 @@ class ConsumerConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CONSUMER_", env_file=".env", extra="ignore")
 
 
+class ObservabilityConfig(BaseSettings):
+    """Observability configuration for Prometheus and OpenTelemetry."""
+    prometheus_enabled: bool = Field(default=True)
+    prometheus_endpoint: str = Field(default="/metrics")
+    otel_enabled: bool = Field(default=False)
+    otel_service_name: str = Field(default="analytics-service")
+    otel_exporter_otlp_endpoint: str = Field(default="http://localhost:4317")
+
+    model_config = SettingsConfigDict(env_prefix="OBSERVABILITY_", env_file=".env", extra="ignore")
+
+
 class AnalyticsServiceSettings(BaseSettings):
     """Aggregate analytics service settings."""
     service: ServiceConfig = Field(default_factory=ServiceConfig)
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
     consumer: ConsumerConfig = Field(default_factory=ConsumerConfig)
+    observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -116,6 +128,78 @@ def _create_services(settings: AnalyticsServiceSettings) -> tuple:
     return aggregator, report_service, consumer
 
 
+def _setup_prometheus(app: FastAPI, settings: AnalyticsServiceSettings) -> None:
+    """Configure Prometheus metrics instrumentation."""
+    if not settings.observability.prometheus_enabled:
+        logger.info("prometheus_disabled")
+        return
+
+    try:
+        from prometheus_fastapi_instrumentator import Instrumentator
+
+        instrumentator = Instrumentator(
+            should_group_status_codes=True,
+            should_ignore_untemplated=True,
+            should_respect_env_var=True,
+            should_instrument_requests_inprogress=True,
+            excluded_handlers=["/health", "/ready", "/metrics"],
+            inprogress_name="analytics_http_requests_inprogress",
+            inprogress_labels=True,
+        )
+
+        instrumentator.instrument(app).expose(
+            app,
+            endpoint=settings.observability.prometheus_endpoint,
+            include_in_schema=False,
+        )
+        logger.info(
+            "prometheus_enabled",
+            endpoint=settings.observability.prometheus_endpoint,
+        )
+    except ImportError:
+        logger.warning("prometheus_not_available", reason="prometheus-fastapi-instrumentator not installed")
+
+
+def _setup_opentelemetry(app: FastAPI, settings: AnalyticsServiceSettings) -> None:
+    """Configure OpenTelemetry tracing instrumentation."""
+    if not settings.observability.otel_enabled:
+        logger.info("opentelemetry_disabled")
+        return
+
+    try:
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+        from opentelemetry.sdk.resources import Resource, SERVICE_NAME
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+        resource = Resource(attributes={
+            SERVICE_NAME: settings.observability.otel_service_name,
+            "service.version": "1.0.0",
+            "deployment.environment": settings.service.env,
+        })
+
+        provider = TracerProvider(resource=resource)
+        exporter = OTLPSpanExporter(endpoint=settings.observability.otel_exporter_otlp_endpoint)
+        processor = BatchSpanProcessor(exporter)
+        provider.add_span_processor(processor)
+        trace.set_tracer_provider(provider)
+
+        FastAPIInstrumentor.instrument_app(
+            app,
+            excluded_urls="health,ready,metrics",
+        )
+
+        logger.info(
+            "opentelemetry_enabled",
+            service_name=settings.observability.otel_service_name,
+            endpoint=settings.observability.otel_exporter_otlp_endpoint,
+        )
+    except ImportError:
+        logger.warning("opentelemetry_not_available", reason="opentelemetry packages not installed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
@@ -169,6 +253,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    _setup_prometheus(app, settings)
+    _setup_opentelemetry(app, settings)
 
     try:
         from .api import router as analytics_router

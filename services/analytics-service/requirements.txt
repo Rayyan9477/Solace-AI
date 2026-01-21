@@ -10,8 +10,21 @@ pydantic-settings==2.12.0
 # Async HTTP Client
 httpx==0.28.1
 
+# Database - ClickHouse
+clickhouse-connect==0.10.0
+
 # Logging
 structlog==25.5.0
+
+# Observability - Prometheus Metrics
+prometheus-fastapi-instrumentator==7.1.0
+prometheus-client==0.21.1
+
+# Observability - OpenTelemetry (Distributed Tracing)
+opentelemetry-api==1.29.0
+opentelemetry-sdk==1.29.0
+opentelemetry-instrumentation-fastapi==0.50b0
+opentelemetry-exporter-otlp==1.29.0
 
 # Testing
 pytest==8.3.3
