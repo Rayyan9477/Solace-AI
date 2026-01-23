@@ -73,13 +73,36 @@ Based on comprehensive research of 2025-2026 industry standards and competitive 
 
 **Competitive Landscape**:
 - **CrewAI limitations**: Teams report hitting scalability wall at 6-12 months, requiring rewrites to LangGraph
-- **Microsoft Agent Framework**: AutoGen + Semantic Kernel merge in public preview (October 2025), GA scheduled Q1 2026
 - **Challenge**: >75% of multi-agent systems become difficult to manage beyond 5 agents
+
+**Microsoft Agent Framework (October 2025)**:
+- **Released**: Public preview October 1, 2025; GA scheduled Q1 2026
+- **Architecture**: Merges AutoGen's multi-agent orchestration with Semantic Kernel's enterprise foundations
+- **Key Quote**: "Developers asked: why can't we have both — innovation of AutoGen and stability of Semantic Kernel — in one unified framework?"
+- **Features**:
+  - Thread-based state management, type safety, filters, telemetry
+  - Extensive model and embedding support
+  - MIT License (commercial use, modification, distribution)
+- **Open Standards**: MCP (Model Context Protocol), A2A communication, OpenAPI integration
+- **Languages**: .NET and Python; Java and JavaScript coming soon
+- **Migration**: AutoGen and Semantic Kernel entered maintenance mode (bug fixes only, no new features)
+- **GitHub**: microsoft/agent-framework
+
+**Framework Comparison Summary**:
+| Framework | Strength | Limitation |
+|-----------|----------|------------|
+| **LangGraph** | Fastest, lowest latency, graph-first | Debugging complexity |
+| **Microsoft Agent Framework** | Enterprise-ready, unified | Newer, less community adoption |
+| **CrewAI** | Simple role-based | Hits scalability wall at 6-12 months |
+| **AutoGen** | Research innovation | Maintenance mode, no new features |
 
 **Citations**:
 - [LangGraph Multi-Agent Orchestration Guide 2025](https://latenode.com/blog/ai-frameworks-technical-infrastructure/langgraph-multi-agent-orchestration/langgraph-multi-agent-orchestration-complete-framework-guide-architecture-analysis-2025)
 - [AI Agent Framework Landscape 2025](https://medium.com/@hieutrantrung.it/the-ai-agent-framework-landscape-in-2025-what-changed-and-what-matters-3cd9b07ef2c3)
 - [Top Open-Source Agentic Frameworks 2026](https://research.aimultiple.com/agentic-frameworks/)
+- [Microsoft Agent Framework Announcement](https://devblogs.microsoft.com/foundry/introducing-microsoft-agent-framework-the-open-source-engine-for-agentic-ai-apps/)
+- [Microsoft Agentic Frameworks Blog](https://devblogs.microsoft.com/autogen/microsofts-agentic-frameworks-autogen-and-semantic-kernel/)
+- [Microsoft Agent Framework Overview - MS Learn](https://learn.microsoft.com/en-us/agent-framework/overview/agent-framework-overview)
 
 ---
 
@@ -598,9 +621,185 @@ services/orchestrator_service/src/
 
 ---
 
-## 8. Conclusion
+## 8. Competitive Learnings: Features to Adopt
 
-### 8.1 Final Verdict
+### 8.1 High-Priority Features from Competitors
+
+#### **From Microsoft Agent Framework**: MCP/A2A Open Standards
+**What They Do**: Implements Model Context Protocol (MCP) for standardized semantic transport and Agent-to-Agent (A2A) communication protocols.
+
+**Why Adopt**: Open standards enable interoperability with ecosystem tools and future-proof the architecture.
+
+**Implementation**:
+- Add MCP-compliant context passing between agents
+- Implement A2A communication interfaces
+- Enable integration with MCP-compatible tools
+- Create standardized agent discovery mechanism
+
+**Priority**: HIGH | **Timeline**: 2-3 months
+
+---
+
+#### **From Microsoft Agent Framework**: Thread-Based State Management
+**What They Do**: Uses thread-based state management with type safety, filters, and telemetry built in.
+
+**Why Adopt**: Improved state management reduces bugs and enables better debugging.
+
+**Implementation**:
+- Migrate to thread-based state pattern
+- Add type safety to state transitions
+- Implement state filters for access control
+- Enhance telemetry for state changes
+
+**Priority**: HIGH | **Timeline**: 1-2 months
+
+---
+
+#### **From LangGraph**: Runtime Graph Mutation
+**What They Do**: Supports runtime modification of workflow graphs based on context or user needs.
+
+**Why Adopt**: Dynamic workflows can adapt to user state (e.g., crisis mode changes agent routing).
+
+**Implementation**:
+- Add conditional edge creation at runtime
+- Implement graph reconfiguration triggers
+- Create user-state-driven workflow adaptation
+- Enable A/B testing via graph variants
+
+**Priority**: MEDIUM | **Timeline**: 3-4 months
+
+---
+
+### 8.2 Medium-Priority Features from Competitors
+
+#### **From AutoGen**: Parallel Agent Conversations
+**What They Do**: Enables multiple agents to process in parallel and coordinate results.
+
+**Why Adopt**: Reduces latency for multi-agent workflows; improves throughput.
+
+**Implementation**:
+- Identify parallelizable agent pairs (safety + personality)
+- Implement parallel execution with timeout handling
+- Create result aggregation for parallel outputs
+- Add dependency graph for ordered execution
+
+**Priority**: MEDIUM | **Timeline**: 2-3 weeks
+
+---
+
+#### **From CrewAI**: Role-Based Agent Definition
+**What They Do**: Defines agents with clear roles, goals, and backstories for consistent behavior.
+
+**Why Adopt**: Clear role definitions improve agent consistency and debuggability.
+
+**Implementation**:
+- Create agent role specifications
+- Add agent goal validation
+- Implement role-based logging
+- Create agent behavior documentation
+
+**Priority**: MEDIUM | **Timeline**: 1-2 months
+
+---
+
+#### **From LangGraph Platform**: LangGraph Cloud Deployment
+**What They Do**: Managed deployment with built-in persistence, streaming, and monitoring.
+
+**Why Adopt**: Reduces operational complexity; provides production-ready infrastructure.
+
+**Implementation**:
+- Evaluate LangGraph Cloud for deployment
+- Assess cost/benefit vs. self-hosted
+- Create deployment strategy documentation
+- Plan migration path if appropriate
+
+**Priority**: LOW | **Timeline**: Evaluation only
+
+---
+
+### 8.3 Innovative Features to Consider
+
+#### **From Research**: Hierarchical Agent Architectures
+**What They Do**: Uses manager agents that coordinate specialist agents in hierarchical structures.
+
+**Why Adopt**: Scales better to many agents; reduces coordination complexity.
+
+**Implementation**:
+- Create orchestrator meta-agent
+- Implement hierarchical routing
+- Add delegation patterns
+- Enable dynamic team composition
+
+**Priority**: LOW (Future) | **Timeline**: 6-12 months
+
+---
+
+#### **From Emerging Patterns**: Agent Memory Sharing
+**What They Do**: Agents share relevant memory/context selectively rather than passing full state.
+
+**Why Adopt**: Reduces token usage; improves agent focus on relevant context.
+
+**Implementation**:
+- Create agent-specific context views
+- Implement selective memory sharing
+- Add relevance filtering per agent
+- Build memory access policies
+
+**Priority**: MEDIUM | **Timeline**: 3-4 months
+
+---
+
+### 8.4 Features NOT to Adopt (Lessons from Competitors)
+
+| Framework | Limitation | Our Approach |
+|-----------|-----------|--------------|
+| **CrewAI** | Hits scalability wall at 6-12 months | LangGraph for complex workflows |
+| **AutoGen** | Entering maintenance mode | Microsoft Agent Framework for future |
+| **OpenAI Assistants** | Limited customization | Self-hosted for full control |
+| **Simple chaining** | No state persistence | StateGraph with checkpointing |
+
+---
+
+### 8.5 Migration Considerations
+
+| Current State | Target State | Priority |
+|---------------|--------------|----------|
+| **LangGraph (our choice)** | Continue + enhance | Maintain |
+| **AutoGen (if used)** | Migrate to MS Agent Framework | HIGH (by Q1 2026) |
+| **Semantic Kernel (if used)** | Migrate to MS Agent Framework | HIGH (by Q1 2026) |
+| **Custom orchestration** | Consider LangGraph adoption | Evaluate |
+
+---
+
+### 8.6 Competitive Feature Adoption Roadmap
+
+```
+Q1 2026:
+├── Implement parallel agent execution
+├── Add MCP standard compliance
+└── Enhance state management
+
+Q2 2026:
+├── Runtime graph mutation
+├── Role-based agent specifications
+└── Selective memory sharing
+
+Q3 2026:
+├── Hierarchical agent architecture design
+├── A2A communication protocols
+└── Advanced telemetry
+
+Q4 2026:
+├── Dynamic workflow adaptation
+├── Agent performance optimization
+└── Cross-service agent coordination
+```
+
+---
+
+## 9. Conclusion
+
+### 9.1 Final Verdict
 
 **The Solace-AI Orchestrator Service is world-class and state-of-the-art in AI orchestration.**
 

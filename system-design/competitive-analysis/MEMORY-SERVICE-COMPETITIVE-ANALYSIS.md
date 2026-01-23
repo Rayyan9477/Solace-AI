@@ -605,9 +605,175 @@ services/memory_service/src/
 
 ---
 
-## 8. Conclusion
+## 8. Competitive Learnings: Features to Adopt
 
-### 8.1 Final Verdict
+### 8.1 High-Priority Features from Competitors
+
+#### **From Mem0**: Graph-Enhanced Memory (Mem0ᵍ)
+**What They Do**: Stores memories as directed, labeled graphs with Entity Extractor for nodes and Relations Generator for edges.
+
+**Why Adopt**: Graph-enhanced memory shows significant improvements in factual accuracy and coherence (26% improvement on LOCOMO benchmark).
+
+**Implementation**:
+- Extend our knowledge graph with entity extraction
+- Add relationship inference between entities
+- Implement graph-based retrieval alongside vector search
+- Target Mem0's benchmark metrics
+
+**Priority**: HIGH | **Timeline**: 2-3 months
+
+---
+
+#### **From Mem0 Research**: Selective Retrieval Pipeline
+**What They Do**: Selective retrieval achieving 91% latency reduction (p95: 1.44s vs. 17.12s) and 90% token reduction (~1.8K vs. 26K tokens).
+
+**Why Adopt**: Efficiency gains directly translate to cost reduction and improved user experience.
+
+**Implementation**:
+- Implement importance-based memory filtering
+- Add relevance scoring to retrieval pipeline
+- Create token budget optimization algorithms
+- Benchmark against Mem0's efficiency metrics
+
+**Priority**: HIGH | **Timeline**: 1-2 months
+
+---
+
+#### **From Generative Agents (Park et al.)**: Reflection Mechanism
+**What They Do**: AI agents generate periodic reflections that synthesize recent experiences into higher-level insights.
+
+**Why Adopt**: Reflections enable long-term coherence and personality consistency across sessions.
+
+**Implementation**:
+- Add daily/weekly reflection generation
+- Synthesize session patterns into user insights
+- Create reflection-based retrieval boost
+- Enable cross-session continuity narratives
+
+**Priority**: HIGH | **Timeline**: 2-3 months
+
+---
+
+### 8.2 Medium-Priority Features from Competitors
+
+#### **From Zep**: Entity Extraction with Relationship Tracking
+**What They Do**: Automatically extracts entities from conversations and tracks relationships over time.
+
+**Why Adopt**: Entities enable structured querying and relationship-aware context assembly.
+
+**Implementation**:
+- Add named entity recognition to consolidation
+- Create entity timeline tracking
+- Implement entity-relationship queries
+- Build entity-centric memory views
+
+**Priority**: MEDIUM | **Timeline**: 3-4 months
+
+---
+
+#### **From LangChain**: Modular Memory Components
+**What They Do**: Provides composable memory primitives (ConversationBufferMemory, ConversationSummaryMemory, VectorStoreMemory).
+
+**Why Adopt**: Modularity enables easier testing, debugging, and customization.
+
+**Implementation**:
+- Ensure each memory tier is independently testable
+- Create memory tier configuration options
+- Add tier-specific performance metrics
+- Enable custom tier composition
+
+**Priority**: MEDIUM | **Timeline**: 1-2 months
+
+---
+
+#### **From MAGMA Research**: Multi-Graph Architecture
+**What They Do**: Uses multiple specialized graphs for different memory types (temporal, semantic, episodic).
+
+**Why Adopt**: Specialized graphs can optimize retrieval for different query types.
+
+**Implementation**:
+- Add temporal graph for time-based queries
+- Create semantic graph for concept relationships
+- Implement episodic graph for session sequences
+- Enable cross-graph query fusion
+
+**Priority**: MEDIUM | **Timeline**: 4-6 months
+
+---
+
+### 8.3 Innovative Features to Consider
+
+#### **From EverMemOS Research**: Self-Organizing Memory
+**What They Do**: Memory that automatically reorganizes based on usage patterns and importance signals.
+
+**Why Adopt**: Self-organization reduces manual tuning and adapts to user behavior.
+
+**Implementation**:
+- Add usage-based importance scoring
+- Implement automatic memory reorganization
+- Create adaptive decay rates based on access patterns
+- Build self-tuning consolidation thresholds
+
+**Priority**: LOW (Future) | **Timeline**: 6-12 months
+
+---
+
+#### **From Agentic Memory Research**: Unified Long/Short-Term Management
+**What They Do**: Learning-based approach to automatically manage memory across timescales.
+
+**Why Adopt**: Reduces manual configuration of memory tiers; adapts to task requirements.
+
+**Implementation**:
+- Train memory management policies
+- Create automatic tier assignment
+- Implement learned consolidation triggers
+- Build adaptive token budgeting
+
+**Priority**: LOW (Future) | **Timeline**: 9-12 months
+
+---
+
+### 8.4 Features NOT to Adopt (Lessons Learned)
+
+| Approach | Why Not Adopt | Better Alternative |
+|----------|---------------|-------------------|
+| **Full context window reliance** | 90% token waste; 17x slower | Selective retrieval (Mem0 approach) |
+| **Simple sliding window** | Loses important long-term context | Tiered hierarchy (our approach) |
+| **No decay model** | Memory becomes cluttered over time | Ebbinghaus decay (our approach) |
+| **RAG without memory** | Stateless; no user awareness | Memory + RAG hybrid |
+| **Single vector store** | Limited query types | Multi-modal retrieval |
+
+---
+
+### 8.5 Competitive Feature Adoption Roadmap
+
+```
+Q1 2026:
+├── Implement selective retrieval pipeline
+├── Add Mem0-style entity extraction
+└── Benchmark against Mem0 metrics
+
+Q2 2026:
+├── Graph-enhanced memory (Mem0ᵍ style)
+├── Reflection mechanism implementation
+└── Multi-graph architecture design
+
+Q3 2026:
+├── Entity relationship tracking
+├── Cross-graph query fusion
+└── Usage-based importance scoring
+
+Q4 2026:
+├── Self-organizing memory pilot
+├── Learned memory management
+└── Advanced consolidation optimization
+```
+
+---
+
+## 9. Conclusion
+
+### 9.1 Final Verdict
 
 **The Solace-AI Memory Service is world-class and innovative in AI memory architecture.**
 

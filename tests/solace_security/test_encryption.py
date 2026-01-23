@@ -1,4 +1,5 @@
 """Unit tests for encryption module."""
+
 from __future__ import annotations
 import pytest
 from solace_security.encryption import (
@@ -21,14 +22,28 @@ class TestEncryptionSettings:
     """Tests for EncryptionSettings."""
 
     def test_default_settings(self):
-        settings = EncryptionSettings()
+        # Use for_development() since master_key is now required
+        settings = EncryptionSettings.for_development()
         assert settings.algorithm == EncryptionAlgorithm.AES_256_GCM
         assert settings.kdf == KeyDerivationFunction.PBKDF2_SHA256
         assert settings.enable_key_rotation
 
     def test_custom_settings(self):
-        settings = EncryptionSettings(key_rotation_days=30)
+        settings = EncryptionSettings(
+            master_key="test-master-key-32-bytes-long!!!",  # Must be exactly 32 bytes
+            key_rotation_days=30,
+        )
         assert settings.key_rotation_days == 30
+
+    def test_master_key_required(self):
+        """Test that master_key is required."""
+        with pytest.raises(Exception):  # ValidationError for missing required field
+            EncryptionSettings()
+
+    def test_master_key_exact_length(self):
+        """Test that master_key must be exactly 32 bytes."""
+        with pytest.raises(ValueError, match="exactly 32 bytes"):
+            EncryptionSettings(master_key="short-key")
 
 
 class TestEncryptionAlgorithm:
@@ -46,17 +61,14 @@ class TestEncryptedData:
             ciphertext="Y2lwaGVydGV4dA==",
             nonce="bm9uY2U=",
             salt="c2FsdA==",
-            key_id="key1"
+            key_id="key1",
         )
         assert data.ciphertext == "Y2lwaGVydGV4dA=="
         assert data.version == 1
 
     def test_to_compact(self):
         data = EncryptedData(
-            ciphertext="cipher",
-            nonce="nonce",
-            salt="salt",
-            key_id="key1"
+            ciphertext="cipher", nonce="nonce", salt="salt", key_id="key1"
         )
         compact = data.to_compact()
         assert "v1$" in compact
@@ -64,10 +76,7 @@ class TestEncryptedData:
 
     def test_from_compact(self):
         data = EncryptedData(
-            ciphertext="cipher",
-            nonce="nonce",
-            salt="salt",
-            key_id="key1"
+            ciphertext="cipher", nonce="nonce", salt="salt", key_id="key1"
         )
         compact = data.to_compact()
         restored = EncryptedData.from_compact(compact)
@@ -85,7 +94,7 @@ class TestKeyManager:
 
     @pytest.fixture
     def key_manager(self):
-        return KeyManager()
+        return KeyManager(EncryptionSettings.for_development())
 
     def test_derive_key(self, key_manager):
         salt = b"test_salt_16byte"
@@ -157,7 +166,7 @@ class TestEncryptor:
 
     @pytest.fixture
     def encryptor(self):
-        return Encryptor()
+        return Encryptor(EncryptionSettings.for_development())
 
     def test_encrypt_string(self, encryptor):
         plaintext = "Hello, World!"
@@ -208,7 +217,7 @@ class TestFieldEncryptor:
 
     @pytest.fixture
     def field_encryptor(self):
-        return FieldEncryptor(Encryptor())
+        return FieldEncryptor(Encryptor(EncryptionSettings.for_development()))
 
     def test_encrypt_field(self, field_encryptor):
         value = "sensitive-data"
@@ -267,9 +276,14 @@ class TestFactoryFunctions:
     """Tests for factory functions."""
 
     def test_create_encryptor(self):
-        encryptor = create_encryptor()
+        # Must provide settings with valid master_key
+        settings = EncryptionSettings.for_development()
+        encryptor = create_encryptor(settings)
         assert isinstance(encryptor, Encryptor)
 
     def test_create_field_encryptor(self):
-        field_encryptor = create_field_encryptor()
+        # Must provide encryptor with valid settings
+        settings = EncryptionSettings.for_development()
+        encryptor = create_encryptor(settings)
+        field_encryptor = create_field_encryptor(encryptor)
         assert isinstance(field_encryptor, FieldEncryptor)

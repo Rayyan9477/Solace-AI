@@ -1,4 +1,5 @@
 """Unit tests for authentication module."""
+
 from __future__ import annotations
 import time
 from datetime import datetime, timezone
@@ -22,7 +23,8 @@ class TestAuthSettings:
     """Tests for AuthSettings configuration."""
 
     def test_default_settings(self):
-        settings = AuthSettings()
+        # Use for_development() since secret_key is now required
+        settings = AuthSettings.for_development()
         assert settings.algorithm == "HS256"
         assert settings.access_token_expire_minutes == 30
         assert settings.refresh_token_expire_days == 7
@@ -30,13 +32,28 @@ class TestAuthSettings:
 
     def test_custom_settings(self):
         settings = AuthSettings(
+            secret_key="test-secret-key-32-bytes-long!!!",  # Must be 32+ bytes
             algorithm="HS512",
             access_token_expire_minutes=60,
-            issuer="custom-issuer"
+            issuer="custom-issuer",
         )
         assert settings.algorithm == "HS512"
         assert settings.access_token_expire_minutes == 60
         assert settings.issuer == "custom-issuer"
+
+    def test_secret_key_required(self):
+        """Test that secret_key is required and validates length."""
+        import pytest
+
+        with pytest.raises(Exception):  # ValidationError for missing required field
+            AuthSettings()
+
+    def test_secret_key_minimum_length(self):
+        """Test that secret_key must be at least 32 bytes."""
+        import pytest
+
+        with pytest.raises(Exception, match="at least 32"):
+            AuthSettings(secret_key="short-key")
 
 
 class TestTokenType:
@@ -54,8 +71,10 @@ class TestTokenPayload:
 
     def test_create_payload(self):
         payload = TokenPayload(
-            sub="user123", type=TokenType.ACCESS,
-            exp=int(time.time()) + 3600, roles=["user"]
+            sub="user123",
+            type=TokenType.ACCESS,
+            exp=int(time.time()) + 3600,
+            roles=["user"],
         )
         assert payload.sub == "user123"
         assert payload.type == TokenType.ACCESS
@@ -78,7 +97,9 @@ class TestAuthenticationResult:
     """Tests for AuthenticationResult model."""
 
     def test_success_result(self):
-        payload = TokenPayload(sub="user123", type=TokenType.ACCESS, exp=int(time.time()) + 3600)
+        payload = TokenPayload(
+            sub="user123", type=TokenType.ACCESS, exp=int(time.time()) + 3600
+        )
         result = AuthenticationResult.ok("user123", payload)
         assert result.success
         assert result.user_id == "user123"
@@ -128,10 +149,12 @@ class TestJWTManager:
 
     @pytest.fixture
     def jwt_manager(self):
-        return JWTManager(AuthSettings(secret_key="test-secret-key-32bytes-long!!"))
+        return JWTManager(AuthSettings(secret_key="test-secret-key-32-bytes-long!!!"))
 
     def test_create_access_token(self, jwt_manager):
-        token = jwt_manager.create_access_token("user123", roles=["user"], permissions=["read"])
+        token = jwt_manager.create_access_token(
+            "user123", roles=["user"], permissions=["read"]
+        )
         assert token
         assert isinstance(token, str)
 
@@ -148,7 +171,9 @@ class TestJWTManager:
         assert pair.token_type == "Bearer"
 
     def test_create_api_key(self, jwt_manager):
-        token = jwt_manager.create_api_key("user123", "my-api-key", permissions=["read"])
+        token = jwt_manager.create_api_key(
+            "user123", "my-api-key", permissions=["read"]
+        )
         assert token
         result = jwt_manager.decode_token(token, TokenType.API_KEY)
         assert result.success
@@ -273,7 +298,9 @@ class TestFactoryFunctions:
     """Tests for factory functions."""
 
     def test_create_jwt_manager(self):
-        manager = create_jwt_manager()
+        # Must provide settings with valid secret_key
+        settings = AuthSettings.for_development()
+        manager = create_jwt_manager(settings)
         assert isinstance(manager, JWTManager)
 
     def test_create_session_manager(self):

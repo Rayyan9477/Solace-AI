@@ -747,9 +747,121 @@ Based on industry benchmarks, target the following performance levels:
 
 ---
 
-## 9. Sources & References
+## 9. Competitive Learnings: Features to Adopt
 
-### 9.1 Competitive Systems & Benchmarks
+### 9.1 High-Priority Features from Competitors
+
+Based on competitive analysis, the following features from industry leaders would significantly enhance the Diagnosis Service:
+
+#### From Google AMIE (Articulate Medical Intelligence Explorer)
+
+| Feature | Description | Implementation Priority | Effort |
+|---------|-------------|------------------------|--------|
+| **Simulated Clinical Environment Training** | AMIE was trained on real-world clinical dialogues plus synthetic vignettes from medical datasets | High | 3-4 months |
+| **Inner/Outer Self-Play Loops** | Inner loop: learns to handle individual conditions. Outer loop: learns to handle entire conversations with feedback | Medium | 2-3 months |
+| **Multi-Modal Reasoning** | Integrate images, lab results, vital signs into diagnostic reasoning | High | 4-6 months |
+| **OSCE-Style Evaluation** | Objective Structured Clinical Examination format for rigorous validation | High | 1-2 months |
+
+**Key Insight**: AMIE achieved 59.1% top-10 diagnostic accuracy by combining self-play with feedback mechanisms that improve history-taking, communication, and clinical reasoning simultaneously.
+
+#### From Ada Health
+
+| Feature | Description | Implementation Priority | Effort |
+|---------|-------------|------------------------|--------|
+| **Probabilistic Disease Models** | Bayesian networks with >5,000 condition-symptom relationships | High | 6+ months |
+| **Symptom Checker API** | Embeddable symptom assessment that integrates with EHR systems | Medium | 3-4 months |
+| **Multi-Language Support** | 10+ language coverage for global accessibility | Medium | 2-3 months |
+| **Triage Urgency Scoring** | Clear emergency vs. routine classification with confidence levels | High | 1-2 months |
+
+**Key Insight**: Ada's strength is in their curated medical knowledge base built by 70+ physicians over a decade. Consider partnerships with clinical experts for knowledge base expansion.
+
+#### From Infermedica
+
+| Feature | Description | Implementation Priority | Effort |
+|---------|-------------|------------------------|--------|
+| **API-First Architecture** | White-label solution that healthcare providers can embed | Medium | 2-3 months |
+| **Risk Factor Integration** | Age, sex, geography, pre-existing conditions affect differential | High | 1-2 months |
+| **Interview Optimization** | Minimize questions while maximizing diagnostic accuracy | High | 2-3 months |
+| **Red Flag Detection** | Immediate escalation for life-threatening symptom patterns | Critical | 1 month |
+
+**Key Insight**: Infermedica's interview optimization algorithm asks an average of 18 questions to reach diagnosis, balancing thoroughness with patient fatigue.
+
+#### From Isabel Healthcare
+
+| Feature | Description | Implementation Priority | Effort |
+|---------|-------------|------------------------|--------|
+| **Diagnosis Reminder System** | Prompts clinicians about often-missed conditions | High | 1-2 months |
+| **Drug Interaction Checking** | Cross-reference diagnoses with current medications | Medium | 2-3 months |
+| **Rare Disease Coverage** | 6,000+ rare diseases in differential consideration | Medium | 3-4 months |
+| **Clinical Pearls** | Key distinguishing features highlighted for each condition | Medium | 1-2 months |
+
+**Key Insight**: Isabel's focus on rare diseases addresses diagnostic odyssey problem - patients see 7+ physicians before rare disease diagnosis.
+
+---
+
+### 9.2 Recommended Implementation Roadmap
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    DIAGNOSIS SERVICE ENHANCEMENT ROADMAP                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  PHASE 1 (Q1 2026) - Critical Safety & Accuracy                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ ✓ Red Flag Detection System (from Infermedica)                      │   │
+│  │ ✓ Triage Urgency Scoring (from Ada Health)                          │   │
+│  │ ✓ OSCE-Style Evaluation Framework (from AMIE)                       │   │
+│  │ ✓ Risk Factor Integration (from Infermedica)                        │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  PHASE 2 (Q2 2026) - Diagnostic Enhancement                                │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ → Interview Optimization Algorithm (from Infermedica)               │   │
+│  │ → Diagnosis Reminder System (from Isabel)                           │   │
+│  │ → Clinical Pearls Database (from Isabel)                            │   │
+│  │ → Inner/Outer Self-Play Training (from AMIE)                        │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  PHASE 3 (Q3-Q4 2026) - Advanced Capabilities                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ → Multi-Modal Reasoning (from AMIE)                                 │   │
+│  │ → Rare Disease Coverage Expansion (from Isabel)                     │   │
+│  │ → Symptom Checker API (from Ada)                                    │   │
+│  │ → Simulated Clinical Environment Training (from AMIE)               │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 9.3 Features NOT to Adopt (Lessons from Competitor Failures)
+
+| Feature | Competitor | Why NOT to Adopt |
+|---------|------------|------------------|
+| **Over-reliance on symptom matching** | Early chatbots | Leads to high false positive rates; our chain-of-reasoning is superior |
+| **Black-box AI diagnosis** | Some ML-based tools | FDA requires explainability; our transparent reasoning is a strength |
+| **Single-model architecture** | Legacy systems | Our Devil's Advocate dual-model approach catches biases others miss |
+| **Consumer-direct marketing claims** | Woebot (shutdown) | Regulatory backlash; maintain clinical partnership focus |
+| **Diagnosis without clinician oversight** | Various | Always position as "clinical decision support" not replacement |
+
+---
+
+### 9.4 Unique Differentiators to Maintain
+
+While adopting competitor features, preserve these core differentiators:
+
+1. **Anti-Sycophancy Architecture**: No competitor has explicit Devil's Advocate bias detection
+2. **Dual Diagnostic Framework**: DSM-5-TR + HiTOP combination is unique
+3. **Transparent Chain-of-Reasoning**: 4-step process exceeds FDA explainability requirements
+4. **Confidence Calibration**: Explicit uncertainty quantification rare in competitors
+5. **Clean Architecture**: Enables rapid feature integration from competitors
+
+---
+
+## 10. Sources & References
+
+### 10.1 Competitive Systems & Benchmarks
 
 **AMIE (Google Research)**:
 - Towards conversational diagnostic artificial intelligence. *Nature*, 2025. https://www.nature.com/articles/s41586-025-08869-4
@@ -768,7 +880,7 @@ Based on industry benchmarks, target the following performance levels:
 
 ---
 
-### 9.2 Regulatory & Safety
+### 10.2 Regulatory & Safety
 
 **FDA Guidance**:
 - U.S. FDA and CMS Actions on Generative AI-Enabled Mental Health Devices. *Sidley Austin*, November 2025. https://www.sidley.com/en/insights/newsupdates/2025/11/us-fda-and-cms-actions-on-generative-ai-enabled-mental-health-devices-yield-insights-across-ai
@@ -781,7 +893,7 @@ Based on industry benchmarks, target the following performance levels:
 
 ---
 
-### 9.3 Clinical Standards & Best Practices
+### 10.3 Clinical Standards & Best Practices
 
 **DSM-5-TR & ICD**:
 - Updates to DSM-5-TR Criteria and Text. *APA*, 2025. https://www.psychiatry.org/psychiatrists/practice/dsm/updates-to-dsm/updates-to-dsm-5-tr-criteria-text
@@ -795,7 +907,7 @@ Based on industry benchmarks, target the following performance levels:
 
 ---
 
-### 9.4 AI Reasoning & Anti-Sycophancy
+### 10.4 AI Reasoning & Anti-Sycophancy
 
 **Chain-of-Thought Reasoning**:
 - Chain of Thought Strategy for Smaller LLMs for Medical Reasoning. *PubMed*, 2025. https://pubmed.ncbi.nlm.nih.gov/40380574/
@@ -810,7 +922,7 @@ Based on industry benchmarks, target the following performance levels:
 
 ---
 
-### 9.5 Diagnostic Accuracy & Performance
+### 10.5 Diagnostic Accuracy & Performance
 
 **Mental Health AI Accuracy**:
 - Artificial intelligence in mental health care: a systematic review. *PMC*, 2025. https://pmc.ncbi.nlm.nih.gov/articles/PMC12017374/
@@ -823,7 +935,7 @@ Based on industry benchmarks, target the following performance levels:
 
 ---
 
-### 9.6 Open-Source Libraries
+### 10.6 Open-Source Libraries
 
 **ICD Coding**:
 - simple-icd-10-cm: A simple python library for ICD-10-CM codes. https://github.com/StefanoTrv/simple_icd_10_CM
@@ -836,9 +948,9 @@ Based on industry benchmarks, target the following performance levels:
 
 ---
 
-## 10. Conclusion
+## 11. Conclusion
 
-### 10.1 Final Verdict
+### 11.1 Final Verdict
 
 **The Solace-AI Diagnosis Service is world-class and competitive with industry leaders including Google's AMIE.**
 

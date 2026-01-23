@@ -75,10 +75,30 @@ Based on comprehensive research of 2025-2026 industry standards and competitive 
 - Require medical screening for comorbidities prior to engagement
 - One-tap escalation for urgent needs with automated role/scope reminders
 
+**AI Crisis Detection Accuracy Research (2025)**:
+- **Scientific Reports (2025)**: 29 AI chatbot agents tested with Columbia-Suicide Severity Rating Scale prompts
+  - **None** satisfied criteria for adequate response
+  - 15 met criteria for marginal response
+  - 14 categorized as inadequate
+  - "Conversational chatbot agents achieved only moderate accuracy in triaging suicidal ideation"
+- **LLM Bias Finding**: McBain et al. (2025) found LLMs rate crisis responses as more appropriate than human experts do, highlighting upward bias in appropriateness judgments
+- **Transformer Limitations**: Frequently misclassified ambiguous suicidal expressions; linguistic nuance determines risk categorization
+- **Specialized Models**: Domain-specific adaptations (e.g., Guardian-BERT) demonstrate high accuracy in detecting self-injury/suicidal signs in EHRs
+- **Key Insight**: General LLM performance vs. specialized model results underscores importance of domain adaptation and curated training data
+
+**Emerging Best Practices**:
+- Three-step ACT model: Assessment → Crisis Intervention → Trauma Treatment
+- Multidimensional suicide risk assessment to identify high-risk individuals
+- Domain-specific fine-tuning outperforms general-purpose LLMs
+- Prompt engineering for suicide intervention shows promise but requires validation
+
 **Citations**:
 - [FDA DHAC November 2025 Meeting - Sidley Austin](https://www.sidley.com/en/insights/newsupdates/2025/11/us-fda-and-cms-actions-on-generative-ai-enabled-mental-health-devices-yield-insights-across-ai)
 - [FDA Perspective on GenAI Mental Health Devices](https://www.fda.gov/media/189833/download)
 - [AI Mental Health Legal Framework - Wilson Sonsini](https://www.wsgr.com/en/insights/legal-framework-for-ai-in-mental-healthcare.html)
+- [Chatbot Suicide Detection Performance - Scientific Reports 2025](https://www.nature.com/articles/s41598-025-17242-4)
+- [LLM Suicide Intervention Chatbot - Frontiers in Psychiatry 2025](https://www.frontiersin.org/journals/psychiatry/articles/10.3389/fpsyt.2025.1634714/full)
+- [Explainable AI for Suicide Risk Detection - Frontiers in Medicine 2025](https://www.frontiersin.org/journals/medicine/articles/10.3389/fmed.2025.1703755/abstract)
 
 ---
 
@@ -628,9 +648,179 @@ class SafetyServiceSettings:
 
 ---
 
-## 9. Conclusion
+## 9. Competitive Learnings: Features to Adopt
 
-### 9.1 Final Verdict
+### 9.1 High-Priority Features from Competitors
+
+#### **From Crisis Text Line**: Real-Time Supervisor Dashboard
+**What They Do**: Provides supervisors with real-time visibility into active crisis conversations, enabling human oversight and intervention when needed.
+
+**Why Adopt**: FDA 2025 guidelines emphasize human oversight; supervisor dashboards enable hybrid AI+human model.
+
+**Implementation**:
+- Build real-time crisis monitoring dashboard
+- Add supervisor intervention capability
+- Create escalation queue management
+- Implement outcome documentation
+
+**Priority**: HIGH | **Timeline**: 2-3 months
+
+---
+
+#### **From Guardian-BERT Research**: Domain-Specific Suicide Detection
+**What They Do**: Domain-specific adaptations like Guardian-BERT demonstrate high accuracy in detecting self-injury/suicidal signs in clinical contexts.
+
+**Why Adopt**: Scientific Reports 2025 found general chatbots inadequate; specialized models are essential.
+
+**Implementation**:
+- Fine-tune detection models on mental health crisis datasets
+- Add clinical-context-specific classifiers
+- Validate against Columbia-Suicide Severity Rating Scale
+
+**Priority**: HIGH | **Timeline**: 3-4 months
+
+---
+
+#### **From Spring Health**: Zero Safety Concerns in 53K Patient Study
+**What They Do**: Achieved 95% user satisfaction with zero major safety concerns in largest digital mental health outcomes study.
+
+**Why Adopt**: Safety track record is essential for enterprise adoption and regulatory approval.
+
+**Implementation**:
+- Design comprehensive safety incident tracking
+- Create safety metrics dashboard
+- Target zero major safety concerns in pilot studies
+- Publish safety outcomes alongside efficacy data
+
+**Priority**: HIGH | **Timeline**: Ongoing
+
+---
+
+### 9.2 Medium-Priority Features from Competitors
+
+#### **From Bark**: Parental/Guardian Alert System
+**What They Do**: Alerts parents when concerning content is detected in youth communications.
+
+**Why Adopt**: Teen mental health market requires guardian notification capabilities.
+
+**Implementation**:
+- Add optional guardian notification settings
+- Create tiered alert levels
+- Ensure COPPA/age-appropriate design compliance
+
+**Priority**: MEDIUM | **Timeline**: 4-6 months
+
+---
+
+#### **From New York State Law**: Automated Role/Scope Reminders
+**What They Do**: NY law requires AI companions to provide automated reminders about AI limitations and human escalation availability.
+
+**Why Adopt**: State regulations now require transparency; proactive compliance demonstrates responsibility.
+
+**Implementation**:
+- Add automated "I'm an AI" reminders in conversations
+- Implement one-tap human escalation visibility
+- Create scope limitation disclosures
+
+**Priority**: MEDIUM | **Timeline**: 1-2 months
+
+---
+
+#### **From VERA-MH Framework**: Standardized Safety Measurement
+**What They Do**: Spring Health's ethics council developing standardized safety measurement framework.
+
+**Why Adopt**: Industry standardization enables benchmarking and regulatory alignment.
+
+**Implementation**:
+- Adopt VERA-MH safety metrics when published
+- Participate in industry safety standard development
+- Publish safety benchmarks for transparency
+
+**Priority**: MEDIUM | **Timeline**: 3-6 months (pending VERA-MH release)
+
+---
+
+### 9.3 Innovative Features to Consider
+
+#### **From Frontiers Research**: Three-Step ACT Model
+**What They Do**: Assessment → Crisis Intervention → Trauma Treatment integrated workflow.
+
+**Why Adopt**: Comprehensive crisis response extends beyond detection to treatment pathway.
+
+**Implementation**:
+- Integrate crisis assessment with intervention planning
+- Add trauma-informed care pathways
+- Create post-crisis follow-up automation
+
+**Priority**: LOW (Future) | **Timeline**: 6-12 months
+
+---
+
+#### **From McBain et al.**: Human Expert Calibration
+**What They Do**: Research shows LLMs rate crisis responses more appropriate than human experts do; calibration needed.
+
+**Why Adopt**: Ensuring AI safety assessments align with clinical expert judgment.
+
+**Implementation**:
+- Calibrate detection against human expert ratings
+- Add expert review for borderline cases
+- Create feedback loop from clinical outcomes
+
+**Priority**: MEDIUM | **Timeline**: 3-4 months
+
+---
+
+### 9.4 Features NOT to Adopt (Lessons from Research)
+
+| Approach | Why Not Adopt | Better Alternative |
+|----------|---------------|-------------------|
+| **General-purpose LLMs for crisis detection** | Scientific Reports 2025: None met adequate response criteria | Domain-specific fine-tuned models |
+| **Single-method detection** | High false positive/negative rates | Multi-layer detection (our approach) |
+| **Fully automated crisis response** | FDA requires human oversight | Hybrid AI+human escalation model |
+| **Delayed escalation** | Risk of harm increases with delay | Immediate automated escalation for CRITICAL |
+
+---
+
+### 9.5 Regulatory Compliance Adoption
+
+| Regulation | Compliance Action | Timeline |
+|------------|-------------------|----------|
+| **New York (May 2025)** | Add suicidal ideation detection safeguards | ✅ Implemented |
+| **Illinois WOPR Act (Aug 2025)** | Ensure licensed professional oversight pathway | ✅ Implemented |
+| **California (Jan 2026)** | Implement protocols preventing suicidal content | Q1 2026 |
+| **FDA DHAC Guidance** | Human oversight, PCCP documentation | Q2 2026 |
+
+---
+
+### 9.6 Competitive Feature Adoption Roadmap
+
+```
+Q1 2026:
+├── Launch supervisor dashboard MVP
+├── Implement state compliance requirements
+└── Add automated role/scope reminders
+
+Q2 2026:
+├── Domain-specific crisis model fine-tuning
+├── Guardian notification system (opt-in)
+└── Safety metrics dashboard
+
+Q3 2026:
+├── Adopt VERA-MH framework standards
+├── Human expert calibration study
+└── Post-crisis follow-up automation
+
+Q4 2026:
+├── Full ACT model integration
+├── International crisis resource expansion
+└── Safety track record publication
+```
+
+---
+
+## 10. Conclusion
+
+### 10.1 Final Verdict
 
 **The Solace-AI Safety Service is world-class and essential for responsible mental health AI deployment.**
 
