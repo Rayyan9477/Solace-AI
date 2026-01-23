@@ -1,4 +1,5 @@
 """Solace-AI PHI Protection - Detection and masking of Protected Health Information."""
+
 from __future__ import annotations
 import re
 from abc import ABC, abstractmethod
@@ -14,6 +15,7 @@ logger = structlog.get_logger(__name__)
 
 class PHIType(str, Enum):
     """Types of Protected Health Information."""
+
     SSN = "ssn"
     PHONE = "phone"
     EMAIL = "email"
@@ -36,17 +38,21 @@ class PHIType(str, Enum):
 
 class PHISettings(BaseSettings):
     """PHI protection configuration."""
+
     enable_detection: bool = Field(default=True)
     enable_masking: bool = Field(default=True)
     mask_character: str = Field(default="*")
     partial_mask_visible: int = Field(default=4)
     log_detections: bool = Field(default=True)
     strict_mode: bool = Field(default=False)
-    model_config = SettingsConfigDict(env_prefix="PHI_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="PHI_", env_file=".env", extra="ignore"
+    )
 
 
 class PHIMatch(BaseModel):
     """Detected PHI match information."""
+
     phi_type: PHIType
     value: str
     masked_value: str
@@ -58,6 +64,7 @@ class PHIMatch(BaseModel):
 
 class PHIDetectionResult(BaseModel):
     """Result of PHI detection scan."""
+
     contains_phi: bool
     matches: list[PHIMatch] = Field(default_factory=list)
     original_text: str
@@ -72,25 +79,92 @@ class PHIDetectionResult(BaseModel):
 
 class PHIPattern(BaseModel):
     """Pattern definition for PHI detection."""
+
     phi_type: PHIType
     pattern: str
     confidence: float = Field(default=1.0)
     description: str = ""
 
 
+# Minimum confidence threshold for PHI detection to reduce false positives
+# Patterns below this threshold are considered low-confidence and may need additional context
+MIN_CONFIDENCE_THRESHOLD = 0.80
+
 DEFAULT_PATTERNS: list[PHIPattern] = [
-    PHIPattern(phi_type=PHIType.SSN, pattern=r"\b\d{3}-\d{2}-\d{4}\b", confidence=0.95, description="SSN format XXX-XX-XXXX"),
-    PHIPattern(phi_type=PHIType.SSN, pattern=r"\b\d{9}\b", confidence=0.7, description="SSN without dashes"),
-    PHIPattern(phi_type=PHIType.PHONE, pattern=r"\b\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b", confidence=0.9, description="US phone number"),
-    PHIPattern(phi_type=PHIType.PHONE, pattern=r"\b\+1[-.\s]?\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b", confidence=0.95, description="US phone with country code"),
-    PHIPattern(phi_type=PHIType.EMAIL, pattern=r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b", confidence=0.95, description="Email address"),
-    PHIPattern(phi_type=PHIType.DATE_OF_BIRTH, pattern=r"\b(?:0[1-9]|1[0-2])/(?:0[1-9]|[12]\d|3[01])/(?:19|20)\d{2}\b", confidence=0.8, description="Date MM/DD/YYYY"),
-    PHIPattern(phi_type=PHIType.DATE_OF_BIRTH, pattern=r"\b(?:19|20)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])\b", confidence=0.8, description="Date YYYY-MM-DD"),
-    PHIPattern(phi_type=PHIType.CREDIT_CARD, pattern=r"\b(?:\d{4}[-\s]?){3}\d{4}\b", confidence=0.9, description="Credit card number"),
-    PHIPattern(phi_type=PHIType.IP_ADDRESS, pattern=r"\b(?:\d{1,3}\.){3}\d{1,3}\b", confidence=0.85, description="IPv4 address"),
-    PHIPattern(phi_type=PHIType.MEDICAL_RECORD, pattern=r"\bMRN[:\s#]*\s*\d{6,12}\b", confidence=0.95, description="Medical Record Number"),
-    PHIPattern(phi_type=PHIType.HEALTH_PLAN, pattern=r"\b[A-Z]{3}\d{9}\b", confidence=0.7, description="Health plan beneficiary number"),
-    PHIPattern(phi_type=PHIType.LICENSE_NUMBER, pattern=r"\b[A-Z]\d{7,8}\b", confidence=0.6, description="Driver's license"),
+    # High-confidence patterns (0.90+) - reliable detection
+    PHIPattern(
+        phi_type=PHIType.SSN,
+        pattern=r"\b\d{3}-\d{2}-\d{4}\b",
+        confidence=0.95,
+        description="SSN format XXX-XX-XXXX",
+    ),
+    PHIPattern(
+        phi_type=PHIType.PHONE,
+        pattern=r"\b\+1[-.\s]?\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b",
+        confidence=0.95,
+        description="US phone with country code",
+    ),
+    PHIPattern(
+        phi_type=PHIType.EMAIL,
+        pattern=r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+        confidence=0.95,
+        description="Email address",
+    ),
+    PHIPattern(
+        phi_type=PHIType.MEDICAL_RECORD,
+        pattern=r"\bMRN[:\s#]*\s*\d{6,12}\b",
+        confidence=0.95,
+        description="Medical Record Number",
+    ),
+    PHIPattern(
+        phi_type=PHIType.PHONE,
+        pattern=r"\b\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b",
+        confidence=0.90,
+        description="US phone number",
+    ),
+    PHIPattern(
+        phi_type=PHIType.CREDIT_CARD,
+        pattern=r"\b(?:\d{4}[-\s]?){3}\d{4}\b",
+        confidence=0.90,
+        description="Credit card number",
+    ),
+    # Medium-confidence patterns (0.80-0.89) - generally reliable
+    PHIPattern(
+        phi_type=PHIType.DATE_OF_BIRTH,
+        pattern=r"\b(?:0[1-9]|1[0-2])/(?:0[1-9]|[12]\d|3[01])/(?:19|20)\d{2}\b",
+        confidence=0.85,
+        description="Date MM/DD/YYYY",
+    ),
+    PHIPattern(
+        phi_type=PHIType.DATE_OF_BIRTH,
+        pattern=r"\b(?:19|20)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])\b",
+        confidence=0.85,
+        description="Date YYYY-MM-DD",
+    ),
+    PHIPattern(
+        phi_type=PHIType.IP_ADDRESS,
+        pattern=r"\b(?:\d{1,3}\.){3}\d{1,3}\b",
+        confidence=0.85,
+        description="IPv4 address",
+    ),
+    PHIPattern(
+        phi_type=PHIType.HEALTH_PLAN,
+        pattern=r"\b[A-Z]{3}\d{9}\b",
+        confidence=0.80,
+        description="Health plan beneficiary number",
+    ),
+    PHIPattern(
+        phi_type=PHIType.SSN,
+        pattern=r"\b\d{9}\b",
+        confidence=0.80,
+        description="SSN without dashes",
+    ),
+    PHIPattern(
+        phi_type=PHIType.LICENSE_NUMBER,
+        pattern=r"\b[A-Z]\d{7,8}\b",
+        confidence=0.80,
+        description="Driver's license",
+    ),
 ]
 
 
@@ -111,9 +185,17 @@ class PHIMasker:
         elif phi_type == PHIType.PHONE:
             return self._mask_phone(value, mask_char, visible)
         elif phi_type == PHIType.SSN:
-            return f"{mask_char * 3}-{mask_char * 2}-{value[-4:]}" if len(value) >= 4 else mask_char * len(value)
+            return (
+                f"{mask_char * 3}-{mask_char * 2}-{value[-4:]}"
+                if len(value) >= 4
+                else mask_char * len(value)
+            )
         elif phi_type == PHIType.CREDIT_CARD:
-            return f"{mask_char * 12}{value[-4:]}" if len(value) >= 4 else mask_char * len(value)
+            return (
+                f"{mask_char * 12}{value[-4:]}"
+                if len(value) >= 4
+                else mask_char * len(value)
+            )
         elif phi_type in (PHIType.NAME, PHIType.ADDRESS):
             return self._mask_partial(value, mask_char, 2)
         else:
@@ -142,36 +224,58 @@ class PHIMasker:
 class PHIDetector:
     """Detect PHI in text using pattern matching."""
 
-    def __init__(self, settings: PHISettings | None = None,
-                 patterns: list[PHIPattern] | None = None) -> None:
+    def __init__(
+        self,
+        settings: PHISettings | None = None,
+        patterns: list[PHIPattern] | None = None,
+    ) -> None:
         self._settings = settings or PHISettings()
         self._patterns = patterns or DEFAULT_PATTERNS
         self._masker = PHIMasker(self._settings)
-        self._compiled = [(p, re.compile(p.pattern, re.IGNORECASE)) for p in self._patterns]
+        self._compiled = [
+            (p, re.compile(p.pattern, re.IGNORECASE)) for p in self._patterns
+        ]
 
     def detect(self, text: str) -> PHIDetectionResult:
         """Detect PHI in text and return results."""
         if not text or not self._settings.enable_detection:
-            return PHIDetectionResult(contains_phi=False, original_text=text, masked_text=text)
+            return PHIDetectionResult(
+                contains_phi=False, original_text=text, masked_text=text
+            )
         matches: list[PHIMatch] = []
         for pattern, regex in self._compiled:
             for match in regex.finditer(text):
                 value = match.group()
                 masked = self._masker.mask(value, pattern.phi_type)
                 phi_match = PHIMatch(
-                    phi_type=pattern.phi_type, value=value, masked_value=masked,
-                    start_pos=match.start(), end_pos=match.end(), confidence=pattern.confidence,
+                    phi_type=pattern.phi_type,
+                    value=value,
+                    masked_value=masked,
+                    start_pos=match.start(),
+                    end_pos=match.end(),
+                    confidence=pattern.confidence,
                 )
                 matches.append(phi_match)
         matches.sort(key=lambda m: (m.start_pos, -m.confidence))
         unique_matches = self._deduplicate_matches(matches)
-        masked_text = self._apply_masks(text, unique_matches) if self._settings.enable_masking else text
+        masked_text = (
+            self._apply_masks(text, unique_matches)
+            if self._settings.enable_masking
+            else text
+        )
         phi_types = list(set(m.phi_type for m in unique_matches))
         if unique_matches and self._settings.log_detections:
-            logger.info("phi_detected", count=len(unique_matches), types=[t.value for t in phi_types])
+            logger.info(
+                "phi_detected",
+                count=len(unique_matches),
+                types=[t.value for t in phi_types],
+            )
         return PHIDetectionResult(
-            contains_phi=len(unique_matches) > 0, matches=unique_matches,
-            original_text=text, masked_text=masked_text, phi_types_found=phi_types,
+            contains_phi=len(unique_matches) > 0,
+            matches=unique_matches,
+            original_text=text,
+            masked_text=masked_text,
+            phi_types_found=phi_types,
         )
 
     def _deduplicate_matches(self, matches: list[PHIMatch]) -> list[PHIMatch]:
@@ -182,7 +286,10 @@ class PHIDetector:
         for match in matches:
             overlaps = False
             for existing in result:
-                if not (match.end_pos <= existing.start_pos or match.start_pos >= existing.end_pos):
+                if not (
+                    match.end_pos <= existing.start_pos
+                    or match.start_pos >= existing.end_pos
+                ):
                     overlaps = True
                     break
             if not overlaps:
@@ -196,7 +303,9 @@ class PHIDetector:
         sorted_matches = sorted(matches, key=lambda m: m.start_pos, reverse=True)
         result = text
         for match in sorted_matches:
-            result = result[:match.start_pos] + match.masked_value + result[match.end_pos:]
+            result = (
+                result[: match.start_pos] + match.masked_value + result[match.end_pos :]
+            )
         return result
 
     def contains_phi(self, text: str) -> bool:
@@ -214,7 +323,9 @@ class PHISanitizer:
         """Sanitize a string by masking detected PHI."""
         return self._detector.detect(text).masked_text
 
-    def sanitize_dict(self, data: dict[str, Any], sensitive_keys: list[str] | None = None) -> dict[str, Any]:
+    def sanitize_dict(
+        self, data: dict[str, Any], sensitive_keys: list[str] | None = None
+    ) -> dict[str, Any]:
         """Sanitize dictionary values."""
         result = {}
         sensitive = {k.lower() for k in sensitive_keys} if sensitive_keys else set()
@@ -229,7 +340,9 @@ class PHISanitizer:
                         result[key] = self._mask_sensitive_value(value)
                 else:
                     detection = self._detector.detect(value)
-                    result[key] = detection.masked_text if detection.contains_phi else value
+                    result[key] = (
+                        detection.masked_text if detection.contains_phi else value
+                    )
             elif isinstance(value, dict):
                 result[key] = self.sanitize_dict(value, sensitive_keys)
             elif isinstance(value, list):
@@ -244,7 +357,9 @@ class PHISanitizer:
             return "*" * len(value)
         return value[0] + "*" * (len(value) - 2) + value[-1]
 
-    def sanitize_list(self, data: list[Any], sensitive_keys: list[str] | None = None) -> list[Any]:
+    def sanitize_list(
+        self, data: list[Any], sensitive_keys: list[str] | None = None
+    ) -> list[Any]:
         """Sanitize list values."""
         result = []
         for item in data:
@@ -259,7 +374,19 @@ class PHISanitizer:
         return result
 
     def _is_sensitive_key(self, key: str) -> bool:
-        sensitive_patterns = ["ssn", "social", "phone", "email", "address", "dob", "birth", "medical", "health", "card", "account"]
+        sensitive_patterns = [
+            "ssn",
+            "social",
+            "phone",
+            "email",
+            "address",
+            "dob",
+            "birth",
+            "medical",
+            "health",
+            "card",
+            "account",
+        ]
         key_lower = key.lower()
         return any(p in key_lower for p in sensitive_patterns)
 

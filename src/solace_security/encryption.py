@@ -1,4 +1,5 @@
 """Solace-AI Encryption - AES-256 encryption for PHI data protection."""
+
 from __future__ import annotations
 import base64
 import hashlib
@@ -27,27 +28,61 @@ PBKDF2_ITERATIONS = 600000
 
 class EncryptionAlgorithm(str, Enum):
     """Supported encryption algorithms."""
+
     AES_256_GCM = "AES-256-GCM"
 
 
 class KeyDerivationFunction(str, Enum):
     """Supported key derivation functions."""
+
     PBKDF2_SHA256 = "PBKDF2-SHA256"
 
 
 class EncryptionSettings(BaseSettings):
-    """Encryption configuration from environment."""
-    master_key: SecretStr = Field(default=SecretStr("change-me-in-production-32bytes!"))
+    """Encryption configuration from environment.
+
+    SECURITY: master_key MUST be set via ENCRYPTION_MASTER_KEY environment variable.
+    The key must be exactly 32 bytes for AES-256 security.
+    """
+
+    master_key: SecretStr = Field(
+        ...,  # Required - no default for security
+        description="AES-256 master encryption key (exactly 32 bytes). Set via ENCRYPTION_MASTER_KEY env var.",
+    )
     algorithm: EncryptionAlgorithm = Field(default=EncryptionAlgorithm.AES_256_GCM)
     kdf: KeyDerivationFunction = Field(default=KeyDerivationFunction.PBKDF2_SHA256)
     kdf_iterations: int = Field(default=PBKDF2_ITERATIONS)
     enable_key_rotation: bool = Field(default=True)
     key_rotation_days: int = Field(default=90)
-    model_config = SettingsConfigDict(env_prefix="ENCRYPTION_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="ENCRYPTION_", env_file=".env", extra="ignore"
+    )
+
+    @classmethod
+    def for_development(cls) -> "EncryptionSettings":
+        """Create settings with a development-only key. NOT FOR PRODUCTION."""
+        import warnings
+
+        warnings.warn(
+            "Using development EncryptionSettings with insecure key. NOT FOR PRODUCTION USE.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return cls(master_key=SecretStr("dev-only-insecure-key-32-bytes!!"))
+
+    def model_post_init(self, __context: Any) -> None:
+        """Validate master key after initialization."""
+        key_value = self.master_key.get_secret_value()
+        if len(key_value) != KEY_SIZE:
+            raise ValueError(
+                f"ENCRYPTION_MASTER_KEY must be exactly {KEY_SIZE} bytes, got {len(key_value)}. "
+                f'Generate a secure key with: python -c "import secrets; print(secrets.token_urlsafe({KEY_SIZE})[:32])"'
+            )
 
 
 class EncryptedData(BaseModel):
     """Container for encrypted data with metadata."""
+
     ciphertext: str = Field(..., description="Base64-encoded ciphertext")
     nonce: str = Field(..., description="Base64-encoded nonce/IV")
     salt: str | None = Field(default=None, description="Base64-encoded salt for KDF")
@@ -74,8 +109,14 @@ class EncryptedData(BaseModel):
         salt = parts[3] if parts[3] else None
         nonce = parts[4]
         ciphertext = parts[5]
-        return cls(ciphertext=ciphertext, nonce=nonce, salt=salt,
-                   algorithm=algorithm, key_id=key_id, version=version)
+        return cls(
+            ciphertext=ciphertext,
+            nonce=nonce,
+            salt=salt,
+            algorithm=algorithm,
+            key_id=key_id,
+            version=version,
+        )
 
 
 class KeyManager:
@@ -91,8 +132,10 @@ class KeyManager:
         """Derive encryption key using PBKDF2."""
         info = context.encode() if context else b""
         kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(), length=KEY_SIZE,
-            salt=salt + info, iterations=self._settings.kdf_iterations,
+            algorithm=hashes.SHA256(),
+            length=KEY_SIZE,
+            salt=salt + info,
+            iterations=self._settings.kdf_iterations,
         )
         return kdf.derive(self._master_key)
 
@@ -129,14 +172,17 @@ class AESGCMCipher:
             raise ValueError(f"Key must be {KEY_SIZE} bytes")
         self._aesgcm = AESGCM(key)
 
-    def encrypt(self, plaintext: bytes, associated_data: bytes | None = None) -> tuple[bytes, bytes]:
+    def encrypt(
+        self, plaintext: bytes, associated_data: bytes | None = None
+    ) -> tuple[bytes, bytes]:
         """Encrypt data returning (ciphertext, nonce)."""
         nonce = os.urandom(NONCE_SIZE)
         ciphertext = self._aesgcm.encrypt(nonce, plaintext, associated_data)
         return ciphertext, nonce
 
-    def decrypt(self, ciphertext: bytes, nonce: bytes,
-                associated_data: bytes | None = None) -> bytes:
+    def decrypt(
+        self, ciphertext: bytes, nonce: bytes, associated_data: bytes | None = None
+    ) -> bytes:
         """Decrypt data."""
         return self._aesgcm.decrypt(nonce, ciphertext, associated_data)
 
@@ -148,7 +194,9 @@ class Encryptor:
         self._settings = settings or EncryptionSettings()
         self._key_manager = KeyManager(self._settings)
 
-    def encrypt(self, plaintext: str | bytes, context: str | None = None) -> EncryptedData:
+    def encrypt(
+        self, plaintext: str | bytes, context: str | None = None
+    ) -> EncryptedData:
         """Encrypt plaintext data."""
         if isinstance(plaintext, str):
             plaintext = plaintext.encode("utf-8")
@@ -168,33 +216,51 @@ class Encryptor:
         """Decrypt encrypted data."""
         ciphertext = base64.b64decode(encrypted.ciphertext)
         nonce = base64.b64decode(encrypted.nonce)
-        salt = base64.b64decode(encrypted.salt) if encrypted.salt else os.urandom(SALT_SIZE)
+        salt = (
+            base64.b64decode(encrypted.salt)
+            if encrypted.salt
+            else os.urandom(SALT_SIZE)
+        )
         key = self._key_manager.derive_key(salt)
         cipher = AESGCMCipher(key)
         aad = context.encode() if context else None
         return cipher.decrypt(ciphertext, nonce, aad)
 
-    def decrypt_to_string(self, encrypted: EncryptedData, context: str | None = None) -> str:
+    def decrypt_to_string(
+        self, encrypted: EncryptedData, context: str | None = None
+    ) -> str:
         """Decrypt and decode to string."""
         return self.decrypt(encrypted, context).decode("utf-8")
 
-    def encrypt_dict(self, data: dict[str, Any], sensitive_keys: list[str] | None = None) -> dict[str, Any]:
+    def encrypt_dict(
+        self, data: dict[str, Any], sensitive_keys: list[str] | None = None
+    ) -> dict[str, Any]:
         """Encrypt sensitive fields in a dictionary."""
         result = data.copy()
         keys_to_encrypt = sensitive_keys or list(data.keys())
         for key in keys_to_encrypt:
             if key in result and result[key] is not None:
-                value = str(result[key]) if not isinstance(result[key], str) else result[key]
+                value = (
+                    str(result[key])
+                    if not isinstance(result[key], str)
+                    else result[key]
+                )
                 encrypted = self.encrypt(value, key)
                 result[key] = encrypted.to_compact()
         return result
 
-    def decrypt_dict(self, data: dict[str, Any], encrypted_keys: list[str] | None = None) -> dict[str, Any]:
+    def decrypt_dict(
+        self, data: dict[str, Any], encrypted_keys: list[str] | None = None
+    ) -> dict[str, Any]:
         """Decrypt encrypted fields in a dictionary."""
         result = data.copy()
         keys_to_decrypt = encrypted_keys or list(data.keys())
         for key in keys_to_decrypt:
-            if key in result and isinstance(result[key], str) and result[key].startswith("v"):
+            if (
+                key in result
+                and isinstance(result[key], str)
+                and result[key].startswith("v")
+            ):
                 try:
                     encrypted = EncryptedData.from_compact(result[key])
                     result[key] = self.decrypt_to_string(encrypted, key)

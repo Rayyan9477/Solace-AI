@@ -21,6 +21,7 @@ logger = structlog.get_logger(__name__)
 
 class OutboxStatus(str, Enum):
     """Status of outbox record."""
+
     PENDING = "PENDING"
     PUBLISHED = "PUBLISHED"
     FAILED = "FAILED"
@@ -98,7 +99,9 @@ class InMemoryOutboxStore:
     async def get_pending(self, limit: int = 100) -> list[OutboxRecord]:
         """Get pending records for publishing."""
         async with self._lock:
-            pending = [r for r in self._records.values() if r.status == OutboxStatus.PENDING]
+            pending = [
+                r for r in self._records.values() if r.status == OutboxStatus.PENDING
+            ]
             pending.sort(key=lambda r: r.created_at)
             return pending[:limit]
 
@@ -151,7 +154,9 @@ class KafkaProducerAdapter(ABC):
 class AIOKafkaProducerAdapter(KafkaProducerAdapter):
     """aiokafka producer implementation."""
 
-    def __init__(self, kafka_settings: KafkaSettings, producer_settings: ProducerSettings) -> None:
+    def __init__(
+        self, kafka_settings: KafkaSettings, producer_settings: ProducerSettings
+    ) -> None:
         self._kafka_settings = kafka_settings
         self._producer_settings = producer_settings
         self._producer: Any = None
@@ -159,6 +164,7 @@ class AIOKafkaProducerAdapter(KafkaProducerAdapter):
     async def start(self) -> None:
         """Start the producer."""
         from aiokafka import AIOKafkaProducer
+
         params = {
             **self._kafka_settings.get_connection_params(),
             **self._producer_settings.to_producer_params(),
@@ -167,7 +173,9 @@ class AIOKafkaProducerAdapter(KafkaProducerAdapter):
         }
         self._producer = AIOKafkaProducer(**params)
         await self._producer.start()
-        logger.info("Kafka producer started", bootstrap=self._kafka_settings.bootstrap_servers)
+        logger.info(
+            "Kafka producer started", bootstrap=self._kafka_settings.bootstrap_servers
+        )
 
     async def stop(self) -> None:
         """Stop the producer."""
@@ -257,23 +265,35 @@ class EventPublisher:
         """Publish event directly to Kafka."""
         partition_key = str(event.user_id)
         await self._producer.send(topic, partition_key, event.to_dict())
-        logger.info("Event published directly",
-                    event_id=str(event.metadata.event_id),
-                    event_type=event.event_type, topic=topic)
+        logger.info(
+            "Event published directly",
+            event_id=str(event.metadata.event_id),
+            event_type=event.event_type,
+            topic=topic,
+        )
         return event.metadata.event_id
 
     async def _publish_via_outbox(self, event: BaseEvent, topic: str) -> UUID:
         """Publish event via outbox pattern."""
         record = OutboxRecord.from_event(event, topic)
         await self._outbox_store.save(record)
-        logger.info("Event queued in outbox",
-                    event_id=str(event.metadata.event_id),
-                    event_type=event.event_type, outbox_id=str(record.id))
+        logger.info(
+            "Event queued in outbox",
+            event_id=str(event.metadata.event_id),
+            event_type=event.event_type,
+            outbox_id=str(record.id),
+        )
         return event.metadata.event_id
 
-    async def publish_batch(self, events: list[BaseEvent], topic: str | None = None) -> list[UUID]:
-        """Publish multiple events."""
-        return [await self.publish(event, topic) for event in events]
+    async def publish_batch(
+        self, events: list[BaseEvent], topic: str | None = None
+    ) -> list[UUID]:
+        """Publish multiple events in parallel for better performance."""
+        if not events:
+            return []
+        # Use asyncio.gather for parallel publishing
+        tasks = [self.publish(event, topic) for event in events]
+        return list(await asyncio.gather(*tasks))
 
     async def flush_outbox(self, batch_size: int = 100) -> int:
         """Flush pending outbox records to Kafka."""
@@ -283,7 +303,9 @@ class EventPublisher:
         published_count = 0
         for record in pending:
             try:
-                await self._producer.send(record.topic, record.partition_key, record.event_payload)
+                await self._producer.send(
+                    record.topic, record.partition_key, record.event_payload
+                )
                 await self._outbox_store.mark_published(record.id)
                 published_count += 1
                 logger.debug("Outbox record published", record_id=str(record.id))
@@ -291,11 +313,17 @@ class EventPublisher:
                 retry_count = await self._outbox_store.increment_retry(record.id)
                 if retry_count >= self._max_retries:
                     await self._outbox_store.mark_failed(record.id, str(e))
-                    logger.error("Outbox publish failed permanently",
-                                 record_id=str(record.id), error=str(e))
+                    logger.error(
+                        "Outbox publish failed permanently",
+                        record_id=str(record.id),
+                        error=str(e),
+                    )
                 else:
-                    logger.warning("Outbox publish failed, will retry",
-                                   record_id=str(record.id), retry=retry_count)
+                    logger.warning(
+                        "Outbox publish failed, will retry",
+                        record_id=str(record.id),
+                        retry=retry_count,
+                    )
         return published_count
 
 

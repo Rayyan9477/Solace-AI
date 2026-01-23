@@ -1,4 +1,5 @@
 """Solace-AI Event Consumer - Consumer group management with offset tracking."""
+
 from __future__ import annotations
 import asyncio
 from abc import ABC, abstractmethod
@@ -20,6 +21,7 @@ EventHandler = Callable[[BaseEvent], Awaitable[None]]
 
 class ProcessingStatus(str, Enum):
     """Status of event processing."""
+
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
     RETRY = "RETRY"
@@ -29,6 +31,7 @@ class ProcessingStatus(str, Enum):
 @dataclass
 class ProcessingResult:
     """Result of processing an event."""
+
     status: ProcessingStatus
     event_id: UUID
     error: str | None = None
@@ -38,6 +41,7 @@ class ProcessingResult:
 @dataclass
 class ConsumerMetrics:
     """Metrics for consumer monitoring."""
+
     messages_received: int = 0
     messages_processed: int = 0
     messages_failed: int = 0
@@ -66,12 +70,20 @@ class ConsumerMetrics:
     @property
     def avg_processing_time_ms(self) -> float:
         """Average processing time in milliseconds."""
-        return 0.0 if self.messages_processed == 0 else self.processing_time_ms_total / self.messages_processed
+        return (
+            0.0
+            if self.messages_processed == 0
+            else self.processing_time_ms_total / self.messages_processed
+        )
 
     @property
     def success_rate(self) -> float:
         """Success rate as percentage."""
-        return 100.0 if self.messages_received == 0 else (self.messages_processed / self.messages_received) * 100
+        return (
+            100.0
+            if self.messages_received == 0
+            else (self.messages_processed / self.messages_received) * 100
+        )
 
 
 class OffsetTracker:
@@ -90,7 +102,9 @@ class OffsetTracker:
                 self._pending[key] = []
             self._pending[key].append(offset)
 
-    async def mark_processed(self, topic: str, partition: int, offset: int) -> int | None:
+    async def mark_processed(
+        self, topic: str, partition: int, offset: int
+    ) -> int | None:
         """Mark offset as processed, return committable offset if available."""
         async with self._lock:
             key = (topic, partition)
@@ -133,7 +147,9 @@ class KafkaConsumerAdapter(ABC):
     async def subscribe(self, topics: list[str]) -> None: ...
 
     @abstractmethod
-    async def poll(self, timeout_ms: int = 1000) -> list[tuple[str, int, int, dict[str, Any]]]: ...
+    async def poll(
+        self, timeout_ms: int = 1000
+    ) -> list[tuple[str, int, int, dict[str, Any]]]: ...
 
     @abstractmethod
     async def commit(self, offsets: dict[tuple[str, int], int]) -> None: ...
@@ -142,7 +158,9 @@ class KafkaConsumerAdapter(ABC):
 class AIOKafkaConsumerAdapter(KafkaConsumerAdapter):
     """aiokafka consumer implementation."""
 
-    def __init__(self, kafka_settings: KafkaSettings, consumer_settings: ConsumerSettings) -> None:
+    def __init__(
+        self, kafka_settings: KafkaSettings, consumer_settings: ConsumerSettings
+    ) -> None:
         self._kafka_settings = kafka_settings
         self._consumer_settings = consumer_settings
         self._consumer: Any = None
@@ -151,6 +169,7 @@ class AIOKafkaConsumerAdapter(KafkaConsumerAdapter):
         """Start the consumer."""
         from aiokafka import AIOKafkaConsumer
         import json
+
         params = {
             **self._kafka_settings.get_connection_params(),
             **self._consumer_settings.to_consumer_params(),
@@ -172,7 +191,9 @@ class AIOKafkaConsumerAdapter(KafkaConsumerAdapter):
             self._consumer.subscribe(topics)
             logger.info("Subscribed to topics", topics=topics)
 
-    async def poll(self, timeout_ms: int = 1000) -> list[tuple[str, int, int, dict[str, Any]]]:
+    async def poll(
+        self, timeout_ms: int = 1000
+    ) -> list[tuple[str, int, int, dict[str, Any]]]:
         """Poll for messages."""
         if not self._consumer:
             return []
@@ -188,6 +209,7 @@ class AIOKafkaConsumerAdapter(KafkaConsumerAdapter):
         if not self._consumer or not offsets:
             return
         from aiokafka import TopicPartition
+
         tp_offsets = {TopicPartition(t, p): o for (t, p), o in offsets.items()}
         await self._consumer.commit(tp_offsets)
         logger.debug("Offsets committed", count=len(offsets))
@@ -215,12 +237,14 @@ class MockKafkaConsumerAdapter(KafkaConsumerAdapter):
         self._subscribed_topics = topics
         logger.info("Mock subscribed to topics", topics=topics)
 
-    async def poll(self, timeout_ms: int = 1000) -> list[tuple[str, int, int, dict[str, Any]]]:
+    async def poll(
+        self, timeout_ms: int = 1000
+    ) -> list[tuple[str, int, int, dict[str, Any]]]:
         if not self._started or self._poll_index >= len(self._messages):
             await asyncio.sleep(timeout_ms / 1000)
             return []
         batch_end = min(self._poll_index + 10, len(self._messages))
-        messages = self._messages[self._poll_index:batch_end]
+        messages = self._messages[self._poll_index : batch_end]
         self._poll_index = batch_end
         return messages
 
@@ -228,7 +252,9 @@ class MockKafkaConsumerAdapter(KafkaConsumerAdapter):
         self._committed_offsets.update(offsets)
         logger.debug("Mock offsets committed", count=len(offsets))
 
-    def add_message(self, topic: str, partition: int, offset: int, value: dict[str, Any]) -> None:
+    def add_message(
+        self, topic: str, partition: int, offset: int, value: dict[str, Any]
+    ) -> None:
         """Add message to mock queue."""
         self._messages.append((topic, partition, offset, value))
 
@@ -261,7 +287,9 @@ class EventConsumer:
         self._metrics = ConsumerMetrics()
         self._running = False
         self._last_commit = datetime.now(timezone.utc)
-        self._dead_letter_handler: Callable[[BaseEvent, str], Awaitable[None]] | None = None
+        self._dead_letter_handler: (
+            Callable[[BaseEvent, str], Awaitable[None]] | None
+        ) = None
 
     @property
     def metrics(self) -> ConsumerMetrics:
@@ -280,7 +308,9 @@ class EventConsumer:
         self._default_handlers.append(handler)
         logger.info("Default handler registered")
 
-    def set_dead_letter_handler(self, handler: Callable[[BaseEvent, str], Awaitable[None]]) -> None:
+    def set_dead_letter_handler(
+        self, handler: Callable[[BaseEvent, str], Awaitable[None]]
+    ) -> None:
         """Set handler for dead letter events."""
         self._dead_letter_handler = handler
         logger.info("Dead letter handler set")
@@ -307,9 +337,13 @@ class EventConsumer:
                 messages = await self._consumer.poll(timeout_ms=1000)
                 for topic, partition, offset, value in messages:
                     await self._offset_tracker.track_received(topic, partition, offset)
-                    result = await self._process_message(topic, partition, offset, value)
+                    result = await self._process_message(
+                        topic, partition, offset, value
+                    )
                     if result.status == ProcessingStatus.SUCCESS:
-                        committable = await self._offset_tracker.mark_processed(topic, partition, offset)
+                        committable = await self._offset_tracker.mark_processed(
+                            topic, partition, offset
+                        )
                         if committable:
                             await self._maybe_commit({(topic, partition): committable})
                 await self._maybe_commit_periodic()
@@ -326,28 +360,76 @@ class EventConsumer:
         start_time = datetime.now(timezone.utc)
         try:
             event = deserialize_event(value)
-            handlers = self._handlers.get(event.event_type, []) or self._default_handlers
+            handlers = (
+                self._handlers.get(event.event_type, []) or self._default_handlers
+            )
             for handler in handlers:
                 await handler(event)
-            processing_time = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
+            processing_time = int(
+                (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+            )
             self._metrics.record_success(processing_time)
-            logger.debug("Event processed", event_type=event.event_type,
-                         event_id=str(event.metadata.event_id), time_ms=processing_time)
-            return ProcessingResult(status=ProcessingStatus.SUCCESS, event_id=event.metadata.event_id)
+            logger.debug(
+                "Event processed",
+                event_type=event.event_type,
+                event_id=str(event.metadata.event_id),
+                time_ms=processing_time,
+            )
+            return ProcessingResult(
+                status=ProcessingStatus.SUCCESS, event_id=event.metadata.event_id
+            )
         except Exception as e:
             self._metrics.record_failure()
-            logger.error("Event processing failed", topic=topic, partition=partition, offset=offset, error=str(e))
+            logger.error(
+                "Event processing failed",
+                topic=topic,
+                partition=partition,
+                offset=offset,
+                error=str(e),
+            )
             if self._dead_letter_handler:
                 try:
                     event = deserialize_event(value)
                     await self._dead_letter_handler(event, str(e))
                 except Exception:
                     pass
+            # Generate unique fallback UUID to avoid duplicate tracking issues
+            # Use offset/partition/topic hash to create deterministic but unique ID for failed events
+            fallback_event_id = self._get_fallback_event_id(
+                value, topic, partition, offset
+            )
             return ProcessingResult(
                 status=ProcessingStatus.FAILED,
-                event_id=value.get("metadata", {}).get("event_id", UUID(int=0)),
+                event_id=fallback_event_id,
                 error=str(e),
             )
+
+    def _get_fallback_event_id(
+        self, value: dict[str, Any], topic: str, partition: int, offset: int
+    ) -> UUID:
+        """Generate a deterministic fallback event ID for failed events.
+
+        Uses topic/partition/offset to create a unique but reproducible UUID,
+        avoiding duplicate tracking issues from using UUID(int=0).
+        """
+        # Try to extract event_id from the message first
+        event_id_str = value.get("metadata", {}).get("event_id")
+        if event_id_str:
+            try:
+                return (
+                    UUID(event_id_str)
+                    if isinstance(event_id_str, str)
+                    else event_id_str
+                )
+            except (ValueError, TypeError):
+                pass
+
+        # Generate deterministic UUID from message location
+        import hashlib
+
+        location_str = f"{topic}:{partition}:{offset}"
+        hash_bytes = hashlib.sha256(location_str.encode()).digest()[:16]
+        return UUID(bytes=hash_bytes)
 
     async def _maybe_commit(self, offsets: dict[tuple[str, int], int]) -> None:
         """Commit offsets if any."""
