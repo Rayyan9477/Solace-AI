@@ -74,6 +74,18 @@ from solace_security.phi_protection import (
     detect_phi,
     mask_phi,
 )
+from solace_security.middleware import (
+    AuthenticatedUser,
+    AuthenticatedService,
+    get_current_user,
+    get_current_user_optional,
+    get_current_service,
+    require_roles,
+    require_permissions,
+    require_service_permission,
+    CurrentUser,
+    CurrentService,
+)
 
 __all__ = [
     # Auth
@@ -146,4 +158,15 @@ __all__ = [
     "create_phi_sanitizer",
     "detect_phi",
     "mask_phi",
+    # Middleware (FastAPI Authentication Dependencies)
+    "AuthenticatedUser",
+    "AuthenticatedService",
+    "get_current_user",
+    "get_current_user_optional",
+    "get_current_service",
+    "require_roles",
+    "require_permissions",
+    "require_service_permission",
+    "CurrentUser",
+    "CurrentService",
 ]

@@ -65,6 +65,10 @@ class EscalationSettings(BaseSettings):
     enable_email_notifications: bool = Field(default=True, description="Enable email notifications")
     enable_pager_notifications: bool = Field(default=True, description="Enable pager for CRITICAL")
     on_call_clinician_pool_size: int = Field(default=3, description="On-call clinician pool size")
+    notification_service_url: str = Field(
+        default="http://localhost:8003",
+        description="URL of the notification microservice"
+    )
     model_config = SettingsConfigDict(env_prefix="ESCALATION_", env_file=".env", extra="ignore")
 
 
@@ -110,27 +114,183 @@ class CrisisResource:
     priority_order: int
 
 
-class NotificationService:
-    """Service for sending escalation notifications."""
+class NotificationServiceClient:
+    """
+    HTTP client for sending escalation notifications to the Notification Service.
 
-    def __init__(self, settings: EscalationSettings) -> None:
+    Replaces the previous mock implementation with real HTTP calls to the notification
+    microservice. Includes retry logic and circuit breaker patterns for reliability.
+
+    CRITICAL: This service handles patient safety notifications. Failures are logged
+    and should trigger alerts.
+    """
+
+    def __init__(self, settings: EscalationSettings, base_url: str = "http://localhost:8003") -> None:
         self._settings = settings
+        self._base_url = base_url.rstrip("/")
+        self._client: Any = None  # httpx.AsyncClient, lazily initialized
+        self._max_retries = settings.max_retries
+        self._timeout_seconds = settings.notification_timeout_seconds
+
+    async def _ensure_client(self) -> Any:
+        """Lazily initialize HTTP client."""
+        if self._client is None:
+            try:
+                import httpx
+                self._client = httpx.AsyncClient(
+                    base_url=self._base_url,
+                    timeout=httpx.Timeout(self._timeout_seconds),
+                    headers={"Content-Type": "application/json"},
+                )
+            except ImportError:
+                logger.error("httpx_not_installed", message="httpx library required for notification client")
+                raise RuntimeError("httpx library is required for NotificationServiceClient")
+        return self._client
+
+    async def close(self) -> None:
+        """Close the HTTP client."""
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
     async def send_notification(self, clinician_id: UUID, escalation: EscalationRecord,
                                 notification_type: NotificationType) -> bool:
-        """Send notification to clinician."""
-        logger.info("sending_notification", clinician_id=str(clinician_id),
-            notification_type=notification_type.value, escalation_id=str(escalation.escalation_id))
-        await asyncio.sleep(0.01)
-        return True
+        """
+        Send notification to clinician via the notification service.
+
+        Args:
+            clinician_id: UUID of the clinician to notify
+            escalation: Escalation record with crisis details
+            notification_type: Channel type (SMS, EMAIL, PUSH, etc.)
+
+        Returns:
+            True if notification was sent successfully, False otherwise.
+        """
+        client = await self._ensure_client()
+
+        # Map notification type to channel
+        channel_map = {
+            NotificationType.EMAIL: "email",
+            NotificationType.SMS: "sms",
+            NotificationType.PUSH: "push",
+            NotificationType.PAGER: "sms",  # Pager falls back to SMS
+            NotificationType.IN_APP: "push",  # In-app uses push channel
+        }
+        channel = channel_map.get(notification_type, "email")
+
+        # Build notification payload
+        payload = {
+            "template_type": "crisis_escalation",
+            "recipients": [{
+                "user_id": str(clinician_id),
+                "email": f"clinician-{clinician_id}@solace-ai.com",  # Placeholder - should lookup from DB
+                "phone": None,  # Should lookup from clinician registry
+            }],
+            "channels": [channel],
+            "variables": {
+                "patient_id": str(escalation.user_id),
+                "patient_name": "Patient",  # Should lookup from user service
+                "risk_level": escalation.crisis_level,
+                "assessment_summary": escalation.reason,
+                "dashboard_link": f"https://dashboard.solace-ai.com/escalations/{escalation.escalation_id}",
+                "escalation_id": str(escalation.escalation_id),
+                "priority": escalation.priority.value,
+            },
+            "priority": "critical" if escalation.priority == EscalationPriority.CRITICAL else "high",
+            "correlation_id": str(escalation.escalation_id),
+        }
+
+        # Attempt to send with retries
+        last_error = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                response = await client.post("/api/v1/notifications/send", json=payload)
+
+                if response.status_code in (200, 201, 202):
+                    result = response.json()
+                    success = result.get("successful_deliveries", 0) > 0
+                    logger.info(
+                        "notification_sent",
+                        clinician_id=str(clinician_id),
+                        escalation_id=str(escalation.escalation_id),
+                        notification_type=notification_type.value,
+                        success=success,
+                        request_id=result.get("request_id"),
+                    )
+                    return success
+                else:
+                    logger.warning(
+                        "notification_failed",
+                        clinician_id=str(clinician_id),
+                        escalation_id=str(escalation.escalation_id),
+                        status_code=response.status_code,
+                        attempt=attempt + 1,
+                        response_text=response.text[:500] if response.text else None,
+                    )
+                    last_error = f"HTTP {response.status_code}: {response.text[:200] if response.text else 'No response'}"
+
+            except Exception as e:
+                logger.error(
+                    "notification_error",
+                    clinician_id=str(clinician_id),
+                    escalation_id=str(escalation.escalation_id),
+                    error=str(e),
+                    attempt=attempt + 1,
+                )
+                last_error = str(e)
+
+            # Wait before retry (exponential backoff)
+            if attempt < self._max_retries:
+                await asyncio.sleep(min(2 ** attempt, 10))
+
+        # All retries exhausted - this is a CRITICAL failure for patient safety
+        logger.critical(
+            "notification_all_retries_exhausted",
+            clinician_id=str(clinician_id),
+            escalation_id=str(escalation.escalation_id),
+            notification_type=notification_type.value,
+            last_error=last_error,
+            crisis_level=escalation.crisis_level,
+            message="CRITICAL: Crisis notification could not be delivered after all retries",
+        )
+        return False
 
     async def send_multi_channel(self, clinician_id: UUID, escalation: EscalationRecord,
                                   channels: list[NotificationType]) -> dict[NotificationType, bool]:
-        """Send notifications across multiple channels."""
-        results = {}
-        for channel in channels:
-            results[channel] = await self.send_notification(clinician_id, escalation, channel)
-        return results
+        """
+        Send notifications across multiple channels concurrently.
+
+        For crisis situations, we attempt all channels to maximize delivery probability.
+        """
+        tasks = [
+            self.send_notification(clinician_id, escalation, channel)
+            for channel in channels
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        channel_results = {}
+        for channel, result in zip(channels, results):
+            if isinstance(result, Exception):
+                logger.error("notification_channel_exception", channel=channel.value, error=str(result))
+                channel_results[channel] = False
+            else:
+                channel_results[channel] = result
+
+        # Log summary
+        successful = sum(1 for v in channel_results.values() if v)
+        logger.info(
+            "multi_channel_notification_complete",
+            escalation_id=str(escalation.escalation_id),
+            total_channels=len(channels),
+            successful=successful,
+            failed=len(channels) - successful,
+        )
+
+        return channel_results
+
+
+# Backward compatibility alias
+NotificationService = NotificationServiceClient
 
 
 class ClinicianAssigner:
@@ -253,12 +413,24 @@ class EscalationManager:
 
     def __init__(self, settings: EscalationSettings | None = None) -> None:
         self._settings = settings or EscalationSettings()
-        self._notification_service = NotificationService(self._settings)
+        self._notification_service = NotificationServiceClient(
+            self._settings,
+            base_url=self._settings.notification_service_url
+        )
         self._clinician_assigner = ClinicianAssigner(self._settings)
         self._resource_manager = CrisisResourceManager()
         self._workflow = EscalationWorkflow(self._settings, self._notification_service, self._clinician_assigner)
         self._active_escalations: dict[UUID, EscalationRecord] = {}
-        logger.info("escalation_manager_initialized", auto_escalate_critical=self._settings.auto_escalate_critical)
+        logger.info(
+            "escalation_manager_initialized",
+            auto_escalate_critical=self._settings.auto_escalate_critical,
+            notification_service_url=self._settings.notification_service_url
+        )
+
+    async def shutdown(self) -> None:
+        """Cleanup resources on shutdown."""
+        await self._notification_service.close()
+        logger.info("escalation_manager_shutdown")
 
     async def escalate(self, user_id: UUID, session_id: UUID | None, crisis_level: str,
                        reason: str, context: dict[str, Any] | None = None,

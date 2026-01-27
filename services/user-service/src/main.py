@@ -255,6 +255,15 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     """Create and configure FastAPI application."""
+    # Load settings early for CORS configuration
+    try:
+        settings = UserServiceSettings()
+        cors_config = settings.service.cors
+    except Exception:
+        # Fallback for when secrets aren't configured yet (e.g., during testing)
+        from .config import CORSConfig
+        cors_config = CORSConfig()
+
     app = FastAPI(
         title="Solace-AI User Service",
         description="User authentication, profile management, and consent tracking",
@@ -265,13 +274,23 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS middleware
+    # CORS middleware with secure configuration
+    # SECURITY: Never use "*" for origins when credentials are enabled
+    allowed_origins = cors_config.get_allowed_origins()
+    if "*" in allowed_origins and cors_config.allow_credentials:
+        logger.warning(
+            "cors_security_warning",
+            message="Using '*' for CORS origins with credentials is insecure. "
+                    "Falling back to localhost only."
+        )
+        allowed_origins = ["http://localhost:3000", "http://localhost:8080"]
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # Configure appropriately for production
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=allowed_origins,
+        allow_credentials=cors_config.allow_credentials,
+        allow_methods=cors_config.get_allowed_methods(),
+        allow_headers=cors_config.get_allowed_headers(),
     )
 
     # Exception handlers

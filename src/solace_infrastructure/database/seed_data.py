@@ -13,10 +13,35 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
+import re
 import structlog
 
 logger = structlog.get_logger(__name__)
 T = TypeVar("T")
+
+# Pattern for valid SQL identifiers (letters, digits, underscore, starting with letter/underscore)
+_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+def _validate_identifier(name: str, identifier_type: str = "identifier") -> None:
+    """Validate that a string is a safe SQL identifier.
+
+    Prevents SQL injection by ensuring names only contain alphanumeric
+    characters and underscores, and start with a letter or underscore.
+
+    Args:
+        name: The identifier to validate.
+        identifier_type: Description of what's being validated (for error message).
+
+    Raises:
+        ValueError: If the identifier contains invalid characters.
+    """
+    if not name:
+        raise ValueError(f"Empty {identifier_type} is not allowed")
+    if len(name) > 128:
+        raise ValueError(f"{identifier_type} exceeds maximum length: {name}")
+    if not _IDENTIFIER_PATTERN.match(name):
+        raise ValueError(f"Invalid {identifier_type}: {name}. Must contain only letters, digits, and underscores, starting with a letter or underscore.")
 
 
 class Environment(str, Enum):
@@ -292,12 +317,24 @@ class SeedDataLoader:
             return SeedResult(provider.category, provider.table_name, 0, 0, 0, False, str(e))
 
     async def _record_exists(self, session: AsyncSession, table: str, keys: list[str], record: dict) -> bool:
+        # Validate table and column names to prevent SQL injection
+        _validate_identifier(table, "table name")
+        for key in keys:
+            _validate_identifier(key, "column name")
+
         conditions = " AND ".join(f"{k} = :{k}" for k in keys)
         result = await session.execute(text(f"SELECT 1 FROM {table} WHERE {conditions} LIMIT 1"),
                                        {k: record.get(k) for k in keys})
         return result.scalar() is not None
 
     async def _upsert_record(self, session: AsyncSession, table: str, keys: list[str], record: dict) -> None:
+        # Validate table and column names to prevent SQL injection
+        _validate_identifier(table, "table name")
+        for key in keys:
+            _validate_identifier(key, "column name")
+        for col in record.keys():
+            _validate_identifier(col, "column name")
+
         cols = ", ".join(record.keys())
         vals = ", ".join(f":{k}" for k in record.keys())
         conflict = ", ".join(keys)

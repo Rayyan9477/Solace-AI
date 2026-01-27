@@ -11,19 +11,64 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
 
+import re
 import aiosmtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.header import Header
+from email.utils import formataddr
 import httpx
 from pydantic import BaseModel, Field, EmailStr
 import structlog
 
 logger = structlog.get_logger(__name__)
+
+
+# Pattern for detecting header injection attempts (newlines and control characters)
+_HEADER_INJECTION_PATTERN = re.compile(r'[\r\n\x00\x0b\x0c]')
+# Pattern for basic email validation
+_EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+
+
+def _sanitize_header(value: str, max_length: int = 998) -> str:
+    """
+    Sanitize a string for safe use in email headers.
+
+    Prevents email header injection attacks by removing newlines and control characters.
+
+    Args:
+        value: The header value to sanitize.
+        max_length: Maximum length for the header value (RFC 5322 recommends 998).
+
+    Returns:
+        Sanitized string safe for use in email headers.
+    """
+    if not value:
+        return ""
+    # Remove newlines and control characters that could enable header injection
+    sanitized = _HEADER_INJECTION_PATTERN.sub('', value)
+    # Truncate to max length to prevent buffer issues
+    return sanitized[:max_length].strip()
+
+
+def _validate_email_address(email: str) -> bool:
+    """
+    Validate email address format.
+
+    Args:
+        email: Email address to validate.
+
+    Returns:
+        True if email appears valid, False otherwise.
+    """
+    if not email or len(email) > 254:  # RFC 5321 max length
+        return False
+    return _EMAIL_PATTERN.match(email) is not None
 
 
 class ChannelType(str, Enum):
@@ -97,10 +142,32 @@ class SMSConfig(ChannelConfig):
 
 
 class PushConfig(ChannelConfig):
-    """Push notification configuration (Firebase-compatible)."""
-    firebase_url: str = Field(default="https://fcm.googleapis.com/fcm/send")
-    server_key: str = Field(default="")
-    project_id: str = Field(default="")
+    """Push notification configuration (Firebase-compatible).
+
+    Supports both legacy API (deprecated) and HTTP v1 API (recommended).
+    For HTTP v1 API, provide service_account_file path and project_id.
+    For legacy API (deprecated), provide server_key.
+    """
+    # HTTP v1 API settings (recommended)
+    project_id: str = Field(default="", description="Firebase project ID for HTTP v1 API")
+    service_account_file: str = Field(
+        default="",
+        description="Path to service account JSON file for HTTP v1 API authentication"
+    )
+    use_v1_api: bool = Field(
+        default=True,
+        description="Use HTTP v1 API (recommended). Set to False for legacy API."
+    )
+
+    # Legacy API settings (deprecated - for backward compatibility only)
+    firebase_url: str = Field(
+        default="https://fcm.googleapis.com/fcm/send",
+        description="DEPRECATED: Legacy FCM endpoint"
+    )
+    server_key: str = Field(
+        default="",
+        description="DEPRECATED: Server key for legacy API. Use service_account_file instead."
+    )
 
 
 class NotificationChannel(ABC):
@@ -214,11 +281,28 @@ class EmailChannel(NotificationChannel):
         html_body: str | None,
         metadata: dict[str, Any],
     ) -> DeliveryResult:
-        """Send email via SMTP."""
+        """Send email via SMTP with header injection protection."""
+        # Validate recipient email address
+        sanitized_recipient = _sanitize_header(recipient)
+        if not _validate_email_address(sanitized_recipient):
+            raise DeliveryError(
+                self.channel_type,
+                recipient,
+                f"Invalid email address format: {recipient[:50]}..."
+            )
+
+        # Sanitize all header values to prevent header injection attacks
+        sanitized_subject = _sanitize_header(subject, max_length=200)
+        sanitized_from_name = _sanitize_header(self._email_config.from_name, max_length=100)
+        sanitized_from_email = _sanitize_header(self._email_config.from_email)
+
+        # Build message with sanitized headers
         message = MIMEMultipart("alternative")
-        message["Subject"] = subject
-        message["From"] = f"{self._email_config.from_name} <{self._email_config.from_email}>"
-        message["To"] = recipient
+        # Use Header class for proper RFC 2047 encoding of non-ASCII characters
+        message["Subject"] = Header(sanitized_subject, "utf-8")
+        # Use formataddr to properly format the From header
+        message["From"] = formataddr((sanitized_from_name, sanitized_from_email))
+        message["To"] = sanitized_recipient
 
         message.attach(MIMEText(body, "plain", "utf-8"))
         if html_body:
@@ -302,14 +386,74 @@ class SMSChannel(NotificationChannel):
 
 
 class PushChannel(NotificationChannel):
-    """Push notification channel (Firebase-compatible)."""
+    """
+    Push notification channel supporting Firebase Cloud Messaging (FCM).
+
+    Supports both HTTP v1 API (recommended) and legacy API (deprecated).
+    HTTP v1 API uses OAuth 2.0 authentication with service account credentials.
+    """
     def __init__(self, config: PushConfig) -> None:
         super().__init__(config)
         self._push_config = config
+        self._access_token: str | None = None
+        self._token_expiry: datetime | None = None
 
     @property
     def channel_type(self) -> ChannelType:
         return ChannelType.PUSH
+
+    async def _get_access_token(self) -> str:
+        """
+        Get OAuth 2.0 access token for FCM HTTP v1 API.
+
+        Uses Google service account credentials to obtain an access token.
+        Tokens are cached until near expiry.
+        """
+        # Check if we have a valid cached token
+        if self._access_token and self._token_expiry:
+            if datetime.now(timezone.utc) < self._token_expiry:
+                return self._access_token
+
+        if not self._push_config.service_account_file:
+            raise DeliveryError(
+                self.channel_type,
+                "service_account",
+                "service_account_file is required for HTTP v1 API"
+            )
+
+        try:
+            # Try to use google-auth library for OAuth2
+            from google.oauth2 import service_account
+            from google.auth.transport.requests import Request
+
+            credentials = service_account.Credentials.from_service_account_file(
+                self._push_config.service_account_file,
+                scopes=['https://www.googleapis.com/auth/firebase.messaging']
+            )
+            credentials.refresh(Request())
+
+            self._access_token = credentials.token
+            # Set expiry to 5 minutes before actual expiry for safety margin
+            if credentials.expiry:
+                self._token_expiry = credentials.expiry.replace(tzinfo=timezone.utc) - timedelta(minutes=5)
+            else:
+                # Default 55 minute expiry (FCM tokens last 1 hour)
+                self._token_expiry = datetime.now(timezone.utc) + timedelta(minutes=55)
+
+            return self._access_token
+
+        except ImportError:
+            logger.warning(
+                "google_auth_not_installed",
+                message="google-auth library not installed. Install with: pip install google-auth"
+            )
+            raise DeliveryError(
+                self.channel_type,
+                "google_auth",
+                "google-auth library required for HTTP v1 API. Install with: pip install google-auth"
+            )
+        except Exception as e:
+            raise DeliveryError(self.channel_type, "auth", f"Failed to get access token: {e}") from e
 
     async def _deliver(
         self,
@@ -319,12 +463,109 @@ class PushChannel(NotificationChannel):
         html_body: str | None,
         metadata: dict[str, Any],
     ) -> DeliveryResult:
-        """Send push notification via Firebase-compatible API."""
+        """Send push notification via FCM."""
+        if self._push_config.use_v1_api:
+            return await self._deliver_v1(recipient, subject, body, metadata)
+        else:
+            return await self._deliver_legacy(recipient, subject, body, metadata)
+
+    async def _deliver_v1(
+        self,
+        recipient: str,
+        subject: str,
+        body: str,
+        metadata: dict[str, Any],
+    ) -> DeliveryResult:
+        """Send push notification via FCM HTTP v1 API (recommended)."""
+        if not self._push_config.project_id:
+            raise DeliveryError(
+                self.channel_type,
+                recipient,
+                "project_id is required for HTTP v1 API"
+            )
+
+        access_token = await self._get_access_token()
+
+        # FCM HTTP v1 API endpoint
+        url = f"https://fcm.googleapis.com/v1/projects/{self._push_config.project_id}/messages:send"
+
+        # HTTP v1 API payload format
+        payload = {
+            "message": {
+                "token": recipient,
+                "notification": {
+                    "title": subject[:100],  # v1 API title limit
+                    "body": body[:4096],  # v1 API body limit
+                },
+                "data": {k: str(v) for k, v in metadata.items()},  # v1 API requires string values
+            }
+        }
+
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
+
+        async with httpx.AsyncClient(timeout=self._push_config.timeout_seconds) as client:
+            try:
+                response = await client.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+
+                # v1 API returns message name on success
+                message_name = data.get("name", "")
+                return DeliveryResult(
+                    channel_type=self.channel_type,
+                    recipient=recipient,
+                    success=True,
+                    message_id=message_name.split("/")[-1] if message_name else None,
+                    metadata=metadata,
+                )
+            except httpx.HTTPStatusError as e:
+                error_detail = ""
+                try:
+                    error_data = e.response.json()
+                    error_detail = error_data.get("error", {}).get("message", str(e))
+                except Exception:
+                    error_detail = e.response.text[:200] if e.response.text else str(e)
+                raise DeliveryError(
+                    self.channel_type,
+                    recipient,
+                    f"HTTP {e.response.status_code}: {error_detail}"
+                ) from e
+            except Exception as e:
+                raise DeliveryError(self.channel_type, recipient, str(e)) from e
+
+    async def _deliver_legacy(
+        self,
+        recipient: str,
+        subject: str,
+        body: str,
+        metadata: dict[str, Any],
+    ) -> DeliveryResult:
+        """
+        Send push notification via legacy FCM API.
+
+        DEPRECATED: This method uses the legacy FCM API which will be removed by Google.
+        Migrate to HTTP v1 API by setting use_v1_api=True and providing service_account_file.
+        """
+        logger.warning(
+            "fcm_legacy_api_deprecated",
+            message="Using deprecated FCM legacy API. Please migrate to HTTP v1 API."
+        )
+
+        if not self._push_config.server_key:
+            raise DeliveryError(
+                self.channel_type,
+                recipient,
+                "server_key is required for legacy API"
+            )
+
         payload = {
             "to": recipient,
             "notification": {
                 "title": subject,
-                "body": body[:4096],  # FCM body limit
+                "body": body[:4096],
             },
             "data": metadata,
         }

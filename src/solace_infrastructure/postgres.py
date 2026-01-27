@@ -305,12 +305,33 @@ class PostgresRepository:
         query = f"SELECT EXISTS(SELECT 1 FROM {self.qualified_table} WHERE id = $1)"
         return await self._client.fetch_val(query, entity_id)
 
-    async def count(self, where: str | None = None, *args: Any) -> int:
-        """Count entities with optional filter."""
+    async def count(self, filters: dict[str, Any] | None = None) -> int:
+        """Count entities with optional filter.
+
+        Args:
+            filters: Dictionary of column names to values for WHERE clause.
+                    All conditions are ANDed together with equality checks.
+                    Column names are validated to prevent SQL injection.
+
+        Returns:
+            Count of matching records.
+
+        Raises:
+            ValueError: If any column name contains invalid characters.
+        """
         query = f"SELECT COUNT(*) FROM {self.qualified_table}"
-        if where:
-            query += f" WHERE {where}"
-        return await self._client.fetch_val(query, *args)
+        if filters:
+            conditions = []
+            values = []
+            for i, (column, value) in enumerate(filters.items(), start=1):
+                # Validate column name to prevent SQL injection
+                if not _is_valid_identifier(column):
+                    raise ValueError(f"Invalid column name: {column}")
+                conditions.append(f"{column} = ${i}")
+                values.append(value)
+            query += " WHERE " + " AND ".join(conditions)
+            return await self._client.fetch_val(query, *values)
+        return await self._client.fetch_val(query)
 
     async def insert(self, data: dict[str, Any]) -> dict[str, Any] | None:
         """Insert entity and return created record."""
@@ -361,6 +382,29 @@ def _truncate_query(query: str, max_length: int = 200) -> str:
     """Truncate query for logging purposes."""
     query = " ".join(query.split())
     return query[:max_length] + "..." if len(query) > max_length else query
+
+
+import re
+
+# Pattern for valid SQL identifiers (letters, digits, underscore, starting with letter/underscore)
+_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+def _is_valid_identifier(name: str) -> bool:
+    """Validate that a string is a safe SQL identifier.
+
+    Prevents SQL injection by ensuring column/table names only contain
+    alphanumeric characters and underscores, and start with a letter or underscore.
+
+    Args:
+        name: The identifier to validate.
+
+    Returns:
+        True if the identifier is safe to use in SQL queries.
+    """
+    if not name or len(name) > 128:  # PostgreSQL identifier limit is 63, but be generous
+        return False
+    return _IDENTIFIER_PATTERN.match(name) is not None
 
 
 async def create_postgres_client(

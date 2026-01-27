@@ -1,0 +1,485 @@
+# Solace-AI Docker Compose Configuration
+# Local development environment with all infrastructure components
+#
+# Usage:
+#   docker-compose up -d                    # Start all services
+#   docker-compose up -d postgres redis     # Start only infrastructure
+#   docker-compose logs -f kafka            # View Kafka logs
+#   docker-compose down -v                  # Stop and remove volumes
+#
+# Environment variables should be set in a .env file (see .env.example)
+
+version: '3.8'
+
+services:
+  # =============================================================================
+  # INFRASTRUCTURE SERVICES
+  # =============================================================================
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: solace-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DATABASE:-solace}
+      POSTGRES_USER: ${POSTGRES_USER:-solace}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-solace_dev_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/init-db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-solace} -d ${POSTGRES_DATABASE:-solace}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - solace-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: solace-redis
+    command: redis-server --appendonly yes ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - solace-network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: solace-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_logs:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - solace-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: solace-kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports:
+      - "29092:29092"
+      - "9092:9092"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - solace-network
+
+  weaviate:
+    image: semitechnologies/weaviate:1.22.4
+    container_name: solace-weaviate
+    environment:
+      QUERY_DEFAULTS_LIMIT: 25
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      PERSISTENCE_DATA_PATH: "/var/lib/weaviate"
+      DEFAULT_VECTORIZER_MODULE: "none"
+      ENABLE_MODULES: ""
+      CLUSTER_HOSTNAME: "node1"
+    ports:
+      - "${WEAVIATE_PORT:-8080}:8080"
+    volumes:
+      - weaviate_data:/var/lib/weaviate
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/.well-known/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - solace-network
+
+  # =============================================================================
+  # OBSERVABILITY STACK
+  # =============================================================================
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.51
+    container_name: solace-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317:4317"     # OTLP gRPC
+      - "4318:4318"     # OTLP HTTP
+      - "6831:6831/udp" # Thrift compact
+    restart: unless-stopped
+    networks:
+      - solace-network
+
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: solace-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    restart: unless-stopped
+    networks:
+      - solace-network
+
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: solace-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - solace-network
+
+  # =============================================================================
+  # APPLICATION SERVICES
+  # =============================================================================
+
+  user-service:
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile
+    container_name: solace-user-service
+    environment:
+      USER_SERVICE_ENV: development
+      USER_SERVICE_PORT: 8001
+      USER_SERVICE_JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+      USER_SERVICE_FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:-dev-encryption-key-32-characters}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: solace
+      DB_USER: ${POSTGRES_USER:-solace}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-solace_dev_password}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SECURITY_JWT_SECRET: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - solace-network
+
+  safety-service:
+    build:
+      context: ./services/safety_service
+      dockerfile: Dockerfile
+    container_name: solace-safety-service
+    environment:
+      SAFETY_SERVICE_ENV: development
+      SAFETY_SERVICE_PORT: 8002
+      ESCALATION_NOTIFICATION_SERVICE_URL: http://notification-service:8003
+      DB_HOST: postgres
+      DB_PORT: 5432
+      REDIS_HOST: redis
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - solace-network
+
+  notification-service:
+    build:
+      context: ./services/notification-service
+      dockerfile: Dockerfile
+    container_name: solace-notification-service
+    environment:
+      NOTIFICATION_SERVICE_ENV: development
+      NOTIFICATION_SERVICE_PORT: 8003
+      EMAIL_ENABLED: "true"
+      EMAIL_SMTP_HOST: ${SMTP_HOST:-mailhog}
+      EMAIL_SMTP_PORT: ${SMTP_PORT:-1025}
+      SMS_ENABLED: "false"
+      PUSH_ENABLED: "false"
+      AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+    ports:
+      - "8003:8003"
+    depends_on:
+      - mailhog
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - solace-network
+
+  diagnosis-service:
+    build:
+      context: ./services/diagnosis_service
+      dockerfile: Dockerfile
+    container_name: solace-diagnosis-service
+    environment:
+      DIAGNOSIS_SERVICE_ENV: development
+      DIAGNOSIS_SERVICE_PORT: 8004
+      DB_HOST: postgres
+      REDIS_HOST: redis
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+    ports:
+      - "8004:8004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - solace-network
+
+  memory-service:
+    build:
+      context: ./services/memory_service
+      dockerfile: Dockerfile
+    container_name: solace-memory-service
+    environment:
+      MEMORY_SERVICE_ENV: development
+      MEMORY_SERVICE_PORT: 8005
+      DB_HOST: postgres
+      REDIS_HOST: redis
+      WEAVIATE_HOST: weaviate
+      WEAVIATE_PORT: 8080
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+    ports:
+      - "8005:8005"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      weaviate:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - solace-network
+
+  therapy-service:
+    build:
+      context: ./services/therapy_service
+      dockerfile: Dockerfile
+    container_name: solace-therapy-service
+    environment:
+      THERAPY_SERVICE_ENV: development
+      THERAPY_SERVICE_PORT: 8006
+      DB_HOST: postgres
+      REDIS_HOST: redis
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+    ports:
+      - "8006:8006"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - solace-network
+
+  personality-service:
+    build:
+      context: ./services/personality_service
+      dockerfile: Dockerfile
+    container_name: solace-personality-service
+    environment:
+      PERSONALITY_SERVICE_ENV: development
+      PERSONALITY_SERVICE_PORT: 8007
+      DB_HOST: postgres
+      REDIS_HOST: redis
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+    ports:
+      - "8007:8007"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - solace-network
+
+  orchestrator-service:
+    build:
+      context: ./services/orchestrator_service
+      dockerfile: Dockerfile
+    container_name: solace-orchestrator-service
+    environment:
+      ORCHESTRATOR_SERVICE_ENV: development
+      ORCHESTRATOR_SERVICE_PORT: 8000
+      PERSONALITY_SERVICE_URL: http://personality-service:8007
+      DIAGNOSIS_SERVICE_URL: http://diagnosis-service:8004
+      THERAPY_SERVICE_URL: http://therapy-service:8006
+      MEMORY_SERVICE_URL: http://memory-service:8005
+      SAFETY_SERVICE_URL: http://safety-service:8002
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - safety-service
+      - memory-service
+      - therapy-service
+      - diagnosis-service
+      - personality-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - solace-network
+
+  # =============================================================================
+  # DEVELOPMENT TOOLS
+  # =============================================================================
+
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    container_name: solace-mailhog
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # Web UI
+    restart: unless-stopped
+    networks:
+      - solace-network
+
+  # Kafka UI for development
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: solace-kafka-ui
+    environment:
+      KAFKA_CLUSTERS_0_NAME: solace-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    ports:
+      - "8081:8080"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - solace-network
+
+# =============================================================================
+# VOLUMES
+# =============================================================================
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  kafka_data:
+    driver: local
+  zookeeper_data:
+    driver: local
+  zookeeper_logs:
+    driver: local
+  weaviate_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+# =============================================================================
+# NETWORKS
+# =============================================================================
+
+networks:
+  solace-network:
+    driver: bridge
+    name: solace-network
