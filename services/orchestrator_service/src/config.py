@@ -23,11 +23,15 @@ class Environment(str, Enum):
 
 class ServiceEndpoints(BaseSettings):
     """External service endpoint configuration."""
+    safety_service_url: str = Field(default="http://localhost:8001")
     personality_service_url: str = Field(default="http://localhost:8002")
     diagnosis_service_url: str = Field(default="http://localhost:8003")
-    treatment_service_url: str = Field(default="http://localhost:8004")
+    therapy_service_url: str = Field(default="http://localhost:8004")
     memory_service_url: str = Field(default="http://localhost:8005")
     user_service_url: str = Field(default="http://localhost:8006")
+    notification_service_url: str = Field(default="http://localhost:8007")
+    # Legacy alias for treatment service (therapy service)
+    treatment_service_url: str = Field(default="http://localhost:8004")
     model_config = SettingsConfigDict(env_prefix="SERVICE_", env_file=".env", extra="ignore")
 
 

@@ -215,20 +215,61 @@ class DiagnosisServiceClient(BaseServiceClient):
         return await self.post(f"/api/v1/diagnosis/{user_id}/symptoms", {"symptoms": symptoms})
 
 
-class TreatmentServiceClient(BaseServiceClient):
-    """Client for Treatment Service."""
+class TherapyServiceClient(BaseServiceClient):
+    """Client for Therapy Service."""
 
     def __init__(self, endpoints: ServiceEndpoints | None = None) -> None:
         eps = endpoints or get_config().endpoints()
-        super().__init__(ClientConfig(base_url=eps.treatment_service_url))
+        super().__init__(ClientConfig(base_url=eps.therapy_service_url))
+
+    async def process_message(
+        self,
+        session_id: UUID,
+        user_id: UUID,
+        message: str,
+        conversation_history: list[dict[str, Any]] | None = None,
+    ) -> ServiceResponse[dict[str, Any]]:
+        """Process a message in the therapy session."""
+        return await self.post(
+            f"/api/v1/therapy/sessions/{session_id}/message",
+            {
+                "session_id": str(session_id),
+                "user_id": str(user_id),
+                "message": message,
+                "conversation_history": conversation_history or [],
+            },
+        )
+
+    async def get_techniques(self, modality: str | None = None) -> ServiceResponse[dict[str, Any]]:
+        """Get available therapeutic techniques."""
+        params = {"modality": modality} if modality else None
+        return await self.get("/api/v1/therapy/techniques", params)
+
+    async def start_session(self, user_id: UUID) -> ServiceResponse[dict[str, Any]]:
+        """Start a new therapy session."""
+        return await self.post("/api/v1/therapy/sessions", {"user_id": str(user_id)})
+
+    async def end_session(self, session_id: UUID) -> ServiceResponse[dict[str, Any]]:
+        """End a therapy session."""
+        return await self.post(f"/api/v1/therapy/sessions/{session_id}/end", {})
+
+
+# Alias for backwards compatibility
+class TreatmentServiceClient(TherapyServiceClient):
+    """Client for Treatment Service (alias for TherapyServiceClient)."""
+
+    def __init__(self, endpoints: ServiceEndpoints | None = None) -> None:
+        eps = endpoints or get_config().endpoints()
+        # Use treatment_service_url for backwards compatibility
+        BaseServiceClient.__init__(self, ClientConfig(base_url=eps.treatment_service_url))
 
     async def get_plan(self, user_id: UUID) -> ServiceResponse[dict[str, Any]]:
         """Get treatment plan for user."""
-        return await self.get(f"/api/v1/treatment/{user_id}/plan")
+        return await self.get(f"/api/v1/therapy/{user_id}/plan")
 
     async def get_interventions(self, user_id: UUID, context: str) -> ServiceResponse[dict[str, Any]]:
         """Get recommended interventions."""
-        return await self.post(f"/api/v1/treatment/{user_id}/interventions", {"context": context})
+        return await self.post(f"/api/v1/therapy/{user_id}/interventions", {"context": context})
 
 
 class MemoryServiceClient(BaseServiceClient):
@@ -245,6 +286,72 @@ class MemoryServiceClient(BaseServiceClient):
     async def store_memory(self, user_id: UUID, content: str, memory_type: str) -> ServiceResponse[dict[str, Any]]:
         """Store memory entry."""
         return await self.post(f"/api/v1/memory/{user_id}/store", {"content": content, "type": memory_type})
+
+    async def assemble_context(
+        self,
+        user_id: UUID,
+        session_id: UUID,
+        current_message: str,
+        token_budget: int = 4000,
+    ) -> ServiceResponse[dict[str, Any]]:
+        """Assemble context for LLM within token budget."""
+        return await self.post(
+            "/api/v1/memory/context",
+            {
+                "user_id": str(user_id),
+                "session_id": str(session_id),
+                "current_message": current_message,
+                "token_budget": token_budget,
+            },
+        )
+
+
+class SafetyServiceClient(BaseServiceClient):
+    """Client for Safety Service."""
+
+    def __init__(self, endpoints: ServiceEndpoints | None = None) -> None:
+        eps = endpoints or get_config().endpoints()
+        super().__init__(ClientConfig(base_url=eps.safety_service_url))
+
+    async def check_safety(
+        self,
+        user_id: UUID,
+        session_id: UUID,
+        message: str,
+        check_type: str = "FULL_ASSESSMENT",
+    ) -> ServiceResponse[dict[str, Any]]:
+        """Perform safety check on message content."""
+        return await self.post(
+            "/api/v1/safety/check",
+            {
+                "user_id": str(user_id),
+                "session_id": str(session_id),
+                "content": message,
+                "check_type": check_type,
+            },
+        )
+
+    async def get_crisis_resources(self, severity: str) -> ServiceResponse[dict[str, Any]]:
+        """Get crisis resources for given severity level."""
+        return await self.get("/api/v1/safety/resources", {"severity": severity})
+
+    async def trigger_escalation(
+        self,
+        user_id: UUID,
+        session_id: UUID,
+        crisis_level: str,
+        reason: str,
+    ) -> ServiceResponse[dict[str, Any]]:
+        """Trigger escalation for crisis situation."""
+        return await self.post(
+            "/api/v1/safety/escalate",
+            {
+                "user_id": str(user_id),
+                "session_id": str(session_id),
+                "crisis_level": crisis_level,
+                "reason": reason,
+            },
+        )
 
 
 class ServiceClientFactory:
@@ -267,16 +374,28 @@ class ServiceClientFactory:
         return self._clients["diagnosis"]  # type: ignore
 
     def treatment(self) -> TreatmentServiceClient:
-        """Get treatment service client."""
+        """Get treatment service client (alias for therapy)."""
         if "treatment" not in self._clients:
             self._clients["treatment"] = TreatmentServiceClient(self._endpoints)
         return self._clients["treatment"]  # type: ignore
+
+    def therapy(self) -> TherapyServiceClient:
+        """Get therapy service client."""
+        if "therapy" not in self._clients:
+            self._clients["therapy"] = TherapyServiceClient(self._endpoints)
+        return self._clients["therapy"]  # type: ignore
 
     def memory(self) -> MemoryServiceClient:
         """Get memory service client."""
         if "memory" not in self._clients:
             self._clients["memory"] = MemoryServiceClient(self._endpoints)
         return self._clients["memory"]  # type: ignore
+
+    def safety(self) -> SafetyServiceClient:
+        """Get safety service client."""
+        if "safety" not in self._clients:
+            self._clients["safety"] = SafetyServiceClient(self._endpoints)
+        return self._clients["safety"]  # type: ignore
 
     async def close_all(self) -> None:
         """Close all clients."""

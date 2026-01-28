@@ -35,6 +35,10 @@ class TherapyServiceAppSettings(BaseSettings):
     enable_tracing: bool = Field(default=True)
     hybrid_mode: bool = Field(default=True)
     enable_stepped_care: bool = Field(default=True)
+    # Kafka event publishing configuration
+    kafka_enabled: bool = Field(default=False)
+    kafka_bootstrap_servers: str = Field(default="localhost:29092")
+    kafka_use_mock: bool = Field(default=False)
     model_config = SettingsConfigDict(env_prefix="THERAPY_", env_file=".env", extra="ignore")
 
     @property
@@ -73,20 +77,38 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = TherapyServiceAppSettings()
     configure_logging(settings)
     logger.info("therapy_service_starting", environment=settings.environment,
-                host=settings.host, port=settings.port, version=settings.version)
+                host=settings.host, port=settings.port, version=settings.version,
+                kafka_enabled=settings.kafka_enabled)
     from .domain.service import TherapyOrchestrator, TherapyOrchestratorSettings
     from .domain.technique_selector import TechniqueSelector, TechniqueSelectorSettings
     from .domain.session_manager import SessionManager, SessionManagerSettings
+    from .events import EventBus
     from services.shared.infrastructure import UnifiedLLMClient, LLMClientSettings
     technique_selector = TechniqueSelector(TechniqueSelectorSettings())
     session_manager = SessionManager(SessionManagerSettings())
     llm_client = UnifiedLLMClient(LLMClientSettings())
     await llm_client.initialize()
+
+    # Create event bus for domain events
+    event_bus = EventBus()
+
+    # Initialize context assembler for Memory Service integration
+    context_assembler = None
+    try:
+        from .infrastructure.context_assembler import ContextAssembler, ContextAssemblerSettings
+        context_settings = ContextAssemblerSettings()
+        context_assembler = ContextAssembler(context_settings)
+        logger.info("context_assembler_initialized", memory_service_url=context_settings.memory_service_url)
+    except Exception as e:
+        logger.warning("context_assembler_init_failed", error=str(e))
+
     therapy_orchestrator = TherapyOrchestrator(
         settings=TherapyOrchestratorSettings(),
         technique_selector=technique_selector,
         session_manager=session_manager,
         llm_client=llm_client,
+        event_bus=event_bus,
+        context_assembler=context_assembler,
     )
     await therapy_orchestrator.initialize()
     app.state.settings = settings
@@ -94,10 +116,47 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.technique_selector = technique_selector
     app.state.session_manager = session_manager
     app.state.llm_client = llm_client
+    app.state.event_bus = event_bus
+
+    # Initialize Kafka event bridge if enabled
+    event_bridge = None
+    if settings.kafka_enabled:
+        try:
+            from .infrastructure.event_bridge import initialize_event_bridge
+            # Build Kafka settings if solace_events is available
+            kafka_settings = None
+            try:
+                from solace_events.config import KafkaSettings
+                kafka_settings = KafkaSettings(
+                    bootstrap_servers=settings.kafka_bootstrap_servers,
+                )
+            except ImportError:
+                logger.warning("solace_events_not_available", reason="Cannot configure Kafka settings")
+
+            event_bridge = await initialize_event_bridge(
+                event_bus=event_bus,
+                kafka_settings=kafka_settings,
+                use_mock=settings.kafka_use_mock,
+            )
+            app.state.event_bridge = event_bridge
+            logger.info("kafka_event_bridge_started")
+        except Exception as e:
+            logger.error("kafka_event_bridge_start_failed", error=str(e))
+
     logger.info("therapy_service_started", environment=settings.environment,
                 hybrid_mode=settings.hybrid_mode, stepped_care=settings.enable_stepped_care)
     yield
     logger.info("therapy_service_stopping")
+
+    # Shutdown event bridge
+    if event_bridge:
+        try:
+            from .infrastructure.event_bridge import shutdown_event_bridge
+            await shutdown_event_bridge()
+            logger.info("kafka_event_bridge_stopped")
+        except Exception as e:
+            logger.error("kafka_event_bridge_stop_failed", error=str(e))
+
     await therapy_orchestrator.shutdown()
     await llm_client.shutdown()
     logger.info("therapy_service_stopped")

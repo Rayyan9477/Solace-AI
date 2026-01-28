@@ -74,12 +74,23 @@ class PushConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="PUSH_", env_file=".env", extra="ignore")
 
 
+class KafkaConfig(BaseSettings):
+    """Kafka configuration for event consumption."""
+    enabled: bool = Field(default=False)
+    bootstrap_servers: str = Field(default="localhost:29092")
+    consumer_group_id: str = Field(default="notification-service-safety-consumer")
+    use_mock: bool = Field(default=False)
+
+    model_config = SettingsConfigDict(env_prefix="KAFKA_", env_file=".env", extra="ignore")
+
+
 class NotificationServiceSettings(BaseSettings):
     """Aggregate notification service settings."""
     service: ServiceConfig = Field(default_factory=ServiceConfig)
     email: EmailConfig = Field(default_factory=EmailConfig)
     sms: SMSConfig = Field(default_factory=SMSConfig)
     push: PushConfig = Field(default_factory=PushConfig)
+    kafka: KafkaConfig = Field(default_factory=KafkaConfig)
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -153,12 +164,46 @@ async def lifespan(app: FastAPI):
                env=settings.service.env,
                email_enabled=settings.email.enabled,
                sms_enabled=settings.sms.enabled,
-               push_enabled=settings.push.enabled)
+               push_enabled=settings.push.enabled,
+               kafka_enabled=settings.kafka.enabled)
 
     _notification_service = _create_notification_service(settings)
     logger.info("notification_service_ready")
 
+    # Start Kafka safety event consumer if enabled
+    safety_consumer = None
+    if settings.kafka.enabled:
+        try:
+            from .consumers import initialize_safety_consumer, shutdown_safety_consumer
+            # Build Kafka settings if solace_events is available
+            kafka_settings = None
+            try:
+                from solace_events.config import KafkaSettings
+                kafka_settings = KafkaSettings(
+                    bootstrap_servers=settings.kafka.bootstrap_servers,
+                )
+            except ImportError:
+                logger.warning("solace_events_not_available", reason="Cannot configure Kafka settings")
+
+            safety_consumer = await initialize_safety_consumer(
+                notification_service=_notification_service,
+                kafka_settings=kafka_settings,
+                use_mock=settings.kafka.use_mock,
+            )
+            logger.info("safety_event_consumer_started")
+        except Exception as e:
+            logger.error("safety_consumer_start_failed", error=str(e))
+
     yield
+
+    # Stop Kafka consumer
+    if safety_consumer:
+        try:
+            from .consumers import shutdown_safety_consumer
+            await shutdown_safety_consumer()
+            logger.info("safety_event_consumer_stopped")
+        except Exception as e:
+            logger.error("safety_consumer_stop_failed", error=str(e))
 
     logger.info("notification_service_shutdown")
     _notification_service = None

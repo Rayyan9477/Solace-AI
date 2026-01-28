@@ -8,6 +8,13 @@ from services.shared.infrastructure import (
     LLM_SYSTEM_PROMPTS,
     get_llm_prompt,
 )
+from .context_assembler import (
+    ContextAssembler,
+    ContextAssemblerSettings,
+    MemoryContext,
+    get_context_assembler,
+    initialize_context_assembler,
+)
 
 
 # Therapy-specific aliases for backward compatibility
@@ -51,4 +58,10 @@ __all__ = [
     "get_llm_prompt",
     "get_therapy_prompt",
     "THERAPY_MODALITY_PROMPTS",
+    # Context assembly for Memory Service integration
+    "ContextAssembler",
+    "ContextAssemblerSettings",
+    "MemoryContext",
+    "get_context_assembler",
+    "initialize_context_assembler",
 ]

@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from .technique_selector import TechniqueSelector
     from .session_manager import SessionManager
     from services.shared.infrastructure import UnifiedLLMClient
+    from ..events import EventBus
+    from ..infrastructure.context_assembler import ContextAssembler
 
 logger = structlog.get_logger(__name__)
 
@@ -34,6 +36,9 @@ class TherapyOrchestratorSettings(BaseSettings):
     enable_homework_assignment: bool = Field(default=True)
     session_timeout_minutes: int = Field(default=60)
     enable_outcome_tracking: bool = Field(default=True)
+    # Enable context assembly from Memory Service
+    enable_context_assembly: bool = Field(default=True)
+    context_assembly_timeout_ms: int = Field(default=5000)
     model_config = SettingsConfigDict(env_prefix="THERAPY_ORCHESTRATOR_", env_file=".env", extra="ignore")
 
 
@@ -51,11 +56,15 @@ class TherapyOrchestrator:
         technique_selector: TechniqueSelector | None = None,
         session_manager: SessionManager | None = None,
         llm_client: UnifiedLLMClient | None = None,
+        event_bus: "EventBus | None" = None,
+        context_assembler: "ContextAssembler | None" = None,
     ) -> None:
         self._settings = settings or TherapyOrchestratorSettings()
         self._technique_selector = technique_selector
         self._session_manager = session_manager
         self._llm_client = llm_client
+        self._event_bus = event_bus
+        self._context_assembler = context_assembler
         self._treatment_plans: dict[UUID, TreatmentPlanDTO] = {}
         self._initialized = False
         self._stats = {
@@ -67,6 +76,8 @@ class TherapyOrchestrator:
             "homework_assigned": 0,
             "llm_responses": 0,
             "llm_fallbacks": 0,
+            "context_assembly_success": 0,
+            "context_assembly_fallback": 0,
         }
 
     async def initialize(self) -> None:
@@ -100,6 +111,18 @@ class TherapyOrchestrator:
         self._session_manager.transition_phase(session_id=session_id, target_phase=SessionPhase.OPENING, trigger="session_start")
         duration_ms = int((time.perf_counter() - start_time) * 1000)
         logger.info("session_start_completed", session_id=str(session_id), duration_ms=duration_ms)
+
+        # Publish session started event
+        if self._event_bus:
+            from ..events import SessionStartedEvent
+            event = SessionStartedEvent.create(
+                session_id=session_id,
+                user_id=user_id,
+                treatment_plan_id=treatment_plan_id,
+                session_number=session.session_number,
+            )
+            await self._event_bus.publish(event)
+
         return SessionStartResult(
             session_id=session_id, session_number=session.session_number, initial_message=initial_message,
             suggested_agenda=suggested_agenda, loaded_context=True,
@@ -139,6 +162,34 @@ class TherapyOrchestrator:
 
         self._session_manager.update_state(session_id, {"messages": {"role": "user", "content": message}})
 
+        # Assemble context from Memory Service if enabled
+        enriched_history = conversation_history
+        memory_context = None
+        if self._settings.enable_context_assembly and self._context_assembler:
+            try:
+                memory_context = await self._context_assembler.assemble(
+                    user_id=user_id,
+                    session_id=session_id,
+                    current_message=message,
+                )
+                enriched_history = await self._context_assembler.enrich_conversation_history(
+                    user_id=user_id,
+                    session_id=session_id,
+                    conversation_history=conversation_history,
+                    current_message=message,
+                )
+                self._stats["context_assembly_success"] += 1
+                logger.debug(
+                    "context_assembled_for_message",
+                    session_id=str(session_id),
+                    total_tokens=memory_context.total_tokens if memory_context else 0,
+                    assembly_time_ms=memory_context.assembly_time_ms if memory_context else 0,
+                )
+            except Exception as e:
+                logger.warning("context_assembly_failed", error=str(e), session_id=str(session_id))
+                self._stats["context_assembly_fallback"] += 1
+                # Continue with original conversation history
+
         safety_result = await self._check_safety(message, session)
         if safety_result["crisis_detected"]:
             return await self._handle_crisis(session_id, safety_result)
@@ -151,7 +202,7 @@ class TherapyOrchestrator:
             session=session,
             message=message,
             treatment_plan=treatment_plan,
-            conversation_history=conversation_history,
+            conversation_history=enriched_history,
         )
 
         response_text = await self._generate_response(
@@ -159,7 +210,7 @@ class TherapyOrchestrator:
             message=message,
             technique=technique_result.get("technique"),
             treatment_plan=treatment_plan,
-            conversation_history=conversation_history,
+            conversation_history=enriched_history,
         )
 
         homework = None
@@ -204,6 +255,21 @@ class TherapyOrchestrator:
         duration_minutes = int(duration.total_seconds() / 60)
         summary = ResponseGenerator.generate_session_summary(session, duration_minutes) if generate_summary else None
         recommendations = ResponseGenerator.generate_recommendations(session)
+
+        # Publish session ended event before deleting session
+        if self._event_bus:
+            from ..events import SessionEndedEvent
+            techniques_count = len(session.techniques_used) if hasattr(session, 'techniques_used') else 0
+            skills_practiced = session.skills_practiced if hasattr(session, 'skills_practiced') else []
+            event = SessionEndedEvent.create(
+                session_id=session_id,
+                user_id=user_id,
+                duration_minutes=duration_minutes,
+                techniques_count=techniques_count,
+                skills_practiced=skills_practiced,
+            )
+            await self._event_bus.publish(event)
+
         self._session_manager.delete_session(session_id)
         logger.info("session_end_completed", session_id=str(session_id), duration_minutes=duration_minutes)
         return SessionEndResult(summary=summary, duration_minutes=duration_minutes, recommendations=recommendations)

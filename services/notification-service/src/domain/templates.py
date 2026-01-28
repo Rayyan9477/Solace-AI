@@ -33,6 +33,10 @@ class TemplateType(str, Enum):
     SESSION_SUMMARY = "session_summary"
     CONSENT_REQUEST = "consent_request"
     SYSTEM_ALERT = "system_alert"
+    # Safety event-driven templates
+    CRISIS_ALERT = "crisis_alert"
+    ESCALATION_ALERT = "escalation_alert"
+    RISK_ALERT = "risk_alert"
 
 
 class TemplateNotFoundError(Exception):
@@ -255,6 +259,36 @@ class TemplateRegistry:
                 subject_template="[{{ severity }}] System Alert: {{ alert_title }}",
                 body_template="System Alert\n\nSeverity: {{ severity }}\nTitle: {{ alert_title }}\nDetails: {{ alert_message }}\nTime: {{ timestamp }}\n\nAction: {{ action_required }}",
                 required_variables=["severity", "alert_title", "alert_message", "timestamp", "action_required"],
+            ),
+            # Safety event-driven templates
+            NotificationTemplate(
+                template_type=TemplateType.CRISIS_ALERT,
+                name="Crisis Alert",
+                description="Automated crisis detection alert from safety service",
+                subject_template="🚨 CRISIS DETECTED [{{ crisis_level }}] - User {{ user_id }}",
+                body_template="CRISIS ALERT\n\n⚠️ Crisis Level: {{ crisis_level }}\n📊 Confidence: {{ confidence }}\n🔍 Detection Layer: {{ detection_layer }}\n\nUser ID: {{ user_id }}\nSession ID: {{ session_id }}\n\nTrigger Indicators:\n{{ trigger_indicators }}\n\nRecommended Action: {{ escalation_action }}\nRequires Human Review: {{ requires_human_review }}\n\nTime: {{ timestamp }}\n\n---\nThis is an automated alert from Solace-AI Safety Service.",
+                html_template="<div style='font-family:sans-serif;max-width:600px;'><h2 style='color:#d32f2f;'>🚨 CRISIS ALERT</h2><table style='width:100%;border-collapse:collapse;'><tr><td style='padding:8px;border:1px solid #ddd;'><strong>Crisis Level</strong></td><td style='padding:8px;border:1px solid #ddd;color:#d32f2f;font-weight:bold;'>{{ crisis_level }}</td></tr><tr><td style='padding:8px;border:1px solid #ddd;'><strong>Confidence</strong></td><td style='padding:8px;border:1px solid #ddd;'>{{ confidence }}</td></tr><tr><td style='padding:8px;border:1px solid #ddd;'><strong>User ID</strong></td><td style='padding:8px;border:1px solid #ddd;'>{{ user_id }}</td></tr><tr><td style='padding:8px;border:1px solid #ddd;'><strong>Session ID</strong></td><td style='padding:8px;border:1px solid #ddd;'>{{ session_id }}</td></tr></table><h3>Trigger Indicators</h3><p>{{ trigger_indicators }}</p><p><strong>Recommended Action:</strong> {{ escalation_action }}</p><p><strong>Human Review Required:</strong> {{ requires_human_review }}</p><p style='color:#666;font-size:12px;margin-top:20px;'>Timestamp: {{ timestamp }}</p></div>",
+                required_variables=["crisis_level", "user_id", "session_id", "trigger_indicators", "confidence", "escalation_action", "requires_human_review", "timestamp"],
+                default_values={"detection_layer": "1"},
+            ),
+            NotificationTemplate(
+                template_type=TemplateType.ESCALATION_ALERT,
+                name="Escalation Alert",
+                description="Case escalation notification to clinicians",
+                subject_template="⚡ ESCALATION [{{ priority }}] - Case Requires Attention",
+                body_template="ESCALATION ALERT\n\n🔴 Priority: {{ priority }}\n📝 Reason: {{ escalation_reason }}\n\nUser ID: {{ user_id }}\nSession ID: {{ session_id }}\nAssigned To: {{ assigned_clinician_id }}\n\nTime: {{ timestamp }}\n\n---\nPlease respond to this escalation immediately.\nThis is an automated alert from Solace-AI Safety Service.",
+                html_template="<div style='font-family:sans-serif;max-width:600px;'><h2 style='color:#ff5722;'>⚡ ESCALATION ALERT</h2><table style='width:100%;border-collapse:collapse;'><tr><td style='padding:8px;border:1px solid #ddd;'><strong>Priority</strong></td><td style='padding:8px;border:1px solid #ddd;color:#ff5722;font-weight:bold;'>{{ priority }}</td></tr><tr><td style='padding:8px;border:1px solid #ddd;'><strong>Reason</strong></td><td style='padding:8px;border:1px solid #ddd;'>{{ escalation_reason }}</td></tr><tr><td style='padding:8px;border:1px solid #ddd;'><strong>User ID</strong></td><td style='padding:8px;border:1px solid #ddd;'>{{ user_id }}</td></tr><tr><td style='padding:8px;border:1px solid #ddd;'><strong>Assigned To</strong></td><td style='padding:8px;border:1px solid #ddd;'>{{ assigned_clinician_id }}</td></tr></table><p style='color:#666;font-size:12px;margin-top:20px;'>Timestamp: {{ timestamp }}</p><p style='background:#fff3e0;padding:10px;border-radius:4px;'><strong>Please respond to this escalation immediately.</strong></p></div>",
+                required_variables=["priority", "escalation_reason", "user_id", "session_id", "assigned_clinician_id", "timestamp"],
+            ),
+            NotificationTemplate(
+                template_type=TemplateType.RISK_ALERT,
+                name="Risk Assessment Alert",
+                description="Elevated risk assessment monitoring notification",
+                subject_template="📈 Risk Alert [{{ risk_level }}] - User {{ user_id }}",
+                body_template="RISK MONITORING ALERT\n\n📊 Risk Level: {{ risk_level }}\n📈 Risk Score: {{ risk_score }}\n🔍 Detection Layer: {{ detection_layer }}\n\nUser ID: {{ user_id }}\nSession ID: {{ session_id }}\n\nRecommended Action: {{ recommended_action }}\n\nTime: {{ timestamp }}\n\n---\nThis is an automated monitoring alert from Solace-AI Safety Service.",
+                html_template="<div style='font-family:sans-serif;max-width:600px;'><h2 style='color:#ff9800;'>📈 RISK MONITORING ALERT</h2><table style='width:100%;border-collapse:collapse;'><tr><td style='padding:8px;border:1px solid #ddd;'><strong>Risk Level</strong></td><td style='padding:8px;border:1px solid #ddd;color:#ff9800;font-weight:bold;'>{{ risk_level }}</td></tr><tr><td style='padding:8px;border:1px solid #ddd;'><strong>Risk Score</strong></td><td style='padding:8px;border:1px solid #ddd;'>{{ risk_score }}</td></tr><tr><td style='padding:8px;border:1px solid #ddd;'><strong>User ID</strong></td><td style='padding:8px;border:1px solid #ddd;'>{{ user_id }}</td></tr><tr><td style='padding:8px;border:1px solid #ddd;'><strong>Session ID</strong></td><td style='padding:8px;border:1px solid #ddd;'>{{ session_id }}</td></tr></table><p><strong>Recommended Action:</strong> {{ recommended_action }}</p><p style='color:#666;font-size:12px;margin-top:20px;'>Timestamp: {{ timestamp }}</p></div>",
+                required_variables=["risk_level", "risk_score", "user_id", "session_id", "recommended_action", "timestamp"],
+                default_values={"detection_layer": "1"},
             ),
         ]
         for template in defaults:

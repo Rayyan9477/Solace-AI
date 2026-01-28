@@ -21,6 +21,59 @@ from .schemas import (
     UserProfileRequest, UserProfileResponse,
 )
 
+# Authentication dependencies from shared security library
+try:
+    from solace_security.middleware import (
+        AuthenticatedUser,
+        AuthenticatedService,
+        get_current_user,
+        get_current_user_optional,
+        get_current_service,
+        require_roles,
+        require_permissions,
+    )
+    from solace_security import Role, Permission
+except ImportError:
+    # Fallback for testing/development without security library
+    from dataclasses import dataclass
+    from typing import Optional
+
+    @dataclass
+    class AuthenticatedUser:
+        user_id: UUID
+        email: str
+        roles: list[str]
+        permissions: list[str]
+
+    @dataclass
+    class AuthenticatedService:
+        service_id: str
+        service_name: str
+        permissions: list[str]
+
+    async def get_current_user() -> AuthenticatedUser:
+        raise HTTPException(status_code=501, detail="Authentication not configured")
+
+    async def get_current_user_optional() -> Optional[AuthenticatedUser]:
+        return None
+
+    async def get_current_service() -> AuthenticatedService:
+        raise HTTPException(status_code=501, detail="Service auth not configured")
+
+    def require_roles(*roles):
+        return get_current_user
+
+    def require_permissions(*perms):
+        return get_current_user
+
+    class Role:
+        ADMIN = "admin"
+        CLINICIAN = "clinician"
+        USER = "user"
+
+    class Permission:
+        DELETE_USER_DATA = "delete:user_data"
+
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["memory"])
 
@@ -36,10 +89,15 @@ def get_memory_service(request: Request) -> MemoryService:
 @router.post("/store", response_model=StoreMemoryResponse, status_code=status.HTTP_201_CREATED)
 async def store_memory(
     request: StoreMemoryRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     memory_service: MemoryService = Depends(get_memory_service),
 ) -> StoreMemoryResponse:
     """Store a memory record to the specified tier."""
-    logger.info("store_memory_requested", user_id=str(request.user_id), tier=request.tier.value)
+    # Verify user can only store memories for themselves (unless clinician/admin)
+    if request.user_id != current_user.user_id and "clinician" not in current_user.roles and "admin" not in current_user.roles:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot store memories for other users")
+    logger.info("store_memory_requested", user_id=str(request.user_id), tier=request.tier.value,
+                authenticated_user=str(current_user.user_id))
     result = await memory_service.store_memory(
         user_id=request.user_id, session_id=request.session_id, content=request.content,
         content_type=request.content_type, tier=request.tier.value,
@@ -56,10 +114,15 @@ async def store_memory(
 @router.post("/retrieve", response_model=RetrieveMemoryResponse, status_code=status.HTTP_200_OK)
 async def retrieve_memories(
     request: RetrieveMemoryRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     memory_service: MemoryService = Depends(get_memory_service),
 ) -> RetrieveMemoryResponse:
     """Retrieve memories based on query and filters."""
-    logger.info("retrieve_memories_requested", user_id=str(request.user_id), query=request.query)
+    # Verify user can only retrieve their own memories (unless clinician/admin)
+    if request.user_id != current_user.user_id and "clinician" not in current_user.roles and "admin" not in current_user.roles:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot retrieve other user's memories")
+    logger.info("retrieve_memories_requested", user_id=str(request.user_id), query=request.query,
+                authenticated_user=str(current_user.user_id))
     result = await memory_service.retrieve_memories(
         user_id=request.user_id, session_id=request.session_id,
         tiers=[t.value for t in request.tiers] if request.tiers else None,
@@ -82,11 +145,15 @@ async def retrieve_memories(
 @router.post("/context", response_model=ContextAssemblyResponse, status_code=status.HTTP_200_OK)
 async def assemble_context(
     request: ContextAssemblyRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     memory_service: MemoryService = Depends(get_memory_service),
 ) -> ContextAssemblyResponse:
     """Assemble context for LLM within token budget."""
+    # Verify user can only access their own context (unless clinician/admin)
+    if request.user_id != current_user.user_id and "clinician" not in current_user.roles and "admin" not in current_user.roles:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot access other user's context")
     logger.info("context_assembly_requested", user_id=str(request.user_id),
-                token_budget=request.token_budget)
+                token_budget=request.token_budget, authenticated_user=str(current_user.user_id))
     result = await memory_service.assemble_context(
         user_id=request.user_id, session_id=request.session_id,
         current_message=request.current_message, token_budget=request.token_budget,
@@ -105,11 +172,15 @@ async def assemble_context(
 @router.post("/session/start", response_model=SessionStartResponse, status_code=status.HTTP_201_CREATED)
 async def start_session(
     request: SessionStartRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     memory_service: MemoryService = Depends(get_memory_service),
 ) -> SessionStartResponse:
     """Start a new session for user."""
+    # Verify user can only start sessions for themselves (unless clinician/admin)
+    if request.user_id != current_user.user_id and "clinician" not in current_user.roles and "admin" not in current_user.roles:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot start sessions for other users")
     logger.info("session_start_requested", user_id=str(request.user_id),
-                session_type=request.session_type)
+                session_type=request.session_type, authenticated_user=str(current_user.user_id))
     result = await memory_service.start_session(
         user_id=request.user_id, session_type=request.session_type,
         initial_context=request.initial_context,
@@ -125,11 +196,15 @@ async def start_session(
 @router.post("/session/end", response_model=SessionEndResponse, status_code=status.HTTP_200_OK)
 async def end_session(
     request: SessionEndRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     memory_service: MemoryService = Depends(get_memory_service),
 ) -> SessionEndResponse:
     """End a session and optionally trigger consolidation."""
+    # Verify user can only end their own sessions (unless clinician/admin)
+    if request.user_id != current_user.user_id and "clinician" not in current_user.roles and "admin" not in current_user.roles:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot end other user's sessions")
     logger.info("session_end_requested", user_id=str(request.user_id),
-                session_id=str(request.session_id))
+                session_id=str(request.session_id), authenticated_user=str(current_user.user_id))
     result = await memory_service.end_session(
         user_id=request.user_id, session_id=request.session_id,
         trigger_consolidation=request.trigger_consolidation,
@@ -146,11 +221,16 @@ async def end_session(
 @router.post("/session/message", response_model=AddMessageResponse, status_code=status.HTTP_201_CREATED)
 async def add_message(
     request: AddMessageRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     memory_service: MemoryService = Depends(get_memory_service),
 ) -> AddMessageResponse:
     """Add a message to the current session."""
+    # Verify user can only add messages to their own sessions (unless clinician/admin)
+    if request.user_id != current_user.user_id and "clinician" not in current_user.roles and "admin" not in current_user.roles:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot add messages to other user's sessions")
     logger.info("add_message_requested", user_id=str(request.user_id),
-                session_id=str(request.session_id), role=request.role)
+                session_id=str(request.session_id), role=request.role,
+                authenticated_user=str(current_user.user_id))
     result = await memory_service.add_message(
         user_id=request.user_id, session_id=request.session_id,
         role=request.role, content=request.content,
@@ -168,11 +248,15 @@ async def add_message(
 @router.post("/consolidate", response_model=ConsolidationResponse, status_code=status.HTTP_200_OK)
 async def trigger_consolidation(
     request: ConsolidationRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     memory_service: MemoryService = Depends(get_memory_service),
 ) -> ConsolidationResponse:
     """Trigger memory consolidation pipeline for a session."""
+    # Verify user can only consolidate their own sessions (unless clinician/admin)
+    if request.user_id != current_user.user_id and "clinician" not in current_user.roles and "admin" not in current_user.roles:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot consolidate other user's sessions")
     logger.info("consolidation_requested", user_id=str(request.user_id),
-                session_id=str(request.session_id))
+                session_id=str(request.session_id), authenticated_user=str(current_user.user_id))
     result = await memory_service.consolidate(
         user_id=request.user_id, session_id=request.session_id,
         extract_facts=request.extract_facts, generate_summary=request.generate_summary,
@@ -193,10 +277,14 @@ async def get_user_profile(
     include_knowledge_graph: bool = False,
     include_session_history: bool = True,
     session_limit: int = 10,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     memory_service: MemoryService = Depends(get_memory_service),
 ) -> UserProfileResponse:
     """Get user profile from memory."""
-    logger.info("user_profile_requested", user_id=str(user_id))
+    # Verify user can only access their own profile (unless clinician/admin)
+    if user_id != current_user.user_id and "clinician" not in current_user.roles and "admin" not in current_user.roles:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot access other user's profile")
+    logger.info("user_profile_requested", user_id=str(user_id), authenticated_user=str(current_user.user_id))
     result = await memory_service.get_user_profile(
         user_id=user_id, include_knowledge_graph=include_knowledge_graph,
         include_session_history=include_session_history, session_limit=session_limit,
@@ -222,9 +310,14 @@ async def get_service_status(
 @router.delete("/user/{user_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def delete_user_data(
     user_id: UUID,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     memory_service: MemoryService = Depends(get_memory_service),
 ) -> Response:
     """Delete all memory data for a user (GDPR compliance)."""
-    logger.info("user_data_deletion_requested", user_id=str(user_id))
+    # Only allow self-deletion or admin deletion
+    if user_id != current_user.user_id and "admin" not in current_user.roles:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot delete other user's data without admin role")
+    logger.info("user_data_deletion_requested", user_id=str(user_id),
+                authenticated_user=str(current_user.user_id))
     await memory_service.delete_user_data(user_id=user_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

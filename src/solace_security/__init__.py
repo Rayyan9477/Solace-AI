@@ -86,6 +86,18 @@ from solace_security.middleware import (
     CurrentUser,
     CurrentService,
 )
+from solace_security.service_auth import (
+    ServiceIdentity,
+    ServicePermission,
+    SERVICE_PERMISSIONS,
+    ServiceAuthSettings,
+    ServiceCredentials,
+    ServiceAuthResult,
+    ServiceTokenManager,
+    ServiceAuthenticatedClient,
+    get_service_token_manager,
+    initialize_service_auth,
+)
 
 __all__ = [
     # Auth
@@ -169,4 +181,15 @@ __all__ = [
     "require_service_permission",
     "CurrentUser",
     "CurrentService",
+    # Service-to-Service Authentication
+    "ServiceIdentity",
+    "ServicePermission",
+    "SERVICE_PERMISSIONS",
+    "ServiceAuthSettings",
+    "ServiceCredentials",
+    "ServiceAuthResult",
+    "ServiceTokenManager",
+    "ServiceAuthenticatedClient",
+    "get_service_token_manager",
+    "initialize_service_auth",
 ]

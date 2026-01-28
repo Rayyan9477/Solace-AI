@@ -32,6 +32,10 @@ class SafetyServiceAppSettings(BaseSettings):
     max_request_size_mb: int = Field(default=10)
     enable_metrics: bool = Field(default=True)
     enable_tracing: bool = Field(default=True)
+    # Kafka event publishing configuration
+    kafka_enabled: bool = Field(default=False)
+    kafka_bootstrap_servers: str = Field(default="localhost:29092")
+    kafka_use_mock: bool = Field(default=False)
     model_config = SettingsConfigDict(env_prefix="SAFETY_", env_file=".env", extra="ignore")
 
     @property
@@ -71,7 +75,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = SafetyServiceAppSettings()
     configure_logging(settings)
     logger.info("safety_service_starting", environment=settings.environment,
-                host=settings.host, port=settings.port, version=settings.version)
+                host=settings.host, port=settings.port, version=settings.version,
+                kafka_enabled=settings.kafka_enabled)
     from .domain.service import SafetyService, SafetyServiceSettings
     from .domain.crisis_detector import CrisisDetector, CrisisDetectorSettings
     from .domain.escalation import EscalationManager, EscalationSettings
@@ -87,9 +92,43 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.safety_service = safety_service
     app.state.crisis_detector = crisis_detector
     app.state.escalation_manager = escalation_manager
+
+    # Initialize Kafka event bridge for notification integration
+    notification_bridge = None
+    if settings.kafka_enabled:
+        try:
+            from .infrastructure.event_bridge import initialize_notification_bridge
+            # Build Kafka settings if solace_events is available
+            kafka_settings = None
+            try:
+                from solace_events.config import KafkaSettings
+                kafka_settings = KafkaSettings(
+                    bootstrap_servers=settings.kafka_bootstrap_servers,
+                )
+            except ImportError:
+                logger.warning("solace_events_not_available", reason="Cannot configure Kafka settings")
+
+            notification_bridge = await initialize_notification_bridge(
+                kafka_settings=kafka_settings,
+                use_mock=settings.kafka_use_mock,
+            )
+            app.state.notification_bridge = notification_bridge
+            logger.info("notification_bridge_started")
+        except Exception as e:
+            logger.error("notification_bridge_start_failed", error=str(e))
+
     logger.info("safety_service_started", environment=settings.environment)
     yield
     logger.info("safety_service_stopping")
+
+    # Stop notification bridge
+    if notification_bridge:
+        try:
+            await notification_bridge.stop()
+            logger.info("notification_bridge_stopped")
+        except Exception as e:
+            logger.error("notification_bridge_stop_failed", error=str(e))
+
     await safety_service.shutdown()
     logger.info("safety_service_stopped")
 

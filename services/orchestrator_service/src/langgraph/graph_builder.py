@@ -22,6 +22,13 @@ from .state_schema import (
 )
 from .supervisor import SupervisorAgent, SupervisorSettings
 
+# Import real agent node functions that call actual services via HTTP
+from ..agents.chat_agent import chat_agent_node as real_chat_agent_node
+from ..agents.diagnosis_agent import diagnosis_agent_node as real_diagnosis_agent_node
+from ..agents.therapy_agent import therapy_agent_node as real_therapy_agent_node
+from ..agents.personality_agent import personality_agent_node as real_personality_agent_node
+from ..agents.safety_agent import safety_agent_node as real_safety_agent_node
+
 logger = structlog.get_logger(__name__)
 
 
@@ -34,6 +41,10 @@ class GraphBuilderSettings(BaseSettings):
     max_iterations: int = Field(default=10, ge=1, le=50)
     safety_timeout_ms: int = Field(default=5000)
     agent_timeout_ms: int = Field(default=30000)
+    # Use full Safety Service for precheck instead of local rule-based check
+    use_safety_service_precheck: bool = Field(default=False)
+    # Use local stub agents instead of HTTP service clients (for testing)
+    use_local_agents: bool = Field(default=False)
     model_config = SettingsConfigDict(env_prefix="ORCHESTRATOR_GRAPH_", env_file=".env", extra="ignore")
 
 
@@ -176,15 +187,37 @@ class OrchestratorGraphBuilder:
         Returns:
             Configured StateGraph instance
         """
-        logger.info("building_orchestrator_graph", checkpointing=self._settings.enable_checkpointing)
+        use_local = self._settings.use_local_agents
+        use_safety_service = self._settings.use_safety_service_precheck
+        logger.info(
+            "building_orchestrator_graph",
+            checkpointing=self._settings.enable_checkpointing,
+            use_local_agents=use_local,
+            use_safety_service_precheck=use_safety_service,
+        )
         builder = StateGraph(OrchestratorState)
-        builder.add_node("safety_precheck", safety_precheck_node)
+        # Safety precheck: use full Safety Service or local rule-based check
+        if use_safety_service:
+            builder.add_node("safety_precheck", real_safety_agent_node)
+        else:
+            builder.add_node("safety_precheck", safety_precheck_node)
         builder.add_node("supervisor", SupervisorAgent(self._supervisor_settings).process)
+        # Use local crisis handler for immediate crisis response
         builder.add_node("crisis_handler", crisis_handler_node)
-        builder.add_node("chat_agent", chat_agent_node)
-        builder.add_node("diagnosis_agent", diagnosis_agent_node)
-        builder.add_node("therapy_agent", therapy_agent_node)
-        builder.add_node("personality_agent", personality_agent_node)
+        # Agent nodes: use HTTP clients or local stubs based on configuration
+        if use_local:
+            # Use local stub implementations (for testing or when services unavailable)
+            builder.add_node("chat_agent", chat_agent_node)
+            builder.add_node("diagnosis_agent", diagnosis_agent_node)
+            builder.add_node("therapy_agent", therapy_agent_node)
+            builder.add_node("personality_agent", personality_agent_node)
+        else:
+            # Use real agent nodes that call actual services via HTTP
+            builder.add_node("chat_agent", real_chat_agent_node)
+            builder.add_node("diagnosis_agent", real_diagnosis_agent_node)
+            builder.add_node("therapy_agent", real_therapy_agent_node)
+            builder.add_node("personality_agent", real_personality_agent_node)
+        # Use local aggregator and post-check nodes
         builder.add_node("aggregator", aggregator_node)
         builder.add_node("safety_postcheck", safety_postcheck_node)
         builder.add_edge(START, "safety_precheck")
@@ -198,7 +231,7 @@ class OrchestratorGraphBuilder:
         builder.add_edge("aggregator", "safety_postcheck")
         builder.add_edge("safety_postcheck", END)
         self._graph = builder
-        logger.info("orchestrator_graph_built", node_count=9)
+        logger.info("orchestrator_graph_built", node_count=9, mode="local" if use_local else "http_clients")
         return builder
 
     def compile(self) -> Any:
