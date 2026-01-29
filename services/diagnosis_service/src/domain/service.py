@@ -20,6 +20,7 @@ from .models import (
     SessionState, AssessmentResult, ExtractionResult, DifferentialResult,
     SessionStartResult, SessionEndResult, HistoryResult, ChallengeResult,
 )
+from services.shared import ServiceBase
 
 if TYPE_CHECKING:
     from .symptom_extractor import SymptomExtractor
@@ -40,7 +41,7 @@ class DiagnosisServiceSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="DIAGNOSIS_SERVICE_", env_file=".env", extra="ignore")
 
 
-class DiagnosisService:
+class DiagnosisService(ServiceBase):
     """Main diagnosis service orchestrating 4-step Chain-of-Reasoning."""
 
     def __init__(self, settings: DiagnosisServiceSettings | None = None,
@@ -353,3 +354,8 @@ class DiagnosisService:
         return {"status": "operational" if self._initialized else "initializing",
                 "initialized": self._initialized, "statistics": self._stats,
                 "active_sessions": len(self._active_sessions), "users_tracked": len(self._user_session_counts)}
+
+    @property
+    def stats(self) -> dict[str, int]:
+        """Get service statistics counters."""
+        return self._stats

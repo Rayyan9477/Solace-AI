@@ -12,7 +12,10 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+import httpx
 import structlog
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Import shared event infrastructure
 try:
@@ -55,6 +58,27 @@ except ImportError:
 logger = structlog.get_logger(__name__)
 
 
+class UserServiceSettings(BaseSettings):
+    """Configuration for User Service integration."""
+
+    user_service_url: str = Field(
+        default="http://localhost:8006",
+        description="URL of the User Service for on-call clinician lookup",
+    )
+    request_timeout: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=60.0,
+        description="HTTP request timeout in seconds",
+    )
+
+    model_config = SettingsConfigDict(
+        env_prefix="NOTIFICATION_",
+        env_file=".env",
+        extra="ignore",
+    )
+
+
 class SafetyEventConsumer:
     """
     Consumes safety events from Kafka and triggers notifications.
@@ -69,7 +93,10 @@ class SafetyEventConsumer:
         kafka_settings: "KafkaSettings | None" = None,
         consumer_settings: "ConsumerSettings | None" = None,
         use_mock: bool = False,
+        user_service_settings: UserServiceSettings | None = None,
     ) -> None:
+        self._user_service_settings = user_service_settings or UserServiceSettings()
+
         if not _KAFKA_AVAILABLE:
             logger.warning("kafka_not_available", reason="solace_events not installed")
             self._consumer = None
@@ -397,21 +424,74 @@ class SafetyEventConsumer:
         """
         Get list of on-call clinicians for crisis notifications.
 
-        In production, this would call the user service to get
-        currently on-call clinicians with their contact information.
+        Calls the User Service to get currently on-call clinicians
+        with their contact information.
+
+        Returns:
+            List of NotificationRecipient objects for on-call clinicians.
+            Returns empty list if service is unavailable (triggers fallback).
         """
-        # TODO: Integrate with user service to fetch real on-call roster
-        # For now, return empty list to trigger fallback
-        return []
+        try:
+            url = f"{self._user_service_settings.user_service_url}/api/v1/users/on-call-clinicians"
+            timeout = httpx.Timeout(self._user_service_settings.request_timeout)
+
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                data = response.json()
+
+            clinicians = data.get("clinicians", [])
+            recipients = []
+
+            for clinician in clinicians:
+                recipients.append(
+                    NotificationRecipient(
+                        user_id=UUID(clinician["user_id"]) if clinician.get("user_id") else None,
+                        email=clinician.get("email", ""),
+                        name=clinician.get("display_name", "Clinician"),
+                        phone=clinician.get("phone_number"),
+                    )
+                )
+
+            logger.info(
+                "on_call_clinicians_fetched",
+                count=len(recipients),
+            )
+            return recipients
+
+        except httpx.HTTPStatusError as e:
+            logger.warning(
+                "user_service_http_error",
+                status_code=e.response.status_code,
+                error=str(e),
+            )
+            return []
+        except httpx.RequestError as e:
+            logger.warning(
+                "user_service_request_error",
+                error=str(e),
+            )
+            return []
+        except Exception as e:
+            logger.error(
+                "on_call_clinicians_fetch_failed",
+                error=str(e),
+            )
+            return []
 
     async def _get_monitoring_team(self) -> list[NotificationRecipient]:
         """
         Get list of monitoring team members.
 
-        In production, this would call the user service.
+        For now, returns the on-call clinicians as the monitoring team.
+        In a full implementation, this would fetch users with a monitoring role.
+
+        Returns:
+            List of NotificationRecipient objects for monitoring team.
         """
-        # TODO: Integrate with user service
-        return []
+        # For monitoring, we use the same on-call clinicians
+        # In production, this could be a separate role/query
+        return await self._get_oncall_clinicians()
 
     def _crisis_level_to_priority(self, crisis_level: "CrisisLevel") -> NotificationPriority:
         """Map crisis level to notification priority."""
@@ -452,6 +532,7 @@ async def initialize_safety_consumer(
     notification_service: NotificationService,
     kafka_settings: "KafkaSettings | None" = None,
     use_mock: bool = False,
+    user_service_settings: UserServiceSettings | None = None,
 ) -> SafetyEventConsumer:
     """Initialize and start the safety event consumer."""
     global _safety_consumer
@@ -459,6 +540,7 @@ async def initialize_safety_consumer(
         notification_service=notification_service,
         kafka_settings=kafka_settings,
         use_mock=use_mock,
+        user_service_settings=user_service_settings,
     )
     await _safety_consumer.start()
     return _safety_consumer

@@ -341,6 +341,40 @@ class InMemoryRepository(AnalyticsRepository):
             self._aggregations.append(aggregation)
 
 
+_repository_instance: AnalyticsRepository | None = None
+_repository_config: ClickHouseConfig | None = None
+
+
+def configure_repository(config: ClickHouseConfig | None = None) -> None:
+    """Configure the repository with ClickHouse settings."""
+    global _repository_instance, _repository_config
+    _repository_config = config
+    _repository_instance = None  # Reset to pick up new config
+
+
 def create_repository(config: ClickHouseConfig | None = None) -> AnalyticsRepository:
-    """Factory function to create appropriate repository."""
+    """Factory function to create appropriate repository (non-singleton)."""
     return ClickHouseRepository(config) if config else InMemoryRepository()
+
+
+def get_repository() -> AnalyticsRepository:
+    """Get singleton repository instance.
+
+    Uses ClickHouse when configured, otherwise uses in-memory.
+    """
+    global _repository_instance
+    if _repository_instance is None:
+        if _repository_config is not None:
+            _repository_instance = ClickHouseRepository(_repository_config)
+            logger.info("analytics_repository_created", type="clickhouse")
+        else:
+            _repository_instance = InMemoryRepository()
+            logger.info("analytics_repository_created", type="in_memory")
+    return _repository_instance
+
+
+def reset_repository() -> None:
+    """Reset the singleton repository (for testing)."""
+    global _repository_instance, _repository_config
+    _repository_instance = None
+    _repository_config = None

@@ -194,6 +194,23 @@ class ComplexityAdjuster:
         ("approximately", "about"),
     ]
 
+    COMPLEXITY_REPLACEMENTS: list[tuple[str, str]] = [
+        ("use", "utilize"),
+        ("help", "facilitate"),
+        ("think about", "conceptualize"),
+        ("then", "subsequently"),
+        ("also", "furthermore"),
+        ("but", "nevertheless"),
+        ("about", "approximately"),
+        ("show", "demonstrate"),
+        ("get", "obtain"),
+        ("start", "initiate"),
+        ("end", "conclude"),
+        ("make", "construct"),
+        ("find", "ascertain"),
+        ("begin", "commence"),
+    ]
+
     def adjust(self, content: str, complexity: float) -> tuple[str, bool]:
         """Adjust content complexity level."""
         adjusted = content
@@ -202,7 +219,8 @@ class ComplexityAdjuster:
             adjusted = self._simplify(content)
             adjustment_made = adjusted != content
         elif complexity >= 0.7:
-            pass
+            adjusted = self._increase_complexity(content)
+            adjustment_made = adjusted != content
         return adjusted, adjustment_made
 
     def _simplify(self, content: str) -> str:
@@ -212,6 +230,18 @@ class ComplexityAdjuster:
             result = re.sub(
                 rf'\b{complex_word}\b',
                 simple_word,
+                result,
+                flags=re.IGNORECASE
+            )
+        return result
+
+    def _increase_complexity(self, content: str) -> str:
+        """Increase complexity for higher complexity preferences."""
+        result = content
+        for simple_word, complex_word in self.COMPLEXITY_REPLACEMENTS:
+            result = re.sub(
+                rf'\b{simple_word}\b',
+                complex_word,
                 result,
                 flags=re.IGNORECASE
             )

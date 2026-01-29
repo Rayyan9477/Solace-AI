@@ -16,6 +16,7 @@ from .models import (
     SessionStartResult, SessionEndResult, AddMessageResult,
     ConsolidationResult, UserProfileResult,
 )
+from services.shared import ServiceBase
 
 if TYPE_CHECKING:
     from .context_assembler import ContextAssembler
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
 logger = structlog.get_logger(__name__)
 
 
-class MemoryService:
+class MemoryService(ServiceBase):
     """Main memory service orchestrating 5-tier memory hierarchy."""
 
     def __init__(self, settings: MemoryServiceSettings | None = None,
@@ -33,11 +34,11 @@ class MemoryService:
         self._settings = settings or MemoryServiceSettings()
         self._context_assembler = context_assembler
         self._consolidation_pipeline = consolidation_pipeline
-        self._tier1_input: dict[UUID, MemoryRecord] = {}
-        self._tier2_working: dict[UUID, list[MemoryRecord]] = {}
-        self._tier3_session: dict[UUID, list[MemoryRecord]] = {}
-        self._tier4_episodic: dict[UUID, list[MemoryRecord]] = {}
-        self._tier5_semantic: dict[UUID, list[MemoryRecord]] = {}
+        self._tier_1_input: dict[UUID, MemoryRecord] = {}
+        self._tier_2_working: dict[UUID, list[MemoryRecord]] = {}
+        self._tier_3_session: dict[UUID, list[MemoryRecord]] = {}
+        self._tier_4_episodic: dict[UUID, list[MemoryRecord]] = {}
+        self._tier_5_semantic: dict[UUID, list[MemoryRecord]] = {}
         self._active_sessions: dict[UUID, SessionState] = {}
         self._user_session_counts: dict[UUID, int] = {}
         self._user_profiles: dict[UUID, dict[str, Any]] = {}
@@ -117,8 +118,8 @@ class MemoryService:
                 user_id=user_id, session_id=session_id, current_message=current_message,
                 token_budget=token_budget, include_safety=include_safety,
                 include_therapeutic=include_therapeutic, retrieval_query=retrieval_query,
-                priority_topics=priority_topics, working_memory=self._tier2_working.get(user_id, []),
-                session_memory=self._tier3_session.get(user_id, []),
+                priority_topics=priority_topics, working_memory=self._tier_2_working.get(user_id, []),
+                session_memory=self._tier_3_session.get(user_id, []),
                 user_profile=self._user_profiles.get(user_id, {}),
             )
             assembly_time_ms = int((time.perf_counter() - start_time) * 1000)
@@ -147,8 +148,8 @@ class MemoryService:
             session_type=session_type, metadata=initial_context,
         )
         self._active_sessions[session.session_id] = session
-        self._tier2_working[user_id] = []
-        self._tier3_session.setdefault(user_id, [])
+        self._tier_2_working[user_id] = []
+        self._tier_3_session.setdefault(user_id, [])
         previous_summary = self._get_previous_session_summary(user_id)
         self._load_user_profile(user_id)
         logger.info("session_started", user_id=str(user_id), session_id=str(session.session_id),
@@ -179,7 +180,7 @@ class MemoryService:
             await self.consolidate(user_id, session_id, True, True, True, self._settings.enable_decay)
             consolidation_triggered = True
         del self._active_sessions[session_id]
-        self._tier2_working.pop(user_id, None)
+        self._tier_2_working.pop(user_id, None)
         logger.info("session_ended", user_id=str(user_id), session_id=str(session_id),
                     message_count=message_count, duration_minutes=duration_minutes)
         return SessionEndResult(
@@ -198,7 +199,7 @@ class MemoryService:
             content=content, content_type="message", importance_score=importance,
             metadata={"role": role, "emotion": emotion_detected, **metadata},
         )
-        self._tier3_session.setdefault(user_id, []).append(record)
+        self._tier_3_session.setdefault(user_id, []).append(record)
         self._update_working_memory(user_id, record)
         session = self._active_sessions.get(session_id)
         if session:
@@ -217,7 +218,7 @@ class MemoryService:
         self._stats["consolidations"] += 1
         if not self._consolidation_pipeline:
             return ConsolidationResult(consolidation_time_ms=0)
-        session_records = [r for r in self._tier3_session.get(user_id, []) if r.session_id == session_id]
+        session_records = [r for r in self._tier_3_session.get(user_id, []) if r.session_id == session_id]
         result = await self._consolidation_pipeline.consolidate(
             user_id=user_id, session_id=session_id, records=session_records,
             extract_facts=extract_facts, generate_summary=generate_summary,
@@ -229,14 +230,14 @@ class MemoryService:
                 content=result.summary_generated, content_type="session_summary",
                 retention_category="long_term", importance_score=Decimal("0.8"),
             )
-            self._tier4_episodic.setdefault(user_id, []).append(summary_record)
+            self._tier_4_episodic.setdefault(user_id, []).append(summary_record)
         for fact in result.extracted_facts:
             fact_record = MemoryRecord(
                 user_id=user_id, tier="tier_5_semantic", content=fact["content"],
                 content_type="fact", retention_category=fact.get("retention", "long_term"),
                 importance_score=Decimal(str(fact.get("importance", 0.7))), metadata=fact.get("metadata", {}),
             )
-            self._tier5_semantic.setdefault(user_id, []).append(fact_record)
+            self._tier_5_semantic.setdefault(user_id, []).append(fact_record)
         if apply_decay:
             decayed, archived = self._apply_decay_model(user_id)
             result.memories_decayed = decayed
@@ -255,7 +256,7 @@ class MemoryService:
                                include_session_history: bool, session_limit: int) -> UserProfileResult:
         """Get user profile from memory."""
         profile = self._user_profiles.get(user_id, {})
-        sessions = self._tier4_episodic.get(user_id, [])
+        sessions = self._tier_4_episodic.get(user_id, [])
         total_sessions = self._user_session_counts.get(user_id, 0)
         first_date = min((s.created_at for s in sessions), default=None) if sessions else None
         last_date = max((s.created_at for s in sessions), default=None) if sessions else None
@@ -266,7 +267,7 @@ class MemoryService:
                                         "summary": record.content[:200] if record.content else None})
         knowledge_graph = None
         if include_knowledge_graph:
-            semantic_records = self._tier5_semantic.get(user_id, [])
+            semantic_records = self._tier_5_semantic.get(user_id, [])
             knowledge_graph = {"nodes": len(semantic_records), "facts": [r.content for r in semantic_records[:20]]}
         return UserProfileResult(
             total_sessions=total_sessions, first_session_date=first_date, last_session_date=last_date,
@@ -276,11 +277,11 @@ class MemoryService:
 
     async def delete_user_data(self, user_id: UUID) -> None:
         """Delete all user data (GDPR compliance)."""
-        self._tier1_input.pop(user_id, None)
-        self._tier2_working.pop(user_id, None)
-        self._tier3_session.pop(user_id, None)
-        self._tier4_episodic.pop(user_id, None)
-        self._tier5_semantic.pop(user_id, None)
+        self._tier_1_input.pop(user_id, None)
+        self._tier_2_working.pop(user_id, None)
+        self._tier_3_session.pop(user_id, None)
+        self._tier_4_episodic.pop(user_id, None)
+        self._tier_5_semantic.pop(user_id, None)
         self._user_profiles.pop(user_id, None)
         self._user_session_counts.pop(user_id, None)
         for sid, session in list(self._active_sessions.items()):
@@ -297,18 +298,23 @@ class MemoryService:
             "active_sessions": len(self._active_sessions),
             "users_tracked": len(self._user_session_counts),
             "tier_counts": {
-                "tier_2_working": sum(len(v) for v in self._tier2_working.values()),
-                "tier_3_session": sum(len(v) for v in self._tier3_session.values()),
-                "tier_4_episodic": sum(len(v) for v in self._tier4_episodic.values()),
-                "tier_5_semantic": sum(len(v) for v in self._tier5_semantic.values()),
+                "tier_2_working": sum(len(v) for v in self._tier_2_working.values()),
+                "tier_3_session": sum(len(v) for v in self._tier_3_session.values()),
+                "tier_4_episodic": sum(len(v) for v in self._tier_4_episodic.values()),
+                "tier_5_semantic": sum(len(v) for v in self._tier_5_semantic.values()),
             },
         }
 
+    @property
+    def stats(self) -> dict[str, int]:
+        """Get service statistics counters."""
+        return self._stats
+
     def _store_to_tier(self, record: MemoryRecord, tier: str) -> None:
         """Store record to appropriate tier."""
-        tier_map = {"tier_1_input": self._tier1_input, "tier_2_working": self._tier2_working,
-                    "tier_3_session": self._tier3_session, "tier_4_episodic": self._tier4_episodic,
-                    "tier_5_semantic": self._tier5_semantic}
+        tier_map = {"tier_1_input": self._tier_1_input, "tier_2_working": self._tier_2_working,
+                    "tier_3_session": self._tier_3_session, "tier_4_episodic": self._tier_4_episodic,
+                    "tier_5_semantic": self._tier_5_semantic}
         storage = tier_map.get(tier)
         if storage is not None:
             if tier == "tier_1_input":
@@ -318,8 +324,8 @@ class MemoryService:
 
     def _get_tier_records(self, user_id: UUID, tier: str) -> list[MemoryRecord]:
         """Get records from a tier for user."""
-        tier_map = {"tier_2_working": self._tier2_working, "tier_3_session": self._tier3_session,
-                    "tier_4_episodic": self._tier4_episodic, "tier_5_semantic": self._tier5_semantic}
+        tier_map = {"tier_2_working": self._tier_2_working, "tier_3_session": self._tier_3_session,
+                    "tier_4_episodic": self._tier_4_episodic, "tier_5_semantic": self._tier_5_semantic}
         return tier_map.get(tier, {}).get(user_id, [])
 
     def _within_time_range(self, record: MemoryRecord, hours: int) -> bool:
@@ -333,7 +339,7 @@ class MemoryService:
 
     def _get_previous_session_summary(self, user_id: UUID) -> str | None:
         """Get summary from previous session."""
-        episodic = self._tier4_episodic.get(user_id, [])
+        episodic = self._tier_4_episodic.get(user_id, [])
         summaries = [r for r in episodic if r.content_type == "session_summary"]
         if summaries:
             return sorted(summaries, key=lambda r: r.created_at, reverse=True)[0].content
@@ -356,7 +362,7 @@ class MemoryService:
 
     def _update_working_memory(self, user_id: UUID, record: MemoryRecord) -> None:
         """Update working memory with new record."""
-        working = self._tier2_working.setdefault(user_id, [])
+        working = self._tier_2_working.setdefault(user_id, [])
         working.append(record)
         while len(working) > 20:
             working.pop(0)
@@ -365,7 +371,7 @@ class MemoryService:
                              current_message: str | None, token_budget: int) -> str:
         """Build basic context without assembler."""
         parts = []
-        working = self._tier2_working.get(user_id, [])
+        working = self._tier_2_working.get(user_id, [])
         for record in working[-10:]:
             role = record.metadata.get("role", "user")
             parts.append(f"{role}: {record.content}")
@@ -377,7 +383,7 @@ class MemoryService:
         """Apply Ebbinghaus decay model to memories."""
         decayed = 0
         archived = 0
-        for tier_storage in [self._tier3_session, self._tier4_episodic]:
+        for tier_storage in [self._tier_3_session, self._tier_4_episodic]:
             records = tier_storage.get(user_id, [])
             for record in records:
                 if record.retention_category not in ("permanent", "long_term"):

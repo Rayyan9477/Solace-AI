@@ -183,14 +183,14 @@ async def update_profile(
 
 
 @router.get(
-    "/statistics",
+    "/status",
     status_code=status.HTTP_200_OK,
-    summary="Get service statistics",
-    description="Retrieve personality service operational statistics.",
+    summary="Get service status",
+    description="Retrieve personality service status and operational statistics.",
 )
-async def get_statistics(orchestrator: OrchestratorDep) -> dict:
-    """Get service statistics."""
-    return orchestrator.get_statistics()
+async def get_status(orchestrator: OrchestratorDep) -> dict:
+    """Get service status and statistics."""
+    return await orchestrator.get_status()
 
 
 @router.get(

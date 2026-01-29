@@ -316,20 +316,54 @@ class UnitOfWork:
 class RepositoryFactory:
     """Factory for creating repository instances."""
     _instance: PersonalityRepositoryPort | None = None
+    _postgres_client: Any | None = None
+    _use_postgres: bool = False
+    _schema: str = "public"
+
+    @classmethod
+    def configure(
+        cls,
+        use_postgres: bool = False,
+        postgres_client: Any | None = None,
+        schema: str = "public",
+    ) -> None:
+        """Configure the factory for creating repositories."""
+        cls._use_postgres = use_postgres
+        cls._postgres_client = postgres_client
+        cls._schema = schema
+        cls._instance = None  # Reset to pick up new config
 
     @classmethod
     def create_in_memory(cls) -> InMemoryPersonalityRepository:
         return InMemoryPersonalityRepository()
 
     @classmethod
+    def create_postgres(cls, client: Any, schema: str = "public") -> PersonalityRepositoryPort:
+        """Create PostgreSQL repository."""
+        from .postgres_repository import PostgresPersonalityRepository
+        return PostgresPersonalityRepository(client, schema=schema)
+
+    @classmethod
     def get_default(cls) -> PersonalityRepositoryPort:
         if cls._instance is None:
-            cls._instance = cls.create_in_memory()
+            if cls._use_postgres and cls._postgres_client is not None:
+                from .postgres_repository import PostgresPersonalityRepository
+                cls._instance = PostgresPersonalityRepository(
+                    cls._postgres_client,
+                    schema=cls._schema,
+                )
+                logger.info("personality_repository_created", type="postgres")
+            else:
+                cls._instance = cls.create_in_memory()
+                logger.info("personality_repository_created", type="in_memory")
         return cls._instance
 
     @classmethod
     def reset(cls) -> None:
         cls._instance = None
+        cls._postgres_client = None
+        cls._use_postgres = False
+        cls._schema = "public"
 
     @classmethod
     def create_unit_of_work(cls, repository: PersonalityRepositoryPort | None = None) -> UnitOfWork:

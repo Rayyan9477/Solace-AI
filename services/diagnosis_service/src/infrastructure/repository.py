@@ -306,6 +306,22 @@ class RepositoryFactory:
     """Factory for creating repository instances."""
 
     _instance: DiagnosisRepositoryPort | None = None
+    _postgres_client: Any | None = None
+    _use_postgres: bool = False
+    _schema: str = "public"
+
+    @classmethod
+    def configure(
+        cls,
+        use_postgres: bool = False,
+        postgres_client: Any | None = None,
+        schema: str = "public",
+    ) -> None:
+        """Configure the factory for creating repositories."""
+        cls._use_postgres = use_postgres
+        cls._postgres_client = postgres_client
+        cls._schema = schema
+        cls._instance = None  # Reset to pick up new config
 
     @classmethod
     def create_in_memory(cls) -> InMemoryDiagnosisRepository:
@@ -313,13 +329,31 @@ class RepositoryFactory:
         return InMemoryDiagnosisRepository()
 
     @classmethod
+    def create_postgres(cls, client: Any, schema: str = "public") -> DiagnosisRepositoryPort:
+        """Create PostgreSQL repository."""
+        from .postgres_repository import PostgresDiagnosisRepository
+        return PostgresDiagnosisRepository(client, schema=schema)
+
+    @classmethod
     def get_default(cls) -> DiagnosisRepositoryPort:
         """Get default repository instance (singleton)."""
         if cls._instance is None:
-            cls._instance = cls.create_in_memory()
+            if cls._use_postgres and cls._postgres_client is not None:
+                from .postgres_repository import PostgresDiagnosisRepository
+                cls._instance = PostgresDiagnosisRepository(
+                    cls._postgres_client,
+                    schema=cls._schema,
+                )
+                logger.info("diagnosis_repository_created", type="postgres")
+            else:
+                cls._instance = cls.create_in_memory()
+                logger.info("diagnosis_repository_created", type="in_memory")
         return cls._instance
 
     @classmethod
     def reset(cls) -> None:
         """Reset the singleton instance."""
         cls._instance = None
+        cls._postgres_client = None
+        cls._use_postgres = False
+        cls._schema = "public"

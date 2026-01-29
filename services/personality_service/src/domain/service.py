@@ -6,11 +6,16 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from uuid import UUID, uuid4
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
+
+from services.shared import ServiceBase
+
+if TYPE_CHECKING:
+    from services.shared.infrastructure import UnifiedLLMClient
 
 from ..schemas import (
     PersonalityTrait, AssessmentSource, OceanScoresDTO, StyleParametersDTO,
@@ -86,7 +91,7 @@ class ProfileStore:
         return len(self._profiles)
 
 
-class PersonalityOrchestrator:
+class PersonalityOrchestrator(ServiceBase):
     """Main personality service orchestrator."""
 
     def __init__(
@@ -94,7 +99,7 @@ class PersonalityOrchestrator:
         settings: PersonalityServiceSettings | None = None,
         trait_detector: TraitDetector | None = None,
         style_adapter: StyleAdapter | None = None,
-        llm_client: Any = None,
+        llm_client: UnifiedLLMClient | None = None,
     ) -> None:
         self._settings = settings or PersonalityServiceSettings()
         self._trait_detector = trait_detector or TraitDetector(
@@ -263,14 +268,25 @@ class PersonalityOrchestrator:
             evidence.extend(trait_score.evidence_markers)
         return list(set(evidence))[:10]
 
-    def get_statistics(self) -> dict[str, Any]:
-        """Get service statistics."""
+    async def get_status(self) -> dict[str, Any]:
+        """Get service status and statistics."""
         return {
+            "status": "operational" if self._initialized else "initializing",
             "initialized": self._initialized,
-            "total_requests": self._request_count,
-            "total_detections": self._detection_count,
+            "statistics": {
+                "total_requests": self._request_count,
+                "total_detections": self._detection_count,
+            },
             "profiles_count": self._profile_store.count(),
             "enable_llm": self._settings.enable_llm_detection,
+        }
+
+    @property
+    def stats(self) -> dict[str, int]:
+        """Get service statistics counters."""
+        return {
+            "total_requests": self._request_count,
+            "total_detections": self._detection_count,
         }
 
     async def shutdown(self) -> None:

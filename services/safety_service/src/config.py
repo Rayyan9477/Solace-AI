@@ -102,8 +102,12 @@ class SafetyMonitoringConfig(BaseSettings):
 
 class SafetyRepositoryConfig(BaseSettings):
     """Repository and persistence configuration."""
-    storage_backend: str = Field(default="memory")
+    storage_backend: str = Field(
+        default="memory",
+        description="Storage backend: 'memory' for testing, 'postgres' for production",
+    )
     postgres_dsn: SecretStr | None = Field(default=None)
+    db_schema: str = Field(default="public", description="PostgreSQL schema name")
     redis_url: str = Field(default="redis://localhost:6379/0")
     assessment_retention_days: int = Field(default=365, ge=30, le=3650)
     incident_retention_days: int = Field(default=730, ge=90, le=3650)
@@ -113,6 +117,11 @@ class SafetyRepositoryConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="SAFETY_REPO_", env_file=".env", extra="ignore"
     )
+
+    @property
+    def use_postgres(self) -> bool:
+        """Check if PostgreSQL should be used."""
+        return self.storage_backend.lower() == "postgres"
 
 
 class SafetyEventsConfig(BaseSettings):
