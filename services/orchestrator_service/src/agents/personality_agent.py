@@ -289,7 +289,8 @@ class PersonalityAgent:
         try:
             style_response = await self._client.get_style(user_id)
             return style_response.style_parameters
-        except Exception:
+        except Exception as e:
+            logger.warning("personality_style_fetch_failed", user_id=str(user_id), error=str(e))
             return StyleParametersDTO.default()
 
     def _scores_to_style(self, scores: OceanScoresDTO) -> StyleParametersDTO:

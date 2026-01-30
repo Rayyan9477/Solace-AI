@@ -152,8 +152,8 @@ class ConnectionManager:
         connection.state = ConnectionState.DISCONNECTING
         try:
             await connection.websocket.close(code=1000, reason=reason)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("websocket_close_failed", connection_id=str(connection_id), error=str(e))
         self._connections.pop(connection_id, None)
         user_conns = self._user_connections.get(connection.user_id)
         if user_conns:

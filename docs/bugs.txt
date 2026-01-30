@@ -1,0 +1,13 @@
+i reviewed the codebase and find out few major flaws in it, like the codebase contains a lot pass statements abstract functions and incomplete implementation of functions
+there are no standard conventions followed and no standard coding standards followed, additionally the codebase is full of mock implementation that just acts as placeholders 
+and no value to the codebase please work on this 
+first identify then create a plan then start acting on it
+
+the database contains no proper structure ; D:\Repo\Contextual-Chatbot\src\solace_infrastructure all the database and structure is soo scattered and fragmented ; no proper structure for connection , also a lot of files contains multiple schemas and data records, there is no concise and precise structure; everything is soo scattered and hard to maintain or modify make sure to use centralized structure for it make sure to align it all it one ; so that we keep all the data in scalable and manageable format with all required security measures and metrics. all see the internal queries and structure.
+
+also in the D:\Repo\Contextual-Chatbot\src\solace_ml i specially instructed to use portkey library to inference the ai models from multiple providers work on this and make it better and use it instead of manually creating integrations ; also is there an option to auto adjust parameters like temperature, top_p, top_k and others like repeat penality.
+
+like the D:\Repo\Contextual-Chatbot\src\solace_security contains no proper structure of auth; neither at rest or at transit; the authorization and security format process are too loosely implemented and in placed. 
+
+
+D:\Repo\Contextual-Chatbot\src\solace_testing very loosly implemented and too very useful and unable to cover bugs and issues

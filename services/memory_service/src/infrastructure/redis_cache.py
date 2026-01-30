@@ -347,7 +347,8 @@ class RedisCache:
         try:
             await self._client.ping()
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning("redis_health_check_failed", error=str(e))
             return False
 
     def is_initialized(self) -> bool:
