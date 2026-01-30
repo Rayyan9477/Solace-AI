@@ -147,6 +147,7 @@ class ValidationPatterns:
     ALPHANUMERIC = re.compile(r"^[a-zA-Z0-9]+$")
     SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
     SAFE_STRING = re.compile(r"^[\w\s\-.,!?@#$%&*()+=:;\"']+$", re.UNICODE)
+    SQL_IDENTIFIER = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
 class ValidationUtils:
@@ -171,6 +172,39 @@ class ValidationUtils:
     def is_valid_slug(slug: str) -> bool:
         """Validate URL slug format."""
         return bool(ValidationPatterns.SLUG.match(slug.strip()))
+
+    @staticmethod
+    def is_valid_sql_identifier(name: str, max_length: int = 128) -> bool:
+        """Validate that a string is a safe SQL identifier.
+
+        Prevents SQL injection by ensuring names only contain alphanumeric
+        characters and underscores, starting with a letter or underscore.
+        """
+        if not name or len(name) > max_length:
+            return False
+        return ValidationPatterns.SQL_IDENTIFIER.match(name) is not None
+
+    @staticmethod
+    def validate_sql_identifier(name: str, identifier_type: str = "identifier") -> None:
+        """Validate SQL identifier, raising ValueError if invalid.
+
+        Args:
+            name: The identifier to validate.
+            identifier_type: Description for error messages (e.g. "table name", "column name").
+
+        Raises:
+            ValueError: If the identifier is invalid.
+        """
+        if not name:
+            raise ValueError(f"Empty {identifier_type} is not allowed")
+        if len(name) > 128:
+            raise ValueError(f"{identifier_type} exceeds maximum length: {name}")
+        if not ValidationPatterns.SQL_IDENTIFIER.match(name):
+            raise ValueError(
+                f"Invalid {identifier_type}: {name}. "
+                "Must contain only letters, digits, and underscores, "
+                "starting with a letter or underscore."
+            )
 
     @staticmethod
     def sanitize_string(value: str, max_length: int = 1000,

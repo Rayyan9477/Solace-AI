@@ -13,35 +13,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
-import re
 import structlog
+
+from solace_common.utils import ValidationUtils
 
 logger = structlog.get_logger(__name__)
 T = TypeVar("T")
 
-# Pattern for valid SQL identifiers (letters, digits, underscore, starting with letter/underscore)
-_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
-
 
 def _validate_identifier(name: str, identifier_type: str = "identifier") -> None:
-    """Validate that a string is a safe SQL identifier.
-
-    Prevents SQL injection by ensuring names only contain alphanumeric
-    characters and underscores, and start with a letter or underscore.
-
-    Args:
-        name: The identifier to validate.
-        identifier_type: Description of what's being validated (for error message).
-
-    Raises:
-        ValueError: If the identifier contains invalid characters.
-    """
-    if not name:
-        raise ValueError(f"Empty {identifier_type} is not allowed")
-    if len(name) > 128:
-        raise ValueError(f"{identifier_type} exceeds maximum length: {name}")
-    if not _IDENTIFIER_PATTERN.match(name):
-        raise ValueError(f"Invalid {identifier_type}: {name}. Must contain only letters, digits, and underscores, starting with a letter or underscore.")
+    """Validate SQL identifier. Delegates to shared ValidationUtils."""
+    ValidationUtils.validate_sql_identifier(name, identifier_type)
 
 
 class Environment(str, Enum):
@@ -62,7 +44,7 @@ class SeedCategory(str, Enum):
 
 class SeedSettings(BaseSettings):
     """Seed data configuration from environment."""
-    database_url: str = Field(default="postgresql+asyncpg://solace:solace@localhost:5432/solace")
+    database_url: str = Field(description="Database URL for seeding (required via SEED_DATABASE_URL env var)")
     environment: Environment = Field(default=Environment.DEVELOPMENT)
     force_reseed: bool = Field(default=False)
     validate_after_seed: bool = Field(default=True)
@@ -297,7 +279,7 @@ class SeedDataLoader:
         return results
 
     async def _seed_provider(self, provider: BaseSeedProvider[Any]) -> SeedResult:
-        start_time = asyncio.get_event_loop().time()
+        start_time = asyncio.get_running_loop().time()
         data = provider.get_data(self._settings.environment)
         try:
             async with self._session_factory() as session:
@@ -310,7 +292,7 @@ class SeedDataLoader:
                     await self._upsert_record(session, provider.table_name, provider.unique_keys, record)
                     created += 1
                 await session.commit()
-            duration = (asyncio.get_event_loop().time() - start_time) * 1000
+            duration = (asyncio.get_running_loop().time() - start_time) * 1000
             logger.info("seed_provider_completed", table=provider.table_name, created=created, skipped=skipped)
             return SeedResult(provider.category, provider.table_name, created, skipped, duration, True)
         except Exception as e:

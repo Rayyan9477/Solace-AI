@@ -38,6 +38,11 @@ class RepositoryConfig(BaseSettings):
     pool_size: int = Field(default=10, ge=1, le=100, description="Connection pool size")
     pool_timeout: int = Field(default=30, ge=1, description="Pool timeout in seconds")
     echo_sql: bool = Field(default=False, description="Echo SQL statements")
+    use_postgres: bool = Field(
+        default=False,
+        description="Use PostgreSQL repositories (False = in-memory for testing)",
+    )
+    db_schema: str = Field(default="public", description="PostgreSQL schema name")
 
     model_config = SettingsConfigDict(
         env_prefix="USER_REPO_",
@@ -205,6 +210,30 @@ class UserRepository(ABC):
 
         Returns:
             Total count
+        """
+        pass
+
+    @abstractmethod
+    async def find_on_call_clinicians(self) -> list[User]:
+        """
+        Find all clinicians currently on-call for crisis notifications.
+
+        Returns:
+            List of on-call clinician users with contact information.
+        """
+        pass
+
+    @abstractmethod
+    async def find_by_role(self, role: str, active_only: bool = True) -> list[User]:
+        """
+        Find users by role.
+
+        Args:
+            role: User role to filter by
+            active_only: Only return active accounts
+
+        Returns:
+            List of users with the specified role.
         """
         pass
 
@@ -416,6 +445,38 @@ class InMemoryUserRepository(UserRepository):
             return len(self._users)
         return len([u for u in self._users.values() if u.deleted_at is None])
 
+    async def find_on_call_clinicians(self) -> list[User]:
+        """Find all clinicians currently on-call for crisis notifications."""
+        from ..domain.value_objects import UserRole, AccountStatus
+
+        return [
+            user for user in self._users.values()
+            if user.deleted_at is None
+            and user.status == AccountStatus.ACTIVE
+            and user.role == UserRole.CLINICIAN
+            and user.is_on_call
+        ]
+
+    async def find_by_role(self, role: str, active_only: bool = True) -> list[User]:
+        """Find users by role."""
+        from ..domain.value_objects import UserRole, AccountStatus
+
+        try:
+            role_enum = UserRole(role)
+        except ValueError:
+            return []
+
+        users = [
+            user for user in self._users.values()
+            if user.role == role_enum
+            and user.deleted_at is None
+        ]
+
+        if active_only:
+            users = [u for u in users if u.status == AccountStatus.ACTIVE]
+
+        return users
+
     # --- Testing Utilities ---
 
     def clear(self) -> None:
@@ -559,8 +620,13 @@ class RepositoryFactory:
     Uses singleton pattern for repository instances.
     """
 
-    def __init__(self, config: RepositoryConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: RepositoryConfig | None = None,
+        postgres_client: Any | None = None,
+    ) -> None:
         self._config = config or RepositoryConfig()
+        self._postgres_client = postgres_client
         self._user_repo: UserRepository | None = None
         self._prefs_repo: UserPreferencesRepository | None = None
         self._consent_repo: ConsentRepository | None = None
@@ -568,25 +634,46 @@ class RepositoryFactory:
     def get_user_repository(self) -> UserRepository:
         """Get or create user repository."""
         if self._user_repo is None:
-            # TODO: Add PostgreSQL repository based on config
-            self._user_repo = InMemoryUserRepository()
-            logger.info("user_repository_created", type="in_memory")
+            if self._config.use_postgres and self._postgres_client is not None:
+                from .postgres_repository import PostgresUserRepository
+                self._user_repo = PostgresUserRepository(
+                    self._postgres_client,
+                    schema=self._config.db_schema,
+                )
+                logger.info("user_repository_created", type="postgres")
+            else:
+                self._user_repo = InMemoryUserRepository()
+                logger.info("user_repository_created", type="in_memory")
         return self._user_repo
 
     def get_preferences_repository(self) -> UserPreferencesRepository:
         """Get or create preferences repository."""
         if self._prefs_repo is None:
-            # TODO: Add PostgreSQL repository based on config
-            self._prefs_repo = InMemoryUserPreferencesRepository()
-            logger.info("preferences_repository_created", type="in_memory")
+            if self._config.use_postgres and self._postgres_client is not None:
+                from .postgres_repository import PostgresUserPreferencesRepository
+                self._prefs_repo = PostgresUserPreferencesRepository(
+                    self._postgres_client,
+                    schema=self._config.db_schema,
+                )
+                logger.info("preferences_repository_created", type="postgres")
+            else:
+                self._prefs_repo = InMemoryUserPreferencesRepository()
+                logger.info("preferences_repository_created", type="in_memory")
         return self._prefs_repo
 
     def get_consent_repository(self) -> ConsentRepository:
         """Get or create consent repository."""
         if self._consent_repo is None:
-            # TODO: Add PostgreSQL repository based on config
-            self._consent_repo = InMemoryConsentRepository()
-            logger.info("consent_repository_created", type="in_memory")
+            if self._config.use_postgres and self._postgres_client is not None:
+                from .postgres_repository import PostgresConsentRepository
+                self._consent_repo = PostgresConsentRepository(
+                    self._postgres_client,
+                    schema=self._config.db_schema,
+                )
+                logger.info("consent_repository_created", type="postgres")
+            else:
+                self._consent_repo = InMemoryConsentRepository()
+                logger.info("consent_repository_created", type="in_memory")
         return self._consent_repo
 
     def reset(self) -> None:
@@ -602,19 +689,23 @@ class RepositoryFactory:
 _factory: RepositoryFactory | None = None
 
 
-def get_repository_factory(config: RepositoryConfig | None = None) -> RepositoryFactory:
+def get_repository_factory(
+    config: RepositoryConfig | None = None,
+    postgres_client: Any | None = None,
+) -> RepositoryFactory:
     """
     Get singleton repository factory.
 
     Args:
         config: Optional configuration (only used on first call)
+        postgres_client: Optional PostgreSQL client for database connections
 
     Returns:
         Repository factory instance
     """
     global _factory
     if _factory is None:
-        _factory = RepositoryFactory(config)
+        _factory = RepositoryFactory(config, postgres_client)
     return _factory
 
 

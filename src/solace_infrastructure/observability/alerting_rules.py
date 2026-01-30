@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
 
@@ -34,9 +34,9 @@ class AlertManagerSettings(BaseSettings):
     smtp_smarthost: str = Field(default="smtp.example.com:587")
     smtp_from: str = Field(default="alertmanager@solace-ai.com")
     smtp_require_tls: bool = Field(default=True)
-    slack_api_url: str | None = Field(default=None)
-    pagerduty_service_key: str | None = Field(default=None)
-    opsgenie_api_key: str | None = Field(default=None)
+    slack_api_url: SecretStr | None = Field(default=None)
+    pagerduty_service_key: SecretStr | None = Field(default=None)
+    opsgenie_api_key: SecretStr | None = Field(default=None)
     webhook_url: str | None = Field(default=None)
     group_wait: str = Field(default="30s")
     group_interval: str = Field(default="5m")
@@ -228,13 +228,14 @@ class AlertManagerConfigGenerator:
         """Generate default receiver configurations."""
         receivers = [Receiver("default", ReceiverType.WEBHOOK, {"url": self._settings.webhook_url or "http://localhost:9999"})]
         if self._settings.slack_api_url:
+            slack_url = self._settings.slack_api_url.get_secret_value()
             receivers.append(Receiver("slack-critical", ReceiverType.SLACK,
-                                       {"api_url": self._settings.slack_api_url, "channel": "#solace-alerts-critical"}))
+                                       {"api_url": slack_url, "channel": "#solace-alerts-critical"}))
             receivers.append(Receiver("slack-warning", ReceiverType.SLACK,
-                                       {"api_url": self._settings.slack_api_url, "channel": "#solace-alerts"}))
+                                       {"api_url": slack_url, "channel": "#solace-alerts"}))
         if self._settings.pagerduty_service_key:
             receivers.append(Receiver("pagerduty-critical", ReceiverType.PAGERDUTY,
-                                       {"service_key": self._settings.pagerduty_service_key}))
+                                       {"service_key": self._settings.pagerduty_service_key.get_secret_value()}))
         return receivers
 
     def generate_routing(self, default_receiver: str = "default") -> Route:

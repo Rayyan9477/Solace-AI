@@ -86,8 +86,9 @@ class GeminiClient(LLMClient):
     async def health_check(self) -> bool:
         """Check Gemini API health."""
         try:
-            url = f"{GEMINI_API_URL}/{self._settings.model}?key={self._settings.api_key.get_secret_value()}"
-            response = await self._http.get(url)
+            url = f"{GEMINI_API_URL}/{self._settings.model}"
+            headers = {"x-goog-api-key": self._settings.api_key.get_secret_value()}
+            response = await self._http.get(url, headers=headers)
             return response.status_code == 200
         except Exception as e:
             logger.warning("health_check_failed", provider="gemini", error=str(e))
@@ -100,12 +101,14 @@ class GeminiClient(LLMClient):
     def _build_url(self, stream: bool = False) -> str:
         """Build API URL."""
         action = "streamGenerateContent" if stream else "generateContent"
-        api_key = self._settings.api_key.get_secret_value()
-        return f"{GEMINI_API_URL}/{self._settings.model}:{action}?key={api_key}"
+        return f"{GEMINI_API_URL}/{self._settings.model}:{action}"
 
     def _build_headers(self) -> dict[str, str]:
-        """Build request headers."""
-        return {"Content-Type": "application/json"}
+        """Build request headers with API key in header instead of URL query."""
+        return {
+            "Content-Type": "application/json",
+            "x-goog-api-key": self._settings.api_key.get_secret_value(),
+        }
 
     def _build_payload(self, messages: list[Message], tools: list[ToolDefinition] | None,
                        system_prompt: str | None, **kwargs: Any) -> dict[str, Any]:

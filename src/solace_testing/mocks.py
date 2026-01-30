@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
@@ -87,7 +88,7 @@ class MockPostgresClient:
         return remaining.split()[0].strip(";").strip("(")
 
     async def begin_transaction(self) -> None:
-        self._transaction_stack.append({k: v.copy() for k, v in self._tables.items()})
+        self._transaction_stack.append(copy.deepcopy(self._tables))
 
     async def commit(self) -> None:
         if self._transaction_stack:

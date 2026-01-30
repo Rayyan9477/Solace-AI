@@ -51,7 +51,7 @@ class MigrationSettings(BaseSettings):
     """Migration configuration from environment."""
 
     database_url: str = Field(
-        default="postgresql+asyncpg://solace:solace@localhost:5432/solace"
+        description="Database URL for migrations (required via MIGRATION_DATABASE_URL env var)"
     )
     migrations_path: str = Field(default="migrations")
     alembic_ini_path: str = Field(default="alembic.ini")
@@ -237,7 +237,7 @@ class MigrationRunner:
         dry_run: bool = False,
     ) -> MigrationResult:
         """Upgrade database to target revision."""
-        start_time = asyncio.get_event_loop().time()
+        start_time = asyncio.get_running_loop().time()
         from_rev = await self.get_current_revision()
 
         try:
@@ -246,7 +246,7 @@ class MigrationRunner:
                     await self._pre_migration_check()
                 await self._run_hooks("pre_upgrade")
                 if not dry_run:
-                    loop = asyncio.get_event_loop()
+                    loop = asyncio.get_running_loop()
                     await loop.run_in_executor(
                         None,
                         command.upgrade,
@@ -257,7 +257,7 @@ class MigrationRunner:
                 if self._settings.post_migration_validate:
                     await self._post_migration_validate()
                 to_rev = await self.get_current_revision()
-                duration = (asyncio.get_event_loop().time() - start_time) * 1000
+                duration = (asyncio.get_running_loop().time() - start_time) * 1000
                 result = MigrationResult(
                     state=MigrationState.COMPLETED,
                     direction=MigrationDirection.UP,
@@ -288,14 +288,14 @@ class MigrationRunner:
         dry_run: bool = False,
     ) -> MigrationResult:
         """Downgrade database to target revision."""
-        start_time = asyncio.get_event_loop().time()
+        start_time = asyncio.get_running_loop().time()
         from_rev = await self.get_current_revision()
 
         try:
             async with self._acquire_lock():
                 await self._run_hooks("pre_downgrade")
                 if not dry_run:
-                    loop = asyncio.get_event_loop()
+                    loop = asyncio.get_running_loop()
                     await loop.run_in_executor(
                         None,
                         command.downgrade,
@@ -304,7 +304,7 @@ class MigrationRunner:
                     )
                 await self._run_hooks("post_downgrade")
                 to_rev = await self.get_current_revision()
-                duration = (asyncio.get_event_loop().time() - start_time) * 1000
+                duration = (asyncio.get_running_loop().time() - start_time) * 1000
                 result = MigrationResult(
                     state=MigrationState.COMPLETED,
                     direction=MigrationDirection.DOWN,

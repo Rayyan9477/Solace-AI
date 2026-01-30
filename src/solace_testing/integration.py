@@ -272,12 +272,19 @@ class IntegrationTestRunner:
 
 
 class APITestClient:
-    """HTTP client for API integration testing."""
+    """HTTP client for API integration testing.
 
-    def __init__(self, base_url: str = "http://localhost:8000") -> None:
+    Uses ``httpx.AsyncClient`` to make real HTTP requests against a running
+    service, making it suitable for integration and contract tests.
+    """
+
+    def __init__(self, base_url: str = "http://localhost:8000", timeout: float = 30.0) -> None:
+        import httpx
         self.base_url = base_url.rstrip("/")
         self._headers: dict[str, str] = {"Content-Type": "application/json"}
         self._auth_token: str | None = None
+        self._timeout = timeout
+        self._client = httpx.AsyncClient(base_url=self.base_url, timeout=timeout)
 
     def set_auth_token(self, token: str) -> None:
         self._auth_token = token
@@ -288,19 +295,44 @@ class APITestClient:
         self._headers.pop("Authorization", None)
 
     def _build_url(self, path: str) -> str:
-        return f"{self.base_url}/{path.lstrip('/')}"
+        return f"/{path.lstrip('/')}"
+
+    async def request(self, method: str, url: str, headers: dict[str, str] | None = None,
+                      params: dict[str, Any] | None = None,
+                      json_data: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Execute an HTTP request and return a normalised response dict."""
+        merged_headers = {**self._headers, **(headers or {})}
+        response = await self._client.request(
+            method=method,
+            url=self._build_url(url),
+            headers=merged_headers,
+            params=params,
+            json=json_data,
+        )
+        body: Any = None
+        try:
+            body = response.json()
+        except Exception:
+            body = response.text
+        return {
+            "status": response.status_code,
+            "headers": dict(response.headers),
+            "json": body if isinstance(body, dict) else {},
+            "body": body,
+            "text": response.text,
+        }
 
     async def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        return {"method": "GET", "url": self._build_url(path), "params": params, "status": 200, "json": {}}
+        return await self.request("GET", path, params=params)
 
     async def post(self, path: str, json_data: dict[str, Any] | None = None) -> dict[str, Any]:
-        return {"method": "POST", "url": self._build_url(path), "json": json_data, "status": 201}
+        return await self.request("POST", path, json_data=json_data)
 
     async def put(self, path: str, json_data: dict[str, Any] | None = None) -> dict[str, Any]:
-        return {"method": "PUT", "url": self._build_url(path), "json": json_data, "status": 200}
+        return await self.request("PUT", path, json_data=json_data)
 
     async def delete(self, path: str) -> dict[str, Any]:
-        return {"method": "DELETE", "url": self._build_url(path), "status": 204}
+        return await self.request("DELETE", path)
 
     async def health_check(self) -> bool:
         try:
@@ -308,6 +340,10 @@ class APITestClient:
             return result.get("status", 500) < 400
         except Exception:
             return False
+
+    async def close(self) -> None:
+        """Close the underlying HTTP client."""
+        await self._client.aclose()
 
 
 def create_test_environment() -> IntegrationEnvironment:

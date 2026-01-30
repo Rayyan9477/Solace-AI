@@ -209,8 +209,8 @@ class KafkaAdminAdapter:
     async def create_topic(self, definition: TopicDefinition) -> TopicOperationResult:
         """Create a new Kafka topic."""
         if not self._client:
-            logger.debug("mock_create_topic", topic=definition.name)
-            return TopicOperationResult(True, definition.name, "create", "Mock created")
+            logger.warning("kafka_unavailable", operation="create_topic", topic=definition.name)
+            return TopicOperationResult(False, definition.name, "create", "Kafka admin client unavailable", "UNAVAILABLE")
         try:
             from aiokafka.admin import NewTopic
             new_topic = NewTopic(
@@ -230,7 +230,8 @@ class KafkaAdminAdapter:
     async def delete_topic(self, topic_name: str) -> TopicOperationResult:
         """Delete a Kafka topic."""
         if not self._client:
-            return TopicOperationResult(True, topic_name, "delete", "Mock deleted")
+            logger.warning("kafka_unavailable", operation="delete_topic", topic=topic_name)
+            return TopicOperationResult(False, topic_name, "delete", "Kafka admin client unavailable", "UNAVAILABLE")
         try:
             await self._client.delete_topics([topic_name])
             logger.info("topic_deleted", topic=topic_name)
@@ -242,7 +243,8 @@ class KafkaAdminAdapter:
     async def describe_topic(self, topic_name: str) -> TopicMetadata | None:
         """Get metadata for a topic."""
         if not self._client:
-            return TopicMetadata(name=topic_name, partitions=4, replication_factor=3)
+            logger.warning("kafka_unavailable", operation="describe_topic", topic=topic_name)
+            return None
         try:
             metadata = await self._client.describe_topics([topic_name])
             if not metadata:
@@ -266,7 +268,8 @@ class KafkaAdminAdapter:
     async def list_topics(self) -> list[str]:
         """List all topics in the cluster."""
         if not self._client:
-            return ["solace.sessions", "solace.safety", "solace.assessments"]
+            logger.warning("kafka_unavailable", operation="list_topics")
+            return []
         try:
             topics = await self._client.list_topics()
             return [t for t in topics if not t.startswith("__")]
@@ -277,7 +280,8 @@ class KafkaAdminAdapter:
     async def alter_configs(self, topic_name: str, configs: dict[str, str]) -> TopicOperationResult:
         """Alter topic configuration."""
         if not self._client:
-            return TopicOperationResult(True, topic_name, "alter", "Mock altered")
+            logger.warning("kafka_unavailable", operation="alter_configs", topic=topic_name)
+            return TopicOperationResult(False, topic_name, "alter", "Kafka admin client unavailable", "UNAVAILABLE")
         try:
             from aiokafka.admin import ConfigResource, ConfigResourceType
             resource = ConfigResource(ConfigResourceType.TOPIC, topic_name)

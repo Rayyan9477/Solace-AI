@@ -1,6 +1,7 @@
 """Solace-AI Schema Registry Management - Schema validation and evolution."""
 from __future__ import annotations
 
+import collections
 import hashlib
 import json
 from abc import ABC, abstractmethod
@@ -9,7 +10,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Generic, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
 
@@ -59,7 +60,7 @@ class CompatibilityResult:
 class SchemaRegistrySettings(BaseSettings):
     url: str = Field(default="http://localhost:8081")
     username: str | None = Field(default=None)
-    password: str | None = Field(default=None)
+    password: SecretStr | None = Field(default=None)
     ssl_ca_location: str | None = Field(default=None)
     ssl_certificate_location: str | None = Field(default=None)
     ssl_key_location: str | None = Field(default=None)
@@ -164,14 +165,19 @@ class AvroSchemaValidator(SchemaValidator):
 class SchemaCache(Generic[T]):
     def __init__(self, capacity: int = 1000) -> None:
         self._capacity = capacity
-        self._cache: dict[str, tuple[T, datetime]] = {}
+        self._cache: collections.OrderedDict[str, tuple[T, datetime]] = collections.OrderedDict()
 
     def get(self, key: str) -> T | None:
-        return self._cache[key][0] if key in self._cache else None
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            return self._cache[key][0]
+        return None
 
     def put(self, key: str, value: T) -> None:
-        if len(self._cache) >= self._capacity:
-            del self._cache[min(self._cache, key=lambda k: self._cache[k][1])]
+        if key in self._cache:
+            self._cache.move_to_end(key)
+        elif len(self._cache) >= self._capacity:
+            self._cache.popitem(last=False)  # O(1) LRU eviction
         self._cache[key] = (value, datetime.now(timezone.utc))
 
     def invalidate(self, key: str) -> None:
@@ -190,7 +196,7 @@ class SchemaRegistryAdapter:
     async def connect(self) -> None:
         try:
             import aiohttp
-            auth = aiohttp.BasicAuth(self._settings.username, self._settings.password) if self._settings.username else None
+            auth = aiohttp.BasicAuth(self._settings.username, self._settings.password.get_secret_value()) if self._settings.username and self._settings.password else None
             self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self._settings.timeout_seconds), auth=auth)
             logger.info("schema_registry_connected", url=self._settings.url)
         except ImportError:
@@ -258,7 +264,8 @@ class SchemaRegistryAdapter:
 
     async def check_compatibility(self, subject: str, schema_str: str) -> bool:
         if not self._session:
-            return True
+            logger.warning("schema_registry_unavailable", operation="check_compatibility", subject=subject)
+            return False
         try:
             async with self._session.post(f"{self._settings.url}/compatibility/subjects/{subject}/versions/latest",
                                           json={"schema": schema_str}) as resp:
@@ -269,7 +276,8 @@ class SchemaRegistryAdapter:
 
     async def set_compatibility(self, subject: str, level: CompatibilityLevel) -> bool:
         if not self._session:
-            return True
+            logger.warning("schema_registry_unavailable", operation="set_compatibility", subject=subject)
+            return False
         try:
             async with self._session.put(f"{self._settings.url}/config/{subject}", json={"compatibility": level.value}) as resp:
                 return resp.status == 200
@@ -279,7 +287,8 @@ class SchemaRegistryAdapter:
 
     async def list_subjects(self) -> list[str]:
         if not self._session:
-            return ["solace.sessions-value", "solace.safety-value"]
+            logger.warning("schema_registry_unavailable", operation="list_subjects")
+            return []
         try:
             async with self._session.get(f"{self._settings.url}/subjects") as resp:
                 return await resp.json()
@@ -289,7 +298,8 @@ class SchemaRegistryAdapter:
 
     async def delete_subject(self, subject: str, permanent: bool = False) -> bool:
         if not self._session:
-            return True
+            logger.warning("schema_registry_unavailable", operation="delete_subject", subject=subject)
+            return False
         try:
             url = f"{self._settings.url}/subjects/{subject}" + ("?permanent=true" if permanent else "")
             async with self._session.delete(url) as resp:

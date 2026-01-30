@@ -1,7 +1,9 @@
 """Solace-AI Observability - Structured logging, metrics, and distributed tracing."""
 from __future__ import annotations
 import asyncio
+import collections
 import functools
+import threading
 import time
 import uuid
 from contextvars import ContextVar
@@ -219,13 +221,16 @@ class MetricsRegistry:
 
 
 _metrics_registry: MetricsRegistry | None = None
+_metrics_registry_lock = threading.Lock()
 
 
 def get_metrics_registry() -> MetricsRegistry:
-    """Get global metrics registry singleton."""
+    """Get global metrics registry singleton (thread-safe)."""
     global _metrics_registry
     if _metrics_registry is None:
-        _metrics_registry = MetricsRegistry()
+        with _metrics_registry_lock:
+            if _metrics_registry is None:
+                _metrics_registry = MetricsRegistry()
     return _metrics_registry
 
 
@@ -266,6 +271,9 @@ class Span:
         }
 
 
+_MAX_COMPLETED_SPANS = 10000
+
+
 class Tracer:
     """Simple distributed tracing implementation."""
 
@@ -273,7 +281,7 @@ class Tracer:
         self._service_name = service_name
         self._sample_rate = sample_rate
         self._active_spans: dict[str, Span] = {}
-        self._completed_spans: list[Span] = []
+        self._completed_spans: collections.deque[Span] = collections.deque(maxlen=_MAX_COMPLETED_SPANS)
 
     def start_span(self, operation_name: str, parent_span_id: str | None = None,
                    attributes: dict[str, Any] | None = None) -> Span:
@@ -300,7 +308,7 @@ class Tracer:
         logger.debug("span_completed", **span.to_dict())
 
     def get_completed_spans(self, clear: bool = False) -> list[Span]:
-        """Get completed spans."""
+        """Get completed spans (capped at 10,000 to prevent memory leaks)."""
         spans = list(self._completed_spans)
         if clear:
             self._completed_spans.clear()
@@ -308,13 +316,16 @@ class Tracer:
 
 
 _tracer: Tracer | None = None
+_tracer_lock = threading.Lock()
 
 
 def get_tracer() -> Tracer:
-    """Get global tracer singleton."""
+    """Get global tracer singleton (thread-safe)."""
     global _tracer
     if _tracer is None:
-        _tracer = Tracer()
+        with _tracer_lock:
+            if _tracer is None:
+                _tracer = Tracer()
     return _tracer
 
 

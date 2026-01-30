@@ -1,17 +1,21 @@
 """Solace-AI Redis Client - Async caching, pub/sub, and session management."""
 from __future__ import annotations
+
 import asyncio
 import json
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from enum import Enum
-from typing import Any, AsyncIterator, Callable, Awaitable
+from typing import Any
+
+import redis.asyncio as redis
+import structlog
 from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import redis.asyncio as redis
 from redis.asyncio.client import PubSub
-import structlog
-from solace_common.exceptions import CacheError, ConfigurationError
+
+from solace_common.exceptions import CacheError
 
 logger = structlog.get_logger(__name__)
 
@@ -81,21 +85,39 @@ class RedisClient:
             return key
         return f"{self._settings.key_prefix}{key}"
 
-    async def connect(self) -> None:
-        """Initialize Redis connection."""
+    async def connect(self, max_retries: int = 3, base_delay: float = 1.0) -> None:
+        """Initialize Redis connection with retry on transient errors."""
         if self._client is not None:
             return
-        try:
-            if self._settings.mode == RedisMode.CLUSTER:
-                self._client = await self._create_cluster_client()
-            elif self._settings.mode == RedisMode.SENTINEL:
-                self._client = await self._create_sentinel_client()
-            else:
-                self._client = await self._create_standalone_client()
-            await self._client.ping()
-            logger.info("redis_connected", host=self._settings.host, mode=self._settings.mode.value)
-        except redis.RedisError as e:
-            raise CacheError(f"Failed to connect to Redis: {e}", cause=e)
+        last_error: Exception | None = None
+        for attempt in range(max_retries):
+            try:
+                if self._settings.mode == RedisMode.CLUSTER:
+                    self._client = await self._create_cluster_client()
+                elif self._settings.mode == RedisMode.SENTINEL:
+                    self._client = await self._create_sentinel_client()
+                else:
+                    self._client = await self._create_standalone_client()
+                await self._client.ping()
+                logger.info("redis_connected", host=self._settings.host, mode=self._settings.mode.value)
+                return
+            except (TimeoutError, redis.RedisError, OSError) as e:
+                last_error = e
+                self._client = None
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(
+                        "redis_connect_retry",
+                        attempt=attempt + 1,
+                        max_retries=max_retries,
+                        delay=delay,
+                        error=str(e),
+                    )
+                    await asyncio.sleep(delay)
+        raise CacheError(
+            f"Failed to connect to Redis after {max_retries} attempts: {last_error}",
+            cause=last_error,
+        )
 
     async def _create_standalone_client(self) -> redis.Redis:
         """Create standalone Redis client."""
@@ -138,6 +160,13 @@ class RedisClient:
             self._client = None
             logger.info("redis_disconnected")
 
+    async def __aenter__(self) -> RedisClient:
+        await self.connect()
+        return self
+
+    async def __aexit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any) -> None:
+        await self.disconnect()
+
     def _ensure_connected(self) -> redis.Redis:
         if not self._client:
             raise CacheError("Redis client not connected")
@@ -153,7 +182,7 @@ class RedisClient:
             return self._deserialize(value)
         except redis.RedisError as e:
             logger.warning("redis_get_error", key=key, error=str(e))
-            raise CacheError(f"Failed to get key: {e}", cause=e)
+            raise CacheError(f"Failed to get key: {e}", cause=e) from e
 
     async def set(self, key: str, value: Any, ttl: int | timedelta | None = None) -> bool:
         """Set value in cache with optional TTL."""
@@ -166,7 +195,7 @@ class RedisClient:
             return True
         except redis.RedisError as e:
             logger.warning("redis_set_error", key=key, error=str(e))
-            raise CacheError(f"Failed to set key: {e}", cause=e)
+            raise CacheError(f"Failed to set key: {e}", cause=e) from e
 
     async def delete(self, *keys: str) -> int:
         """Delete one or more keys."""
@@ -175,7 +204,7 @@ class RedisClient:
             prefixed_keys = [self._make_key(k) for k in keys]
             return await client.delete(*prefixed_keys)
         except redis.RedisError as e:
-            raise CacheError(f"Failed to delete keys: {e}", cause=e)
+            raise CacheError(f"Failed to delete keys: {e}", cause=e) from e
 
     async def exists(self, *keys: str) -> int:
         """Check if keys exist."""

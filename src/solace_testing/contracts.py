@@ -298,10 +298,41 @@ class ProviderContractTest:
         self._state_handlers[state] = handler
 
     def verify_contract(self, contract: ContractDefinition, api_client: Any) -> VerificationResult:
-        return VerificationResult(
+        """Verify a contract against an actual API response.
+
+        Args:
+            contract: The contract definition to verify.
+            api_client: An object with a ``request`` method that accepts
+                ``method``, ``url``, ``headers``, ``params``, and ``json_data``
+                keyword arguments and returns a dict with ``status``, ``headers``,
+                and ``json``/``body`` keys.  Both sync and async callables are
+                supported.
+        """
+        import asyncio
+
+        start = time.monotonic()
+        result = VerificationResult(
             contract_id=contract.contract_id(), contract_name=contract.name,
-            status=ContractStatus.PASSED, verified_at=datetime.now(timezone.utc),
         )
+        try:
+            request_kwargs: dict[str, Any] = {
+                "method": contract.request.method.value,
+                "url": contract.request.path,
+                "headers": contract.request.headers or None,
+                "params": contract.request.query_params or None,
+                "json_data": contract.request.body,
+            }
+            response = api_client.request(**request_kwargs)
+            if asyncio.iscoroutine(response):
+                response = asyncio.get_event_loop().run_until_complete(response)
+            result = self.verifier.verify_api_contract(contract, response)
+        except Exception as e:
+            result.errors.append(f"Provider verification failed: {e}")
+            result.status = ContractStatus.FAILED
+            result.verified_at = datetime.now(timezone.utc)
+            result.duration_ms = (time.monotonic() - start) * 1000
+            logger.error("provider_contract_verification_error", contract=contract.name, error=str(e))
+        return result
 
     def verify_all_consumer_contracts(self, api_client: Any) -> list[VerificationResult]:
         return [self.verify_contract(c, api_client) for c in self.registry.get_contracts_for_provider(self.provider)]

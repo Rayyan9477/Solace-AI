@@ -23,7 +23,6 @@ class LLMProvider(str, Enum):
     DEEPSEEK = "deepseek"
     XAI = "xai"
     MINIMAX = "minimax"
-    OLLAMA = "ollama"
 
 
 class MessageRole(str, Enum):

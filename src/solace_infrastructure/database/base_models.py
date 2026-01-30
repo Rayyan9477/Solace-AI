@@ -19,6 +19,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    ForeignKey,
     Integer,
     String,
     Text,
@@ -230,6 +231,7 @@ class UserProfileBase(AuditableModel):
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -247,6 +249,7 @@ class SessionBase(AuditableModel):
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -262,6 +265,7 @@ class ClinicalBase(AuditableModel):
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -286,6 +290,7 @@ class SafetyEventBase(AuditableModel):
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
@@ -325,6 +330,69 @@ class ConfigurationBase(BaseModel):
         Boolean,
         default=True,
         nullable=False,
+    )
+
+
+class AuditLog(Base, TimestampMixin):
+    """Immutable audit log for HIPAA compliance.
+
+    Records all security-relevant events: authentication, authorization,
+    data access, and modifications. Never deleted — retained per policy.
+    """
+
+    __tablename__ = "audit_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    event_type: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+    )
+    actor_id: Mapped[str | None] = mapped_column(
+        String(128),
+        nullable=True,
+        index=True,
+    )
+    actor_type: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="user",
+    )
+    resource_type: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+    )
+    resource_id: Mapped[str | None] = mapped_column(
+        String(128),
+        nullable=True,
+    )
+    action: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+    )
+    outcome: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="success",
+    )
+    details: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+    )
+    ip_address: Mapped[str | None] = mapped_column(
+        String(45),
+        nullable=True,
+    )
+    user_agent: Mapped[str | None] = mapped_column(
+        String(512),
+        nullable=True,
     )
 
 

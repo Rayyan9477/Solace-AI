@@ -3,8 +3,10 @@
 from __future__ import annotations
 import hashlib
 import hmac
+import os
 import secrets
 import time
+from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
@@ -57,6 +59,12 @@ class AuthSettings(BaseSettings):
         """Create settings with a development-only key. NOT FOR PRODUCTION."""
         import warnings
 
+        env = os.environ.get("ENVIRONMENT", "development").lower()
+        if env == "production":
+            raise RuntimeError(
+                "AuthSettings.for_development() cannot be used in production. "
+                "Set AUTH_SECRET_KEY environment variable with a secure key."
+            )
         warnings.warn(
             "Using development AuthSettings with insecure key. NOT FOR PRODUCTION USE.",
             UserWarning,
@@ -140,7 +148,16 @@ class PasswordHasher:
     _salt_length: int = 32
 
     @classmethod
-    def hash_password(cls, password: str) -> str:
+    def hash_password(cls, password: str, min_length: int = 12) -> str:
+        """Hash a password using PBKDF2.
+
+        Raises:
+            ValueError: If password is shorter than min_length.
+        """
+        if len(password) < min_length:
+            raise ValueError(
+                f"Password must be at least {min_length} characters, got {len(password)}"
+            )
         salt = secrets.token_bytes(cls._salt_length)
         dk = hashlib.pbkdf2_hmac(
             cls._hash_name, password.encode(), salt, cls._iterations
@@ -174,12 +191,94 @@ class PasswordHasher:
             return True
 
 
-class JWTManager:
-    """JWT token creation and validation."""
+class TokenBlacklist(ABC):
+    """Abstract interface for token revocation/blacklisting."""
 
-    def __init__(self, settings: AuthSettings | None = None) -> None:
+    @abstractmethod
+    async def add(self, jti: str, expires_at: datetime) -> None:
+        """Add a token JTI to the blacklist until its natural expiry."""
+
+    @abstractmethod
+    async def is_blacklisted(self, jti: str) -> bool:
+        """Check if a token JTI has been revoked."""
+
+
+class InMemoryTokenBlacklist(TokenBlacklist):
+    """In-memory token blacklist for testing/development."""
+
+    def __init__(self) -> None:
+        self._blacklist: dict[str, datetime] = {}
+
+    async def add(self, jti: str, expires_at: datetime) -> None:
+        self._blacklist[jti] = expires_at
+
+    async def is_blacklisted(self, jti: str) -> bool:
+        if jti in self._blacklist:
+            # Auto-clean expired entries
+            if self._blacklist[jti] < datetime.now(timezone.utc):
+                del self._blacklist[jti]
+                return False
+            return True
+        return False
+
+
+class LoginAttemptTracker(ABC):
+    """Abstract interface for tracking failed login attempts."""
+
+    @abstractmethod
+    async def record_failure(self, user_id: str) -> int:
+        """Record a failed login attempt. Returns total failed count."""
+
+    @abstractmethod
+    async def is_locked_out(self, user_id: str) -> bool:
+        """Check if user is locked out due to failed attempts."""
+
+    @abstractmethod
+    async def reset(self, user_id: str) -> None:
+        """Reset failed attempts on successful login."""
+
+
+class InMemoryLoginAttemptTracker(LoginAttemptTracker):
+    """In-memory login attempt tracker for testing/development."""
+
+    def __init__(self, max_attempts: int = 5, lockout_minutes: int = 15) -> None:
+        self._max_attempts = max_attempts
+        self._lockout_minutes = lockout_minutes
+        self._attempts: dict[str, list[datetime]] = {}
+
+    async def record_failure(self, user_id: str) -> int:
+        now = datetime.now(timezone.utc)
+        if user_id not in self._attempts:
+            self._attempts[user_id] = []
+        self._attempts[user_id].append(now)
+        # Only count recent attempts within lockout window
+        cutoff = now - timedelta(minutes=self._lockout_minutes)
+        self._attempts[user_id] = [t for t in self._attempts[user_id] if t > cutoff]
+        return len(self._attempts[user_id])
+
+    async def is_locked_out(self, user_id: str) -> bool:
+        if user_id not in self._attempts:
+            return False
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(minutes=self._lockout_minutes)
+        recent = [t for t in self._attempts[user_id] if t > cutoff]
+        return len(recent) >= self._max_attempts
+
+    async def reset(self, user_id: str) -> None:
+        self._attempts.pop(user_id, None)
+
+
+class JWTManager:
+    """JWT token creation and validation with optional token revocation."""
+
+    def __init__(
+        self,
+        settings: AuthSettings | None = None,
+        token_blacklist: TokenBlacklist | None = None,
+    ) -> None:
         self._settings = settings or AuthSettings()
         self._secret = self._settings.secret_key.get_secret_value()
+        self._blacklist = token_blacklist
 
     def create_access_token(
         self,
@@ -272,9 +371,31 @@ class JWTManager:
         )
         return self._encode(payload)
 
-    def decode_token(
+    async def revoke_token(self, token: str) -> bool:
+        """Revoke a token by adding its JTI to the blacklist.
+
+        Returns True if successfully revoked, False if no blacklist configured.
+        """
+        if not self._blacklist:
+            logger.warning("token_revocation_unavailable", reason="no blacklist configured")
+            return False
+        result = self.decode_token_sync(token)
+        if result.success and result.payload:
+            await self._blacklist.add(result.payload.jti, result.payload.expires_at)
+            logger.info("token_revoked", jti=result.payload.jti, user_id=result.user_id)
+            return True
+        return False
+
+    async def is_token_revoked(self, jti: str) -> bool:
+        """Check if a token JTI has been revoked."""
+        if not self._blacklist:
+            return False
+        return await self._blacklist.is_blacklisted(jti)
+
+    def decode_token_sync(
         self, token: str, expected_type: TokenType | None = None
     ) -> AuthenticationResult:
+        """Decode and validate a JWT token (synchronous, no revocation check)."""
         try:
             decoded = jwt.decode(
                 token,
@@ -308,6 +429,28 @@ class JWTManager:
         except jwt.InvalidTokenError as e:
             return AuthenticationResult.fail("INVALID_TOKEN", f"Invalid token: {e}")
 
+    def decode_token(
+        self, token: str, expected_type: TokenType | None = None
+    ) -> AuthenticationResult:
+        """Decode and validate a JWT token (synchronous, backward compatible).
+
+        Note: For revocation checking, use decode_token_async() instead.
+        """
+        return self.decode_token_sync(token, expected_type)
+
+    async def decode_token_async(
+        self, token: str, expected_type: TokenType | None = None
+    ) -> AuthenticationResult:
+        """Decode and validate a JWT token with revocation check."""
+        result = self.decode_token_sync(token, expected_type)
+        if not result.success or not result.payload:
+            return result
+        # Check revocation blacklist
+        if await self.is_token_revoked(result.payload.jti):
+            logger.warning("revoked_token_used", jti=result.payload.jti, user_id=result.user_id)
+            return AuthenticationResult.fail("TOKEN_REVOKED", "Token has been revoked")
+        return result
+
     def validate_access_token(self, token: str) -> AuthenticationResult:
         return self.decode_token(token, TokenType.ACCESS)
 
@@ -320,6 +463,7 @@ class JWTManager:
         roles: list[str] | None = None,
         permissions: list[str] | None = None,
     ) -> tuple[str, AuthenticationResult]:
+        """Refresh access token (synchronous, no rotation)."""
         result = self.validate_refresh_token(refresh_token)
         if not result.success or not result.payload:
             return "", result
@@ -327,6 +471,28 @@ class JWTManager:
             result.user_id, roles, permissions, result.payload.session_id
         )
         return new_access, result
+
+    async def refresh_token_pair(
+        self,
+        refresh_token: str,
+        roles: list[str] | None = None,
+        permissions: list[str] | None = None,
+    ) -> tuple[TokenPair | None, AuthenticationResult]:
+        """Refresh with token rotation: issues new access + refresh tokens, revokes old refresh.
+
+        Returns a new TokenPair and the validation result, or (None, error_result).
+        """
+        result = await self.decode_token_async(refresh_token, TokenType.REFRESH)
+        if not result.success or not result.payload:
+            return None, result
+        # Revoke the old refresh token to prevent reuse
+        await self.revoke_token(refresh_token)
+        # Issue new pair
+        new_pair = self.create_token_pair(
+            result.user_id, roles, permissions, result.payload.session_id
+        )
+        logger.info("token_pair_rotated", user_id=result.user_id)
+        return new_pair, result
 
     def _encode(self, payload: TokenPayload) -> str:
         return jwt.encode(
@@ -359,64 +525,117 @@ class APIKeyGenerator:
         )
 
 
-class SessionManager:
-    """Manage user sessions."""
+class SessionStore(ABC):
+    """Abstract interface for session persistence.
+
+    Implementations can back sessions with Redis, PostgreSQL, or in-memory storage.
+    """
+
+    @abstractmethod
+    async def create(self, session_id: str, user_id: str, metadata: dict[str, Any]) -> None:
+        """Persist a new session."""
+
+    @abstractmethod
+    async def get(self, session_id: str) -> dict[str, Any] | None:
+        """Retrieve session data by ID. Returns None if not found."""
+
+    @abstractmethod
+    async def update_activity(self, session_id: str) -> None:
+        """Update last activity timestamp for a session."""
+
+    @abstractmethod
+    async def delete(self, session_id: str) -> bool:
+        """Delete a session. Returns True if it existed."""
+
+    @abstractmethod
+    async def delete_user_sessions(self, user_id: str) -> int:
+        """Delete all sessions for a user. Returns count deleted."""
+
+    @abstractmethod
+    async def get_user_sessions(self, user_id: str) -> list[str]:
+        """Get all session IDs for a user."""
+
+
+class InMemorySessionStore(SessionStore):
+    """In-memory session store for testing/development."""
 
     def __init__(self) -> None:
-        self._active_sessions: dict[str, dict[str, Any]] = {}
+        self._sessions: dict[str, dict[str, Any]] = {}
 
-    def create_session(
-        self, user_id: str, metadata: dict[str, Any] | None = None
-    ) -> str:
-        session_id = str(uuid4())
-        self._active_sessions[session_id] = {
+    async def create(self, session_id: str, user_id: str, metadata: dict[str, Any]) -> None:
+        self._sessions[session_id] = {
             "user_id": user_id,
             "created_at": datetime.now(timezone.utc),
             "last_activity": datetime.now(timezone.utc),
-            "metadata": metadata or {},
+            "metadata": metadata,
         }
-        logger.info("session_created", user_id=user_id, session_id=session_id)
-        return session_id
 
-    def validate_session(self, session_id: str) -> bool:
-        return session_id in self._active_sessions
+    async def get(self, session_id: str) -> dict[str, Any] | None:
+        return self._sessions.get(session_id)
 
-    def get_session(self, session_id: str) -> dict[str, Any] | None:
-        return self._active_sessions.get(session_id)
+    async def update_activity(self, session_id: str) -> None:
+        if session_id in self._sessions:
+            self._sessions[session_id]["last_activity"] = datetime.now(timezone.utc)
 
-    def update_activity(self, session_id: str) -> None:
-        if session_id in self._active_sessions:
-            self._active_sessions[session_id]["last_activity"] = datetime.now(
-                timezone.utc
-            )
-
-    def invalidate_session(self, session_id: str) -> bool:
-        if session_id in self._active_sessions:
-            del self._active_sessions[session_id]
-            logger.info("session_invalidated", session_id=session_id)
+    async def delete(self, session_id: str) -> bool:
+        if session_id in self._sessions:
+            del self._sessions[session_id]
             return True
         return False
 
-    def invalidate_user_sessions(self, user_id: str) -> int:
+    async def delete_user_sessions(self, user_id: str) -> int:
         to_remove = [
-            sid
-            for sid, data in self._active_sessions.items()
+            sid for sid, data in self._sessions.items()
             if data["user_id"] == user_id
         ]
         for sid in to_remove:
-            del self._active_sessions[sid]
-        if to_remove:
-            logger.info(
-                "user_sessions_invalidated", user_id=user_id, count=len(to_remove)
-            )
+            del self._sessions[sid]
         return len(to_remove)
 
-    def get_user_sessions(self, user_id: str) -> list[str]:
+    async def get_user_sessions(self, user_id: str) -> list[str]:
         return [
-            sid
-            for sid, data in self._active_sessions.items()
+            sid for sid, data in self._sessions.items()
             if data["user_id"] == user_id
         ]
+
+
+class SessionManager:
+    """Manage user sessions via pluggable SessionStore backend."""
+
+    def __init__(self, store: SessionStore | None = None) -> None:
+        self._store = store or InMemorySessionStore()
+
+    async def create_session(
+        self, user_id: str, metadata: dict[str, Any] | None = None
+    ) -> str:
+        session_id = str(uuid4())
+        await self._store.create(session_id, user_id, metadata or {})
+        logger.info("session_created", user_id=user_id, session_id=session_id)
+        return session_id
+
+    async def validate_session(self, session_id: str) -> bool:
+        return (await self._store.get(session_id)) is not None
+
+    async def get_session(self, session_id: str) -> dict[str, Any] | None:
+        return await self._store.get(session_id)
+
+    async def update_activity(self, session_id: str) -> None:
+        await self._store.update_activity(session_id)
+
+    async def invalidate_session(self, session_id: str) -> bool:
+        result = await self._store.delete(session_id)
+        if result:
+            logger.info("session_invalidated", session_id=session_id)
+        return result
+
+    async def invalidate_user_sessions(self, user_id: str) -> int:
+        count = await self._store.delete_user_sessions(user_id)
+        if count:
+            logger.info("user_sessions_invalidated", user_id=user_id, count=count)
+        return count
+
+    async def get_user_sessions(self, user_id: str) -> list[str]:
+        return await self._store.get_user_sessions(user_id)
 
 
 def create_jwt_manager(settings: AuthSettings | None = None) -> JWTManager:

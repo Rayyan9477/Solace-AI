@@ -52,6 +52,10 @@ class EncryptionSettings(BaseSettings):
     algorithm: EncryptionAlgorithm = Field(default=EncryptionAlgorithm.AES_256_GCM)
     kdf: KeyDerivationFunction = Field(default=KeyDerivationFunction.PBKDF2_SHA256)
     kdf_iterations: int = Field(default=PBKDF2_ITERATIONS)
+    search_hash_salt: SecretStr = Field(
+        default=SecretStr(""),
+        description="Salt for deterministic search hashes. Set via ENCRYPTION_SEARCH_HASH_SALT env var.",
+    )
     enable_key_rotation: bool = Field(default=True)
     key_rotation_days: int = Field(default=90)
     model_config = SettingsConfigDict(
@@ -63,6 +67,12 @@ class EncryptionSettings(BaseSettings):
         """Create settings with a development-only key. NOT FOR PRODUCTION."""
         import warnings
 
+        env = os.environ.get("ENVIRONMENT", "development").lower()
+        if env == "production":
+            raise RuntimeError(
+                "EncryptionSettings.for_development() cannot be used in production. "
+                "Set ENCRYPTION_MASTER_KEY environment variable with a secure key."
+            )
         warnings.warn(
             "Using development EncryptionSettings with insecure key. NOT FOR PRODUCTION USE.",
             UserWarning,
@@ -216,11 +226,12 @@ class Encryptor:
         """Decrypt encrypted data."""
         ciphertext = base64.b64decode(encrypted.ciphertext)
         nonce = base64.b64decode(encrypted.nonce)
-        salt = (
-            base64.b64decode(encrypted.salt)
-            if encrypted.salt
-            else os.urandom(SALT_SIZE)
-        )
+        if not encrypted.salt:
+            raise ValueError(
+                "Cannot decrypt: missing salt in encrypted data. "
+                "Data may be corrupted or from an incompatible encryption version."
+            )
+        salt = base64.b64decode(encrypted.salt)
         key = self._key_manager.derive_key(salt)
         cipher = AESGCMCipher(key)
         aad = context.encode() if context else None
@@ -264,16 +275,28 @@ class Encryptor:
                 try:
                     encrypted = EncryptedData.from_compact(result[key])
                     result[key] = self.decrypt_to_string(encrypted, key)
-                except (ValueError, Exception):
-                    pass
+                except ValueError as e:
+                    logger.error("decrypt_field_failed", field=key, error=str(e))
+                    raise
+                except Exception as e:
+                    logger.error("decrypt_field_unexpected_error", field=key, error=str(e))
+                    raise
         return result
 
 
 class FieldEncryptor:
     """Encrypt specific fields with deterministic or randomized encryption."""
 
-    def __init__(self, encryptor: Encryptor) -> None:
+    def __init__(self, encryptor: Encryptor, settings: EncryptionSettings | None = None) -> None:
         self._encryptor = encryptor
+        self._settings = settings or encryptor._settings
+        search_salt_value = self._settings.search_hash_salt.get_secret_value()
+        if not search_salt_value:
+            raise ValueError(
+                "ENCRYPTION_SEARCH_HASH_SALT must be configured. "
+                "Generate with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+            )
+        self._search_salt = search_salt_value.encode()
 
     def encrypt_field(self, value: str, field_name: str) -> str:
         """Encrypt a single field value."""
@@ -287,8 +310,8 @@ class FieldEncryptor:
 
     def hash_for_search(self, value: str, salt: bytes | None = None) -> str:
         """Create searchable hash (deterministic, for equality search only)."""
-        salt = salt or b"solace-search-salt"
-        return hmac.new(salt, value.encode(), hashlib.sha256).hexdigest()
+        effective_salt = salt or self._search_salt
+        return hmac.new(effective_salt, value.encode(), hashlib.sha256).hexdigest()
 
 
 class SecureTokenGenerator:
@@ -320,6 +343,10 @@ def create_encryptor(settings: EncryptionSettings | None = None) -> Encryptor:
     return Encryptor(settings)
 
 
-def create_field_encryptor(encryptor: Encryptor | None = None) -> FieldEncryptor:
+def create_field_encryptor(
+    encryptor: Encryptor | None = None,
+    settings: EncryptionSettings | None = None,
+) -> FieldEncryptor:
     """Factory function to create field encryptor."""
-    return FieldEncryptor(encryptor or create_encryptor())
+    enc = encryptor or create_encryptor(settings)
+    return FieldEncryptor(enc, settings)

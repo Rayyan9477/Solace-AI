@@ -1,17 +1,23 @@
 """Solace-AI PostgreSQL Client - Async database operations with connection pooling."""
 
 from __future__ import annotations
+
 import asyncio
+import json
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, AsyncIterator, TypeVar
+from typing import Any, TypeVar
 from uuid import UUID
+
 import asyncpg
+import structlog
 from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import structlog
-from solace_common.exceptions import DatabaseError, ConfigurationError
+
+from solace_common.exceptions import DatabaseError
+from solace_common.utils import ValidationUtils
 
 logger = structlog.get_logger(__name__)
 T = TypeVar("T")
@@ -32,7 +38,7 @@ class PostgresSettings(BaseSettings):
     port: int = Field(default=5432, ge=1, le=65535)
     database: str = Field(default="solace")
     user: str = Field(default="solace")
-    password: SecretStr = Field(default=SecretStr("solace"))
+    password: SecretStr = Field(description="PostgreSQL password (required via POSTGRES_PASSWORD env var)")
     min_pool_size: int = Field(default=5, ge=1, le=100)
     max_pool_size: int = Field(default=20, ge=1, le=200)
     command_timeout: float = Field(default=60.0, gt=0)
@@ -82,31 +88,47 @@ class PostgresClient:
     def is_connected(self) -> bool:
         return self._connected and self._pool is not None
 
-    async def connect(self) -> None:
-        """Initialize connection pool."""
+    async def connect(self, max_retries: int = 3, base_delay: float = 1.0) -> None:
+        """Initialize connection pool with retry on transient errors."""
         if self._pool is not None:
             return
-        try:
-            self._pool = await asyncpg.create_pool(
-                dsn=self._settings.get_dsn(),
-                min_size=self._settings.min_pool_size,
-                max_size=self._settings.max_pool_size,
-                command_timeout=self._settings.command_timeout,
-                statement_cache_size=self._settings.statement_cache_size,
-                max_cached_statement_lifetime=self._settings.max_cached_statement_lifetime,
-                init=self._init_connection,
-            )
-            self._connected = True
-            logger.info(
-                "postgres_pool_connected",
-                host=self._settings.host,
-                database=self._settings.database,
-                pool_size=self._settings.max_pool_size,
-            )
-        except asyncpg.PostgresError as e:
-            raise DatabaseError(
-                f"Failed to connect to PostgreSQL: {e}", operation="connect", cause=e
-            )
+        last_error: Exception | None = None
+        for attempt in range(max_retries):
+            try:
+                self._pool = await asyncpg.create_pool(
+                    dsn=self._settings.get_dsn(),
+                    min_size=self._settings.min_pool_size,
+                    max_size=self._settings.max_pool_size,
+                    command_timeout=self._settings.command_timeout,
+                    statement_cache_size=self._settings.statement_cache_size,
+                    max_cached_statement_lifetime=self._settings.max_cached_statement_lifetime,
+                    init=self._init_connection,
+                )
+                self._connected = True
+                logger.info(
+                    "postgres_pool_connected",
+                    host=self._settings.host,
+                    database=self._settings.database,
+                    pool_size=self._settings.max_pool_size,
+                )
+                return
+            except (TimeoutError, asyncpg.PostgresError, OSError) as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(
+                        "postgres_connect_retry",
+                        attempt=attempt + 1,
+                        max_retries=max_retries,
+                        delay=delay,
+                        error=str(e),
+                    )
+                    await asyncio.sleep(delay)
+        raise DatabaseError(
+            f"Failed to connect to PostgreSQL after {max_retries} attempts: {last_error}",
+            operation="connect",
+            cause=last_error,
+        )
 
     async def _init_connection(self, conn: asyncpg.Connection) -> None:
         """Initialize each connection with type codecs."""
@@ -124,6 +146,13 @@ class PostgresClient:
             self._pool = None
             self._connected = False
             logger.info("postgres_pool_disconnected")
+
+    async def __aenter__(self) -> PostgresClient:
+        await self.connect()
+        return self
+
+    async def __aexit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any) -> None:
+        await self.disconnect()
 
     def _ensure_connected(self) -> asyncpg.Pool:
         if not self._pool:
@@ -165,7 +194,7 @@ class PostgresClient:
             except asyncpg.PostgresError as e:
                 raise DatabaseError(
                     f"Query execution failed: {e}", operation="execute", cause=e
-                )
+                ) from e
 
     async def fetch(
         self, query: str, *args: Any, timeout: float | None = None
@@ -192,7 +221,7 @@ class PostgresClient:
             except asyncpg.PostgresError as e:
                 raise DatabaseError(
                     f"Query fetch failed: {e}", operation="fetch", cause=e
-                )
+                ) from e
 
     async def fetch_one(
         self, query: str, *args: Any, timeout: float | None = None
@@ -205,7 +234,7 @@ class PostgresClient:
             except asyncpg.PostgresError as e:
                 raise DatabaseError(
                     f"Query fetch_one failed: {e}", operation="fetch_one", cause=e
-                )
+                ) from e
 
     async def fetch_val(
         self, query: str, *args: Any, column: int = 0, timeout: float | None = None
@@ -217,7 +246,7 @@ class PostgresClient:
             except asyncpg.PostgresError as e:
                 raise DatabaseError(
                     f"Query fetch_val failed: {e}", operation="fetch_val", cause=e
-                )
+                ) from e
 
     async def execute_many(
         self, query: str, args_list: list[tuple[Any, ...]], timeout: float | None = None
@@ -234,7 +263,7 @@ class PostgresClient:
             except asyncpg.PostgresError as e:
                 raise DatabaseError(
                     f"Batch execution failed: {e}", operation="execute_many", cause=e
-                )
+                ) from e
 
     async def copy_records(
         self,
@@ -256,7 +285,7 @@ class PostgresClient:
             except asyncpg.PostgresError as e:
                 raise DatabaseError(
                     f"Copy records failed: {e}", operation="copy_records", cause=e
-                )
+                ) from e
 
     async def check_health(self) -> dict[str, Any]:
         """Check database connectivity and return health status."""
@@ -281,6 +310,10 @@ class PostgresRepository:
     def __init__(
         self, client: PostgresClient, table_name: str, schema: str = "public"
     ) -> None:
+        if not _is_valid_identifier(table_name):
+            raise ValueError(f"Invalid table name: {table_name}")
+        if not _is_valid_identifier(schema):
+            raise ValueError(f"Invalid schema name: {schema}")
         self._client = client
         self._table = table_name
         self._schema = schema
@@ -334,7 +367,14 @@ class PostgresRepository:
         return await self._client.fetch_val(query)
 
     async def insert(self, data: dict[str, Any]) -> dict[str, Any] | None:
-        """Insert entity and return created record."""
+        """Insert entity and return created record.
+
+        Raises:
+            ValueError: If any column name contains invalid characters.
+        """
+        for column in data.keys():
+            if not _is_valid_identifier(column):
+                raise ValueError(f"Invalid column name: {column}")
         columns = ", ".join(data.keys())
         placeholders = ", ".join(f"${i+1}" for i in range(len(data)))
         query = f"INSERT INTO {self.qualified_table} ({columns}) VALUES ({placeholders}) RETURNING *"
@@ -343,8 +383,15 @@ class PostgresRepository:
     async def update(
         self, entity_id: UUID | str, data: dict[str, Any]
     ) -> dict[str, Any] | None:
-        """Update entity and return updated record."""
-        data["updated_at"] = datetime.now(timezone.utc)
+        """Update entity and return updated record.
+
+        Raises:
+            ValueError: If any column name contains invalid characters.
+        """
+        data["updated_at"] = datetime.now(UTC)
+        for column in data.keys():
+            if not _is_valid_identifier(column):
+                raise ValueError(f"Invalid column name: {column}")
         set_clause = ", ".join(f"{k} = ${i+2}" for i, k in enumerate(data.keys()))
         query = (
             f"UPDATE {self.qualified_table} SET {set_clause} WHERE id = $1 RETURNING *"
@@ -361,20 +408,16 @@ class PostgresRepository:
         """Soft delete by setting deleted_at timestamp."""
         query = f"UPDATE {self.qualified_table} SET deleted_at = $2 WHERE id = $1"
         result = await self._client.execute(
-            query, entity_id, datetime.now(timezone.utc)
+            query, entity_id, datetime.now(UTC)
         )
         return "UPDATE 1" in result
 
 
 def _json_encoder(value: Any) -> str:
-    import json
-
     return json.dumps(value, default=str)
 
 
 def _json_decoder(value: str) -> Any:
-    import json
-
     return json.loads(value)
 
 
@@ -384,27 +427,12 @@ def _truncate_query(query: str, max_length: int = 200) -> str:
     return query[:max_length] + "..." if len(query) > max_length else query
 
 
-import re
-
-# Pattern for valid SQL identifiers (letters, digits, underscore, starting with letter/underscore)
-_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
-
-
 def _is_valid_identifier(name: str) -> bool:
     """Validate that a string is a safe SQL identifier.
 
-    Prevents SQL injection by ensuring column/table names only contain
-    alphanumeric characters and underscores, and start with a letter or underscore.
-
-    Args:
-        name: The identifier to validate.
-
-    Returns:
-        True if the identifier is safe to use in SQL queries.
+    Delegates to the shared ValidationUtils.is_valid_sql_identifier.
     """
-    if not name or len(name) > 128:  # PostgreSQL identifier limit is 63, but be generous
-        return False
-    return _IDENTIFIER_PATTERN.match(name) is not None
+    return ValidationUtils.is_valid_sql_identifier(name)
 
 
 async def create_postgres_client(

@@ -157,7 +157,8 @@ class KafkaMonitorAdapter:
 
     async def get_brokers(self) -> list[BrokerMetrics]:
         if not self._client:
-            return [BrokerMetrics(broker_id=1, host="localhost", port=9092, is_alive=True)]
+            logger.warning("kafka_unavailable", operation="get_brokers")
+            return []
         try:
             cluster = await self._client.describe_cluster()
             return [BrokerMetrics(broker_id=b.node_id, host=b.host, port=b.port, rack=b.rack,
@@ -169,7 +170,8 @@ class KafkaMonitorAdapter:
 
     async def get_topic_metrics(self, topic: str) -> TopicMetrics | None:
         if not self._client:
-            return TopicMetrics(topic_name=topic, partition_count=4, replication_factor=3)
+            logger.warning("kafka_unavailable", operation="get_topic_metrics", topic=topic)
+            return None
         try:
             topics = await self._client.describe_topics([topic])
             if not topics:
@@ -186,7 +188,8 @@ class KafkaMonitorAdapter:
 
     async def get_consumer_groups(self) -> list[ConsumerGroupMetrics]:
         if not self._client:
-            return [ConsumerGroupMetrics(group_id="solace-group-analytics", state="Stable", members_count=2)]
+            logger.warning("kafka_unavailable", operation="get_consumer_groups")
+            return []
         try:
             groups = await self._client.list_consumer_groups()
             return [ConsumerGroupMetrics(group_id=g.group_id if hasattr(g, "group_id") else str(g)) for g in groups]
@@ -196,8 +199,8 @@ class KafkaMonitorAdapter:
 
     async def get_consumer_lag(self, group_id: str) -> list[ConsumerLag]:
         if not self._client:
-            return [ConsumerLag(topic="solace.sessions", partition=0, consumer_group=group_id,
-                               current_offset=100, end_offset=105, lag=5)]
+            logger.warning("kafka_unavailable", operation="get_consumer_lag", group_id=group_id)
+            return []
         try:
             offsets = await self._client.list_consumer_group_offsets(group_id)
             lags: list[ConsumerLag] = []

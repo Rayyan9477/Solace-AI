@@ -34,6 +34,7 @@ from .auth import (
     TokenType,
     AuthenticationResult,
 )
+from .authorization import Role, ROLE_PERMISSIONS
 
 logger = structlog.get_logger(__name__)
 
@@ -67,17 +68,29 @@ class AuthenticatedUser(BaseModel):
         """Check if user has a specific role."""
         return role in self.roles
 
+    def _get_resolved_permissions(self) -> set[str]:
+        """Resolve all permissions from both direct grants and role hierarchy."""
+        all_perms: set[str] = set(self.permissions)
+        for role_name in self.roles:
+            try:
+                role = Role(role_name)
+                role_perms = ROLE_PERMISSIONS.get(role, set())
+                all_perms |= {p.value for p in role_perms}
+            except ValueError:
+                continue
+        return all_perms
+
     def has_permission(self, permission: str) -> bool:
-        """Check if user has a specific permission."""
-        return permission in self.permissions
+        """Check if user has a specific permission (direct or via role)."""
+        return permission in self._get_resolved_permissions()
 
     def has_any_role(self, roles: list[str]) -> bool:
         """Check if user has any of the specified roles."""
         return bool(set(self.roles) & set(roles))
 
     def has_all_permissions(self, permissions: list[str]) -> bool:
-        """Check if user has all specified permissions."""
-        return set(permissions).issubset(set(self.permissions))
+        """Check if user has all specified permissions (direct or via role)."""
+        return set(permissions).issubset(self._get_resolved_permissions())
 
     @property
     def is_service_token(self) -> bool:

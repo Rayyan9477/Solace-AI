@@ -1,13 +1,14 @@
 """Solace-AI Authorization - RBAC/ABAC policy enforcement."""
 from __future__ import annotations
+
 import re
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Protocol
-from uuid import UUID
-from pydantic import BaseModel, Field
+from typing import Any, ClassVar
+
 import structlog
+from pydantic import BaseModel, Field
 
 logger = structlog.get_logger(__name__)
 
@@ -74,7 +75,7 @@ ROLE_PERMISSIONS: dict[Role, set[Permission]] = {
         Permission.ASSESSMENT_WRITE, Permission.PHI_ACCESS, Permission.PHI_EXPORT,
         Permission.AUDIT_READ, Permission.SETTINGS_READ, Permission.SETTINGS_WRITE,
     },
-    Role.SUPERADMIN: {Permission.ADMIN} | {p for p in Permission},
+    Role.SUPERADMIN: {Permission.ADMIN} | set(Permission),
     Role.SERVICE: {
         Permission.READ, Permission.WRITE, Permission.PHI_ACCESS,
         Permission.SESSION_CREATE, Permission.SESSION_READ,
@@ -102,7 +103,7 @@ class AuthorizationContext(BaseModel):
     session_id: str | None = None
     ip_address: str | None = None
     user_agent: str | None = None
-    request_time: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    request_time: datetime = Field(default_factory=lambda: datetime.now(UTC))
     attributes: dict[str, Any] = Field(default_factory=dict)
 
     def has_role(self, role: Role) -> bool:
@@ -136,7 +137,7 @@ class AuthorizationDecision(BaseModel):
     allowed: bool
     reason: str
     policy_name: str | None = None
-    evaluated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    evaluated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @classmethod
     def allow(cls, reason: str, policy: str | None = None) -> AuthorizationDecision:
@@ -180,7 +181,7 @@ class OwnershipPolicy(Policy):
     def evaluate(self, context: AuthorizationContext, resource: Resource,
                  action: Permission) -> AuthorizationDecision | None:
         if resource.owner_id and resource.owner_id == context.user_id:
-            allowed_actions = {Permission.READ, Permission.WRITE, Permission.DELETE}
+            allowed_actions = {Permission.READ, Permission.WRITE}
             if action in allowed_actions or action.value.endswith(":read") or action.value.endswith(":write"):
                 return AuthorizationDecision.allow("Owner has access to own resource", self.name)
         return None
@@ -190,7 +191,7 @@ class ResourceTypePolicy(Policy):
     """Policy based on resource type restrictions."""
     name = "resource_type_policy"
     priority = 30
-    _resource_permissions: dict[ResourceType, set[Permission]] = {
+    _resource_permissions: ClassVar[dict[ResourceType, set[Permission]]] = {
         ResourceType.USER: {Permission.USER_READ, Permission.USER_WRITE, Permission.USER_DELETE},
         ResourceType.SESSION: {Permission.SESSION_CREATE, Permission.SESSION_READ, Permission.SESSION_DELETE},
         ResourceType.MESSAGE: {Permission.CHAT_SEND, Permission.CHAT_READ},

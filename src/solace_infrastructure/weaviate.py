@@ -1,19 +1,21 @@
 """Solace-AI Weaviate Client - Vector database operations and schema management."""
 
 from __future__ import annotations
+
 import asyncio
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Sequence
+from typing import Any
 from uuid import UUID, uuid4
-from pydantic import BaseModel, Field, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
-import weaviate
-from weaviate.auth import AuthApiKey
-from weaviate.classes.config import Configure, Property, DataType, VectorDistances
-from weaviate.classes.query import MetadataQuery, Filter
-from weaviate.classes.data import DataObject
+
 import structlog
+import weaviate
+from pydantic import Field, SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from weaviate.auth import AuthApiKey
+from weaviate.classes.config import Configure, DataType, Property, VectorDistances
+from weaviate.classes.query import MetadataQuery
+
 from solace_common.exceptions import InfrastructureError
 
 logger = structlog.get_logger(__name__)
@@ -122,17 +124,37 @@ class WeaviateClient:
     def is_connected(self) -> bool:
         return self._client is not None and self._client.is_ready()
 
-    async def connect(self) -> None:
-        """Initialize Weaviate connection."""
+    async def connect(self, max_retries: int = 3, base_delay: float = 1.0) -> None:
+        """Initialize Weaviate connection with retry on transient errors."""
         if self._client is not None:
             return
-        try:
-            loop = asyncio.get_running_loop()
-            self._client = await loop.run_in_executor(None, self._create_client)
-            await loop.run_in_executor(None, self._client.connect)
-            logger.info("weaviate_connected", url=self._settings.get_url())
-        except Exception as e:
-            raise InfrastructureError(f"Failed to connect to Weaviate: {e}", cause=e)
+        last_error: Exception | None = None
+        for attempt in range(max_retries):
+            try:
+                loop = asyncio.get_running_loop()
+                self._client = await loop.run_in_executor(None, self._create_client)
+                await loop.run_in_executor(None, self._client.connect)
+                logger.info("weaviate_connected", url=self._settings.get_url())
+                return
+            except (TimeoutError, OSError, ConnectionError) as e:
+                last_error = e
+                self._client = None
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(
+                        "weaviate_connect_retry",
+                        attempt=attempt + 1,
+                        max_retries=max_retries,
+                        delay=delay,
+                        error=str(e),
+                    )
+                    await asyncio.sleep(delay)
+            except Exception as e:
+                raise InfrastructureError(f"Failed to connect to Weaviate: {e}", cause=e) from e
+        raise InfrastructureError(
+            f"Failed to connect to Weaviate after {max_retries} attempts: {last_error}",
+            cause=last_error,
+        )
 
     def _create_client(self) -> weaviate.WeaviateClient:
         """Create Weaviate client instance."""
@@ -161,6 +183,13 @@ class WeaviateClient:
             await loop.run_in_executor(None, self._client.close)
             self._client = None
             logger.info("weaviate_disconnected")
+
+    async def __aenter__(self) -> WeaviateClient:
+        await self.connect()
+        return self
+
+    async def __aexit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any) -> None:
+        await self.disconnect()
 
     def _ensure_connected(self) -> weaviate.WeaviateClient:
         if not self._client:
@@ -202,7 +231,7 @@ class WeaviateClient:
                 logger.info("weaviate_collection_created", name=config.name)
             return created
         except Exception as e:
-            raise InfrastructureError(f"Failed to create collection: {e}", cause=e)
+            raise InfrastructureError(f"Failed to create collection: {e}", cause=e) from e
 
     def _build_property(self, prop: PropertyConfig) -> Property:
         """Build Weaviate property from config."""

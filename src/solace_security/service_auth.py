@@ -3,18 +3,20 @@ Solace-AI Service-to-Service Authentication.
 Provides service identity verification and token management for inter-service communication.
 """
 from __future__ import annotations
-import time
+
+import threading
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Callable, Awaitable
-from uuid import UUID
+from typing import Any
+
 import httpx
 import structlog
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .auth import JWTManager, AuthSettings, TokenPayload, TokenType, AuthenticationResult
+from .auth import AuthSettings, JWTManager, TokenType
 
 logger = structlog.get_logger(__name__)
 
@@ -126,16 +128,17 @@ class ServiceCredentials:
     token: str
     expires_at: datetime
     permissions: list[str] = field(default_factory=list)
+    refresh_threshold_seconds: int = 300
 
     @property
     def is_expired(self) -> bool:
-        return datetime.now(timezone.utc) >= self.expires_at
+        return datetime.now(UTC) >= self.expires_at
 
     @property
-    def should_refresh(self, threshold_seconds: int = 300) -> bool:
+    def should_refresh(self) -> bool:
         """Check if token should be refreshed based on threshold."""
-        remaining = (self.expires_at - datetime.now(timezone.utc)).total_seconds()
-        return remaining < threshold_seconds
+        remaining = (self.expires_at - datetime.now(UTC)).total_seconds()
+        return remaining < self.refresh_threshold_seconds
 
 
 @dataclass
@@ -147,11 +150,11 @@ class ServiceAuthResult:
     error: str | None = None
 
     @classmethod
-    def success(cls, service_name: str, permissions: list[str]) -> "ServiceAuthResult":
+    def success(cls, service_name: str, permissions: list[str]) -> ServiceAuthResult:
         return cls(authenticated=True, service_name=service_name, permissions=permissions)
 
     @classmethod
-    def failure(cls, error: str) -> "ServiceAuthResult":
+    def failure(cls, error: str) -> ServiceAuthResult:
         return cls(authenticated=False, error=error)
 
 
@@ -220,7 +223,7 @@ class ServiceTokenManager:
             if self._service_settings
             else 60
         )
-        expires_at = datetime.now(timezone.utc) + __import__("datetime").timedelta(
+        expires_at = datetime.now(UTC) + __import__("datetime").timedelta(
             minutes=expire_mins
         )
 
@@ -231,11 +234,17 @@ class ServiceTokenManager:
             expire_minutes=expire_mins,
         )
 
+        refresh_threshold = (
+            self._service_settings.token_refresh_threshold_seconds
+            if self._service_settings
+            else 300
+        )
         credentials = ServiceCredentials(
             service_name=service_name,
             token=token,
             expires_at=expires_at,
             permissions=all_permissions,
+            refresh_threshold_seconds=refresh_threshold,
         )
 
         # Cache the token if enabled
@@ -265,11 +274,6 @@ class ServiceTokenManager:
             return None
 
         # Check if expired or should refresh
-        threshold = (
-            self._service_settings.token_refresh_threshold_seconds
-            if self._service_settings
-            else 300
-        )
         if credentials.is_expired or credentials.should_refresh:
             del self._token_cache[cache_key]
             return None
@@ -349,12 +353,24 @@ class ServiceTokenManager:
             self._token_cache.clear()
 
     def _get_service_identity(self, service_name: str) -> ServiceIdentity:
-        """Get ServiceIdentity enum from service name."""
+        """Get ServiceIdentity enum from service name.
+
+        Raises:
+            ValueError: If service_name doesn't match any known ServiceIdentity.
+                Unknown services must NOT be granted default permissions.
+        """
         try:
             return ServiceIdentity(service_name)
         except ValueError:
-            logger.warning("unknown_service_identity", service_name=service_name)
-            return ServiceIdentity.ORCHESTRATOR  # Default fallback
+            logger.error(
+                "unknown_service_identity_rejected",
+                service_name=service_name,
+                known_services=[s.value for s in ServiceIdentity],
+            )
+            raise ValueError(
+                f"Unknown service identity: '{service_name}'. "
+                f"Known services: {[s.value for s in ServiceIdentity]}"
+            ) from None
 
 
 class ServiceAuthenticatedClient:
@@ -490,13 +506,16 @@ async def get_service_auth_dependency(
 
 # Module-level singleton
 _service_token_manager: ServiceTokenManager | None = None
+_service_token_manager_lock = threading.Lock()
 
 
 def get_service_token_manager() -> ServiceTokenManager:
-    """Get or create the global service token manager."""
+    """Get or create the global service token manager (thread-safe)."""
     global _service_token_manager
     if _service_token_manager is None:
-        _service_token_manager = ServiceTokenManager()
+        with _service_token_manager_lock:
+            if _service_token_manager is None:
+                _service_token_manager = ServiceTokenManager()
     return _service_token_manager
 
 

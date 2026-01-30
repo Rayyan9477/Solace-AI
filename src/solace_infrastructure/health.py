@@ -92,19 +92,19 @@ class HealthChecker(ABC):
 
     async def check_with_timeout(self) -> ComponentHealth:
         """Perform health check with timeout."""
-        start = asyncio.get_event_loop().time()
+        start = asyncio.get_running_loop().time()
         try:
             result = await asyncio.wait_for(self.check(), timeout=self.timeout_seconds)
-            result.latency_ms = (asyncio.get_event_loop().time() - start) * 1000
+            result.latency_ms = (asyncio.get_running_loop().time() - start) * 1000
             return result
         except asyncio.TimeoutError:
-            elapsed = (asyncio.get_event_loop().time() - start) * 1000
+            elapsed = (asyncio.get_running_loop().time() - start) * 1000
             return ComponentHealth(
                 name=self.name, status=HealthStatus.UNHEALTHY, component_type=self.component_type,
                 latency_ms=elapsed, message=f"Health check timed out after {self.timeout_seconds}s",
             )
         except Exception as e:
-            elapsed = (asyncio.get_event_loop().time() - start) * 1000
+            elapsed = (asyncio.get_running_loop().time() - start) * 1000
             return ComponentHealth(
                 name=self.name, status=HealthStatus.UNHEALTHY, component_type=self.component_type,
                 latency_ms=elapsed, message=f"Health check failed: {e}",
