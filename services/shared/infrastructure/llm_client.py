@@ -42,6 +42,16 @@ class LLMClientSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="LLM_", env_file=".env", extra="ignore")
 
 
+# Task-type presets for automatic parameter adjustment
+TASK_TYPE_PRESETS: dict[str, dict[str, float]] = {
+    "crisis": {"temperature": 0.2, "top_p": 0.9},
+    "therapy": {"temperature": 0.7, "top_p": 0.95},
+    "diagnosis": {"temperature": 0.3, "top_p": 0.85},
+    "creative": {"temperature": 0.9, "top_p": 1.0},
+    "structured": {"temperature": 0.0, "top_p": 1.0},
+}
+
+
 class UnifiedLLMClient:
     """
     Unified LLM client for all Solace-AI services using Portkey AI Gateway.
@@ -49,22 +59,22 @@ class UnifiedLLMClient:
     Provides resilient LLM access with automatic fallbacks, load balancing,
     semantic caching, and comprehensive observability.
 
-    Uses AsyncPortkey for non-blocking async operations following Portkey SDK patterns.
+    Supports task-type presets for automatic parameter adjustment:
+        - ``crisis``: Low temperature (0.2), focused and reliable
+        - ``therapy``: Medium temperature (0.7), warm and natural
+        - ``diagnosis``: Low-medium temperature (0.3), precise
+        - ``creative``: High temperature (0.9), for journaling prompts
+        - ``structured``: Zero temperature (0.0), for JSON output
 
-    Example usage:
-        ```python
-        from services.shared import UnifiedLLMClient, LLMClientSettings
+    Example usage::
 
-        settings = LLMClientSettings()
-        client = UnifiedLLMClient(settings)
-        await client.initialize()
-
-        response = await client.generate(
-            system_prompt="You are a helpful assistant.",
-            user_message="Hello!",
-            service_name="my_service",
-        )
-        ```
+        async with UnifiedLLMClient(settings) as client:
+            response = await client.generate(
+                system_prompt="You are a helpful assistant.",
+                user_message="Hello!",
+                task_type="therapy",
+                service_name="therapy_service",
+            )
     """
 
     def __init__(self, settings: LLMClientSettings | None = None) -> None:
@@ -74,6 +84,13 @@ class UnifiedLLMClient:
         self._request_count = 0
         self._error_count = 0
         self._cache_hits = 0
+
+    async def __aenter__(self) -> "UnifiedLLMClient":
+        await self.initialize()
+        return self
+
+    async def __aexit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any) -> None:
+        await self.shutdown()
 
     async def initialize(self) -> None:
         """Initialize the LLM client with Portkey configuration."""
@@ -169,6 +186,7 @@ class UnifiedLLMClient:
         metadata: dict[str, Any] | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
+        task_type: str | None = None,
     ) -> str:
         """
         Generate a response using the configured LLM.
@@ -182,6 +200,9 @@ class UnifiedLLMClient:
             metadata: Additional metadata for tracing
             max_tokens: Override default max tokens
             temperature: Override default temperature
+            task_type: Auto-adjust parameters by task type.
+                Options: ``crisis``, ``therapy``, ``diagnosis``, ``creative``, ``structured``.
+                Explicit ``temperature`` overrides the preset.
 
         Returns:
             Generated response text
@@ -189,6 +210,22 @@ class UnifiedLLMClient:
         if not self._initialized or self._client is None:
             logger.warning("llm_client_not_initialized", service=service_name)
             return ""
+
+        # Apply task-type preset if specified (explicit params override)
+        effective_temperature = temperature
+        effective_top_p: float | None = None
+        if task_type and task_type in TASK_TYPE_PRESETS:
+            preset = TASK_TYPE_PRESETS[task_type]
+            if effective_temperature is None:
+                effective_temperature = preset["temperature"]
+            effective_top_p = preset.get("top_p")
+            logger.debug(
+                "task_type_preset_applied",
+                task_type=task_type,
+                temperature=effective_temperature,
+                top_p=effective_top_p,
+                service=service_name,
+            )
 
         self._request_count += 1
         messages = self._build_messages(system_prompt, user_message, conversation_history, context)
@@ -199,7 +236,8 @@ class UnifiedLLMClient:
                 service_name=service_name,
                 metadata=metadata,
                 max_tokens=max_tokens,
-                temperature=temperature,
+                temperature=effective_temperature,
+                top_p=effective_top_p,
             )
             return self._extract_response_text(response)
         except Exception as e:
@@ -238,14 +276,17 @@ class UnifiedLLMClient:
         metadata: dict[str, Any] | None,
         max_tokens: int | None = None,
         temperature: float | None = None,
+        top_p: float | None = None,
     ) -> Any:
         """Execute LLM completion request using AsyncPortkey."""
-        request_params = {
+        request_params: dict[str, Any] = {
             "model": self._settings.primary_model,
             "messages": messages,
             "max_tokens": max_tokens or self._settings.max_tokens,
-            "temperature": temperature or self._settings.temperature,
+            "temperature": temperature if temperature is not None else self._settings.temperature,
         }
+        if top_p is not None:
+            request_params["top_p"] = top_p
 
         trace_id = f"{self._settings.trace_id_prefix}-{service_name}"
         if metadata:

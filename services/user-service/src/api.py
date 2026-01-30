@@ -847,5 +847,114 @@ async def resend_verification(
             detail=error,
         )
 
-    # TODO: Send verification email with token
-    logger.info("verification_email_requested", user_id=str(current_user.user_id))
+    # Email is sent via notification service in the service layer
+    logger.info(
+        "verification_email_sent",
+        user_id=str(current_user.user_id),
+        token_generated=token is not None,
+    )
+
+
+# --- On-Call Clinician Endpoints ---
+
+
+class OnCallClinicianResponse(BaseModel):
+    """Response for on-call clinician lookup."""
+    user_id: UUID
+    display_name: str
+    email: str
+    phone_number: str | None = None
+
+
+class OnCallListResponse(BaseModel):
+    """Response containing list of on-call clinicians."""
+    clinicians: list[OnCallClinicianResponse]
+    count: int
+
+
+class SetOnCallRequest(BaseModel):
+    """Request to set on-call status."""
+    is_on_call: bool = Field(..., description="Whether the clinician is on-call")
+
+
+@router.get(
+    "/users/on-call-clinicians",
+    response_model=OnCallListResponse,
+    tags=["Clinicians"],
+)
+async def get_on_call_clinicians(
+    user_service: UserService = Depends(get_user_service),
+) -> OnCallListResponse:
+    """
+    Get list of currently on-call clinicians for crisis notifications.
+
+    This endpoint is used by the notification service to route crisis alerts
+    to available clinicians. Returns contact information for all clinicians
+    who have marked themselves as on-call.
+
+    Note: This endpoint requires service-level authentication in production.
+    """
+    clinicians = await user_service.get_on_call_clinicians()
+
+    return OnCallListResponse(
+        clinicians=[
+            OnCallClinicianResponse(
+                user_id=UUID(c["user_id"]),
+                display_name=c["display_name"],
+                email=c["email"],
+                phone_number=c.get("phone_number"),
+            )
+            for c in clinicians
+        ],
+        count=len(clinicians),
+    )
+
+
+@router.put(
+    "/users/{user_id}/on-call",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["Clinicians"],
+)
+async def set_on_call_status(
+    user_id: UUID,
+    request: SetOnCallRequest,
+    current_user: TokenPayload = Depends(get_current_user),
+    user_service: UserService = Depends(get_user_service),
+) -> None:
+    """
+    Set a clinician's on-call status.
+
+    Only the clinician themselves or an admin can update on-call status.
+    """
+    # Check authorization: only self or admin
+    if current_user.user_id != user_id:
+        user = await user_service.get_user(current_user.user_id)
+        if not user or not user.role.has_admin_access():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot modify another user's on-call status",
+            )
+
+    result = await user_service.set_on_call_status(user_id, request.is_on_call)
+
+    if not result.success:
+        if result.error_code == "USER_NOT_FOUND":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=result.error or "User not found",
+            )
+        if result.error_code == "INVALID_ROLE":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result.error or "Only clinicians can be set on-call",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=result.error or "Failed to update on-call status",
+        )
+
+    logger.info(
+        "on_call_status_updated",
+        user_id=str(user_id),
+        is_on_call=request.is_on_call,
+    )

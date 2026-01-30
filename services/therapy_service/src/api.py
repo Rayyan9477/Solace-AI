@@ -17,6 +17,55 @@ from .schemas import (
     SessionStateDTO, TreatmentPlanDTO,
 )
 
+# Authentication dependencies from shared security library
+try:
+    from solace_security.middleware import (
+        AuthenticatedUser,
+        AuthenticatedService,
+        get_current_user,
+        get_current_user_optional,
+        get_current_service,
+        require_roles,
+        require_permissions,
+    )
+except ImportError:
+    from dataclasses import dataclass as _dataclass
+    from typing import Optional
+
+    @_dataclass
+    class AuthenticatedUser:
+        user_id: str
+        token_type: str = "access"
+        roles: list = None
+        permissions: list = None
+        session_id: str | None = None
+        metadata: dict = None
+        def has_role(self, role: str) -> bool:
+            return role in (self.roles or [])
+        def has_permission(self, perm: str) -> bool:
+            return perm in (self.permissions or [])
+
+    @_dataclass
+    class AuthenticatedService:
+        service_name: str
+        permissions: list = None
+
+    async def get_current_user() -> AuthenticatedUser:
+        raise HTTPException(status_code=501, detail="Authentication not configured")
+
+    async def get_current_user_optional() -> Optional[AuthenticatedUser]:
+        return None
+
+    async def get_current_service() -> AuthenticatedService:
+        raise HTTPException(status_code=501, detail="Service auth not configured")
+
+    def require_roles(*roles):
+        return get_current_user
+
+    def require_permissions(*perms):
+        return get_current_user
+
+
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["therapy"])
 
@@ -34,6 +83,7 @@ def get_therapy_orchestrator(request: Request) -> TherapyOrchestrator:
 @router.post("/sessions/start", response_model=SessionStartResponse, status_code=status.HTTP_201_CREATED)
 async def start_session(
     request: SessionStartRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     orchestrator: TherapyOrchestrator = Depends(get_therapy_orchestrator),
 ) -> SessionStartResponse:
     """
@@ -86,6 +136,7 @@ async def start_session(
 async def process_message(
     session_id: UUID,
     request: MessageRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     orchestrator: TherapyOrchestrator = Depends(get_therapy_orchestrator),
 ) -> TherapyResponse:
     """
@@ -157,6 +208,7 @@ async def process_message(
 async def end_session(
     session_id: UUID,
     request: SessionEndRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     orchestrator: TherapyOrchestrator = Depends(get_therapy_orchestrator),
 ) -> SessionSummaryDTO:
     """
@@ -386,3 +438,28 @@ async def get_service_status(
     Returns operational status, active sessions, and processing statistics.
     """
     return await orchestrator.get_status()
+
+
+@router.get("/users/{user_id}/progress", response_model=dict[str, Any], status_code=status.HTTP_200_OK)
+async def get_user_progress(
+    user_id: UUID,
+    orchestrator: TherapyOrchestrator = Depends(get_therapy_orchestrator),
+) -> dict[str, Any]:
+    """
+    Get user's therapy progress summary.
+
+    Returns session counts, techniques used, total minutes, and engagement metrics.
+    Used by User Service to aggregate user progress data.
+    """
+    logger.info("user_progress_requested", user_id=str(user_id))
+
+    try:
+        progress = await orchestrator.get_user_progress(user_id=user_id)
+        return progress
+
+    except Exception as e:
+        logger.error("user_progress_error", error=str(e), user_id=str(user_id))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve user progress"
+        )

@@ -301,3 +301,42 @@ class UnitOfWork:
             await self.rollback()
         elif not self._committed:
             await self.commit()
+
+
+def create_unit_of_work(backend: str = "memory", **kwargs: Any) -> UnitOfWork:
+    """Factory to create UnitOfWork with the configured backend.
+
+    Args:
+        backend: Storage backend type ("memory" or "postgres").
+        **kwargs: Backend-specific configuration (e.g., postgres_client for postgres).
+
+    Returns:
+        Configured UnitOfWork with appropriate repositories.
+    """
+    if backend == "postgres":
+        logger.info("therapy_repository_backend", backend="postgres")
+        # PostgreSQL backend - import here to avoid hard dependency
+        try:
+            from .postgres_repository import (
+                PostgresTreatmentPlanRepository,
+                PostgresTherapySessionRepository,
+                PostgresTechniqueRepository,
+                PostgresOutcomeMeasureRepository,
+            )
+            client = kwargs["postgres_client"]
+            return UnitOfWork(
+                treatment_plans=PostgresTreatmentPlanRepository(client),
+                sessions=PostgresTherapySessionRepository(client),
+                techniques=PostgresTechniqueRepository(client),
+                outcomes=PostgresOutcomeMeasureRepository(client),
+            )
+        except (ImportError, KeyError) as e:
+            logger.warning("postgres_backend_unavailable", error=str(e), fallback="memory")
+
+    logger.info("therapy_repository_backend", backend="memory")
+    return UnitOfWork(
+        treatment_plans=TreatmentPlanRepository(),
+        sessions=TherapySessionRepository(),
+        techniques=TechniqueRepository(),
+        outcomes=OutcomeMeasureRepository(),
+    )

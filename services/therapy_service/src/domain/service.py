@@ -4,7 +4,7 @@ Evidence-based hybrid (rules+LLM) therapy with CBT/DBT/ACT/MI/Mindfulness modali
 """
 from __future__ import annotations
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, TYPE_CHECKING
 from uuid import UUID, uuid4
 from pydantic import Field
@@ -17,6 +17,7 @@ from ..schemas import (
 )
 from .models import SessionStartResult, TherapyMessageResult, SessionEndResult
 from .response_generator import ResponseGenerator
+from services.shared import ServiceBase
 
 if TYPE_CHECKING:
     from .technique_selector import TechniqueSelector
@@ -42,7 +43,7 @@ class TherapyOrchestratorSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="THERAPY_ORCHESTRATOR_", env_file=".env", extra="ignore")
 
 
-class TherapyOrchestrator:
+class TherapyOrchestrator(ServiceBase):
     """
     Main orchestrator for therapeutic interventions.
 
@@ -100,7 +101,7 @@ class TherapyOrchestrator:
         self._stats["sessions_started"] += 1
         start_time = time.perf_counter()
         if not self._session_manager:
-            raise ValueError("Session manager not initialized")
+            return SessionStartResult.failure("Session manager not initialized", "SESSION_MANAGER_NOT_INITIALIZED")
         treatment_plan = self._treatment_plans.get(treatment_plan_id)
         if not treatment_plan:
             treatment_plan = self._create_mock_treatment_plan(user_id, treatment_plan_id, context)
@@ -151,14 +152,14 @@ class TherapyOrchestrator:
         start_time = time.perf_counter()
 
         if not self._session_manager:
-            raise ValueError("Session manager not initialized")
+            return TherapyMessageResult.failure("Session manager not initialized", "SESSION_MANAGER_NOT_INITIALIZED")
 
         session = self._session_manager.get_session(session_id)
         if not session:
-            raise ValueError(f"Session {session_id} not found")
+            return TherapyMessageResult.failure(f"Session {session_id} not found", "SESSION_NOT_FOUND")
 
         if session.user_id != user_id:
-            raise ValueError("User ID mismatch for session")
+            return TherapyMessageResult.failure("User ID mismatch for session", "USER_ID_MISMATCH")
 
         self._session_manager.update_state(session_id, {"messages": {"role": "user", "content": message}})
 
@@ -196,7 +197,7 @@ class TherapyOrchestrator:
 
         treatment_plan = self._treatment_plans.get(session.treatment_plan_id)
         if not treatment_plan:
-            raise ValueError("Treatment plan not found")
+            return TherapyMessageResult.failure("Treatment plan not found", "TREATMENT_PLAN_NOT_FOUND")
 
         technique_result = await self._select_and_apply_technique(
             session=session,
@@ -244,12 +245,12 @@ class TherapyOrchestrator:
         """End therapy session."""
         self._stats["sessions_ended"] += 1
         if not self._session_manager:
-            raise ValueError("Session manager not initialized")
+            return SessionEndResult.failure("Session manager not initialized", "SESSION_MANAGER_NOT_INITIALIZED")
         session = self._session_manager.get_session(session_id)
         if not session:
-            raise ValueError(f"Session {session_id} not found")
+            return SessionEndResult.failure(f"Session {session_id} not found", "SESSION_NOT_FOUND")
         if session.user_id != user_id:
-            raise ValueError("User ID mismatch for session")
+            return SessionEndResult.failure("User ID mismatch for session", "USER_ID_MISMATCH")
         self._session_manager.transition_phase(session_id=session_id, target_phase=SessionPhase.POST_SESSION, trigger="session_end")
         duration = datetime.now(timezone.utc) - session.started_at
         duration_minutes = int(duration.total_seconds() / 60)
@@ -486,6 +487,152 @@ class TherapyOrchestrator:
         if self._session_manager:
             self._session_manager.delete_session(session_id)
 
+    async def get_user_progress(self, user_id: UUID) -> dict[str, Any]:
+        """
+        Get user's therapy progress summary.
+
+        Returns session statistics, techniques used, and engagement metrics.
+
+        Parameters
+        ----------
+        user_id : UUID
+            The user identifier.
+
+        Returns
+        -------
+        dict[str, Any]
+            Progress summary including:
+            - total_sessions: Total completed sessions
+            - completed_homework: Number of completed homework assignments
+            - techniques_used: List of techniques practiced
+            - total_minutes: Total therapy time in minutes
+            - streak_days: Consecutive days with sessions
+            - last_session: ISO timestamp of last session
+            - mood_trend: Overall mood trajectory
+            - engagement_score: Average engagement across sessions
+        """
+        # Get session history from session manager
+        completed_sessions = 0
+        total_minutes = 0
+        techniques_used: set[str] = set()
+        last_session = None
+        total_engagement = 0.0
+        completed_homework = 0
+        session_dates: list[datetime] = []
+        mood_ratings: list[int] = []
+
+        if self._session_manager:
+            # Get user's session history
+            user_sessions = self._session_manager.get_user_sessions(user_id)
+            completed_sessions = len(user_sessions)
+
+            for session in user_sessions:
+                # Calculate session duration
+                if hasattr(session, "start_time") and hasattr(session, "end_time"):
+                    if session.end_time and session.start_time:
+                        duration = (session.end_time - session.start_time).total_seconds() / 60
+                        total_minutes += int(duration)
+
+                # Collect techniques used
+                if hasattr(session, "skills_practiced"):
+                    techniques_used.update(session.skills_practiced or [])
+
+                # Track last session and collect dates for streak calculation
+                if hasattr(session, "start_time") and session.start_time:
+                    session_dates.append(session.start_time)
+                    if last_session is None or session.start_time > last_session:
+                        last_session = session.start_time
+
+                # Accumulate engagement scores
+                if hasattr(session, "engagement_score"):
+                    total_engagement += session.engagement_score or 0.0
+
+                # Count completed homework
+                if hasattr(session, "homework_assigned"):
+                    for hw in session.homework_assigned or []:
+                        if hasattr(hw, "completed") and hw.completed:
+                            completed_homework += 1
+
+                # Collect mood ratings for trend calculation
+                if hasattr(session, "mood_rating") and session.mood_rating is not None:
+                    mood_ratings.append(session.mood_rating)
+
+        avg_engagement = total_engagement / max(completed_sessions, 1)
+
+        # Calculate streak days (consecutive days with sessions)
+        streak_days = self._calculate_streak_days(session_dates)
+
+        # Calculate mood trend
+        mood_trend = self._calculate_mood_trend(mood_ratings)
+
+        return {
+            "user_id": str(user_id),
+            "total_sessions": completed_sessions,
+            "completed_homework": completed_homework,
+            "techniques_used": list(techniques_used),
+            "total_minutes": total_minutes,
+            "streak_days": streak_days,
+            "last_session": last_session.isoformat() if last_session else None,
+            "mood_trend": mood_trend,
+            "engagement_score": round(avg_engagement, 2),
+        }
+
+    def _calculate_streak_days(self, session_dates: list[datetime]) -> int:
+        """Calculate consecutive days with sessions ending at today or yesterday."""
+        if not session_dates:
+            return 0
+
+        # Get unique dates (just the date part)
+        unique_dates = sorted(set(d.date() for d in session_dates), reverse=True)
+        if not unique_dates:
+            return 0
+
+        # Check if streak is current (includes today or yesterday)
+        today = datetime.now(timezone.utc).date()
+        if unique_dates[0] < today - timedelta(days=1):
+            return 0  # Streak broken
+
+        # Count consecutive days
+        streak = 1
+        for i in range(1, len(unique_dates)):
+            if unique_dates[i - 1] - unique_dates[i] == timedelta(days=1):
+                streak += 1
+            else:
+                break
+
+        return streak
+
+    def _calculate_mood_trend(self, mood_ratings: list[int]) -> str:
+        """Calculate mood trend from recent ratings."""
+        if len(mood_ratings) < 2:
+            return "stable"
+
+        # Use last 5 ratings for trend
+        recent = mood_ratings[-5:]
+        if len(recent) < 2:
+            return "stable"
+
+        # Calculate simple linear regression slope
+        n = len(recent)
+        sum_x = sum(range(n))
+        sum_y = sum(recent)
+        sum_xy = sum(i * r for i, r in enumerate(recent))
+        sum_xx = sum(i * i for i in range(n))
+
+        denominator = n * sum_xx - sum_x * sum_x
+        if denominator == 0:
+            return "stable"
+
+        slope = (n * sum_xy - sum_x * sum_y) / denominator
+
+        # Classify trend based on slope
+        if slope > 0.3:
+            return "improving"
+        elif slope < -0.3:
+            return "declining"
+        else:
+            return "stable"
+
     async def get_status(self) -> dict[str, Any]:
         """Get service status."""
         active_sessions = self._session_manager.get_active_session_count() if self._session_manager else 0
@@ -496,3 +643,8 @@ class TherapyOrchestrator:
             "active_sessions": active_sessions,
             "treatment_plans_loaded": len(self._treatment_plans),
         }
+
+    @property
+    def stats(self) -> dict[str, int]:
+        """Get service statistics counters."""
+        return self._stats

@@ -16,6 +16,7 @@ import structlog
 
 from .crisis_detector import CrisisDetector, CrisisDetectorSettings, DetectionResult, CrisisLevel, RiskFactor
 from .escalation import EscalationManager, EscalationSettings, EscalationResult
+from services.shared import ServiceBase
 
 logger = structlog.get_logger(__name__)
 
@@ -90,7 +91,7 @@ class AssessmentCache:
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
-class SafetyService:
+class SafetyService(ServiceBase):
     """Main safety service orchestrating all safety operations."""
 
     def __init__(self, settings: SafetyServiceSettings | None = None,
@@ -282,6 +283,11 @@ class SafetyService:
                 "continuous_monitoring": self._settings.enable_continuous_monitoring,
             },
         }
+
+    @property
+    def stats(self) -> dict[str, int]:
+        """Get service statistics counters."""
+        return self._stats
 
     def _update_conversation_history(self, user_id: UUID, content: str) -> None:
         """Update conversation history for user."""

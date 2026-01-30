@@ -15,7 +15,10 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+import httpx
 import structlog
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .entities import User, UserPreferences
 from .value_objects import AccountStatus, ConsentRecord, ConsentType, UserRole
@@ -30,6 +33,35 @@ if TYPE_CHECKING:
     from ..events import EventPublisher
 
 logger = structlog.get_logger(__name__)
+
+
+class ServiceIntegrationSettings(BaseSettings):
+    """Configuration for inter-service communication."""
+
+    therapy_service_url: str = Field(
+        default="http://localhost:8004",
+        description="URL of the Therapy Service for progress data",
+    )
+    notification_service_url: str = Field(
+        default="http://localhost:8005",
+        description="URL of the Notification Service for emails/SMS",
+    )
+    frontend_url: str = Field(
+        default="http://localhost:3000",
+        description="Frontend URL for verification links",
+    )
+    request_timeout: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=60.0,
+        description="HTTP request timeout in seconds",
+    )
+
+    model_config = SettingsConfigDict(
+        env_prefix="USER_SERVICE_",
+        env_file=".env",
+        extra="ignore",
+    )
 
 
 # --- Result Types ---
@@ -136,6 +168,7 @@ class UserService:
         consent_repository: ConsentRepository | None = None,
         password_service: PasswordService | None = None,
         event_publisher: EventPublisher | None = None,
+        integration_settings: ServiceIntegrationSettings | None = None,
         max_login_attempts: int = 5,
         lockout_duration_minutes: int = 30,
         verification_token_expiry_hours: int = 24,
@@ -149,6 +182,7 @@ class UserService:
             consent_repository: Optional repository for consent records
             password_service: Service for password hashing/verification
             event_publisher: Optional publisher for domain events
+            integration_settings: Settings for inter-service communication
             max_login_attempts: Max failed login attempts before lockout
             lockout_duration_minutes: Duration of account lockout
             verification_token_expiry_hours: Email verification token expiry
@@ -158,6 +192,7 @@ class UserService:
         self._consent_repo = consent_repository
         self._password_service = password_service
         self._event_publisher = event_publisher
+        self._integration_settings = integration_settings or ServiceIntegrationSettings()
         self._max_login_attempts = max_login_attempts
         self._lockout_duration_minutes = lockout_duration_minutes
         self._verification_token_expiry_hours = verification_token_expiry_hours
@@ -245,6 +280,20 @@ class UserService:
                 user_id=str(saved_user.user_id),
                 email=saved_user.email,
             )
+
+            # Send verification email
+            email_sent = await self._send_verification_email(
+                email=saved_user.email,
+                display_name=saved_user.display_name,
+                token=verification_token,
+            )
+
+            if not email_sent:
+                logger.warning(
+                    "initial_verification_email_failed",
+                    user_id=str(saved_user.user_id),
+                    email=saved_user.email,
+                )
 
             return CreateUserResult(success=True, user=saved_user)
 
@@ -548,7 +597,7 @@ class UserService:
         user_id: UUID,
     ) -> tuple[str | None, str | None]:
         """
-        Generate new verification token for email resend.
+        Generate new verification token and send verification email.
 
         Args:
             user_id: User identifier
@@ -574,11 +623,95 @@ class UserService:
 
             logger.info("verification_token_regenerated", user_id=str(user_id))
 
+            # Send verification email via notification service
+            email_sent = await self._send_verification_email(
+                email=user.email,
+                display_name=user.display_name,
+                token=new_token,
+            )
+
+            if not email_sent:
+                logger.warning(
+                    "verification_email_send_failed",
+                    user_id=str(user_id),
+                    email=user.email,
+                )
+                # Token is saved, email failed - user can retry or use token directly
+
             return new_token, None
 
         except Exception as e:
             logger.error("verification_resend_failed", user_id=str(user_id), error=str(e))
             return None, str(e)
+
+    async def _send_verification_email(
+        self,
+        email: str,
+        display_name: str,
+        token: str,
+    ) -> bool:
+        """
+        Send verification email via notification service.
+
+        Args:
+            email: Recipient email address
+            display_name: User's display name
+            token: Verification token
+
+        Returns:
+            True if email was sent successfully, False otherwise
+        """
+        verification_link = (
+            f"{self._integration_settings.frontend_url}/verify-email?token={token}"
+        )
+
+        url = f"{self._integration_settings.notification_service_url}/api/v1/notifications/email"
+        timeout = httpx.Timeout(self._integration_settings.request_timeout)
+
+        payload = {
+            "to_email": email,
+            "template_type": "email_verification",
+            "variables": {
+                "display_name": display_name,
+                "verification_link": verification_link,
+                "expiry_hours": self._verification_token_expiry_hours,
+            },
+            "priority": "high",
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+
+                logger.info(
+                    "verification_email_sent",
+                    email=email,
+                    template="email_verification",
+                )
+                return True
+
+        except httpx.TimeoutException:
+            logger.warning(
+                "notification_service_timeout",
+                email=email,
+                url=url,
+            )
+            return False
+        except httpx.HTTPStatusError as e:
+            logger.warning(
+                "notification_service_http_error",
+                email=email,
+                status_code=e.response.status_code,
+            )
+            return False
+        except Exception as e:
+            logger.error(
+                "verification_email_send_error",
+                email=email,
+                error=str(e),
+            )
+            return False
 
     # --- Login Tracking ---
 
@@ -780,32 +913,168 @@ class UserService:
                 return record.is_active()
         return False
 
+    # --- On-Call Clinicians ---
+
+    async def get_on_call_clinicians(self) -> list[dict[str, Any]]:
+        """
+        Get list of currently on-call clinicians for crisis notifications.
+
+        Returns:
+            List of clinician contact information dictionaries containing:
+            - user_id: Clinician user ID
+            - display_name: Clinician name
+            - email: Contact email
+            - phone_number: Contact phone (if available)
+        """
+        try:
+            clinicians = await self._user_repo.find_on_call_clinicians()
+
+            return [
+                {
+                    "user_id": str(clinician.user_id),
+                    "display_name": clinician.display_name,
+                    "email": clinician.email,
+                    "phone_number": clinician.phone_number,
+                }
+                for clinician in clinicians
+            ]
+        except Exception as e:
+            logger.error("get_on_call_clinicians_failed", error=str(e))
+            return []
+
+    async def set_on_call_status(
+        self,
+        user_id: UUID,
+        is_on_call: bool,
+    ) -> UpdateUserResult:
+        """
+        Set a clinician's on-call status.
+
+        Args:
+            user_id: Clinician user ID
+            is_on_call: Whether the clinician is on-call
+
+        Returns:
+            UpdateUserResult indicating success or error
+        """
+        try:
+            user = await self._user_repo.get_by_id(user_id)
+            if not user:
+                return UpdateUserResult(
+                    error="User not found",
+                    error_code="USER_NOT_FOUND",
+                )
+
+            if user.role != UserRole.CLINICIAN:
+                return UpdateUserResult(
+                    error="Only clinicians can be set on-call",
+                    error_code="INVALID_ROLE",
+                )
+
+            user.is_on_call = is_on_call
+            user.updated_at = datetime.now(timezone.utc)
+
+            updated_user = await self._user_repo.update(user)
+
+            logger.info(
+                "on_call_status_changed",
+                user_id=str(user_id),
+                is_on_call=is_on_call,
+            )
+
+            return UpdateUserResult(success=True, user=updated_user)
+
+        except Exception as e:
+            logger.error("set_on_call_status_failed", user_id=str(user_id), error=str(e))
+            return UpdateUserResult(
+                error=f"Failed to update on-call status: {str(e)}",
+                error_code="UPDATE_FAILED",
+            )
+
     # --- Progress Tracking ---
 
     async def get_progress(self, user_id: UUID) -> UserProgress | None:
         """
-        Get user progress summary.
+        Get user progress summary by fetching data from therapy service.
 
         Args:
             user_id: User identifier
 
         Returns:
-            UserProgress summary or None
+            UserProgress summary or None if user not found
         """
         user = await self._user_repo.get_by_id(user_id)
         if not user:
             return None
 
-        # TODO: Fetch actual progress from session/therapy services
+        # Fetch actual progress from therapy service
+        therapy_progress = await self._fetch_therapy_progress(user_id)
+
         return UserProgress(
             user_id=user_id,
-            total_sessions=0,
-            completed_assessments=0,
-            streak_days=0,
-            total_minutes=0,
-            mood_trend="stable",
-            engagement_score=0.5,
+            total_sessions=therapy_progress.get("total_sessions", 0),
+            completed_assessments=therapy_progress.get("assessments_completed", 0),
+            streak_days=therapy_progress.get("streak_days", 0),
+            total_minutes=therapy_progress.get("total_minutes", 0),
+            mood_trend=therapy_progress.get("mood_trend", "stable"),
+            engagement_score=therapy_progress.get("engagement_score", 0.5),
         )
+
+    async def _fetch_therapy_progress(self, user_id: UUID) -> dict[str, Any]:
+        """
+        Fetch therapy progress data from the therapy service.
+
+        Args:
+            user_id: User identifier
+
+        Returns:
+            Dictionary with therapy progress data, or empty dict on failure
+        """
+        url = f"{self._integration_settings.therapy_service_url}/api/v1/users/{user_id}/progress"
+        timeout = httpx.Timeout(self._integration_settings.request_timeout)
+
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.get(url)
+
+                if response.status_code == 404:
+                    logger.debug(
+                        "no_therapy_progress_found",
+                        user_id=str(user_id),
+                    )
+                    return {}
+
+                response.raise_for_status()
+                data = response.json()
+
+                logger.debug(
+                    "therapy_progress_fetched",
+                    user_id=str(user_id),
+                    total_sessions=data.get("total_sessions", 0),
+                )
+                return data
+
+        except httpx.TimeoutException:
+            logger.warning(
+                "therapy_service_timeout",
+                user_id=str(user_id),
+                url=url,
+            )
+            return {}
+        except httpx.HTTPStatusError as e:
+            logger.warning(
+                "therapy_service_http_error",
+                user_id=str(user_id),
+                status_code=e.response.status_code,
+            )
+            return {}
+        except Exception as e:
+            logger.error(
+                "therapy_progress_fetch_failed",
+                user_id=str(user_id),
+                error=str(e),
+            )
+            return {}
 
     # --- Statistics ---
 

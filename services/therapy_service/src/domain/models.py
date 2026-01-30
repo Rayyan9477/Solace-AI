@@ -47,6 +47,14 @@ class SessionStartResult:
     initial_message: str = ""
     suggested_agenda: list[str] = field(default_factory=list)
     loaded_context: bool = False
+    success: bool = True
+    error: str | None = None
+    error_code: str | None = None
+
+    @classmethod
+    def failure(cls, error: str, error_code: str = "SESSION_START_ERROR") -> SessionStartResult:
+        """Create a failure result."""
+        return cls(success=False, error=error, error_code=error_code)
 
 
 @dataclass
@@ -59,6 +67,14 @@ class TherapyMessageResult:
     safety_alerts: list[str] = field(default_factory=list)
     next_steps: list[str] = field(default_factory=list)
     processing_time_ms: int = 0
+    success: bool = True
+    error: str | None = None
+    error_code: str | None = None
+
+    @classmethod
+    def failure(cls, error: str, error_code: str = "MESSAGE_PROCESSING_ERROR") -> TherapyMessageResult:
+        """Create a failure result."""
+        return cls(success=False, error=error, error_code=error_code)
 
 
 @dataclass
@@ -67,6 +83,14 @@ class SessionEndResult:
     summary: SessionSummaryDTO | None = None
     duration_minutes: int = 0
     recommendations: list[str] = field(default_factory=list)
+    success: bool = True
+    error: str | None = None
+    error_code: str | None = None
+
+    @classmethod
+    def failure(cls, error: str, error_code: str = "SESSION_END_ERROR") -> SessionEndResult:
+        """Create a failure result."""
+        return cls(success=False, error=error, error_code=error_code)
 
 
 @dataclass

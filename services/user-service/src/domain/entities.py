@@ -49,6 +49,10 @@ class User(BaseModel):
     role: UserRole = Field(default=UserRole.USER, description="User role for authorization")
     status: AccountStatus = Field(default=AccountStatus.PENDING_VERIFICATION, description="Account status")
 
+    # Clinician on-call status for crisis notification routing
+    is_on_call: bool = Field(default=False, description="Whether clinician is currently on-call for crisis notifications")
+    phone_number: str | None = Field(default=None, max_length=20, description="Phone number for SMS notifications")
+
     timezone: str = Field(default="UTC", description="User timezone (IANA format)")
     locale: str = Field(default="en-US", description="User locale (ISO 639-1)")
     avatar_url: str | None = Field(default=None, max_length=500, description="Avatar image URL")

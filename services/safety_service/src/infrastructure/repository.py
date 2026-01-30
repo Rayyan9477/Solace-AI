@@ -353,20 +353,48 @@ class SafetyRepositoryFactory:
 
 
 _factory: SafetyRepositoryFactory | None = None
+_postgres_client: Any | None = None
 
 
-def get_repository_factory() -> SafetyRepositoryFactory:
-    """Get singleton repository factory."""
-    global _factory
+def configure_repository_factory(
+    config: SafetyRepositoryConfig | None = None,
+    postgres_client: Any | None = None,
+) -> None:
+    """Configure the repository factory with optional PostgreSQL client."""
+    global _factory, _postgres_client
+    _factory = None  # Reset to pick up new config
+    _postgres_client = postgres_client
+
+
+def get_repository_factory(
+    config: SafetyRepositoryConfig | None = None,
+) -> SafetyRepositoryFactory:
+    """Get singleton repository factory.
+
+    Uses PostgreSQL repositories when config.use_postgres is True
+    and a PostgresClient has been configured via configure_repository_factory().
+    """
+    global _factory, _postgres_client
     if _factory is None:
-        _factory = SafetyRepositoryFactory()
+        repo_config = config or SafetyRepositoryConfig()
+        if repo_config.use_postgres and _postgres_client is not None:
+            _factory = PostgresSafetyRepositoryFactory(
+                config=repo_config,
+                postgres_client=_postgres_client,
+                schema=repo_config.db_schema,
+            )
+            logger.info("safety_repository_factory_created", type="postgres")
+        else:
+            _factory = SafetyRepositoryFactory(config=repo_config)
+            logger.info("safety_repository_factory_created", type="in_memory")
     return _factory
 
 
 def reset_repositories() -> None:
     """Reset all repositories (for testing)."""
-    global _factory
+    global _factory, _postgres_client
     _factory = None
+    _postgres_client = None
 
 
 # =============================================================================

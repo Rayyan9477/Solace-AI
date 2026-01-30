@@ -17,6 +17,35 @@ from .schemas import (
 )
 from .domain.service import PersonalityOrchestrator
 
+# Authentication dependencies from shared security library
+try:
+    from solace_security.middleware import (
+        AuthenticatedUser,
+        AuthenticatedService,
+        get_current_user,
+        get_current_service,
+    )
+except ImportError:
+    from dataclasses import dataclass as _dataclass
+
+    @_dataclass
+    class AuthenticatedUser:
+        user_id: str
+        token_type: str = "access"
+        roles: list = None
+        permissions: list = None
+
+    @_dataclass
+    class AuthenticatedService:
+        service_name: str
+        permissions: list = None
+
+    async def get_current_user() -> AuthenticatedUser:
+        raise HTTPException(status_code=501, detail="Authentication not configured")
+
+    async def get_current_service() -> AuthenticatedService:
+        raise HTTPException(status_code=501, detail="Service auth not configured")
+
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["personality"])
 
@@ -49,6 +78,7 @@ OrchestratorDep = Annotated[PersonalityOrchestrator, Depends(get_orchestrator)]
 async def detect_personality(
     request: DetectPersonalityRequest,
     orchestrator: OrchestratorDep,
+    service: AuthenticatedService = Depends(get_current_service),
 ) -> DetectPersonalityResponse:
     """Detect personality traits from user text."""
     logger.info("personality_detection_request", user_id=str(request.user_id), text_length=len(request.text))
