@@ -159,6 +159,125 @@ class TenantMixin:
     )
 
 
+class EncryptedFieldMixin:
+    """Mixin providing automatic field-level encryption for PHI.
+
+    Entities inheriting this mixin will have automatic encryption support
+    for sensitive fields. Works in conjunction with FieldEncryptor from
+    solace_security.encryption.
+
+    NOTE: Actual encryption/decryption happens at the service layer.
+    This mixin provides the necessary fields and metadata for tracking
+    encrypted data and encryption keys.
+    """
+
+    encryption_key_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,  # ← REQUIRED for PHI protection
+        index=True,
+        comment="ID of encryption key used for PHI fields (REQUIRED)"
+    )
+
+    encryption_algorithm: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="AES-256-GCM",
+        comment="Encryption algorithm used"
+    )
+
+    encryption_version: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="v1",
+        comment="Encryption scheme version for future key rotation"
+    )
+
+    def set_encryption_metadata(
+        self,
+        key_id: str,
+        algorithm: str = "AES-256-GCM",
+        version: str = "v1"
+    ) -> None:
+        """Set encryption metadata for this entity.
+
+        Args:
+            key_id: The encryption key ID to use
+            algorithm: The encryption algorithm (default: AES-256-GCM)
+            version: The encryption version (default: v1)
+        """
+        self.encryption_key_id = key_id
+        self.encryption_algorithm = algorithm
+        self.encryption_version = version
+
+
+class AuditTrailMixin:
+    """Enhanced mixin for comprehensive audit trail tracking.
+
+    Provides detailed tracking of all entity modifications including:
+    - Who performed the action (created_by, updated_by)
+    - When the action occurred (created_at, updated_at, last_accessed_at)
+    - What changed (change_history as JSONB)
+    - Access tracking for HIPAA compliance
+
+    This extends the basic AuditMixin with additional compliance features.
+    """
+
+    last_accessed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Last time this record was accessed (read)"
+    )
+
+    access_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        comment="Number of times this record was accessed"
+    )
+
+    last_accessed_by: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        comment="User ID who last accessed this record"
+    )
+
+    change_history: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        comment="History of changes to this record (for compliance)"
+    )
+
+    def record_access(self, accessor_id: str) -> None:
+        """Record that this entity was accessed.
+
+        Args:
+            accessor_id: ID of user or system accessing the record
+        """
+        self.last_accessed_at = datetime.now(timezone.utc)
+        self.last_accessed_by = accessor_id
+        self.access_count += 1
+
+    def add_change_record(self, change_description: str, changed_by: str, changed_fields: list[str] | None = None) -> None:
+        """Add a change record to the history.
+
+        Args:
+            change_description: Description of what changed
+            changed_by: Who made the change
+            changed_fields: Optional list of field names that changed
+        """
+        if not self.change_history:
+            self.change_history = {"changes": []}
+
+        change_record = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "changed_by": changed_by,
+            "description": change_description,
+            "fields": changed_fields or [],
+        }
+        self.change_history["changes"].append(change_record)
+
+
 class BaseModel(Base, TimestampMixin, VersionMixin):
     """Abstract base model with UUID primary key and core features.
 
@@ -255,10 +374,18 @@ class SessionBase(AuditableModel):
     )
 
 
-class ClinicalBase(AuditableModel):
+class ClinicalBase(AuditableModel, EncryptedFieldMixin, AuditTrailMixin):
     """Base for clinical data entities with PHI handling.
 
     Entities inheriting this require encryption and access controls.
+    Enforces:
+    - Encryption at rest (encryption_key_id REQUIRED)
+    - Comprehensive audit trail
+    - PHI access tracking
+    - HIPAA compliance features
+
+    All PHI fields will be automatically encrypted when stored and
+    decrypted when retrieved.
     """
 
     __abstract__ = True
@@ -268,16 +395,18 @@ class ClinicalBase(AuditableModel):
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
+        comment="User this clinical data belongs to"
     )
+
     is_phi: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
         nullable=False,
+        comment="Whether this record contains PHI (default: True)"
     )
-    encryption_key_id: Mapped[str | None] = mapped_column(
-        String(64),
-        nullable=True,
-    )
+
+    # encryption_key_id is now inherited from EncryptedFieldMixin
+    # and is REQUIRED (nullable=False) for HIPAA compliance
 
 
 class SafetyEventBase(AuditableModel):

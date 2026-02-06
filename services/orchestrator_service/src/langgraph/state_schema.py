@@ -220,6 +220,9 @@ class OrchestratorState(TypedDict, total=False):
     personality_style: dict[str, Any]
     active_treatment: dict[str, Any] | None
     memory_context: dict[str, Any]
+    retrieved_memories: list[dict[str, Any]]
+    assembled_context: str
+    memory_sources: list[str]
 
 
 def create_initial_state(
@@ -264,6 +267,9 @@ def create_initial_state(
         personality_style={},
         active_treatment=None,
         memory_context={},
+        retrieved_memories=[],
+        assembled_context="",
+        memory_sources=[],
     )
 
 

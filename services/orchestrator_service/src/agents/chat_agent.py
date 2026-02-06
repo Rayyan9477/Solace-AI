@@ -179,12 +179,20 @@ class ResponseGenerator:
         topic: TopicClassification,
         personality_style: dict[str, Any],
         conversation_context: str,
+        memory_context: dict[str, Any] | None = None,
     ) -> ChatResponse:
         """Generate a response based on topic and personality."""
         warmth = personality_style.get("warmth", self._settings.default_warmth)
         validation_level = personality_style.get("validation_level", self._settings.default_validation_level)
         tone = self._determine_tone(topic.category, warmth)
-        content = self._generate_content(message, topic, warmth, validation_level)
+        
+        # Incorporate memory context if available
+        context_aware_prefix = ""
+        if memory_context and memory_context.get("retrieval_count", 0) > 0:
+            context_aware_prefix = self._build_context_aware_prefix(conversation_context, memory_context)
+        
+        content = self._generate_content(message, topic, warmth, validation_level, context_aware_prefix)
+        
         if self._settings.include_follow_up_questions and topic.category not in (
             TopicCategory.FAREWELL,
             TopicCategory.GRATITUDE,
@@ -213,12 +221,27 @@ class ResponseGenerator:
             return ConversationTone.REFLECTIVE
         return ConversationTone.WARM if warmth > 0.5 else ConversationTone.NEUTRAL
 
+    def _build_context_aware_prefix(self, conversation_context: str, memory_context: dict[str, Any]) -> str:
+        """Build a prefix based on retrieved memory context."""
+        if not conversation_context:
+            return ""
+        
+        # Extract key information from memory context
+        retrieval_count = memory_context.get("retrieval_count", 0)
+        
+        if retrieval_count > 0:
+            # Add subtle context awareness (not explicitly mentioning memory retrieval)
+            return "Based on our previous conversations, "
+        
+        return ""
+
     def _generate_content(
         self,
         message: str,
         topic: TopicClassification,
         warmth: float,
         validation_level: float,
+        context_aware_prefix: str = "",
     ) -> str:
         """Generate response content based on topic."""
         if topic.category == TopicCategory.GREETING:
@@ -231,7 +254,7 @@ class ResponseGenerator:
             return self._check_in_response(warmth)
         if topic.category == TopicCategory.CLARIFICATION:
             return self._clarification_response(message)
-        return self._general_response(message, warmth, validation_level)
+        return self._general_response(message, warmth, validation_level, context_aware_prefix)
 
     def _greeting_response(self, warmth: float) -> str:
         """Generate greeting response."""
@@ -279,19 +302,23 @@ class ResponseGenerator:
             "Could you tell me more about what you mean?"
         )
 
-    def _general_response(self, message: str, warmth: float, validation_level: float) -> str:
+    def _general_response(self, message: str, warmth: float, validation_level: float, context_aware_prefix: str = "") -> str:
         """Generate general conversation response."""
         empathy_prefix = ""
         if self._settings.empathy_phrases_enabled and validation_level > 0.5:
             empathy_prefix = "Thank you for sharing that with me. "
+        
+        # Add context-aware prefix if available
+        full_prefix = context_aware_prefix + empathy_prefix if context_aware_prefix else empathy_prefix
+        
         if warmth > 0.7:
             return (
-                f"{empathy_prefix}I appreciate you opening up. "
+                f"{full_prefix}I appreciate you opening up. "
                 "I'm here to listen and support you in whatever way I can."
             )
         if warmth > 0.5:
-            return f"{empathy_prefix}I hear you. Tell me more about what's on your mind."
-        return f"{empathy_prefix}I understand. How can I help you with this?"
+            return f"{full_prefix}I hear you. Tell me more about what's on your mind."
+        return f"{full_prefix}I understand. How can I help you with this?"
 
     def _generate_follow_up(self, topic: TopicCategory, message: str) -> str:
         """Generate appropriate follow-up question."""
@@ -331,10 +358,13 @@ class ChatAgent:
         message = state.get("current_message", "")
         personality_style = state.get("personality_style", {})
         conversation_context = state.get("conversation_context", "")
+        memory_context = state.get("memory_context", {})
+        
         logger.info(
             "chat_agent_processing",
             message_length=len(message),
             has_personality_style=bool(personality_style),
+            has_memory_context=bool(memory_context),
         )
         topic = self._topic_classifier.classify(message)
         response = self._response_generator.generate(
@@ -342,6 +372,7 @@ class ChatAgent:
             topic=topic,
             personality_style=personality_style,
             conversation_context=conversation_context,
+            memory_context=memory_context,
         )
         return self._build_state_update(response, topic)
 

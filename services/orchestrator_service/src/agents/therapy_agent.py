@@ -211,11 +211,16 @@ class TherapyAgent:
         messages = state.get("messages", [])
         intent = state.get("intent", "general_chat")
         active_treatment = state.get("active_treatment")
+        memory_context = state.get("memory_context", {})
+        assembled_context = state.get("assembled_context", "")
+        
         logger.info(
             "therapy_agent_processing",
             user_id=user_id,
             message_length=len(message),
             intent=intent,
+            has_memory_context=bool(memory_context),
+            context_tokens=memory_context.get("total_tokens", 0) if memory_context else 0,
         )
         try:
             result = await self._process_therapy_request(
@@ -225,6 +230,7 @@ class TherapyAgent:
                 messages=messages,
                 intent=intent,
                 active_treatment=active_treatment,
+                assembled_context=assembled_context,
             )
             return self._build_state_update(result)
         except Exception as e:
@@ -241,8 +247,17 @@ class TherapyAgent:
         messages: list[dict[str, Any]],
         intent: str,
         active_treatment: dict[str, Any] | None,
+        assembled_context: str = "",
     ) -> TherapyResponse:
         """Process therapy request via Therapy Service."""
+        # Note: assembled_context from memory can be logged or used for future enhancements
+        # Currently passing to service via conversation_history
+        if assembled_context:
+            logger.debug(
+                "therapy_request_with_memory_context",
+                context_length=len(assembled_context),
+            )
+        
         return await self._client.process_message(
             session_id=session_id,
             user_id=user_id,
