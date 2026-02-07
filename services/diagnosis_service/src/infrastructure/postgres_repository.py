@@ -31,6 +31,13 @@ from ..schemas import (
 )
 from .repository import DiagnosisRepositoryPort
 
+try:
+    from solace_infrastructure.database import ConnectionPoolManager
+    from solace_infrastructure.feature_flags import FeatureFlags
+except ImportError:
+    ConnectionPoolManager = None
+    FeatureFlags = None
+
 if TYPE_CHECKING:
     from solace_infrastructure.postgres import PostgresClient
 
@@ -51,12 +58,22 @@ def _decimal_encoder(obj: Any) -> Any:
 class PostgresDiagnosisRepository(DiagnosisRepositoryPort):
     """PostgreSQL implementation of diagnosis repository."""
 
+    POOL_NAME = "diagnosis_db"
+
     def __init__(self, client: PostgresClient, schema: str = "public") -> None:
         self._client = client
         self._schema = schema
         self._sessions_table = f"{schema}.diagnosis_sessions"
         self._records_table = f"{schema}.diagnosis_records"
         self._stats = {"sessions_saved": 0, "records_saved": 0, "queries": 0, "deletes": 0}
+
+    def _acquire(self):
+        """Get connection from ConnectionPoolManager or legacy client."""
+        if ConnectionPoolManager is not None and FeatureFlags is not None and FeatureFlags.is_enabled("use_connection_pool_manager"):
+            return ConnectionPoolManager.acquire(self.POOL_NAME)
+        if self._client is not None:
+            return self._client.acquire()
+        raise Exception("No database connection available.")
 
     async def save_session(self, session: DiagnosisSessionEntity) -> None:
         """Save a diagnosis session to PostgreSQL."""
@@ -99,7 +116,7 @@ class PostgresDiagnosisRepository(DiagnosisRepositoryPort):
                 updated_at = EXCLUDED.updated_at,
                 version = EXCLUDED.version
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             await conn.execute(
                 query,
                 session.id,
@@ -128,7 +145,7 @@ class PostgresDiagnosisRepository(DiagnosisRepositoryPort):
         """Get a session by ID from PostgreSQL."""
         self._stats["queries"] += 1
         query = f"SELECT * FROM {self._sessions_table} WHERE id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, session_id)
             if row is None:
                 return None
@@ -143,7 +160,7 @@ class PostgresDiagnosisRepository(DiagnosisRepositoryPort):
             ORDER BY created_at DESC
             LIMIT 1
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, user_id)
             if row is None:
                 return None
@@ -160,14 +177,14 @@ class PostgresDiagnosisRepository(DiagnosisRepositoryPort):
             ORDER BY created_at DESC
             LIMIT $2
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, user_id, limit)
             return [self._row_to_session(dict(row)) for row in rows]
 
     async def delete_session(self, session_id: UUID) -> bool:
         """Delete a session from PostgreSQL."""
         query = f"DELETE FROM {self._sessions_table} WHERE id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             result = await conn.execute(query, session_id)
             deleted = result.split()[-1] != "0"
             if deleted:
@@ -207,7 +224,7 @@ class PostgresDiagnosisRepository(DiagnosisRepositoryPort):
                 updated_at = EXCLUDED.updated_at,
                 version = EXCLUDED.version
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             await conn.execute(
                 query,
                 record.id,
@@ -238,7 +255,7 @@ class PostgresDiagnosisRepository(DiagnosisRepositoryPort):
         """Get a diagnosis record by ID from PostgreSQL."""
         self._stats["queries"] += 1
         query = f"SELECT * FROM {self._records_table} WHERE id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, record_id)
             if row is None:
                 return None
@@ -255,7 +272,7 @@ class PostgresDiagnosisRepository(DiagnosisRepositoryPort):
             ORDER BY created_at DESC
             LIMIT $2
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, user_id, limit)
             return [self._row_to_record(dict(row)) for row in rows]
 
@@ -265,13 +282,13 @@ class PostgresDiagnosisRepository(DiagnosisRepositoryPort):
 
         # Delete sessions
         sessions_query = f"DELETE FROM {self._sessions_table} WHERE user_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             result = await conn.execute(sessions_query, user_id)
             deleted_count += int(result.split()[-1])
 
         # Delete records
         records_query = f"DELETE FROM {self._records_table} WHERE user_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             result = await conn.execute(records_query, user_id)
             deleted_count += int(result.split()[-1])
 
@@ -290,7 +307,7 @@ class PostgresDiagnosisRepository(DiagnosisRepositoryPort):
             ORDER BY created_at DESC
         """
         symptoms: list[SymptomEntity] = []
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, user_id)
             for row in rows:
                 symptoms_data = row["symptoms"]
@@ -309,7 +326,7 @@ class PostgresDiagnosisRepository(DiagnosisRepositoryPort):
         records_query = f"SELECT COUNT(*) FROM {self._records_table}"
         users_query = f"SELECT COUNT(DISTINCT user_id) FROM {self._sessions_table}"
 
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             sessions_row = await conn.fetchrow(sessions_query)
             records_count = await conn.fetchval(records_query)
             users_count = await conn.fetchval(users_query)

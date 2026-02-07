@@ -3,6 +3,7 @@ Solace-AI Diagnosis Service - Repository Layer.
 Provides persistence abstraction for diagnosis entities.
 """
 from __future__ import annotations
+import os
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Any
@@ -69,6 +70,8 @@ class InMemoryDiagnosisRepository(DiagnosisRepositoryPort):
     """In-memory implementation of diagnosis repository."""
 
     def __init__(self) -> None:
+        if os.getenv("ENVIRONMENT") == "production":
+            raise RuntimeError("In-memory repositories are not allowed in production.")
         self._sessions: dict[UUID, DiagnosisSessionEntity] = {}
         self._records: dict[UUID, DiagnosisRecordEntity] = {}
         self._user_sessions: dict[UUID, list[UUID]] = {}
