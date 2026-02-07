@@ -22,6 +22,13 @@ from ..domain.value_objects import OceanScores, CommunicationStyle, AssessmentMe
 from ..schemas import AssessmentSource, CommunicationStyleType
 from .repository import PersonalityRepositoryPort
 
+try:
+    from solace_infrastructure.database import ConnectionPoolManager
+    from solace_infrastructure.feature_flags import FeatureFlags
+except ImportError:
+    ConnectionPoolManager = None
+    FeatureFlags = None
+
 if TYPE_CHECKING:
     from solace_infrastructure.postgres import PostgresClient
 
@@ -42,6 +49,8 @@ def _decimal_encoder(obj: Any) -> Any:
 class PostgresPersonalityRepository(PersonalityRepositoryPort):
     """PostgreSQL implementation of personality repository."""
 
+    POOL_NAME = "personality_db"
+
     def __init__(self, client: PostgresClient, schema: str = "public") -> None:
         self._client = client
         self._schema = schema
@@ -49,6 +58,14 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
         self._assessments_table = f"{schema}.trait_assessments"
         self._snapshots_table = f"{schema}.profile_snapshots"
         self._stats = {"profiles_saved": 0, "assessments_saved": 0, "snapshots_saved": 0, "queries": 0, "deletes": 0}
+
+    def _acquire(self):
+        """Get connection from ConnectionPoolManager or legacy client."""
+        if ConnectionPoolManager is not None and FeatureFlags is not None and FeatureFlags.is_enabled("use_connection_pool_manager"):
+            return ConnectionPoolManager.acquire(self.POOL_NAME)
+        if self._client is not None:
+            return self._client.acquire()
+        raise Exception("No database connection available.")
 
     async def save_profile(self, profile: PersonalityProfile) -> None:
         """Save a personality profile to PostgreSQL."""
@@ -87,7 +104,7 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
                 updated_at = EXCLUDED.updated_at,
                 version = EXCLUDED.version
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             await conn.execute(
                 query,
                 profile.profile_id,
@@ -108,7 +125,7 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
         """Get a profile by ID from PostgreSQL."""
         self._stats["queries"] += 1
         query = f"SELECT * FROM {self._profiles_table} WHERE profile_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, profile_id)
             if row is None:
                 return None
@@ -118,7 +135,7 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
         """Get profile by user ID from PostgreSQL."""
         self._stats["queries"] += 1
         query = f"SELECT * FROM {self._profiles_table} WHERE user_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, user_id)
             if row is None:
                 return None
@@ -132,14 +149,14 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
             ORDER BY created_at DESC
             LIMIT $1 OFFSET $2
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, limit, offset)
             return [self._row_to_profile(dict(row)) for row in rows]
 
     async def delete_profile(self, profile_id: UUID) -> bool:
         """Delete a profile from PostgreSQL."""
         query = f"DELETE FROM {self._profiles_table} WHERE profile_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             result = await conn.execute(query, profile_id)
             deleted = result.split()[-1] != "0"
             if deleted:
@@ -172,7 +189,7 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
                 evidence = EXCLUDED.evidence,
                 version = EXCLUDED.version
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             await conn.execute(
                 query,
                 assessment.assessment_id,
@@ -191,7 +208,7 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
         """Get assessment by ID from PostgreSQL."""
         self._stats["queries"] += 1
         query = f"SELECT * FROM {self._assessments_table} WHERE assessment_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, assessment_id)
             if row is None:
                 return None
@@ -206,7 +223,7 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
             ORDER BY created_at DESC
             LIMIT $2
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, user_id, limit)
             return [self._row_to_assessment(dict(row)) for row in rows]
 
@@ -236,7 +253,7 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
             )
             ON CONFLICT (snapshot_id) DO NOTHING
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             await conn.execute(
                 query,
                 snapshot.snapshot_id,
@@ -256,7 +273,7 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
         """Get snapshot by ID from PostgreSQL."""
         self._stats["queries"] += 1
         query = f"SELECT * FROM {self._snapshots_table} WHERE snapshot_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, snapshot_id)
             if row is None:
                 return None
@@ -271,7 +288,7 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
             ORDER BY captured_at DESC
             LIMIT $2
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, profile_id, limit)
             return [self._row_to_snapshot(dict(row)) for row in rows]
 
@@ -281,26 +298,26 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
 
         # Get profile ID first
         query = f"SELECT profile_id FROM {self._profiles_table} WHERE user_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, user_id)
             profile_id = row["profile_id"] if row else None
 
         # Delete snapshots
         if profile_id:
             snapshots_query = f"DELETE FROM {self._snapshots_table} WHERE profile_id = $1"
-            async with self._client.acquire() as conn:
+            async with self._acquire() as conn:
                 result = await conn.execute(snapshots_query, profile_id)
                 deleted_count += int(result.split()[-1])
 
         # Delete assessments
         assessments_query = f"DELETE FROM {self._assessments_table} WHERE user_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             result = await conn.execute(assessments_query, user_id)
             deleted_count += int(result.split()[-1])
 
         # Delete profile
         profiles_query = f"DELETE FROM {self._profiles_table} WHERE user_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             result = await conn.execute(profiles_query, user_id)
             deleted_count += int(result.split()[-1])
 
@@ -315,7 +332,7 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
         snapshots_query = f"SELECT COUNT(*) FROM {self._snapshots_table}"
         users_query = f"SELECT COUNT(DISTINCT user_id) FROM {self._profiles_table}"
 
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             profiles_count = await conn.fetchval(profiles_query)
             assessments_count = await conn.fetchval(assessments_query)
             snapshots_count = await conn.fetchval(snapshots_query)

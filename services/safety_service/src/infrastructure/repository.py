@@ -1,9 +1,13 @@
 """
 Solace-AI Safety Service - Repository Layer.
 Repository abstraction and implementations for safety data persistence.
+
+Updated to use ConnectionPoolManager for centralized connection pooling
+and FeatureFlags for gradual rollout.
 """
 from __future__ import annotations
 import asyncio
+import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from datetime import datetime, timezone, timedelta
@@ -174,9 +178,23 @@ class UserRiskProfileRepository(ABC):
 
 
 class InMemorySafetyAssessmentRepository(SafetyAssessmentRepository):
-    """In-memory implementation for development and testing."""
+    """In-memory implementation for development and testing.
+
+    DEPRECATED: Use PostgreSQL-backed repositories via ConnectionPoolManager.
+    This class will be removed in v2.0.0. In-memory repos are blocked in production.
+    """
 
     def __init__(self) -> None:
+        if os.getenv("ENVIRONMENT") == "production":
+            raise RuntimeError(
+                "In-memory repositories are not allowed in production. "
+                "Configure PostgreSQL via POSTGRES_* environment variables."
+            )
+        logger.warning(
+            "in_memory_repo_deprecated",
+            repo="SafetyAssessmentRepository",
+            message="Using in-memory storage - data will not persist. Migrate to PostgreSQL.",
+        )
         self._assessments: dict[UUID, SafetyAssessment] = {}
         self._lock = asyncio.Lock()
 
@@ -208,9 +226,23 @@ class InMemorySafetyAssessmentRepository(SafetyAssessmentRepository):
 
 
 class InMemorySafetyPlanRepository(SafetyPlanRepository):
-    """In-memory implementation for development and testing."""
+    """In-memory implementation for development and testing.
+
+    DEPRECATED: Use PostgreSQL-backed repositories via ConnectionPoolManager.
+    This class will be removed in v2.0.0. In-memory repos are blocked in production.
+    """
 
     def __init__(self) -> None:
+        if os.getenv("ENVIRONMENT") == "production":
+            raise RuntimeError(
+                "In-memory repositories are not allowed in production. "
+                "Configure PostgreSQL via POSTGRES_* environment variables."
+            )
+        logger.warning(
+            "in_memory_repo_deprecated",
+            repo="SafetyPlanRepository",
+            message="Using in-memory storage - data will not persist. Migrate to PostgreSQL.",
+        )
         self._plans: dict[UUID, SafetyPlan] = {}
         self._lock = asyncio.Lock()
 
@@ -248,9 +280,23 @@ class InMemorySafetyPlanRepository(SafetyPlanRepository):
 
 
 class InMemorySafetyIncidentRepository(SafetyIncidentRepository):
-    """In-memory implementation for development and testing."""
+    """In-memory implementation for development and testing.
+
+    DEPRECATED: Use PostgreSQL-backed repositories via ConnectionPoolManager.
+    This class will be removed in v2.0.0. In-memory repos are blocked in production.
+    """
 
     def __init__(self) -> None:
+        if os.getenv("ENVIRONMENT") == "production":
+            raise RuntimeError(
+                "In-memory repositories are not allowed in production. "
+                "Configure PostgreSQL via POSTGRES_* environment variables."
+            )
+        logger.warning(
+            "in_memory_repo_deprecated",
+            repo="SafetyIncidentRepository",
+            message="Using in-memory storage - data will not persist. Migrate to PostgreSQL.",
+        )
         self._incidents: dict[UUID, SafetyIncident] = {}
         self._lock = asyncio.Lock()
 
@@ -287,9 +333,23 @@ class InMemorySafetyIncidentRepository(SafetyIncidentRepository):
 
 
 class InMemoryUserRiskProfileRepository(UserRiskProfileRepository):
-    """In-memory implementation for development and testing."""
+    """In-memory implementation for development and testing.
+
+    DEPRECATED: Use PostgreSQL-backed repositories via ConnectionPoolManager.
+    This class will be removed in v2.0.0. In-memory repos are blocked in production.
+    """
 
     def __init__(self) -> None:
+        if os.getenv("ENVIRONMENT") == "production":
+            raise RuntimeError(
+                "In-memory repositories are not allowed in production. "
+                "Configure PostgreSQL via POSTGRES_* environment variables."
+            )
+        logger.warning(
+            "in_memory_repo_deprecated",
+            repo="UserRiskProfileRepository",
+            message="Using in-memory storage - data will not persist. Migrate to PostgreSQL.",
+        )
         self._profiles: dict[UUID, UserRiskProfile] = {}
         self._lock = asyncio.Lock()
 
@@ -371,20 +431,43 @@ def get_repository_factory(
 ) -> SafetyRepositoryFactory:
     """Get singleton repository factory.
 
-    Uses PostgreSQL repositories when config.use_postgres is True
-    and a PostgresClient has been configured via configure_repository_factory().
+    Resolution order:
+    1. If ConnectionPoolManager feature flag is enabled → use ConnectionPoolManager-based repos
+    2. If config.use_postgres and PostgresClient provided → use legacy client repos
+    3. If neither → use in-memory repos (blocked in production)
     """
     global _factory, _postgres_client
     if _factory is None:
         repo_config = config or SafetyRepositoryConfig()
-        if repo_config.use_postgres and _postgres_client is not None:
+
+        # Priority 1: Use ConnectionPoolManager (new centralized approach)
+        use_pool_manager = (
+            FeatureFlags is not None
+            and FeatureFlags.is_enabled("use_connection_pool_manager")
+            and ConnectionPoolManager is not None
+        )
+
+        if use_pool_manager:
+            _factory = PostgresSafetyRepositoryFactory(
+                config=repo_config,
+                postgres_client=None,  # Not needed with ConnectionPoolManager
+                schema=repo_config.db_schema,
+            )
+            logger.info(
+                "safety_repository_factory_created",
+                type="postgres_pool_manager",
+                pool_name="safety_db",
+            )
+        elif repo_config.use_postgres and _postgres_client is not None:
+            # Priority 2: Legacy PostgresClient
             _factory = PostgresSafetyRepositoryFactory(
                 config=repo_config,
                 postgres_client=_postgres_client,
                 schema=repo_config.db_schema,
             )
-            logger.info("safety_repository_factory_created", type="postgres")
+            logger.info("safety_repository_factory_created", type="postgres_legacy")
         else:
+            # Priority 3: In-memory (blocked in production)
             _factory = SafetyRepositoryFactory(config=repo_config)
             logger.info("safety_repository_factory_created", type="in_memory")
     return _factory
@@ -403,11 +486,15 @@ def reset_repositories() -> None:
 
 try:
     from solace_infrastructure.postgres import PostgresClient, PostgresSettings
+    from solace_infrastructure.database import ConnectionPoolManager
+    from solace_infrastructure.feature_flags import FeatureFlags
     _POSTGRES_AVAILABLE = True
 except ImportError:
     _POSTGRES_AVAILABLE = False
     PostgresClient = None
     PostgresSettings = None
+    ConnectionPoolManager = None
+    FeatureFlags = None
 
 
 def _serialize_entity(entity: Any) -> dict[str, Any]:
@@ -428,12 +515,28 @@ def _serialize_entity(entity: Any) -> dict[str, Any]:
 
 
 class PostgresSafetyAssessmentRepository(SafetyAssessmentRepository):
-    """PostgreSQL implementation of safety assessment repository."""
+    """PostgreSQL implementation of safety assessment repository.
 
-    def __init__(self, client: Any, schema: str = "public") -> None:
+    Uses ConnectionPoolManager for centralized connection pooling when feature flag
+    is enabled, falling back to legacy client if provided.
+    """
+
+    POOL_NAME = "safety_db"
+
+    def __init__(self, client: Any = None, schema: str = "public", pool_name: str | None = None) -> None:
         self._client = client
         self._schema = schema
         self._table = f"{schema}.safety_assessments"
+        if pool_name:
+            self.POOL_NAME = pool_name
+
+    def _acquire(self):
+        """Get connection context manager from ConnectionPoolManager or legacy client."""
+        if ConnectionPoolManager is not None and FeatureFlags is not None and FeatureFlags.is_enabled("use_connection_pool_manager"):
+            return ConnectionPoolManager.acquire(self.POOL_NAME)
+        if self._client is not None:
+            return self._client.acquire()
+        raise RepositoryError("No database connection available. Configure ConnectionPoolManager or provide a PostgresClient.")
 
     async def save(self, assessment: SafetyAssessment) -> SafetyAssessment:
         """Save a safety assessment to PostgreSQL."""
@@ -457,7 +560,7 @@ class PostgresSafetyAssessmentRepository(SafetyAssessmentRepository):
                 review_notes = EXCLUDED.review_notes
             RETURNING *
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             await conn.fetchrow(
                 query,
                 assessment.assessment_id,
@@ -488,7 +591,7 @@ class PostgresSafetyAssessmentRepository(SafetyAssessmentRepository):
     async def get_by_id(self, assessment_id: UUID) -> SafetyAssessment | None:
         """Get assessment by ID from PostgreSQL."""
         query = f"SELECT * FROM {self._table} WHERE assessment_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, assessment_id)
             if row is None:
                 return None
@@ -502,7 +605,7 @@ class PostgresSafetyAssessmentRepository(SafetyAssessmentRepository):
             ORDER BY created_at DESC
             LIMIT $2
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, user_id, limit)
             return [self._row_to_entity(dict(row)) for row in rows]
 
@@ -513,7 +616,7 @@ class PostgresSafetyAssessmentRepository(SafetyAssessmentRepository):
             WHERE session_id = $1
             ORDER BY created_at ASC
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, session_id)
             return [self._row_to_entity(dict(row)) for row in rows]
 
@@ -525,7 +628,7 @@ class PostgresSafetyAssessmentRepository(SafetyAssessmentRepository):
             WHERE user_id = $1 AND created_at >= $2
             ORDER BY created_at DESC
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, user_id, cutoff)
             return [self._row_to_entity(dict(row)) for row in rows]
 
@@ -535,7 +638,7 @@ class PostgresSafetyAssessmentRepository(SafetyAssessmentRepository):
             SELECT COUNT(*) FROM {self._table}
             WHERE user_id = $1 AND crisis_level = $2
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             count = await conn.fetchval(query, user_id, crisis_level)
             return count or 0
 
@@ -568,12 +671,28 @@ class PostgresSafetyAssessmentRepository(SafetyAssessmentRepository):
 
 
 class PostgresSafetyPlanRepository(SafetyPlanRepository):
-    """PostgreSQL implementation of safety plan repository."""
+    """PostgreSQL implementation of safety plan repository.
 
-    def __init__(self, client: Any, schema: str = "public") -> None:
+    Uses ConnectionPoolManager for centralized connection pooling when feature flag
+    is enabled, falling back to legacy client if provided.
+    """
+
+    POOL_NAME = "safety_db"
+
+    def __init__(self, client: Any = None, schema: str = "public", pool_name: str | None = None) -> None:
         self._client = client
         self._schema = schema
         self._table = f"{schema}.safety_plans"
+        if pool_name:
+            self.POOL_NAME = pool_name
+
+    def _acquire(self):
+        """Get connection context manager from ConnectionPoolManager or legacy client."""
+        if ConnectionPoolManager is not None and FeatureFlags is not None and FeatureFlags.is_enabled("use_connection_pool_manager"):
+            return ConnectionPoolManager.acquire(self.POOL_NAME)
+        if self._client is not None:
+            return self._client.acquire()
+        raise RepositoryError("No database connection available. Configure ConnectionPoolManager or provide a PostgresClient.")
 
     async def save(self, plan: SafetyPlan) -> SafetyPlan:
         """Save a safety plan to PostgreSQL."""
@@ -605,7 +724,7 @@ class PostgresSafetyPlanRepository(SafetyPlanRepository):
                 metadata = EXCLUDED.metadata
             RETURNING *
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             await conn.fetchrow(
                 query,
                 plan.plan_id,
@@ -633,7 +752,7 @@ class PostgresSafetyPlanRepository(SafetyPlanRepository):
     async def get_by_id(self, plan_id: UUID) -> SafetyPlan | None:
         """Get plan by ID from PostgreSQL."""
         query = f"SELECT * FROM {self._table} WHERE plan_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, plan_id)
             if row is None:
                 return None
@@ -646,7 +765,7 @@ class PostgresSafetyPlanRepository(SafetyPlanRepository):
             WHERE user_id = $1
             ORDER BY created_at DESC
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, user_id)
             return [self._row_to_entity(dict(row)) for row in rows]
 
@@ -658,7 +777,7 @@ class PostgresSafetyPlanRepository(SafetyPlanRepository):
             ORDER BY created_at DESC
             LIMIT 1
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, user_id)
             if row is None:
                 return None
@@ -671,7 +790,7 @@ class PostgresSafetyPlanRepository(SafetyPlanRepository):
     async def delete(self, plan_id: UUID) -> bool:
         """Delete a plan by ID from PostgreSQL."""
         query = f"DELETE FROM {self._table} WHERE plan_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             result = await conn.execute(query, plan_id)
             return result == "DELETE 1"
 
@@ -709,12 +828,28 @@ class PostgresSafetyPlanRepository(SafetyPlanRepository):
 
 
 class PostgresSafetyIncidentRepository(SafetyIncidentRepository):
-    """PostgreSQL implementation of safety incident repository."""
+    """PostgreSQL implementation of safety incident repository.
 
-    def __init__(self, client: Any, schema: str = "public") -> None:
+    Uses ConnectionPoolManager for centralized connection pooling when feature flag
+    is enabled, falling back to legacy client if provided.
+    """
+
+    POOL_NAME = "safety_db"
+
+    def __init__(self, client: Any = None, schema: str = "public", pool_name: str | None = None) -> None:
         self._client = client
         self._schema = schema
         self._table = f"{schema}.safety_incidents"
+        if pool_name:
+            self.POOL_NAME = pool_name
+
+    def _acquire(self):
+        """Get connection context manager from ConnectionPoolManager or legacy client."""
+        if ConnectionPoolManager is not None and FeatureFlags is not None and FeatureFlags.is_enabled("use_connection_pool_manager"):
+            return ConnectionPoolManager.acquire(self.POOL_NAME)
+        if self._client is not None:
+            return self._client.acquire()
+        raise RepositoryError("No database connection available. Configure ConnectionPoolManager or provide a PostgresClient.")
 
     async def save(self, incident: SafetyIncident) -> SafetyIncident:
         """Save a safety incident to PostgreSQL."""
@@ -743,7 +878,7 @@ class PostgresSafetyIncidentRepository(SafetyIncidentRepository):
                 metadata = EXCLUDED.metadata
             RETURNING *
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             await conn.fetchrow(
                 query,
                 incident.incident_id,
@@ -775,7 +910,7 @@ class PostgresSafetyIncidentRepository(SafetyIncidentRepository):
     async def get_by_id(self, incident_id: UUID) -> SafetyIncident | None:
         """Get incident by ID from PostgreSQL."""
         query = f"SELECT * FROM {self._table} WHERE incident_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, incident_id)
             if row is None:
                 return None
@@ -789,7 +924,7 @@ class PostgresSafetyIncidentRepository(SafetyIncidentRepository):
             ORDER BY created_at DESC
             LIMIT $2
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, user_id, limit)
             return [self._row_to_entity(dict(row)) for row in rows]
 
@@ -801,7 +936,7 @@ class PostgresSafetyIncidentRepository(SafetyIncidentRepository):
                 WHERE user_id = $1 AND status IN ('OPEN', 'ACKNOWLEDGED', 'IN_PROGRESS')
                 ORDER BY created_at DESC
             """
-            async with self._client.acquire() as conn:
+            async with self._acquire() as conn:
                 rows = await conn.fetch(query, user_id)
         else:
             query = f"""
@@ -809,7 +944,7 @@ class PostgresSafetyIncidentRepository(SafetyIncidentRepository):
                 WHERE status IN ('OPEN', 'ACKNOWLEDGED', 'IN_PROGRESS')
                 ORDER BY created_at DESC
             """
-            async with self._client.acquire() as conn:
+            async with self._acquire() as conn:
                 rows = await conn.fetch(query)
         return [self._row_to_entity(dict(row)) for row in rows]
 
@@ -820,7 +955,7 @@ class PostgresSafetyIncidentRepository(SafetyIncidentRepository):
             WHERE status = $1
             ORDER BY created_at DESC
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, status.value)
             return [self._row_to_entity(dict(row)) for row in rows]
 
@@ -861,12 +996,28 @@ class PostgresSafetyIncidentRepository(SafetyIncidentRepository):
 
 
 class PostgresUserRiskProfileRepository(UserRiskProfileRepository):
-    """PostgreSQL implementation of user risk profile repository."""
+    """PostgreSQL implementation of user risk profile repository.
 
-    def __init__(self, client: Any, schema: str = "public") -> None:
+    Uses ConnectionPoolManager for centralized connection pooling when feature flag
+    is enabled, falling back to legacy client if provided.
+    """
+
+    POOL_NAME = "safety_db"
+
+    def __init__(self, client: Any = None, schema: str = "public", pool_name: str | None = None) -> None:
         self._client = client
         self._schema = schema
         self._table = f"{schema}.user_risk_profiles"
+        if pool_name:
+            self.POOL_NAME = pool_name
+
+    def _acquire(self):
+        """Get connection context manager from ConnectionPoolManager or legacy client."""
+        if ConnectionPoolManager is not None and FeatureFlags is not None and FeatureFlags.is_enabled("use_connection_pool_manager"):
+            return ConnectionPoolManager.acquire(self.POOL_NAME)
+        if self._client is not None:
+            return self._client.acquire()
+        raise RepositoryError("No database connection available. Configure ConnectionPoolManager or provide a PostgresClient.")
 
     async def save(self, profile: UserRiskProfile) -> UserRiskProfile:
         """Save a risk profile to PostgreSQL."""
@@ -896,7 +1047,7 @@ class PostgresUserRiskProfileRepository(UserRiskProfileRepository):
                 updated_at = EXCLUDED.updated_at
             RETURNING *
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             await conn.fetchrow(
                 query,
                 profile.profile_id,
@@ -923,7 +1074,7 @@ class PostgresUserRiskProfileRepository(UserRiskProfileRepository):
     async def get_by_user(self, user_id: UUID) -> UserRiskProfile | None:
         """Get profile for a user from PostgreSQL."""
         query = f"SELECT * FROM {self._table} WHERE user_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, user_id)
             if row is None:
                 return None
@@ -948,7 +1099,7 @@ class PostgresUserRiskProfileRepository(UserRiskProfileRepository):
             WHERE high_risk_flag = TRUE
             ORDER BY updated_at DESC
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query)
             return [self._row_to_entity(dict(row)) for row in rows]
 

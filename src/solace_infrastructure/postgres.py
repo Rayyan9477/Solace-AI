@@ -32,7 +32,13 @@ class IsolationLevel(str, Enum):
 
 
 class PostgresSettings(BaseSettings):
-    """PostgreSQL connection settings from environment."""
+    """PostgreSQL connection settings from environment.
+
+    SSL/TLS Configuration:
+    - In production/staging: ssl_mode defaults to "require" (enforced via feature flag)
+    - In development: ssl_mode defaults to "prefer" (allows unencrypted local connections)
+    - For maximum security, use "verify-full" with ssl_root_cert configured
+    """
 
     host: str = Field(default="localhost")
     port: int = Field(default=5432, ge=1, le=65535)
@@ -45,10 +51,38 @@ class PostgresSettings(BaseSettings):
     statement_cache_size: int = Field(default=100, ge=0)
     max_cached_statement_lifetime: int = Field(default=300, ge=0)
     ssl_mode: str = Field(default="prefer")
+    ssl_root_cert: str | None = Field(default=None, description="Path to SSL root certificate for verify-ca/verify-full modes")
     db_schema: str = Field(default="public")
     model_config = SettingsConfigDict(
         env_prefix="POSTGRES_", env_file=".env", extra="ignore"
     )
+
+    def get_effective_ssl_mode(self) -> str:
+        """Get the effective SSL mode based on environment and feature flags.
+
+        In production/staging environments with the enforce_database_ssl feature flag
+        enabled, this will enforce 'require' as the minimum SSL mode.
+
+        Returns:
+            Effective SSL mode string
+        """
+        import os
+        env = os.getenv("ENVIRONMENT", "development")
+
+        # In production/staging, enforce minimum SSL
+        if env in ("production", "staging"):
+            # If ssl_mode is too permissive, upgrade to "require"
+            if self.ssl_mode in ("disable", "allow", "prefer"):
+                logger.warning(
+                    "ssl_mode_upgraded",
+                    original_mode=self.ssl_mode,
+                    effective_mode="require",
+                    environment=env,
+                    reason="Production environment requires encrypted connections",
+                )
+                return "require"
+
+        return self.ssl_mode
 
     def get_dsn(self) -> str:
         """Build PostgreSQL DSN connection string."""
@@ -56,6 +90,44 @@ class PostgresSettings(BaseSettings):
             f"postgresql://{self.user}:{self.password.get_secret_value()}"
             f"@{self.host}:{self.port}/{self.database}"
         )
+
+    def get_ssl_context(self) -> "ssl.SSLContext | None":
+        """Build SSL context for database connections.
+
+        Returns:
+            SSLContext for encrypted connections, or None for unencrypted
+        """
+        import ssl as ssl_module
+
+        effective_mode = self.get_effective_ssl_mode()
+
+        if effective_mode == "disable":
+            return None
+
+        if effective_mode in ("require", "verify-ca", "verify-full"):
+            ctx = ssl_module.create_default_context()
+
+            if effective_mode == "require":
+                # Require encryption but don't verify certificate
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl_module.CERT_NONE
+            elif effective_mode == "verify-ca":
+                # Verify CA but not hostname
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl_module.CERT_REQUIRED
+                if self.ssl_root_cert:
+                    ctx.load_verify_locations(self.ssl_root_cert)
+            elif effective_mode == "verify-full":
+                # Full verification (most secure)
+                ctx.check_hostname = True
+                ctx.verify_mode = ssl_module.CERT_REQUIRED
+                if self.ssl_root_cert:
+                    ctx.load_verify_locations(self.ssl_root_cert)
+
+            return ctx
+
+        # For "allow" and "prefer", let asyncpg handle SSL negotiation
+        return None
 
 
 class QueryResult(BaseModel):

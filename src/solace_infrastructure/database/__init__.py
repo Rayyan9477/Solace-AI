@@ -2,6 +2,8 @@
 
 This module provides database infrastructure components for Solace-AI:
 - Base SQLAlchemy models with enterprise patterns
+- Centralized schema registry for entity management
+- Unified connection pool management
 - Alembic migration orchestration
 - Seed data loading with dependency resolution
 - Weaviate vector database schema management
@@ -12,6 +14,12 @@ Usage:
         # Base models
         Base, BaseModel, AuditableModel, TenantModel,
         TimestampMixin, SoftDeleteMixin, VersionMixin, AuditMixin,
+
+        # Schema registry
+        SchemaRegistry,
+
+        # Connection pooling
+        ConnectionPoolManager, ConnectionPoolConfig, get_connection_pool,
 
         # Migrations
         MigrationRunner, MigrationSettings, create_migration_runner,
@@ -94,6 +102,14 @@ from solace_infrastructure.database.redis_setup import (
     setup_redis,
 )
 
+from solace_infrastructure.database.connection_manager import (
+    ConnectionPoolManager,
+    ConnectionPoolConfig,
+    get_connection_pool,
+)
+
+from solace_infrastructure.database.schema_registry import SchemaRegistry
+
 __all__ = [
     # Base models
     "Base",
@@ -114,6 +130,12 @@ __all__ = [
     "create_all_tables",
     "create_all_tables_async",
     "get_model_table_name",
+    # Schema registry
+    "SchemaRegistry",
+    # Connection pooling
+    "ConnectionPoolManager",
+    "ConnectionPoolConfig",
+    "get_connection_pool",
     # Migrations
     "MigrationRunner",
     "MigrationSettings",

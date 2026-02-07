@@ -17,6 +17,13 @@ from uuid import UUID
 
 import structlog
 
+try:
+    from solace_infrastructure.database import ConnectionPoolManager
+    from solace_infrastructure.feature_flags import FeatureFlags
+except ImportError:
+    ConnectionPoolManager = None
+    FeatureFlags = None
+
 from ..domain.entities import (
     HomeworkEntity,
     InterventionEntity,
@@ -55,14 +62,24 @@ logger = structlog.get_logger(__name__)
 class PostgresTreatmentPlanRepository(Repository[TreatmentPlanEntity]):
     """PostgreSQL implementation of treatment plan repository."""
 
+    POOL_NAME = "therapy_db"
+
     def __init__(self, client: PostgresClient, schema: str = "public") -> None:
         self._client = client
         self._table = f"{schema}.treatment_plans"
 
+    def _acquire(self):
+        """Get connection from ConnectionPoolManager or legacy client."""
+        if ConnectionPoolManager is not None and FeatureFlags is not None and FeatureFlags.is_enabled("use_connection_pool_manager"):
+            return ConnectionPoolManager.acquire(self.POOL_NAME)
+        if self._client is not None:
+            return self._acquire()
+        raise Exception("No database connection available.")
+
     async def get(self, plan_id: UUID) -> TreatmentPlanEntity | None:
         """Get treatment plan by ID."""
         query = f"SELECT * FROM {self._table} WHERE plan_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, plan_id)
             if row is None:
                 return None
@@ -113,7 +130,7 @@ class PostgresTreatmentPlanRepository(Repository[TreatmentPlanEntity]):
                 version = EXCLUDED.version
             RETURNING *
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             await conn.fetchrow(
                 query,
                 plan.plan_id,
@@ -151,7 +168,7 @@ class PostgresTreatmentPlanRepository(Repository[TreatmentPlanEntity]):
     async def delete(self, plan_id: UUID) -> bool:
         """Delete treatment plan."""
         query = f"DELETE FROM {self._table} WHERE plan_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             result = await conn.execute(query, plan_id)
             deleted = result.split()[-1] != "0"
             if deleted:
@@ -164,7 +181,7 @@ class PostgresTreatmentPlanRepository(Repository[TreatmentPlanEntity]):
             SELECT * FROM {self._table}
             WHERE user_id = $1 ORDER BY created_at DESC
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, user_id)
             return [self._row_to_entity(dict(row)) for row in rows]
 
@@ -175,7 +192,7 @@ class PostgresTreatmentPlanRepository(Repository[TreatmentPlanEntity]):
             WHERE user_id = $1 AND is_active = true
             ORDER BY created_at DESC
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, user_id)
             return [self._row_to_entity(dict(row)) for row in rows]
 
@@ -210,14 +227,14 @@ class PostgresTreatmentPlanRepository(Repository[TreatmentPlanEntity]):
 
         where = " WHERE " + " AND ".join(conditions) if conditions else ""
         query = f"SELECT * FROM {self._table}{where} ORDER BY created_at DESC"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, *params)
             return [self._row_to_entity(dict(row)) for row in rows]
 
     async def count(self) -> int:
         """Count total treatment plans."""
         query = f"SELECT COUNT(*) FROM {self._table}"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             return await conn.fetchval(query) or 0
 
     # -- Serialization helpers --
@@ -318,14 +335,24 @@ class PostgresTreatmentPlanRepository(Repository[TreatmentPlanEntity]):
 class PostgresTherapySessionRepository(Repository[TherapySessionEntity]):
     """PostgreSQL implementation of therapy session repository."""
 
+    POOL_NAME = "therapy_db"
+
     def __init__(self, client: PostgresClient, schema: str = "public") -> None:
         self._client = client
         self._table = f"{schema}.therapy_sessions"
 
+    def _acquire(self):
+        """Get connection from ConnectionPoolManager or legacy client."""
+        if ConnectionPoolManager is not None and FeatureFlags is not None and FeatureFlags.is_enabled("use_connection_pool_manager"):
+            return ConnectionPoolManager.acquire(self.POOL_NAME)
+        if self._client is not None:
+            return self._acquire()
+        raise Exception("No database connection available.")
+
     async def get(self, session_id: UUID) -> TherapySessionEntity | None:
         """Get therapy session by ID."""
         query = f"SELECT * FROM {self._table} WHERE session_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, session_id)
             if row is None:
                 return None
@@ -366,7 +393,7 @@ class PostgresTherapySessionRepository(Repository[TherapySessionEntity]):
                 version = EXCLUDED.version
             RETURNING *
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             await conn.fetchrow(
                 query,
                 session.session_id,
@@ -398,7 +425,7 @@ class PostgresTherapySessionRepository(Repository[TherapySessionEntity]):
     async def delete(self, session_id: UUID) -> bool:
         """Delete therapy session."""
         query = f"DELETE FROM {self._table} WHERE session_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             result = await conn.execute(query, session_id)
             deleted = result.split()[-1] != "0"
             if deleted:
@@ -415,7 +442,7 @@ class PostgresTherapySessionRepository(Repository[TherapySessionEntity]):
             ORDER BY started_at DESC
             LIMIT $2 OFFSET $3
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, user_id, limit, offset)
             return [self._row_to_entity(dict(row)) for row in rows]
 
@@ -429,7 +456,7 @@ class PostgresTherapySessionRepository(Repository[TherapySessionEntity]):
             ORDER BY session_number ASC
             LIMIT $2 OFFSET $3
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, plan_id, limit, offset)
             return [self._row_to_entity(dict(row)) for row in rows]
 
@@ -441,7 +468,7 @@ class PostgresTherapySessionRepository(Repository[TherapySessionEntity]):
             ORDER BY started_at DESC
             LIMIT 1
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, user_id)
             if row is None:
                 return None
@@ -459,20 +486,20 @@ class PostgresTherapySessionRepository(Repository[TherapySessionEntity]):
             WHERE user_id = $1 AND started_at >= $2
             ORDER BY started_at DESC
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, user_id, cutoff)
             return [self._row_to_entity(dict(row)) for row in rows]
 
     async def count_by_plan(self, plan_id: UUID) -> int:
         """Count sessions for a treatment plan."""
         query = f"SELECT COUNT(*) FROM {self._table} WHERE treatment_plan_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             return await conn.fetchval(query, plan_id) or 0
 
     async def count(self) -> int:
         """Count total therapy sessions."""
         query = f"SELECT COUNT(*) FROM {self._table}"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             return await conn.fetchval(query) or 0
 
     # -- Serialization helpers --
@@ -611,14 +638,24 @@ class PostgresTherapySessionRepository(Repository[TherapySessionEntity]):
 class PostgresTechniqueRepository:
     """PostgreSQL implementation of technique repository."""
 
+    POOL_NAME = "therapy_db"
+
     def __init__(self, client: PostgresClient, schema: str = "public") -> None:
         self._client = client
         self._table = f"{schema}.therapy_techniques"
 
+    def _acquire(self):
+        """Get connection from ConnectionPoolManager or legacy client."""
+        if ConnectionPoolManager is not None and FeatureFlags is not None and FeatureFlags.is_enabled("use_connection_pool_manager"):
+            return ConnectionPoolManager.acquire(self.POOL_NAME)
+        if self._client is not None:
+            return self._acquire()
+        raise Exception("No database connection available.")
+
     async def get(self, technique_id: UUID) -> Technique | None:
         """Get technique by ID."""
         query = f"SELECT * FROM {self._table} WHERE technique_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, technique_id)
             if row is None:
                 return None
@@ -627,7 +664,7 @@ class PostgresTechniqueRepository:
     async def get_by_name(self, name: str) -> Technique | None:
         """Get technique by name (case-insensitive)."""
         query = f"SELECT * FROM {self._table} WHERE LOWER(name) = LOWER($1)"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, name)
             if row is None:
                 return None
@@ -661,7 +698,7 @@ class PostgresTechniqueRepository:
                 evidence_level = EXCLUDED.evidence_level
             RETURNING *
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             await conn.fetchrow(
                 query,
                 technique.technique_id,
@@ -686,7 +723,7 @@ class PostgresTechniqueRepository:
     async def delete(self, technique_id: UUID) -> bool:
         """Delete technique."""
         query = f"DELETE FROM {self._table} WHERE technique_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             result = await conn.execute(query, technique_id)
             deleted = result.split()[-1] != "0"
             if deleted:
@@ -696,7 +733,7 @@ class PostgresTechniqueRepository:
     async def get_by_modality(self, modality: str) -> list[Technique]:
         """Get techniques by modality."""
         query = f"SELECT * FROM {self._table} WHERE modality = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, modality)
             return [self._row_to_value_object(dict(row)) for row in rows]
 
@@ -731,14 +768,14 @@ class PostgresTechniqueRepository:
 
         where = " WHERE " + " AND ".join(conditions) if conditions else ""
         query = f"SELECT * FROM {self._table}{where} ORDER BY name ASC"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, *params)
             return [self._row_to_value_object(dict(row)) for row in rows]
 
     async def count(self) -> int:
         """Count total techniques."""
         query = f"SELECT COUNT(*) FROM {self._table}"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             return await conn.fetchval(query) or 0
 
     def _row_to_value_object(self, row: dict[str, Any]) -> Technique:
@@ -780,14 +817,24 @@ class PostgresTechniqueRepository:
 class PostgresOutcomeMeasureRepository:
     """PostgreSQL implementation of outcome measure repository."""
 
+    POOL_NAME = "therapy_db"
+
     def __init__(self, client: PostgresClient, schema: str = "public") -> None:
         self._client = client
         self._table = f"{schema}.outcome_measures"
 
+    def _acquire(self):
+        """Get connection from ConnectionPoolManager or legacy client."""
+        if ConnectionPoolManager is not None and FeatureFlags is not None and FeatureFlags.is_enabled("use_connection_pool_manager"):
+            return ConnectionPoolManager.acquire(self.POOL_NAME)
+        if self._client is not None:
+            return self._acquire()
+        raise Exception("No database connection available.")
+
     async def get(self, measure_id: UUID) -> OutcomeMeasure | None:
         """Get outcome measure by ID."""
         query = f"SELECT * FROM {self._table} WHERE measure_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, measure_id)
             if row is None:
                 return None
@@ -808,7 +855,7 @@ class PostgresOutcomeMeasureRepository:
                 notes = EXCLUDED.notes
             RETURNING *
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             await conn.fetchrow(
                 query,
                 measure.measure_id,
@@ -826,7 +873,7 @@ class PostgresOutcomeMeasureRepository:
     async def delete(self, measure_id: UUID) -> bool:
         """Delete outcome measure."""
         query = f"DELETE FROM {self._table} WHERE measure_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             result = await conn.execute(query, measure_id)
             deleted = result.split()[-1] != "0"
             if deleted:
@@ -839,7 +886,7 @@ class PostgresOutcomeMeasureRepository:
             SELECT * FROM {self._table}
             WHERE session_id = $1 ORDER BY recorded_at ASC
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, session_id)
             return [self._row_to_value_object(dict(row)) for row in rows]
 
@@ -853,7 +900,7 @@ class PostgresOutcomeMeasureRepository:
             ORDER BY recorded_at DESC
             LIMIT $3
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, user_id, instrument, limit)
             return [self._row_to_value_object(dict(row)) for row in rows]
 
@@ -867,7 +914,7 @@ class PostgresOutcomeMeasureRepository:
             ORDER BY recorded_at DESC
             LIMIT 1
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, user_id, instrument)
             if row is None:
                 return None
@@ -876,7 +923,7 @@ class PostgresOutcomeMeasureRepository:
     async def count(self) -> int:
         """Count total outcome measures."""
         query = f"SELECT COUNT(*) FROM {self._table}"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             return await conn.fetchval(query) or 0
 
     def _row_to_value_object(self, row: dict[str, Any]) -> OutcomeMeasure:

@@ -16,6 +16,13 @@ from uuid import UUID
 
 import structlog
 
+try:
+    from solace_infrastructure.database import ConnectionPoolManager
+    from solace_infrastructure.feature_flags import FeatureFlags
+except ImportError:
+    ConnectionPoolManager = None
+    FeatureFlags = None
+
 from ..domain.entities import User, UserPreferences
 from ..domain.value_objects import AccountStatus, ConsentRecord, ConsentType, UserRole
 from .repository import (
@@ -35,10 +42,20 @@ logger = structlog.get_logger(__name__)
 class PostgresUserRepository(UserRepository):
     """PostgreSQL implementation of user repository."""
 
+    POOL_NAME = "user_db"
+
     def __init__(self, client: PostgresClient, schema: str = "public") -> None:
         self._client = client
         self._schema = schema
         self._table = f"{schema}.users"
+
+    def _acquire(self):
+        """Get connection from ConnectionPoolManager or legacy client."""
+        if ConnectionPoolManager is not None and FeatureFlags is not None and FeatureFlags.is_enabled("use_connection_pool_manager"):
+            return ConnectionPoolManager.acquire(self.POOL_NAME)
+        if self._client is not None:
+            return self._client.acquire()
+        raise Exception("No database connection available.")
 
     async def save(self, user: User) -> User:
         """Save a new user to PostgreSQL."""
@@ -55,7 +72,7 @@ class PostgresUserRepository(UserRepository):
             RETURNING *
         """
         try:
-            async with self._client.acquire() as conn:
+            async with self._acquire() as conn:
                 await conn.fetchrow(
                     query,
                     user.user_id,
@@ -92,7 +109,7 @@ class PostgresUserRepository(UserRepository):
             SELECT * FROM {self._table}
             WHERE user_id = $1 AND deleted_at IS NULL
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, user_id)
             if row is None:
                 return None
@@ -104,7 +121,7 @@ class PostgresUserRepository(UserRepository):
             SELECT * FROM {self._table}
             WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, email)
             if row is None:
                 return None
@@ -135,7 +152,7 @@ class PostgresUserRepository(UserRepository):
             WHERE user_id = $1
             RETURNING *
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(
                 query,
                 user.user_id,
@@ -166,7 +183,7 @@ class PostgresUserRepository(UserRepository):
     async def delete(self, user_id: UUID) -> bool:
         """Delete a user by ID (hard delete) from PostgreSQL."""
         query = f"DELETE FROM {self._table} WHERE user_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             result = await conn.execute(query, user_id)
             deleted = result.split()[-1] != "0"
             if deleted:
@@ -193,7 +210,7 @@ class PostgresUserRepository(UserRepository):
                 ORDER BY created_at DESC
                 LIMIT $1 OFFSET $2
             """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, limit, offset)
             return [self._row_to_entity(dict(row)) for row in rows]
 
@@ -203,7 +220,7 @@ class PostgresUserRepository(UserRepository):
             query = f"SELECT COUNT(*) FROM {self._table}"
         else:
             query = f"SELECT COUNT(*) FROM {self._table} WHERE deleted_at IS NULL"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             count = await conn.fetchval(query)
             return count or 0
 
@@ -216,7 +233,7 @@ class PostgresUserRepository(UserRepository):
               AND role = $2
               AND is_on_call = true
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(
                 query,
                 AccountStatus.ACTIVE.value,
@@ -231,14 +248,14 @@ class PostgresUserRepository(UserRepository):
                 SELECT * FROM {self._table}
                 WHERE role = $1 AND deleted_at IS NULL AND status = $2
             """
-            async with self._client.acquire() as conn:
+            async with self._acquire() as conn:
                 rows = await conn.fetch(query, role, AccountStatus.ACTIVE.value)
         else:
             query = f"""
                 SELECT * FROM {self._table}
                 WHERE role = $1 AND deleted_at IS NULL
             """
-            async with self._client.acquire() as conn:
+            async with self._acquire() as conn:
                 rows = await conn.fetch(query, role)
         return [self._row_to_entity(dict(row)) for row in rows]
 
@@ -271,10 +288,20 @@ class PostgresUserRepository(UserRepository):
 class PostgresUserPreferencesRepository(UserPreferencesRepository):
     """PostgreSQL implementation of user preferences repository."""
 
+    POOL_NAME = "user_db"
+
     def __init__(self, client: PostgresClient, schema: str = "public") -> None:
         self._client = client
         self._schema = schema
         self._table = f"{schema}.user_preferences"
+
+    def _acquire(self):
+        """Get connection from ConnectionPoolManager or legacy client."""
+        if ConnectionPoolManager is not None and FeatureFlags is not None and FeatureFlags.is_enabled("use_connection_pool_manager"):
+            return ConnectionPoolManager.acquire(self.POOL_NAME)
+        if self._client is not None:
+            return self._client.acquire()
+        raise Exception("No database connection available.")
 
     async def save(self, preferences: UserPreferences) -> UserPreferences:
         """Save user preferences to PostgreSQL."""
@@ -306,7 +333,7 @@ class PostgresUserPreferencesRepository(UserPreferencesRepository):
                 updated_at = EXCLUDED.updated_at
             RETURNING *
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             await conn.fetchrow(
                 query,
                 preferences.user_id,
@@ -333,7 +360,7 @@ class PostgresUserPreferencesRepository(UserPreferencesRepository):
     async def get_by_user_id(self, user_id: UUID) -> UserPreferences | None:
         """Get preferences for a user from PostgreSQL."""
         query = f"SELECT * FROM {self._table} WHERE user_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, user_id)
             if row is None:
                 return None
@@ -361,7 +388,7 @@ class PostgresUserPreferencesRepository(UserPreferencesRepository):
             WHERE user_id = $1
             RETURNING *
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(
                 query,
                 preferences.user_id,
@@ -389,7 +416,7 @@ class PostgresUserPreferencesRepository(UserPreferencesRepository):
     async def delete(self, user_id: UUID) -> bool:
         """Delete preferences for a user from PostgreSQL."""
         query = f"DELETE FROM {self._table} WHERE user_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             result = await conn.execute(query, user_id)
             deleted = result.split()[-1] != "0"
             if deleted:
@@ -426,10 +453,20 @@ class PostgresUserPreferencesRepository(UserPreferencesRepository):
 class PostgresConsentRepository(ConsentRepository):
     """PostgreSQL implementation of consent repository."""
 
+    POOL_NAME = "user_db"
+
     def __init__(self, client: PostgresClient, schema: str = "public") -> None:
         self._client = client
         self._schema = schema
         self._table = f"{schema}.consent_records"
+
+    def _acquire(self):
+        """Get connection from ConnectionPoolManager or legacy client."""
+        if ConnectionPoolManager is not None and FeatureFlags is not None and FeatureFlags.is_enabled("use_connection_pool_manager"):
+            return ConnectionPoolManager.acquire(self.POOL_NAME)
+        if self._client is not None:
+            return self._client.acquire()
+        raise Exception("No database connection available.")
 
     async def save(self, consent: ConsentRecord) -> ConsentRecord:
         """Save a consent record to PostgreSQL."""
@@ -442,7 +479,7 @@ class PostgresConsentRepository(ConsentRepository):
             )
             RETURNING *
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             await conn.fetchrow(
                 query,
                 consent.consent_id,
@@ -469,14 +506,14 @@ class PostgresConsentRepository(ConsentRepository):
             WHERE user_id = $1
             ORDER BY granted_at ASC
         """
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(query, user_id)
             return [self._row_to_entity(dict(row)) for row in rows]
 
     async def get_by_id(self, consent_id: UUID) -> ConsentRecord | None:
         """Get consent record by ID from PostgreSQL."""
         query = f"SELECT * FROM {self._table} WHERE consent_id = $1"
-        async with self._client.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(query, consent_id)
             if row is None:
                 return None

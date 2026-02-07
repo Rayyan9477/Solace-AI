@@ -3,6 +3,7 @@ Solace-AI Therapy Service - Repository Infrastructure.
 Persistence layer implementing repository pattern for therapy domain entities.
 """
 from __future__ import annotations
+import os
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone, timedelta
 from typing import Any, Generic, TypeVar
@@ -33,6 +34,8 @@ class TreatmentPlanRepository(Repository[TreatmentPlanEntity]):
     """Repository for treatment plan persistence."""
 
     def __init__(self) -> None:
+        if os.getenv("ENVIRONMENT") == "production":
+            raise RuntimeError("In-memory repositories are not allowed in production.")
         self._storage: dict[UUID, TreatmentPlanEntity] = {}
         self._user_index: dict[UUID, list[UUID]] = {}
 
@@ -90,6 +93,8 @@ class TherapySessionRepository(Repository[TherapySessionEntity]):
     """Repository for therapy session persistence."""
 
     def __init__(self) -> None:
+        if os.getenv("ENVIRONMENT") == "production":
+            raise RuntimeError("In-memory repositories are not allowed in production.")
         self._storage: dict[UUID, TherapySessionEntity] = {}
         self._user_index: dict[UUID, list[UUID]] = {}
         self._plan_index: dict[UUID, list[UUID]] = {}
@@ -160,6 +165,8 @@ class TechniqueRepository:
     """Repository for therapeutic technique lookup."""
 
     def __init__(self) -> None:
+        if os.getenv("ENVIRONMENT") == "production":
+            raise RuntimeError("In-memory repositories are not allowed in production.")
         self._techniques: dict[UUID, Technique] = {}
         self._name_index: dict[str, UUID] = {}
         self._modality_index: dict[str, list[UUID]] = {}
@@ -222,6 +229,8 @@ class OutcomeMeasureRepository:
     """Repository for outcome measure persistence."""
 
     def __init__(self) -> None:
+        if os.getenv("ENVIRONMENT") == "production":
+            raise RuntimeError("In-memory repositories are not allowed in production.")
         self._measures: dict[UUID, OutcomeMeasure] = {}
         self._session_index: dict[UUID, list[UUID]] = {}
         self._user_instrument_index: dict[tuple[UUID, str], list[UUID]] = {}

@@ -3,6 +3,7 @@ Solace-AI Personality Service - Repository Infrastructure.
 Persistence layer implementing repository pattern for personality domain entities.
 """
 from __future__ import annotations
+import os
 from abc import ABC, abstractmethod
 from datetime import datetime
 from decimal import Decimal
@@ -60,6 +61,8 @@ class PersonalityRepositoryPort(ABC):
 class InMemoryPersonalityRepository(PersonalityRepositoryPort):
     """In-memory implementation of personality repository."""
     def __init__(self) -> None:
+        if os.getenv("ENVIRONMENT") == "production":
+            raise RuntimeError("In-memory repositories are not allowed in production.")
         self._profiles: dict[UUID, PersonalityProfile] = {}
         self._user_profiles: dict[UUID, UUID] = {}
         self._assessments: dict[UUID, TraitAssessment] = {}

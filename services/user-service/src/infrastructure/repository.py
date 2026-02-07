@@ -10,6 +10,7 @@ Principles: Repository Pattern, Dependency Inversion, Interface Segregation
 from __future__ import annotations
 
 import asyncio
+import os
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Any
@@ -358,6 +359,8 @@ class InMemoryUserRepository(UserRepository):
     """
 
     def __init__(self) -> None:
+        if os.getenv("ENVIRONMENT") == "production":
+            raise RuntimeError("In-memory repositories are not allowed in production.")
         self._users: dict[UUID, User] = {}
         self._users_by_email: dict[str, UUID] = {}
         self._lock = asyncio.Lock()
@@ -513,6 +516,8 @@ class InMemoryUserPreferencesRepository(UserPreferencesRepository):
     """
 
     def __init__(self) -> None:
+        if os.getenv("ENVIRONMENT") == "production":
+            raise RuntimeError("In-memory repositories are not allowed in production.")
         self._preferences: dict[UUID, UserPreferences] = {}
         self._lock = asyncio.Lock()
 
@@ -571,6 +576,8 @@ class InMemoryConsentRepository(ConsentRepository):
     """
 
     def __init__(self) -> None:
+        if os.getenv("ENVIRONMENT") == "production":
+            raise RuntimeError("In-memory repositories are not allowed in production.")
         self._consents: dict[UUID, list[ConsentRecord]] = {}
         self._consents_by_id: dict[UUID, ConsentRecord] = {}
         self._lock = asyncio.Lock()

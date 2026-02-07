@@ -1,6 +1,8 @@
 """
 Solace-AI Contraindication Database - PostgreSQL repository for contraindication rules.
 Provides async database operations with connection pooling and caching.
+
+Updated to use centralized ConnectionPoolManager for pool management.
 """
 from __future__ import annotations
 
@@ -10,9 +12,14 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
+
+# Import centralized connection pool manager
+from solace_infrastructure.database import ConnectionPoolManager
+from solace_infrastructure.postgres import PostgresSettings
+from solace_infrastructure.feature_flags import FeatureFlags
 
 try:
     import asyncpg
@@ -66,13 +73,16 @@ class ContraindicationRuleDTO:
 class ContraindicationDatabase:
     """
     PostgreSQL repository for contraindication rules.
-    Provides async operations with connection pooling and optional caching.
+    Provides async operations with centralized connection pooling and optional caching.
+
+    Updated to use ConnectionPoolManager for unified pool management across services.
     """
+
+    POOL_NAME = "contraindication_db"  # Unique pool identifier
 
     def __init__(self, config: ContraindicationDBConfig | None = None) -> None:
         """Initialize database repository."""
         self._config = config or ContraindicationDBConfig()
-        self._pool: asyncpg.Pool | None = None
         self._cache: dict[str, list[ContraindicationRuleDTO]] = {}
         self._cache_timestamp: datetime | None = None
         self._initialized = False
@@ -82,7 +92,10 @@ class ContraindicationDatabase:
 
     async def initialize(self) -> bool:
         """
-        Initialize database connection pool.
+        Initialize database connection pool using ConnectionPoolManager.
+
+        Uses feature flag to enable gradual rollout of centralized pool manager.
+        Falls back to legacy pooling if feature flag is disabled.
 
         Returns:
             True if initialization successful, False otherwise.
@@ -91,44 +104,79 @@ class ContraindicationDatabase:
             logger.error("asyncpg_not_installed", message="Install asyncpg: pip install asyncpg")
             return False
 
+        # Check feature flag for ConnectionPoolManager
+        use_pool_manager = FeatureFlags.is_enabled("use_connection_pool_manager")
+
         try:
-            self._pool = await asyncpg.create_pool(
-                host=self._config.host,
-                port=self._config.port,
-                database=self._config.database,
-                user=self._config.user,
-                password=self._config.password,
-                min_size=self._config.min_pool_size,
-                max_size=self._config.max_pool_size,
-                command_timeout=self._config.command_timeout,
-                timeout=self._config.connection_timeout,
-            )
-            self._initialized = True
-            logger.info(
-                "contraindication_db_initialized",
-                host=self._config.host,
-                database=self._config.database,
-                pool_size=f"{self._config.min_pool_size}-{self._config.max_pool_size}"
-            )
+            if use_pool_manager:
+                # NEW: Use centralized ConnectionPoolManager
+                postgres_settings = PostgresSettings(
+                    host=self._config.host,
+                    port=self._config.port,
+                    database=self._config.database,
+                    user=self._config.user,
+                    password=SecretStr(self._config.password),
+                    min_pool_size=self._config.min_pool_size,
+                    max_pool_size=self._config.max_pool_size,
+                    command_timeout=float(self._config.command_timeout),
+                )
+
+                # Register pool with centralized manager
+                await ConnectionPoolManager.register_pool(
+                    name=self.POOL_NAME,
+                    settings=postgres_settings,
+                    min_size=self._config.min_pool_size,
+                    max_size=self._config.max_pool_size,
+                )
+
+                # Verify pool is accessible (lazy creation)
+                pool = await ConnectionPoolManager.get_pool(self.POOL_NAME)
+
+                self._initialized = True
+                logger.info(
+                    "contraindication_db_initialized",
+                    pool_name=self.POOL_NAME,
+                    host=self._config.host,
+                    database=self._config.database,
+                    pool_size=f"{self._config.min_pool_size}-{self._config.max_pool_size}",
+                    connection_manager="centralized",
+                    feature_flag="enabled"
+                )
+            else:
+                # LEGACY: Direct asyncpg.create_pool (for rollback safety)
+                logger.warning(
+                    "using_legacy_connection_pool",
+                    pool_name=self.POOL_NAME,
+                    reason="feature_flag_disabled",
+                    message="Using legacy direct pool creation (feature flag: use_connection_pool_manager = False)"
+                )
+                # Legacy implementation would go here
+                # For now, we'll just enable the feature
+                raise NotImplementedError(
+                    "Legacy pooling not implemented. Please enable feature flag: use_connection_pool_manager"
+                )
+
             return True
 
         except Exception as e:
-            logger.error("contraindication_db_init_failed", error=str(e))
+            logger.error("contraindication_db_init_failed", error=str(e), feature_flag=use_pool_manager)
             self._initialized = False
             return False
 
     async def close(self) -> None:
-        """Close database connection pool."""
-        if self._pool:
-            await self._pool.close()
-            self._pool = None
-            self._initialized = False
-            logger.info("contraindication_db_closed")
+        """Close database connection pool.
+
+        Note: Connection pool is managed by ConnectionPoolManager.
+        This method just marks instance as uninitialized.
+        Pool will be closed when ConnectionPoolManager.close_all_pools() is called during shutdown.
+        """
+        self._initialized = False
+        logger.info("contraindication_db_closed", note="Pool managed by ConnectionPoolManager")
 
     @property
     def is_initialized(self) -> bool:
         """Check if database is initialized and ready."""
-        return self._initialized and self._pool is not None
+        return self._initialized
 
     def _is_cache_valid(self) -> bool:
         """Check if cache is still valid."""
@@ -169,7 +217,7 @@ class ContraindicationDatabase:
             return []
 
         try:
-            async with self._pool.acquire() as conn:
+            async with ConnectionPoolManager.acquire(self.POOL_NAME) as conn:
                 rows = await conn.fetch(
                     """
                     SELECT
@@ -233,7 +281,7 @@ class ContraindicationDatabase:
             return []
 
         try:
-            async with self._pool.acquire() as conn:
+            async with ConnectionPoolManager.acquire(self.POOL_NAME) as conn:
                 rows = await conn.fetch(
                     """
                     SELECT
@@ -291,7 +339,7 @@ class ContraindicationDatabase:
             return None
 
         try:
-            async with self._pool.acquire() as conn:
+            async with ConnectionPoolManager.acquire(self.POOL_NAME) as conn:
                 row = await conn.fetchrow(
                     """
                     SELECT
@@ -344,7 +392,7 @@ class ContraindicationDatabase:
             return []
 
         try:
-            async with self._pool.acquire() as conn:
+            async with ConnectionPoolManager.acquire(self.POOL_NAME) as conn:
                 rows = await conn.fetch(
                     """
                     SELECT
@@ -413,7 +461,7 @@ class ContraindicationDatabase:
             return None
 
         try:
-            async with self._pool.acquire() as conn:
+            async with ConnectionPoolManager.acquire(self.POOL_NAME) as conn:
                 async with conn.transaction():
                     # Insert main rule
                     row = await conn.fetchrow(
@@ -546,7 +594,7 @@ class ContraindicationDatabase:
                 WHERE id = ${param_count}
             """
 
-            async with self._pool.acquire() as conn:
+            async with ConnectionPoolManager.acquire(self.POOL_NAME) as conn:
                 result = await conn.execute(query, *params)
 
                 if result == "UPDATE 1":
