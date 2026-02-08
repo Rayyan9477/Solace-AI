@@ -85,6 +85,7 @@ async def detect_personality(
 async def get_style(
     request: GetStyleRequest,
     orchestrator: OrchestratorDep,
+    service: AuthenticatedService = Depends(get_current_service),
 ) -> GetStyleResponse:
     """Get style parameters for user."""
     logger.info("style_request", user_id=str(request.user_id))
@@ -110,6 +111,7 @@ async def get_style(
 async def adapt_response(
     request: AdaptResponseRequest,
     orchestrator: OrchestratorDep,
+    service: AuthenticatedService = Depends(get_current_service),
 ) -> AdaptResponseResponse:
     """Adapt response content to user personality."""
     logger.info("adapt_request", user_id=str(request.user_id), base_length=len(request.base_response))
@@ -138,6 +140,7 @@ async def adapt_response(
 async def get_profile(
     user_id: UUID,
     orchestrator: OrchestratorDep,
+    current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> GetProfileResponse:
     """Get user personality profile."""
     logger.info("profile_request", user_id=str(user_id))
@@ -164,6 +167,7 @@ async def get_profile(
 async def update_profile(
     request: UpdateProfileRequest,
     orchestrator: OrchestratorDep,
+    current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> UpdateProfileResponse:
     """Update user personality profile."""
     logger.info("profile_update_request", user_id=str(request.user_id), source=request.source.value)

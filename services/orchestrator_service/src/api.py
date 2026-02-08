@@ -159,7 +159,11 @@ async def process_chat_message(
 
 
 @router.post("/sessions", response_model=SessionCreateResponse, summary="Create new session")
-async def create_session(request_data: SessionCreateRequest, request: Request) -> SessionCreateResponse:
+async def create_session(
+    request_data: SessionCreateRequest,
+    request: Request,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> SessionCreateResponse:
     """
     Create a new orchestration session for a user.
 
@@ -182,7 +186,7 @@ async def get_conversation_history(
     session_id: str,
     thread_id: str = Query(..., description="Thread ID for conversation lookup"),
     limit: int = Query(default=50, ge=1, le=200, description="Maximum messages to return"),
-    request: Request = None,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     graph_builder: OrchestratorGraphBuilder = Depends(get_graph_builder),
 ) -> ConversationHistoryResponse:
     """
@@ -319,6 +323,7 @@ async def websocket_chat_endpoint(
 async def process_batch_messages(
     messages: list[ChatMessageRequest],
     request: Request,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     graph_builder: OrchestratorGraphBuilder = Depends(get_graph_builder),
 ) -> list[ChatMessageResponse]:
     """

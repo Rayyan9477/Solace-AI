@@ -54,6 +54,8 @@ from solace_infrastructure.database.base_models import (
     create_all_tables,
     create_all_tables_async,
     get_model_table_name,
+    configure_phi_encryption,
+    get_phi_encryptor,
 )
 
 from solace_infrastructure.database.migrations_runner import (

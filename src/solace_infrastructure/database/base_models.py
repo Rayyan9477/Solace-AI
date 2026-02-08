@@ -385,10 +385,18 @@ class ClinicalBase(AuditableModel, EncryptedFieldMixin, AuditTrailMixin):
     - HIPAA compliance features
 
     All PHI fields will be automatically encrypted when stored and
-    decrypted when retrieved.
+    decrypted when retrieved. Subclasses declare PHI fields via
+    __phi_fields__ class variable.
+
+    Example:
+        class DiagnosisSession(ClinicalBase):
+            __phi_fields__: ClassVar[list[str]] = ["summary", "progress_notes"]
     """
 
     __abstract__ = True
+
+    # Subclasses override to list field names that contain PHI
+    __phi_fields__: ClassVar[list[str]] = []
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -407,6 +415,34 @@ class ClinicalBase(AuditableModel, EncryptedFieldMixin, AuditTrailMixin):
 
     # encryption_key_id is now inherited from EncryptedFieldMixin
     # and is REQUIRED (nullable=False) for HIPAA compliance
+
+    def encrypt_phi_fields(self, field_encryptor: Any) -> None:
+        """Encrypt all declared PHI fields using the given FieldEncryptor.
+
+        Args:
+            field_encryptor: A FieldEncryptor instance from solace_security.encryption
+        """
+        for field_name in self.__phi_fields__:
+            value = getattr(self, field_name, None)
+            if value is not None and isinstance(value, str) and not value.startswith("v1$"):
+                encrypted = field_encryptor.encrypt_field(value, field_name)
+                setattr(self, field_name, encrypted)
+
+    def decrypt_phi_fields(self, field_encryptor: Any) -> None:
+        """Decrypt all declared PHI fields using the given FieldEncryptor.
+
+        Args:
+            field_encryptor: A FieldEncryptor instance from solace_security.encryption
+        """
+        for field_name in self.__phi_fields__:
+            value = getattr(self, field_name, None)
+            if value is not None and isinstance(value, str) and value.startswith("v1$"):
+                try:
+                    decrypted = field_encryptor.decrypt_field(value, field_name)
+                    setattr(self, field_name, decrypted)
+                except Exception:
+                    logger.error("phi_decrypt_failed", field=field_name,
+                                 entity=self.__class__.__name__, id=str(self.id))
 
 
 class SafetyEventBase(AuditableModel):
@@ -575,3 +611,52 @@ async def create_all_tables_async(engine: Any) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("database_tables_created_async")
+
+
+# PHI encryption integration
+
+_global_field_encryptor: Any = None
+
+
+def configure_phi_encryption(field_encryptor: Any) -> None:
+    """Register a FieldEncryptor for automatic PHI encryption/decryption.
+
+    Call this once at application startup to enable transparent PHI encryption
+    on all ClinicalBase entities.
+
+    Args:
+        field_encryptor: A FieldEncryptor from solace_security.encryption
+    """
+    global _global_field_encryptor
+    _global_field_encryptor = field_encryptor
+    logger.info("phi_encryption_configured")
+
+
+def get_phi_encryptor() -> Any:
+    """Get the globally configured PHI encryptor, or None if not configured."""
+    return _global_field_encryptor
+
+
+@event.listens_for(ClinicalBase, "before_insert", propagate=True)
+def _encrypt_phi_before_insert(mapper: Any, connection: Any, target: ClinicalBase) -> None:
+    """Encrypt PHI fields before inserting a clinical entity."""
+    if _global_field_encryptor and target.__phi_fields__ and target.is_phi:
+        target.encrypt_phi_fields(_global_field_encryptor)
+        if not target.encryption_key_id or target.encryption_key_id == "":
+            target.encryption_key_id = getattr(
+                _global_field_encryptor._encryptor._key_manager, "current_key_id", "primary"
+            )
+
+
+@event.listens_for(ClinicalBase, "before_update", propagate=True)
+def _encrypt_phi_before_update(mapper: Any, connection: Any, target: ClinicalBase) -> None:
+    """Encrypt PHI fields before updating a clinical entity."""
+    if _global_field_encryptor and target.__phi_fields__ and target.is_phi:
+        target.encrypt_phi_fields(_global_field_encryptor)
+
+
+@event.listens_for(ClinicalBase, "load", propagate=True)
+def _decrypt_phi_after_load(target: ClinicalBase, context: Any) -> None:
+    """Decrypt PHI fields after loading a clinical entity from database."""
+    if _global_field_encryptor and target.__phi_fields__ and target.is_phi:
+        target.decrypt_phi_fields(_global_field_encryptor)

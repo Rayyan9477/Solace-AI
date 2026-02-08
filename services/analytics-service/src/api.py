@@ -239,6 +239,7 @@ class IngestEventResponse(BaseModel):
 
 @router.get("/dashboard", response_model=DashboardResponse)
 async def get_dashboard(
+    current_user: AuthenticatedUser = Depends(get_current_user),
     aggregator: AnalyticsAggregator = Depends(get_aggregator),
 ) -> DashboardResponse:
     """Get dashboard metrics summary."""
@@ -262,6 +263,7 @@ async def get_dashboard(
 @router.post("/metrics/query", response_model=MetricsListResponse)
 async def query_metrics(
     request: MetricQueryRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     aggregator: AnalyticsAggregator = Depends(get_aggregator),
 ) -> MetricsListResponse:
     """Query aggregated metrics."""
@@ -314,6 +316,7 @@ async def query_metrics(
 
 @router.get("/metrics/names", response_model=list[str])
 async def list_metric_names(
+    current_user: AuthenticatedUser = Depends(get_current_user),
     aggregator: AnalyticsAggregator = Depends(get_aggregator),
 ) -> list[str]:
     """List all available metric names."""
@@ -323,6 +326,7 @@ async def list_metric_names(
 
 @router.get("/reports/types", response_model=ReportTypesResponse)
 async def list_report_types(
+    current_user: AuthenticatedUser = Depends(get_current_user),
     report_service: ReportService = Depends(get_report_service),
 ) -> ReportTypesResponse:
     """List available report types."""
@@ -336,6 +340,7 @@ async def generate_report(
     start_time: datetime | None = Query(default=None, description="Start time (UTC)"),
     end_time: datetime | None = Query(default=None, description="End time (UTC)"),
     use_cache: bool = Query(default=True, description="Use cached report if available"),
+    current_user: AuthenticatedUser = Depends(get_current_user),
     report_service: ReportService = Depends(get_report_service),
 ) -> ReportResponse:
     """Generate an analytics report."""
@@ -378,6 +383,7 @@ async def generate_report(
 async def get_report(
     report_type: str,
     period: Literal["hourly", "daily", "weekly", "monthly"] = Query(default="daily"),
+    current_user: AuthenticatedUser = Depends(get_current_user),
     report_service: ReportService = Depends(get_report_service),
 ) -> ReportResponse:
     """Get a standard period report by type."""
@@ -417,6 +423,7 @@ async def get_report(
 @router.post("/events/ingest", response_model=IngestEventResponse)
 async def ingest_event(
     request: IngestEventRequest,
+    service: AuthenticatedService = Depends(get_current_service),
     consumer: AnalyticsConsumer = Depends(get_consumer),
 ) -> IngestEventResponse:
     """Ingest an event for analytics processing."""
@@ -456,6 +463,7 @@ async def ingest_event(
 
 @router.get("/consumer/stats", response_model=ConsumerStatsResponse)
 async def get_consumer_stats(
+    current_user: AuthenticatedUser = Depends(get_current_user),
     consumer: AnalyticsConsumer = Depends(get_consumer),
 ) -> ConsumerStatsResponse:
     """Get consumer statistics."""
@@ -465,6 +473,7 @@ async def get_consumer_stats(
 
 @router.get("/stats", response_model=ServiceStatsResponse)
 async def get_service_stats(
+    current_user: AuthenticatedUser = Depends(get_current_user),
     aggregator: AnalyticsAggregator = Depends(get_aggregator),
     report_service: ReportService = Depends(get_report_service),
     consumer: AnalyticsConsumer = Depends(get_consumer),

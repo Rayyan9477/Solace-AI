@@ -231,6 +231,7 @@ async def end_session(
 @router.get("/sessions/{session_id}/state", response_model=SessionStateDTO, status_code=status.HTTP_200_OK)
 async def get_session_state(
     session_id: UUID,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     orchestrator: TherapyOrchestrator = Depends(get_therapy_orchestrator),
 ) -> SessionStateDTO:
     """
@@ -265,6 +266,7 @@ async def get_session_state(
 @router.get("/sessions/{session_id}/treatment-plan", response_model=TreatmentPlanDTO, status_code=status.HTTP_200_OK)
 async def get_treatment_plan(
     session_id: UUID,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     orchestrator: TherapyOrchestrator = Depends(get_therapy_orchestrator),
 ) -> TreatmentPlanDTO:
     """
@@ -300,6 +302,7 @@ async def get_treatment_plan(
 async def assign_homework(
     session_id: UUID,
     homework: HomeworkDTO,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     orchestrator: TherapyOrchestrator = Depends(get_therapy_orchestrator),
 ) -> dict[str, Any]:
     """
@@ -368,6 +371,7 @@ async def list_techniques(
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def delete_session(
     session_id: UUID,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     orchestrator: TherapyOrchestrator = Depends(get_therapy_orchestrator),
 ) -> Response:
     """
@@ -406,6 +410,7 @@ async def get_service_status(
 @router.get("/users/{user_id}/progress", response_model=dict[str, Any], status_code=status.HTTP_200_OK)
 async def get_user_progress(
     user_id: UUID,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     orchestrator: TherapyOrchestrator = Depends(get_therapy_orchestrator),
 ) -> dict[str, Any]:
     """

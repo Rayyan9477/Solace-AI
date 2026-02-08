@@ -419,6 +419,148 @@ class SessionManager:
         }
 
 
+class RedisSessionManager:
+    """
+    Redis-backed session manager for production use.
+
+    Stores sessions in Redis with TTL-based expiration, supporting
+    multi-instance deployments where in-memory session state would be lost.
+    """
+
+    def __init__(self, redis_client: Any, config: SessionConfig | None = None) -> None:
+        self._redis = redis_client
+        self._config = config or SessionConfig()
+        self._prefix = "session:"
+        self._user_prefix = "user_sessions:"
+        self._stats = {
+            "sessions_created": 0,
+            "sessions_revoked": 0,
+            "sessions_expired": 0,
+        }
+
+    def _session_key(self, session_id: UUID) -> str:
+        return f"{self._prefix}{session_id}"
+
+    def _user_key(self, user_id: UUID) -> str:
+        return f"{self._user_prefix}{user_id}"
+
+    async def create_session(
+        self,
+        user: Any,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        device_info: dict[str, str] | None = None,
+    ) -> UserSession:
+        session = UserSession(
+            user_id=user.user_id,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            device_info=device_info or {},
+        )
+        ttl_seconds = self._config.session_timeout_minutes * 60
+        await self._redis.set(
+            self._session_key(session.session_id),
+            session.model_dump_json(),
+            ttl=ttl_seconds,
+        )
+        # Track session IDs per user
+        user_key = self._user_key(user.user_id)
+        existing = await self._redis.get(user_key)
+        import json as _json
+        session_ids: list[str] = _json.loads(existing) if existing else []
+        # Enforce max sessions
+        while len(session_ids) >= self._config.max_sessions_per_user:
+            oldest_id = session_ids.pop(0)
+            await self._redis.delete(f"{self._prefix}{oldest_id}")
+        session_ids.append(str(session.session_id))
+        await self._redis.set(user_key, _json.dumps(session_ids), ttl=ttl_seconds)
+        self._stats["sessions_created"] += 1
+        logger.info("session_created", session_id=str(session.session_id), user_id=str(user.user_id))
+        return session
+
+    async def get_session(self, session_id: UUID) -> UserSession | None:
+        data = await self._redis.get(self._session_key(session_id))
+        if not data:
+            return None
+        session = UserSession.model_validate_json(data)
+        if not session.is_active:
+            return None
+        return session
+
+    async def validate_session(self, session_id: UUID) -> bool:
+        session = await self.get_session(session_id)
+        return session is not None
+
+    async def update_activity(self, session_id: UUID) -> None:
+        session = await self.get_session(session_id)
+        if session and session.is_active:
+            session.update_activity()
+            ttl_seconds = self._config.session_timeout_minutes * 60
+            await self._redis.set(
+                self._session_key(session_id),
+                session.model_dump_json(),
+                ttl=ttl_seconds,
+            )
+
+    async def get_user_sessions(self, user_id: UUID, active_only: bool = True) -> list[UserSession]:
+        import json as _json
+        user_key = self._user_key(user_id)
+        existing = await self._redis.get(user_key)
+        if not existing:
+            return []
+        session_ids = _json.loads(existing)
+        sessions = []
+        for sid in session_ids:
+            session = await self.get_session(UUID(sid))
+            if session:
+                if active_only and not session.is_active:
+                    continue
+                sessions.append(session)
+        return sessions
+
+    async def revoke_session(self, session_id: UUID) -> bool:
+        session = await self.get_session(session_id)
+        if not session:
+            return False
+        await self._redis.delete(self._session_key(session_id))
+        # Remove from user's session list
+        import json as _json
+        user_key = self._user_key(session.user_id)
+        existing = await self._redis.get(user_key)
+        if existing:
+            session_ids = _json.loads(existing)
+            session_ids = [s for s in session_ids if s != str(session_id)]
+            if session_ids:
+                await self._redis.set(user_key, _json.dumps(session_ids))
+            else:
+                await self._redis.delete(user_key)
+        self._stats["sessions_revoked"] += 1
+        return True
+
+    async def revoke_all_user_sessions(self, user_id: UUID) -> int:
+        import json as _json
+        user_key = self._user_key(user_id)
+        existing = await self._redis.get(user_key)
+        if not existing:
+            return 0
+        session_ids = _json.loads(existing)
+        revoked = 0
+        for sid in session_ids:
+            await self._redis.delete(f"{self._prefix}{sid}")
+            revoked += 1
+        await self._redis.delete(user_key)
+        self._stats["sessions_revoked"] += revoked
+        logger.info("all_user_sessions_revoked", user_id=str(user_id), count=revoked)
+        return revoked
+
+    async def cleanup_expired_sessions(self) -> int:
+        # Redis TTL handles expiration automatically
+        return 0
+
+    def get_statistics(self) -> dict[str, Any]:
+        return {**self._stats}
+
+
 # --- Authentication Service ---
 
 

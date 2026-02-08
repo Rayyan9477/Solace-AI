@@ -21,6 +21,7 @@ from services.shared import ServiceBase
 if TYPE_CHECKING:
     from .context_assembler import ContextAssembler
     from .consolidation import ConsolidationPipeline
+    from ..infrastructure.postgres_repo import PostgresRepository
 
 logger = structlog.get_logger(__name__)
 
@@ -30,12 +31,16 @@ class MemoryService(ServiceBase):
 
     def __init__(self, settings: MemoryServiceSettings | None = None,
                  context_assembler: ContextAssembler | None = None,
-                 consolidation_pipeline: ConsolidationPipeline | None = None) -> None:
+                 consolidation_pipeline: ConsolidationPipeline | None = None,
+                 postgres_repo: PostgresRepository | None = None) -> None:
         self._settings = settings or MemoryServiceSettings()
         self._context_assembler = context_assembler
         self._consolidation_pipeline = consolidation_pipeline
+        self._postgres_repo = postgres_repo
+        # Tiers 1-2: always in-memory (ephemeral per-session data)
         self._tier_1_input: dict[UUID, MemoryRecord] = {}
         self._tier_2_working: dict[UUID, list[MemoryRecord]] = {}
+        # Tiers 3-5: in-memory cache for active session, persisted to postgres
         self._tier_3_session: dict[UUID, list[MemoryRecord]] = {}
         self._tier_4_episodic: dict[UUID, list[MemoryRecord]] = {}
         self._tier_5_semantic: dict[UUID, list[MemoryRecord]] = {}
@@ -49,11 +54,15 @@ class MemoryService(ServiceBase):
     async def initialize(self) -> None:
         """Initialize the memory service."""
         logger.info("memory_service_initializing")
+        if self._postgres_repo:
+            await self._postgres_repo.initialize()
+            logger.info("memory_service_postgres_connected")
         self._initialized = True
         logger.info("memory_service_initialized", settings={
             "working_memory_max": self._settings.working_memory_max_tokens,
             "auto_consolidation": self._settings.enable_auto_consolidation,
             "decay_enabled": self._settings.enable_decay,
+            "persistent_storage": self._postgres_repo is not None,
         })
 
     async def shutdown(self) -> None:
@@ -61,6 +70,8 @@ class MemoryService(ServiceBase):
         logger.info("memory_service_shutting_down", stats=self._stats)
         for session in list(self._active_sessions.values()):
             await self.end_session(session.user_id, session.session_id, False, False)
+        if self._postgres_repo:
+            await self._postgres_repo.close()
         self._initialized = False
 
     async def store_memory(self, user_id: UUID, session_id: UUID | None, content: str,
@@ -74,7 +85,14 @@ class MemoryService(ServiceBase):
             content_type=content_type, retention_category=retention_category,
             importance_score=importance_score, metadata=metadata,
         )
+        # In-memory cache for active session access
         self._store_to_tier(record, tier)
+        # Persist tiers 3-5 to postgres
+        if self._postgres_repo and tier in ("tier_3_session", "tier_4_episodic", "tier_5_semantic"):
+            try:
+                await self._postgres_repo.store_memory_record(record)
+            except Exception:
+                logger.exception("postgres_store_failed", record_id=str(record.record_id), tier=tier)
         storage_time_ms = int((time.perf_counter() - start_time) * 1000)
         logger.debug("memory_stored", user_id=str(user_id), tier=tier, time_ms=storage_time_ms)
         return StoreMemoryResult(record_id=record.record_id, tier=tier, stored=True,
@@ -89,13 +107,37 @@ class MemoryService(ServiceBase):
         self._stats["total_retrieves"] += 1
         search_tiers = tiers or ["tier_2_working", "tier_3_session", "tier_4_episodic", "tier_5_semantic"]
         all_records: list[MemoryRecord] = []
+        persistent_tiers = {"tier_3_session", "tier_4_episodic", "tier_5_semantic"}
+
         for tier in search_tiers:
-            tier_records = self._get_tier_records(user_id, tier)
-            for record in tier_records:
-                if record.importance_score >= min_importance:
-                    if session_id is None or record.session_id == session_id:
-                        if time_range_hours is None or self._within_time_range(record, time_range_hours):
-                            all_records.append(record)
+            if self._postgres_repo and tier in persistent_tiers:
+                # Query persistent storage for tiers 3-5
+                try:
+                    rows = await self._postgres_repo.get_user_records(user_id, tier=tier, limit=limit)
+                    for row in rows:
+                        record = self._row_to_memory_record(row)
+                        if record.importance_score >= min_importance:
+                            if session_id is None or record.session_id == session_id:
+                                if time_range_hours is None or self._within_time_range(record, time_range_hours):
+                                    all_records.append(record)
+                except Exception:
+                    logger.exception("postgres_retrieve_failed", tier=tier)
+                    # Fall back to in-memory cache
+                    tier_records = self._get_tier_records(user_id, tier)
+                    for record in tier_records:
+                        if record.importance_score >= min_importance:
+                            if session_id is None or record.session_id == session_id:
+                                if time_range_hours is None or self._within_time_range(record, time_range_hours):
+                                    all_records.append(record)
+            else:
+                # In-memory tiers (1-2) or no postgres available
+                tier_records = self._get_tier_records(user_id, tier)
+                for record in tier_records:
+                    if record.importance_score >= min_importance:
+                        if session_id is None or record.session_id == session_id:
+                            if time_range_hours is None or self._within_time_range(record, time_range_hours):
+                                all_records.append(record)
+
         if query:
             all_records = self._semantic_filter(all_records, query)
         all_records = sorted(all_records, key=lambda r: (r.importance_score, r.created_at), reverse=True)[:limit]
@@ -150,7 +192,7 @@ class MemoryService(ServiceBase):
         self._active_sessions[session.session_id] = session
         self._tier_2_working[user_id] = []
         self._tier_3_session.setdefault(user_id, [])
-        previous_summary = self._get_previous_session_summary(user_id)
+        previous_summary = await self._get_previous_session_summary(user_id)
         self._load_user_profile(user_id)
         logger.info("session_started", user_id=str(user_id), session_id=str(session.session_id),
                     session_number=session_number)
@@ -204,6 +246,12 @@ class MemoryService(ServiceBase):
         session = self._active_sessions.get(session_id)
         if session:
             session.messages.append(record)
+        # Persist to postgres
+        if self._postgres_repo:
+            try:
+                await self._postgres_repo.store_memory_record(record)
+            except Exception:
+                logger.exception("postgres_add_message_failed", record_id=str(record.record_id))
         storage_time_ms = int((time.perf_counter() - start_time) * 1000)
         return AddMessageResult(
             message_id=record.record_id, stored_to_tier="tier_3_session",
@@ -231,6 +279,21 @@ class MemoryService(ServiceBase):
                 retention_category="long_term", importance_score=Decimal("0.8"),
             )
             self._tier_4_episodic.setdefault(user_id, []).append(summary_record)
+            # Persist summary to postgres
+            if self._postgres_repo:
+                try:
+                    session_state = self._active_sessions.get(session_id)
+                    await self._postgres_repo.store_session_summary({
+                        "session_id": session_id,
+                        "user_id": user_id,
+                        "session_number": session_state.session_number if session_state else 1,
+                        "summary_text": result.summary_generated,
+                        "key_topics": getattr(result, "key_topics", []),
+                        "message_count": len(session_state.messages) if session_state else 0,
+                        "session_date": datetime.now(timezone.utc),
+                    })
+                except Exception:
+                    logger.exception("postgres_store_summary_failed", session_id=str(session_id))
         for fact in result.extracted_facts:
             fact_record = MemoryRecord(
                 user_id=user_id, tier="tier_5_semantic", content=fact["content"],
@@ -238,8 +301,21 @@ class MemoryService(ServiceBase):
                 importance_score=Decimal(str(fact.get("importance", 0.7))), metadata=fact.get("metadata", {}),
             )
             self._tier_5_semantic.setdefault(user_id, []).append(fact_record)
+            # Persist fact to postgres
+            if self._postgres_repo:
+                try:
+                    await self._postgres_repo.store_user_fact({
+                        "user_id": user_id,
+                        "category": fact.get("category", "general"),
+                        "content": fact["content"],
+                        "importance": Decimal(str(fact.get("importance", 0.7))),
+                        "source_session_id": session_id,
+                        "metadata": fact.get("metadata", {}),
+                    })
+                except Exception:
+                    logger.exception("postgres_store_fact_failed", user_id=str(user_id))
         if apply_decay:
-            decayed, archived = self._apply_decay_model(user_id)
+            decayed, archived = await self._apply_decay_model(user_id)
             result.memories_decayed = decayed
             result.memories_archived = archived
         consolidation_time_ms = int((time.perf_counter() - start_time) * 1000)
@@ -256,19 +332,45 @@ class MemoryService(ServiceBase):
                                include_session_history: bool, session_limit: int) -> UserProfileResult:
         """Get user profile from memory."""
         profile = self._user_profiles.get(user_id, {})
-        sessions = self._tier_4_episodic.get(user_id, [])
         total_sessions = self._user_session_counts.get(user_id, 0)
-        first_date = min((s.created_at for s in sessions), default=None) if sessions else None
-        last_date = max((s.created_at for s in sessions), default=None) if sessions else None
+        first_date = None
+        last_date = None
         recent_sessions = []
-        if include_session_history:
-            for record in sorted(sessions, key=lambda r: r.created_at, reverse=True)[:session_limit]:
-                recent_sessions.append({"session_id": str(record.session_id), "date": record.created_at.isoformat(),
-                                        "summary": record.content[:200] if record.content else None})
         knowledge_graph = None
-        if include_knowledge_graph:
-            semantic_records = self._tier_5_semantic.get(user_id, [])
-            knowledge_graph = {"nodes": len(semantic_records), "facts": [r.content for r in semantic_records[:20]]}
+
+        if self._postgres_repo:
+            try:
+                summaries = await self._postgres_repo.get_user_summaries(user_id, limit=session_limit)
+                if summaries:
+                    total_sessions = max(total_sessions, len(summaries))
+                    dates = [s["session_date"] for s in summaries if s.get("session_date")]
+                    first_date = min(dates) if dates else None
+                    last_date = max(dates) if dates else None
+                if include_session_history:
+                    for s in summaries:
+                        recent_sessions.append({
+                            "session_id": str(s.get("session_id", "")),
+                            "date": s["session_date"].isoformat() if s.get("session_date") else None,
+                            "summary": s.get("summary_text", "")[:200],
+                        })
+                if include_knowledge_graph:
+                    facts = await self._postgres_repo.get_user_facts(user_id)
+                    knowledge_graph = {"nodes": len(facts), "facts": [f["content"] for f in facts[:20]]}
+            except Exception:
+                logger.exception("postgres_get_profile_failed", user_id=str(user_id))
+        else:
+            # Fallback to in-memory
+            sessions = self._tier_4_episodic.get(user_id, [])
+            first_date = min((s.created_at for s in sessions), default=None) if sessions else None
+            last_date = max((s.created_at for s in sessions), default=None) if sessions else None
+            if include_session_history:
+                for record in sorted(sessions, key=lambda r: r.created_at, reverse=True)[:session_limit]:
+                    recent_sessions.append({"session_id": str(record.session_id), "date": record.created_at.isoformat(),
+                                            "summary": record.content[:200] if record.content else None})
+            if include_knowledge_graph:
+                semantic_records = self._tier_5_semantic.get(user_id, [])
+                knowledge_graph = {"nodes": len(semantic_records), "facts": [r.content for r in semantic_records[:20]]}
+
         return UserProfileResult(
             total_sessions=total_sessions, first_session_date=first_date, last_session_date=last_date,
             profile_facts=profile.get("facts", {}), knowledge_graph=knowledge_graph,
@@ -277,6 +379,15 @@ class MemoryService(ServiceBase):
 
     async def delete_user_data(self, user_id: UUID) -> None:
         """Delete all user data (GDPR compliance)."""
+        # Delete from persistent storage first
+        if self._postgres_repo:
+            try:
+                counts = await self._postgres_repo.delete_user_data(user_id)
+                logger.info("user_data_deleted_postgres", user_id=str(user_id),
+                            records=counts[0], summaries=counts[1], facts=counts[2], events=counts[3])
+            except Exception:
+                logger.exception("postgres_delete_user_data_failed", user_id=str(user_id))
+        # Clear in-memory caches
         self._tier_1_input.pop(user_id, None)
         self._tier_2_working.pop(user_id, None)
         self._tier_3_session.pop(user_id, None)
@@ -328,6 +439,25 @@ class MemoryService(ServiceBase):
                     "tier_4_episodic": self._tier_4_episodic, "tier_5_semantic": self._tier_5_semantic}
         return tier_map.get(tier, {}).get(user_id, [])
 
+    @staticmethod
+    def _row_to_memory_record(row: dict[str, Any]) -> MemoryRecord:
+        """Convert a postgres row dict back to a MemoryRecord."""
+        return MemoryRecord(
+            record_id=row["record_id"],
+            user_id=row["user_id"],
+            session_id=row.get("session_id"),
+            tier=row.get("tier", "tier_3_session"),
+            content=row.get("content", ""),
+            content_type=row.get("content_type", "message"),
+            retention_category=row.get("retention_category", "medium_term"),
+            importance_score=Decimal(str(row.get("importance_score", "0.5"))),
+            emotional_valence=Decimal(str(row["emotional_valence"])) if row.get("emotional_valence") is not None else None,
+            metadata=row.get("metadata", {}),
+            created_at=row.get("created_at", datetime.now(timezone.utc)),
+            accessed_at=row.get("accessed_at", datetime.now(timezone.utc)),
+            retention_strength=Decimal(str(row.get("retention_strength", "1.0"))),
+        )
+
     def _within_time_range(self, record: MemoryRecord, hours: int) -> bool:
         """Check if record is within time range."""
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
@@ -337,8 +467,16 @@ class MemoryService(ServiceBase):
         """Basic semantic filtering (placeholder for vector search)."""
         return [r for r in records if query.lower() in r.content.lower()]
 
-    def _get_previous_session_summary(self, user_id: UUID) -> str | None:
+    async def _get_previous_session_summary(self, user_id: UUID) -> str | None:
         """Get summary from previous session."""
+        if self._postgres_repo:
+            try:
+                summaries = await self._postgres_repo.get_user_summaries(user_id, limit=1)
+                if summaries:
+                    return summaries[0].get("summary_text")
+            except Exception:
+                logger.exception("postgres_get_summary_failed", user_id=str(user_id))
+        # Fallback to in-memory
         episodic = self._tier_4_episodic.get(user_id, [])
         summaries = [r for r in episodic if r.content_type == "session_summary"]
         if summaries:
@@ -379,10 +517,19 @@ class MemoryService(ServiceBase):
             parts.append(f"user: {current_message}")
         return "\n".join(parts)
 
-    def _apply_decay_model(self, user_id: UUID) -> tuple[int, int]:
+    async def _apply_decay_model(self, user_id: UUID) -> tuple[int, int]:
         """Apply Ebbinghaus decay model to memories."""
         decayed = 0
         archived = 0
+        # Apply batch decay in postgres
+        if self._postgres_repo:
+            try:
+                decayed = await self._postgres_repo.apply_batch_decay(
+                    user_id, decay_factor=Decimal("0.05"), exclude_permanent=True,
+                )
+            except Exception:
+                logger.exception("postgres_decay_failed", user_id=str(user_id))
+        # Also apply to in-memory cache
         for tier_storage in [self._tier_3_session, self._tier_4_episodic]:
             records = tier_storage.get(user_id, [])
             for record in records:

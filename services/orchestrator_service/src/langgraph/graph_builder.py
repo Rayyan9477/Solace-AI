@@ -9,7 +9,13 @@ import structlog
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.memory import MemorySaver as InMemorySaver
+
+try:
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    _POSTGRES_CHECKPOINT_AVAILABLE = True
+except ImportError:
+    _POSTGRES_CHECKPOINT_AVAILABLE = False
 
 from .state_schema import (
     OrchestratorState,
@@ -173,12 +179,31 @@ class OrchestratorGraphBuilder:
     Configures nodes, edges, and checkpointing for the orchestrator.
     """
 
-    def __init__(self, settings: GraphBuilderSettings | None = None) -> None:
+    def __init__(
+        self,
+        settings: GraphBuilderSettings | None = None,
+        postgres_connection_string: str | None = None,
+    ) -> None:
         self._settings = settings or GraphBuilderSettings()
         self._supervisor_settings = SupervisorSettings()
-        self._checkpointer = InMemorySaver() if self._settings.enable_checkpointing else None
+        self._postgres_conn_str = postgres_connection_string
+        self._checkpointer = self._create_checkpointer()
         self._graph = None
         self._compiled = None
+
+    def _create_checkpointer(self) -> Any:
+        """Create appropriate checkpointer based on configuration."""
+        if not self._settings.enable_checkpointing:
+            return None
+        if self._postgres_conn_str and _POSTGRES_CHECKPOINT_AVAILABLE:
+            logger.info("using_postgres_checkpointer")
+            return AsyncPostgresSaver.from_conn_string(self._postgres_conn_str)
+        if self._postgres_conn_str and not _POSTGRES_CHECKPOINT_AVAILABLE:
+            logger.warning(
+                "postgres_checkpointer_unavailable",
+                msg="langgraph-checkpoint-postgres not installed, falling back to in-memory",
+            )
+        return InMemorySaver()
 
     def build(self) -> StateGraph:
         """
@@ -253,8 +278,8 @@ class OrchestratorGraphBuilder:
             self.compile()
         return self._compiled
 
-    def get_checkpointer(self) -> InMemorySaver | None:
-        """Get the checkpointer instance."""
+    def get_checkpointer(self) -> Any:
+        """Get the checkpointer instance (InMemorySaver or AsyncPostgresSaver)."""
         return self._checkpointer
 
     async def invoke(self, state: OrchestratorState, thread_id: str | None = None) -> OrchestratorState:

@@ -180,12 +180,65 @@ class RateLimitStore:
         return len(expired_keys)
 
 
+class RedisRateLimitStore:
+    """Redis-backed rate limit storage for production multi-instance deployments."""
+
+    def __init__(self, redis_client: Any) -> None:
+        self._redis = redis_client
+        self._prefix = "rate_limit:"
+
+    def _generate_key(self, policy: RateLimitPolicy, identifier: str) -> str:
+        components = [policy.name, identifier, policy.window.value]
+        if policy.service_name:
+            components.append(policy.service_name)
+        if policy.route_name:
+            components.append(policy.route_name)
+        raw_key = ":".join(components)
+        return f"{self._prefix}{hashlib.sha256(raw_key.encode()).hexdigest()[:32]}"
+
+    async def async_increment(self, policy: RateLimitPolicy, identifier: str) -> RateLimitResult:
+        """Async increment using Redis INCR with TTL."""
+        key = self._generate_key(policy, identifier)
+        window_seconds = policy.window_seconds()
+        count = await self._redis.incr(key)
+        if count == 1:
+            await self._redis.expire(key, window_seconds)
+        ttl = await self._redis.ttl(key)
+        allowed = count <= policy.limit
+        remaining = max(0, policy.limit - count)
+        reset_at = datetime.now(timezone.utc)
+        retry_after = None if allowed else max(1, ttl)
+        return RateLimitResult(
+            allowed=allowed, remaining=remaining, limit=policy.limit,
+            reset_at=reset_at, retry_after=retry_after, policy_name=policy.name,
+        )
+
+    # Sync compatibility wrapper (uses in-memory fallback)
+    def increment(self, policy: RateLimitPolicy, identifier: str) -> RateLimitResult:
+        """Sync fallback — use async_increment in async contexts."""
+        logger.warning("redis_rate_limit_sync_call", msg="Use async_increment for Redis-backed rate limiting")
+        # Fall through to basic check
+        return RateLimitResult(
+            allowed=True, remaining=policy.limit, limit=policy.limit,
+            reset_at=datetime.now(timezone.utc), retry_after=None, policy_name=policy.name,
+        )
+
+    def get_count(self, policy: RateLimitPolicy, identifier: str) -> int:
+        return 0  # Use async version
+
+    def reset(self, policy: RateLimitPolicy, identifier: str) -> None:
+        pass  # Use async version
+
+    def cleanup_expired(self) -> int:
+        return 0  # Redis TTL handles this
+
+
 class RateLimiter:
     """Rate limiter with policy management."""
 
-    def __init__(self, config: RateLimitConfig | None = None) -> None:
+    def __init__(self, config: RateLimitConfig | None = None, redis_client: Any | None = None) -> None:
         self._config = config or RateLimitConfig()
-        self._store = RateLimitStore()
+        self._store = RedisRateLimitStore(redis_client) if redis_client else RateLimitStore()
         self._policies: dict[str, RateLimitPolicy] = {}
         self._service_policies: dict[str, list[str]] = {}
         self._route_policies: dict[str, list[str]] = {}

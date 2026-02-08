@@ -466,11 +466,13 @@ async def refresh_token(
     request_data: RefreshRequest,
     request: Request,
     jwt_service: JWTService = Depends(get_jwt_service),
+    session_manager: SessionManager = Depends(get_session_manager),
 ) -> TokenResponse:
     """
     Refresh access token using refresh token.
 
     Returns new access token without requiring re-authentication.
+    Validates that the user still has an active session before issuing new tokens.
     """
     try:
         # Verify refresh token and get payload
@@ -478,6 +480,15 @@ async def refresh_token(
             request_data.refresh_token,
             expected_type=TokenType.REFRESH,
         )
+
+        # Verify user still has at least one active session
+        active_sessions = await session_manager.get_user_sessions(payload.user_id, active_only=True)
+        if not active_sessions:
+            logger.warning("token_refresh_denied_no_active_session", user_id=str(payload.user_id))
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="No active session found. Please log in again.",
+            )
 
         # Generate new token pair
         token_pair = jwt_service.generate_token_pair(
@@ -498,6 +509,8 @@ async def refresh_token(
             expires_in=token_pair.expires_in,
         )
 
+    except HTTPException:
+        raise
     except (TokenExpiredError, TokenInvalidError) as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -707,12 +720,14 @@ async def record_consent(
     user_service: UserService = Depends(get_user_service),
 ) -> ConsentResponse:
     """Record a consent decision."""
-    # Try to parse consent type
+    # Parse and validate consent type
     try:
         consent_type = ConsentType(request_data.consent_type)
     except ValueError:
-        # Allow custom consent types
-        consent_type = ConsentType.ANALYTICS_TRACKING  # Default fallback
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid consent type: {request_data.consent_type}. Valid types: {[t.value for t in ConsentType]}",
+        )
 
     result = await user_service.record_consent(
         user_id=current_user.user_id,
@@ -885,6 +900,7 @@ class SetOnCallRequest(BaseModel):
     tags=["Clinicians"],
 )
 async def get_on_call_clinicians(
+    current_user: TokenPayload = Depends(get_current_user),
     user_service: UserService = Depends(get_user_service),
 ) -> OnCallListResponse:
     """

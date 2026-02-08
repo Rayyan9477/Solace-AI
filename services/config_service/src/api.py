@@ -3,6 +3,7 @@ Solace-AI Configuration Service API Endpoints.
 RESTful API for configuration, secrets, and feature flag management.
 """
 from __future__ import annotations
+import hmac
 from datetime import datetime, timezone
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Header, status
@@ -129,6 +130,12 @@ async def _verify_api_key(x_api_key: str | None = Header(default=None)) -> str:
     """Verify API key for protected endpoints."""
     if not x_api_key:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key required")
+    import os
+    expected_key = os.getenv("CONFIG_SERVICE_API_KEY")
+    if not expected_key:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="API key not configured on server")
+    if not hmac.compare_digest(x_api_key, expected_key):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API key")
     return x_api_key
 
 
@@ -157,6 +164,7 @@ async def health_check(
 async def get_config_value(
     key: str,
     config: ConfigurationManager = Depends(_get_config_manager),
+    _: str = Depends(_verify_api_key),
 ) -> ConfigResponse:
     """Get configuration value by dot-notation key."""
     try:
@@ -175,6 +183,7 @@ async def get_config_value(
 async def get_config_section(
     section: str,
     config: ConfigurationManager = Depends(_get_config_manager),
+    _: str = Depends(_verify_api_key),
 ) -> ConfigSectionResponse:
     """Get entire configuration section."""
     data = config.get_section(section)
@@ -282,6 +291,7 @@ async def list_feature_flags(
     status_filter: FlagStatus | None = Query(None, alias="status"),
     tags: list[str] | None = Query(None),
     flags: FeatureFlagManager = Depends(_get_feature_flags),
+    _: str = Depends(_verify_api_key),
 ) -> list[FeatureFlagResponse]:
     """List all feature flags with optional filtering."""
     items = await flags.list_flags(tags, status_filter)
@@ -298,6 +308,7 @@ async def list_feature_flags(
 async def get_feature_flag(
     key: str,
     flags: FeatureFlagManager = Depends(_get_feature_flags),
+    _: str = Depends(_verify_api_key),
 ) -> FeatureFlagResponse:
     """Get feature flag by key."""
     flag = await flags.get_flag(key)
@@ -375,6 +386,7 @@ async def evaluate_feature_flag(
     key: str,
     request: FlagEvaluationRequest,
     flags: FeatureFlagManager = Depends(_get_feature_flags),
+    _: str = Depends(_verify_api_key),
 ) -> EvaluationResult:
     """Evaluate a feature flag for specific user/context."""
     return await flags.evaluate(key, request.user_id, request.context)
@@ -384,6 +396,7 @@ async def evaluate_feature_flag(
 async def bulk_evaluate_flags(
     request: BulkEvaluationRequest,
     flags: FeatureFlagManager = Depends(_get_feature_flags),
+    _: str = Depends(_verify_api_key),
 ) -> dict[str, bool]:
     """Evaluate multiple feature flags at once."""
     return await flags.bulk_evaluate(request.keys, request.user_id, request.context)
@@ -394,6 +407,7 @@ async def check_flag_enabled(
     key: str,
     user_id: str | None = Query(None),
     flags: FeatureFlagManager = Depends(_get_feature_flags),
+    _: str = Depends(_verify_api_key),
 ) -> dict[str, Any]:
     """Quick check if flag is enabled for user."""
     enabled = flags.is_enabled(key, user_id)

@@ -12,6 +12,12 @@ import json
 import structlog
 from langgraph.checkpoint.memory import MemorySaver
 
+try:
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    _POSTGRES_CHECKPOINT_AVAILABLE = True
+except ImportError:
+    _POSTGRES_CHECKPOINT_AVAILABLE = False
+
 from ..config import PersistenceSettings, get_config
 from ..langgraph.state_schema import OrchestratorState
 
@@ -156,7 +162,7 @@ class StatePersistenceManager:
     def __init__(self, settings: PersistenceSettings | None = None) -> None:
         self._settings = settings or get_config().persistence()
         self._store = self._create_store()
-        self._langgraph_saver = MemorySaver() if self._settings.enable_checkpointing else None
+        self._langgraph_saver = self._create_langgraph_checkpointer()
         self._save_count = 0
         self._load_count = 0
 
@@ -165,10 +171,26 @@ class StatePersistenceManager:
         backend = self._settings.checkpoint_backend
         if backend == "memory":
             return MemoryStateStore()
+        if backend == "postgres":
+            logger.info("using_memory_state_store_with_postgres_checkpointer")
+            return MemoryStateStore()
         logger.warning("unknown_backend_using_memory", backend=backend)
         return MemoryStateStore()
 
-    def get_langgraph_checkpointer(self) -> MemorySaver | None:
+    def _create_langgraph_checkpointer(self) -> Any:
+        """Create LangGraph checkpointer based on configuration."""
+        if not self._settings.enable_checkpointing:
+            return None
+        backend = self._settings.checkpoint_backend
+        if backend == "postgres" and _POSTGRES_CHECKPOINT_AVAILABLE:
+            postgres_url = self._settings.postgres_url
+            logger.info("creating_postgres_langgraph_checkpointer", url=postgres_url.split("@")[-1] if "@" in postgres_url else "***")
+            return AsyncPostgresSaver.from_conn_string(postgres_url)
+        if backend == "postgres" and not _POSTGRES_CHECKPOINT_AVAILABLE:
+            logger.warning("postgres_checkpointer_unavailable", msg="Install langgraph-checkpoint-postgres")
+        return MemorySaver()
+
+    def get_langgraph_checkpointer(self) -> Any:
         """Get LangGraph checkpointer for graph compilation."""
         return self._langgraph_saver
 

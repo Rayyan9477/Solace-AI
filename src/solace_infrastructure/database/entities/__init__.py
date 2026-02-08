@@ -8,16 +8,24 @@ ensure consistency and proper encryption/audit trail support.
 Entity Modules:
 - user_entities: User, UserPreferences, ConsentRecord
 - safety_entities: SafetyAssessment, SafetyPlan, RiskFactor, ContraindicationCheck
-- therapy_entities: TherapySession, TherapyPlan, TherapeuticIntervention
-- diagnosis_entities: DiagnosticAssessment, Diagnosis, Symptom
-- memory_entities: ConversationMemory, MemoryEntry, MemoryVector
-- notification_entities: Notification, NotificationTemplate
-- analytics_entities: AnalyticsEvent, MetricSnapshot
+- therapy_entities: TreatmentPlan, TherapySession, TherapyIntervention, HomeworkAssignment
+- diagnosis_entities: DiagnosisSession, Symptom, Hypothesis, DiagnosisRecord
+- memory_entities: MemoryRecord, MemoryUserProfile, SessionSummary, TherapeuticEvent
+- personality_entities: PersonalityProfile, TraitAssessment, ProfileSnapshot
+- notification_entities: Notification, DeliveryAttempt, UserNotificationPreferences, NotificationBatch
 """
 
 from __future__ import annotations
 
-# Import all entities to ensure they're registered at module load time
+# Import all entities to ensure they're registered at module load time.
+# Order matters: user_entities first since other entities reference users table.
+
+from .user_entities import (
+    User,
+    UserPreferences,
+    ConsentRecord,
+)
+
 from .safety_entities import (
     ContraindicationCheck,
     RiskFactor,
@@ -25,18 +33,72 @@ from .safety_entities import (
     SafetyPlan,
 )
 
-# from .user_entities import User, UserPreferences, ConsentRecord  # TODO
-# from .therapy_entities import TherapySession, TherapyPlan  # TODO
-# from .diagnosis_entities import DiagnosticAssessment, Diagnosis  # TODO
-# from .memory_entities import ConversationMemory, MemoryEntry  # TODO
-# from .notification_entities import Notification, NotificationTemplate  # TODO
-# from .analytics_entities import AnalyticsEvent, MetricSnapshot  # TODO
+from .therapy_entities import (
+    TreatmentPlan,
+    TherapySession,
+    TherapyIntervention,
+    HomeworkAssignment,
+)
+
+from .diagnosis_entities import (
+    DiagnosisSession,
+    Symptom,
+    Hypothesis,
+    DiagnosisRecord,
+)
+
+from .memory_entities import (
+    MemoryRecord,
+    MemoryUserProfile,
+    SessionSummary,
+    TherapeuticEvent,
+)
+
+from .personality_entities import (
+    PersonalityProfile,
+    TraitAssessment,
+    ProfileSnapshot,
+)
+
+from .notification_entities import (
+    Notification,
+    DeliveryAttempt,
+    UserNotificationPreferences,
+    NotificationBatch,
+)
 
 __all__ = [
+    # User entities
+    "User",
+    "UserPreferences",
+    "ConsentRecord",
     # Safety entities
     "SafetyAssessment",
     "SafetyPlan",
     "RiskFactor",
     "ContraindicationCheck",
-    # TODO: Add other entities as they're created
+    # Therapy entities
+    "TreatmentPlan",
+    "TherapySession",
+    "TherapyIntervention",
+    "HomeworkAssignment",
+    # Diagnosis entities
+    "DiagnosisSession",
+    "Symptom",
+    "Hypothesis",
+    "DiagnosisRecord",
+    # Memory entities
+    "MemoryRecord",
+    "MemoryUserProfile",
+    "SessionSummary",
+    "TherapeuticEvent",
+    # Personality entities
+    "PersonalityProfile",
+    "TraitAssessment",
+    "ProfileSnapshot",
+    # Notification entities
+    "Notification",
+    "DeliveryAttempt",
+    "UserNotificationPreferences",
+    "NotificationBatch",
 ]

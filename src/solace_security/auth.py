@@ -268,6 +268,58 @@ class InMemoryLoginAttemptTracker(LoginAttemptTracker):
         self._attempts.pop(user_id, None)
 
 
+class RedisTokenBlacklist(TokenBlacklist):
+    """Redis-backed token blacklist for production use."""
+
+    def __init__(self, redis_client: Any, key_prefix: str = "token_blacklist:") -> None:
+        self._redis = redis_client
+        self._prefix = key_prefix
+
+    async def add(self, jti: str, expires_at: datetime) -> None:
+        key = f"{self._prefix}{jti}"
+        ttl_seconds = max(1, int((expires_at - datetime.now(timezone.utc)).total_seconds()))
+        await self._redis.set(key, "1", ttl=ttl_seconds)
+
+    async def is_blacklisted(self, jti: str) -> bool:
+        key = f"{self._prefix}{jti}"
+        result = await self._redis.get(key)
+        return result is not None
+
+
+class RedisLoginAttemptTracker(LoginAttemptTracker):
+    """Redis-backed login attempt tracker for production use."""
+
+    def __init__(
+        self,
+        redis_client: Any,
+        max_attempts: int = 5,
+        lockout_minutes: int = 15,
+        key_prefix: str = "login_attempts:",
+    ) -> None:
+        self._redis = redis_client
+        self._max_attempts = max_attempts
+        self._lockout_minutes = lockout_minutes
+        self._prefix = key_prefix
+
+    async def record_failure(self, user_id: str) -> int:
+        key = f"{self._prefix}{user_id}"
+        count = await self._redis.incr(key)
+        if count == 1:
+            await self._redis.expire(key, timedelta(minutes=self._lockout_minutes))
+        return count
+
+    async def is_locked_out(self, user_id: str) -> bool:
+        key = f"{self._prefix}{user_id}"
+        count = await self._redis.get(key)
+        if count is None:
+            return False
+        return int(count) >= self._max_attempts
+
+    async def reset(self, user_id: str) -> None:
+        key = f"{self._prefix}{user_id}"
+        await self._redis.delete(key)
+
+
 class JWTManager:
     """JWT token creation and validation with optional token revocation."""
 

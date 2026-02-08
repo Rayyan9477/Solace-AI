@@ -229,25 +229,21 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
 
     async def save_snapshot(self, snapshot: ProfileSnapshot) -> None:
         """Save a profile snapshot to PostgreSQL."""
-        traits_json = json.dumps(
-            {k.value: str(v) for k, v in snapshot.traits.items()},
+        ocean_scores_json = json.dumps(
+            snapshot.ocean_scores.to_dict(),
             default=_decimal_encoder,
-        ) if snapshot.traits else None
+        ) if snapshot.ocean_scores else None
 
         communication_style_json = json.dumps(
             snapshot.communication_style.to_dict(),
             default=_decimal_encoder,
         ) if snapshot.communication_style else None
 
-        dominant_traits_json = json.dumps(
-            [t.value for t in snapshot.dominant_traits],
-        ) if snapshot.dominant_traits else None
-
         query = f"""
             INSERT INTO {self._snapshots_table} (
-                snapshot_id, profile_id, traits, communication_style,
-                stability_score, assessment_count, dominant_traits,
-                captured_at, trigger_reason
+                snapshot_id, profile_id, user_id, ocean_scores,
+                communication_style, stability_score, assessment_count,
+                captured_at, reason
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9
             )
@@ -258,13 +254,13 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
                 query,
                 snapshot.snapshot_id,
                 snapshot.profile_id,
-                traits_json,
+                snapshot.user_id,
+                ocean_scores_json,
                 communication_style_json,
                 float(snapshot.stability_score),
                 snapshot.assessment_count,
-                dominant_traits_json,
                 snapshot.captured_at,
-                snapshot.trigger_reason,
+                snapshot.reason,
             )
             self._stats["snapshots_saved"] += 1
             logger.debug("snapshot_saved_postgres", snapshot_id=str(snapshot.snapshot_id))
@@ -401,34 +397,24 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
 
     def _row_to_snapshot(self, row: dict[str, Any]) -> ProfileSnapshot:
         """Convert a database row to a ProfileSnapshot entity."""
-        from ..schemas import PersonalityTrait
-
-        traits_data = row.get("traits")
-        if isinstance(traits_data, str):
-            traits_data = json.loads(traits_data)
-        traits = {}
-        if traits_data:
-            for k, v in traits_data.items():
-                traits[PersonalityTrait(k)] = Decimal(v)
+        ocean_scores_data = row.get("ocean_scores")
+        if isinstance(ocean_scores_data, str):
+            ocean_scores_data = json.loads(ocean_scores_data)
+        ocean_scores = OceanScores.from_dict(ocean_scores_data) if ocean_scores_data else OceanScores.neutral()
 
         comm_style_data = row.get("communication_style")
         if isinstance(comm_style_data, str):
             comm_style_data = json.loads(comm_style_data)
         communication_style = CommunicationStyle.from_dict(comm_style_data) if comm_style_data else None
 
-        dominant_traits_data = row.get("dominant_traits", [])
-        if isinstance(dominant_traits_data, str):
-            dominant_traits_data = json.loads(dominant_traits_data)
-        dominant_traits = [PersonalityTrait(t) for t in dominant_traits_data] if dominant_traits_data else []
-
         return ProfileSnapshot(
             snapshot_id=row["snapshot_id"],
             profile_id=row["profile_id"],
-            traits=traits,
+            user_id=row.get("user_id", row["profile_id"]),
+            ocean_scores=ocean_scores,
             communication_style=communication_style,
             stability_score=Decimal(str(row.get("stability_score", "0.0"))),
             assessment_count=row.get("assessment_count", 0),
-            dominant_traits=dominant_traits,
             captured_at=row.get("captured_at", datetime.now(timezone.utc)),
-            trigger_reason=row.get("trigger_reason"),
+            reason=row.get("reason", ""),
         )

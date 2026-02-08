@@ -156,9 +156,10 @@ class JWTCodec:
 class JWTAuthPlugin:
     """JWT authentication plugin for API gateway."""
 
-    def __init__(self, config: JWTConfig | None = None) -> None:
+    def __init__(self, config: JWTConfig | None = None, token_blacklist: Any | None = None) -> None:
         self._config = config or JWTConfig()
         self._revoked_tokens: set[str] = set()
+        self._token_blacklist = token_blacklist  # Optional Redis-backed TokenBlacklist
 
     def create_token(self, subject: str, roles: list[UserRole] | None = None, token_type: TokenType = TokenType.ACCESS, email: str | None = None, name: str | None = None, session_id: str | None = None, custom_claims: dict[str, Any] | None = None) -> str:
         now = datetime.now(timezone.utc)

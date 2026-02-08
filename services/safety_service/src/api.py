@@ -222,6 +222,7 @@ async def perform_safety_check(
 @router.post("/detect-crisis", response_model=CrisisDetectionResponse, status_code=status.HTTP_200_OK)
 async def detect_crisis(
     request: CrisisDetectionRequest,
+    service: AuthenticatedService = Depends(get_current_service),
     safety_service: SafetyService = Depends(get_safety_service),
 ) -> CrisisDetectionResponse:
     """Perform direct crisis detection on content."""
@@ -245,6 +246,7 @@ async def detect_crisis(
 @router.post("/escalate", response_model=EscalationResponse, status_code=status.HTTP_201_CREATED)
 async def trigger_escalation(
     request: EscalationRequest,
+    service: AuthenticatedService = Depends(get_current_service),
     safety_service: SafetyService = Depends(get_safety_service),
 ) -> EscalationResponse:
     """Trigger escalation to human clinician."""
@@ -272,6 +274,7 @@ async def trigger_escalation(
 @router.post("/assess", response_model=SafetyAssessmentResponse, status_code=status.HTTP_200_OK)
 async def perform_safety_assessment(
     request: SafetyAssessmentRequest,
+    service: AuthenticatedService = Depends(get_current_service),
     safety_service: SafetyService = Depends(get_safety_service),
 ) -> SafetyAssessmentResponse:
     """Perform comprehensive safety assessment on multiple messages."""
@@ -299,6 +302,7 @@ async def perform_safety_assessment(
 @router.post("/filter-output", response_model=OutputFilterResponse, status_code=status.HTTP_200_OK)
 async def filter_output(
     request: OutputFilterRequest,
+    service: AuthenticatedService = Depends(get_current_service),
     safety_service: SafetyService = Depends(get_safety_service),
 ) -> OutputFilterResponse:
     """Filter AI-generated output for safety before delivery."""
