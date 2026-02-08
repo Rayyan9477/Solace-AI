@@ -127,7 +127,7 @@ class ConnectionPoolManager:
     _pool_configs: ClassVar[dict[str, ConnectionPoolConfig]] = {}
     _locks: ClassVar[dict[str, asyncio.Lock]] = {}
     _initialized: ClassVar[bool] = False
-    _global_lock: ClassVar[asyncio.Lock | None] = None
+    _global_lock: ClassVar[asyncio.Lock] = asyncio.Lock()
 
     # Connection leak detection
     _metrics: ClassVar[dict[str, ConnectionMetrics]] = {}
@@ -139,9 +139,6 @@ class ConnectionPoolManager:
     @classmethod
     async def _ensure_lock(cls, pool_name: str) -> asyncio.Lock:
         """Ensure lock exists for pool name (thread-safe)."""
-        if cls._global_lock is None:
-            cls._global_lock = asyncio.Lock()
-
         async with cls._global_lock:
             if pool_name not in cls._locks:
                 cls._locks[pool_name] = asyncio.Lock()

@@ -191,11 +191,11 @@ class LIWCProcessor:
         margin = 0.15 * (1 - conf)
         trait_scores = []
         evidence_funcs = {
-            PersonalityTrait.OPENNESS: lambda f: ['high_insight'] if f.insight > 1.0 else [] + (['cognitive_processing'] if f.cognitive > 2.0 else []) + (['complex_vocabulary'] if f.six_letter_words > 15 else []),
-            PersonalityTrait.CONSCIENTIOUSNESS: lambda f: ['achievement_focus'] if f.achievement > 1.0 else [] + (['work_oriented'] if f.work > 1.5 else []) + (['decisive_language'] if f.certainty > 1.0 else []),
-            PersonalityTrait.EXTRAVERSION: lambda f: ['social_language'] if f.social > 2.0 else [] + (['collective_focus'] if f.we_words > 1.5 else []) + (['positive_affect'] if f.positive_emotion > 2.0 else []),
-            PersonalityTrait.AGREEABLENESS: lambda f: ['warm_language'] if f.positive_emotion > 2.0 else [] + (['relationship_focus'] if f.family > 0.5 or f.friends > 0.5 else []) + (['low_hostility'] if f.anger < 0.5 and f.negative_emotion < 1.0 else []),
-            PersonalityTrait.NEUROTICISM: lambda f: ['anxiety_language'] if f.anxiety > 0.5 else [] + (['sadness_expressed'] if f.sadness > 0.5 else []) + (['negative_affect'] if f.negative_emotion > 2.0 else []),
+            PersonalityTrait.OPENNESS: lambda f: (['high_insight'] if f.insight > 1.0 else []) + (['cognitive_processing'] if f.cognitive > 2.0 else []) + (['complex_vocabulary'] if f.six_letter_words > 15 else []),
+            PersonalityTrait.CONSCIENTIOUSNESS: lambda f: (['achievement_focus'] if f.achievement > 1.0 else []) + (['work_oriented'] if f.work > 1.5 else []) + (['decisive_language'] if f.certainty > 1.0 else []),
+            PersonalityTrait.EXTRAVERSION: lambda f: (['social_language'] if f.social > 2.0 else []) + (['collective_focus'] if f.we_words > 1.5 else []) + (['positive_affect'] if f.positive_emotion > 2.0 else []),
+            PersonalityTrait.AGREEABLENESS: lambda f: (['warm_language'] if f.positive_emotion > 2.0 else []) + (['relationship_focus'] if f.family > 0.5 or f.friends > 0.5 else []) + (['low_hostility'] if f.anger < 0.5 and f.negative_emotion < 1.0 else []),
+            PersonalityTrait.NEUROTICISM: lambda f: (['anxiety_language'] if f.anxiety > 0.5 else []) + (['sadness_expressed'] if f.sadness > 0.5 else []) + (['negative_affect'] if f.negative_emotion > 2.0 else []),
         }
         for trait, value in scores.items():
             evidence = evidence_funcs[trait](features)

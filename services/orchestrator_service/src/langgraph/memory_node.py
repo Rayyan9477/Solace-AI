@@ -105,18 +105,11 @@ class MemoryRetrievalNode:
             raise ValueError(f"Invalid UUID format: {e}")
 
         # Call Memory Service context assembly endpoint
-        response = await self._client.post(
-            "/context",
-            data={
-                "user_id": str(user_uuid),
-                "session_id": str(session_uuid),
-                "current_message": current_message,
-                "token_budget": self._settings.token_budget,
-                "include_safety_context": self._settings.include_safety_context,
-                "include_therapeutic_context": self._settings.include_therapeutic_context,
-                "retrieval_query": None,
-                "priority_topics": [],
-            }
+        response = await self._client.assemble_context(
+            user_id=user_uuid,
+            session_id=session_uuid,
+            current_message=current_message,
+            token_budget=self._settings.token_budget,
         )
 
         elapsed_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
@@ -158,7 +151,7 @@ class MemoryRetrievalNode:
         conversation_context = assembled_context
 
         agent_result = AgentResult(
-            agent_type=AgentType.AGGREGATOR,  # Using AGGREGATOR as closest match
+            agent_type=AgentType.MEMORY,  # Using AGGREGATOR as closest match
             success=success,
             confidence=0.9 if success else 0.0,
             processing_time_ms=assembly_time_ms,
@@ -195,7 +188,7 @@ class MemoryRetrievalNode:
     def _build_empty_context(self, error: str | None = None) -> dict[str, Any]:
         """Build empty context when retrieval fails or is disabled."""
         agent_result = AgentResult(
-            agent_type=AgentType.AGGREGATOR,
+            agent_type=AgentType.MEMORY,
             success=False,
             confidence=0.0,
             metadata={

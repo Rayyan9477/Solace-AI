@@ -16,7 +16,7 @@ from uuid import UUID
 import structlog
 
 from ..domain.entities import (
-    SafetyAssessment, SafetyPlan, SafetyIncident, UserRiskProfile,
+    AssessmentType, SafetyAssessment, SafetyPlan, SafetyIncident, UserRiskProfile,
     SafetyPlanStatus, IncidentStatus, IncidentSeverity,
 )
 from ..config import SafetyRepositoryConfig

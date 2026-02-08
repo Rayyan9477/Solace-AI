@@ -28,7 +28,7 @@ class OrchestratorAppSettings(BaseSettings):
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=8001)
     log_level: str = Field(default="INFO")
-    cors_origins: str = Field(default="*")
+    cors_origins: str = Field(default="", description="Comma-separated allowed CORS origins")
     request_timeout_ms: int = Field(default=60000)
     websocket_timeout_ms: int = Field(default=300000)
     max_connections: int = Field(default=1000)

@@ -172,7 +172,9 @@ class SoftCombiner:
         templates = getattr(listener_bank.get_listener(top_emotion), f"{component}_templates", [])
         if not templates: return ""
         template = templates[min(int(style.warmth * 2), len(templates) - 1)]
-        return template.format(intensity=self._get_intensity_word(intensity, style))
+        if "{intensity}" in template:
+            return template.format(intensity=self._get_intensity_word(intensity, style))
+        return template
 
     def _get_intensity_word(self, intensity: EmotionIntensity, style: StyleParametersDTO) -> str:
         options = self._INTENSITY_WORDS.get(intensity, [""])

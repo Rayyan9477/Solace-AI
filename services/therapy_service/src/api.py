@@ -18,52 +18,15 @@ from .schemas import (
 )
 
 # Authentication dependencies from shared security library
-try:
-    from solace_security.middleware import (
-        AuthenticatedUser,
-        AuthenticatedService,
-        get_current_user,
-        get_current_user_optional,
-        get_current_service,
-        require_roles,
-        require_permissions,
-    )
-except ImportError:
-    from dataclasses import dataclass as _dataclass
-    from typing import Optional
-
-    @_dataclass
-    class AuthenticatedUser:
-        user_id: str
-        token_type: str = "access"
-        roles: list = None
-        permissions: list = None
-        session_id: str | None = None
-        metadata: dict = None
-        def has_role(self, role: str) -> bool:
-            return role in (self.roles or [])
-        def has_permission(self, perm: str) -> bool:
-            return perm in (self.permissions or [])
-
-    @_dataclass
-    class AuthenticatedService:
-        service_name: str
-        permissions: list = None
-
-    async def get_current_user() -> AuthenticatedUser:
-        raise HTTPException(status_code=501, detail="Authentication not configured")
-
-    async def get_current_user_optional() -> Optional[AuthenticatedUser]:
-        return None
-
-    async def get_current_service() -> AuthenticatedService:
-        raise HTTPException(status_code=501, detail="Service auth not configured")
-
-    def require_roles(*roles):
-        return get_current_user
-
-    def require_permissions(*perms):
-        return get_current_user
+from solace_security.middleware import (
+    AuthenticatedUser,
+    AuthenticatedService,
+    get_current_user,
+    get_current_user_optional,
+    get_current_service,
+    require_roles,
+    require_permissions,
+)
 
 
 logger = structlog.get_logger(__name__)

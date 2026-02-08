@@ -159,9 +159,17 @@ async def lifespan(app: FastAPI):
     )
     password_service = PasswordService(password_config)
 
-    # Generate or load Fernet keys (in production, use secure key management)
-    token_encryption_key = Fernet.generate_key()
-    field_encryption_key = Fernet.generate_key()
+    # Load Fernet keys from environment (MUST be set — keys are persistent across restarts)
+    import os
+    token_encryption_key = os.environ.get("FERNET_TOKEN_KEY")
+    field_encryption_key = os.environ.get("FERNET_FIELD_KEY")
+    if not token_encryption_key or not field_encryption_key:
+        raise RuntimeError(
+            "FERNET_TOKEN_KEY and FERNET_FIELD_KEY environment variables must be set. "
+            "Generate with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+        )
+    token_encryption_key = token_encryption_key.encode()
+    field_encryption_key = field_encryption_key.encode()
 
     token_service = create_token_service(
         encryption_key=token_encryption_key,

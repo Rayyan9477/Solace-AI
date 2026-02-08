@@ -19,9 +19,9 @@ class SafetyServiceConfig(BaseSettings):
     environment: str = Field(default="development")
     debug: bool = Field(default=False)
     host: str = Field(default="0.0.0.0")
-    port: int = Field(default=8001, ge=1, le=65535)
+    port: int = Field(default=8002, ge=1, le=65535)
     log_level: str = Field(default="INFO")
-    cors_origins: str = Field(default="*")
+    cors_origins: str = Field(default="")
     request_timeout_ms: int = Field(default=30000, ge=1000, le=120000)
     max_request_size_mb: int = Field(default=10, ge=1, le=100)
     model_config = SettingsConfigDict(

@@ -14,6 +14,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
@@ -116,14 +117,14 @@ class SafetyAssessment(ClinicalBase):
         comment="Numerical risk score (0.0-1.0)"
     )
 
-    risk_factors: Mapped[dict[str, any]] = mapped_column(
+    risk_factors: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
         default=dict,
         comment="Detailed risk factors identified (encrypted)"
     )
 
-    protective_factors: Mapped[dict[str, any]] = mapped_column(
+    protective_factors: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
         default=dict,
@@ -137,7 +138,7 @@ class SafetyAssessment(ClinicalBase):
     )
 
     # Recommendations
-    recommended_interventions: Mapped[dict[str, any]] = mapped_column(
+    recommended_interventions: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
         default=dict,
@@ -235,35 +236,35 @@ class SafetyPlan(ClinicalBase):
     )
 
     # Plan content (all encrypted as PHI)
-    warning_signs: Mapped[dict[str, any]] = mapped_column(
+    warning_signs: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
         default=dict,
         comment="List of warning signs and triggers (encrypted)"
     )
 
-    coping_strategies: Mapped[dict[str, any]] = mapped_column(
+    coping_strategies: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
         default=dict,
         comment="Coping strategies and self-help techniques (encrypted)"
     )
 
-    emergency_contacts: Mapped[dict[str, any]] = mapped_column(
+    emergency_contacts: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
         default=dict,
         comment="Emergency contacts list (encrypted as PHI)"
     )
 
-    safe_environment_actions: Mapped[dict[str, any]] = mapped_column(
+    safe_environment_actions: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
         default=dict,
         comment="Actions to make environment safer (encrypted)"
     )
 
-    professional_resources: Mapped[dict[str, any]] = mapped_column(
+    professional_resources: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
         default=dict,
@@ -391,7 +392,7 @@ class RiskFactor(ClinicalBase):
     )
 
     # Additional context
-    context_data: Mapped[dict[str, any]] = mapped_column(
+    context_data: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
         default=dict,
@@ -440,7 +441,7 @@ class ContraindicationCheck(SafetyEventBase):
         comment="Identifier of medication/intervention being checked"
     )
 
-    subject_details: Mapped[dict[str, any]] = mapped_column(
+    subject_details: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
         default=dict,
@@ -455,7 +456,7 @@ class ContraindicationCheck(SafetyEventBase):
         comment="Whether any contraindications were found"
     )
 
-    contraindication_details: Mapped[dict[str, any]] = mapped_column(
+    contraindication_details: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
         default=dict,
@@ -504,7 +505,7 @@ class ContraindicationCheck(SafetyEventBase):
     )
 
     # Data sources
-    data_sources_consulted: Mapped[dict[str, any]] = mapped_column(
+    data_sources_consulted: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
         default=dict,

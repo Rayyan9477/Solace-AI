@@ -166,7 +166,7 @@ class TherapyServiceSettings(BaseSettings):
     service_version: str = Field(default="1.0.0")
     environment: str = Field(default="development")
     host: str = Field(default="0.0.0.0")
-    port: int = Field(default=8002, ge=1024, le=65535)
+    port: int = Field(default=8006, ge=1024, le=65535)
     workers: int = Field(default=4, ge=1, le=32)
     debug: bool = Field(default=False)
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])

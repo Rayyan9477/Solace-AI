@@ -45,6 +45,7 @@ class AgentType(str, Enum):
     THERAPY = "therapy"
     PERSONALITY = "personality"
     CHAT = "chat"
+    MEMORY = "memory"
     AGGREGATOR = "aggregator"
 
 

@@ -31,7 +31,7 @@ class JWTConfig(BaseModel):
     algorithm: str = Field(default="HS256", description="JWT signing algorithm")
     access_token_expire_minutes: int = Field(default=15, description="Access token lifetime")
     refresh_token_expire_days: int = Field(default=30, description="Refresh token lifetime")
-    issuer: str = Field(default="solace-ai-user-service", description="Token issuer")
+    issuer: str = Field(default="solace-ai", description="Token issuer")
     audience: str = Field(default="solace-ai-api", description="Token audience")
 
 

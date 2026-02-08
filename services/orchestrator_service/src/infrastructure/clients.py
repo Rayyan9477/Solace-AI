@@ -144,8 +144,12 @@ class BaseServiceClient:
                 elapsed_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
                 if response.status_code >= 200 and response.status_code < 300:
                     self._circuit.record_success()
+                    try:
+                        response_data = response.json() if response.content else None
+                    except (ValueError, UnicodeDecodeError):
+                        response_data = {"raw": response.text}
                     return ServiceResponse(
-                        success=True, data=response.json() if response.content else None,
+                        success=True, data=response_data,
                         status_code=response.status_code, response_time_ms=elapsed_ms,
                     )
                 if response.status_code >= 500:

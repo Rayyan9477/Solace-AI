@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from services.shared.infrastructure import UnifiedLLMClient
 
 from ..schemas import (
-    PersonalityTrait, AssessmentSource, OceanScoresDTO, StyleParametersDTO,
+    PersonalityTrait, AssessmentSource, EmotionCategory, OceanScoresDTO, StyleParametersDTO,
     EmotionStateDTO, EmpathyComponentsDTO, ProfileSummaryDTO,
     DetectPersonalityRequest, DetectPersonalityResponse,
     GetStyleRequest, GetStyleResponse,
@@ -181,7 +181,7 @@ class PersonalityOrchestrator(ServiceBase):
         adapted_content = self._style_adapter.adapt_response(request.base_response, style)
         empathy_components = None
         if request.include_empathy:
-            emotion = EmotionStateDTO(primary_emotion="neutral", intensity=0.3, valence=0.0)
+            emotion = EmotionStateDTO(primary_emotion=EmotionCategory.NEUTRAL, intensity=0.3, valence=0.0)
             empathy_components = self._style_adapter.get_empathy_components(emotion, style)
         confidence = profile.ocean_scores.overall_confidence if profile and profile.ocean_scores else 0.3
         logger.info("response_adapted", user_id=str(request.user_id), content_length=len(adapted_content))

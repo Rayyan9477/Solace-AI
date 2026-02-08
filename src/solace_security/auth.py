@@ -45,7 +45,7 @@ class AuthSettings(BaseSettings):
     refresh_token_expire_days: int = Field(default=7)
     api_key_expire_days: int = Field(default=365)
     issuer: str = Field(default="solace-ai")
-    audience: str = Field(default="solace-api")
+    audience: str = Field(default="solace-ai-api")
     clock_skew_seconds: int = Field(default=30)
     min_password_length: int = Field(default=12)
     max_failed_attempts: int = Field(default=5)
@@ -278,6 +278,8 @@ class JWTManager:
     ) -> None:
         self._settings = settings or AuthSettings()
         self._secret = self._settings.secret_key.get_secret_value()
+        if token_blacklist is None:
+            raise ValueError("token_blacklist is required for JWTManager. Pass a TokenBlacklist implementation.")
         self._blacklist = token_blacklist
 
     def create_access_token(

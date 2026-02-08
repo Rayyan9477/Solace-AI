@@ -17,38 +17,13 @@ from .domain.crisis_detector import DetectionResult
 from .domain.escalation import EscalationResult
 
 # Authentication dependencies from shared security library
-try:
-    from solace_security.middleware import (
-        AuthenticatedUser,
-        AuthenticatedService,
-        get_current_user,
-        get_current_service,
-        require_service_permission,
-    )
-except ImportError:
-    from dataclasses import dataclass as _dataclass
-    from typing import Optional
-
-    @_dataclass
-    class AuthenticatedUser:
-        user_id: str
-        token_type: str = "access"
-        roles: list = None
-        permissions: list = None
-
-    @_dataclass
-    class AuthenticatedService:
-        service_name: str
-        permissions: list = None
-
-    async def get_current_user() -> AuthenticatedUser:
-        raise HTTPException(status_code=501, detail="Authentication not configured")
-
-    async def get_current_service() -> AuthenticatedService:
-        raise HTTPException(status_code=501, detail="Service auth not configured")
-
-    def require_service_permission(*perms):
-        return get_current_service
+from solace_security.middleware import (
+    AuthenticatedUser,
+    AuthenticatedService,
+    get_current_user,
+    get_current_service,
+    require_service_permission,
+)
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["safety"])

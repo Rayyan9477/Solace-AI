@@ -52,10 +52,12 @@ class RegisterRequest(BaseModel):
     @classmethod
     def validate_email(cls, v: str) -> str:
         """Validate and normalize email."""
-        import re
-        if not re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", v):
-            raise ValueError("Invalid email format")
-        return v.lower()
+        from email_validator import validate_email as _validate_email, EmailNotValidError
+        try:
+            result = _validate_email(v, check_deliverability=False)
+            return result.normalized
+        except EmailNotValidError as e:
+            raise ValueError(f"Invalid email: {e}")
 
     @field_validator("password")
     @classmethod

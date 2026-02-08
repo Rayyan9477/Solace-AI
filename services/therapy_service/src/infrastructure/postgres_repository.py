@@ -73,7 +73,7 @@ class PostgresTreatmentPlanRepository(Repository[TreatmentPlanEntity]):
         if ConnectionPoolManager is not None and FeatureFlags is not None and FeatureFlags.is_enabled("use_connection_pool_manager"):
             return ConnectionPoolManager.acquire(self.POOL_NAME)
         if self._client is not None:
-            return self._acquire()
+            return self._client.acquire()
         raise Exception("No database connection available.")
 
     async def get(self, plan_id: UUID) -> TreatmentPlanEntity | None:
@@ -346,7 +346,7 @@ class PostgresTherapySessionRepository(Repository[TherapySessionEntity]):
         if ConnectionPoolManager is not None and FeatureFlags is not None and FeatureFlags.is_enabled("use_connection_pool_manager"):
             return ConnectionPoolManager.acquire(self.POOL_NAME)
         if self._client is not None:
-            return self._acquire()
+            return self._client.acquire()
         raise Exception("No database connection available.")
 
     async def get(self, session_id: UUID) -> TherapySessionEntity | None:
@@ -649,7 +649,7 @@ class PostgresTechniqueRepository:
         if ConnectionPoolManager is not None and FeatureFlags is not None and FeatureFlags.is_enabled("use_connection_pool_manager"):
             return ConnectionPoolManager.acquire(self.POOL_NAME)
         if self._client is not None:
-            return self._acquire()
+            return self._client.acquire()
         raise Exception("No database connection available.")
 
     async def get(self, technique_id: UUID) -> Technique | None:
@@ -828,7 +828,7 @@ class PostgresOutcomeMeasureRepository:
         if ConnectionPoolManager is not None and FeatureFlags is not None and FeatureFlags.is_enabled("use_connection_pool_manager"):
             return ConnectionPoolManager.acquire(self.POOL_NAME)
         if self._client is not None:
-            return self._acquire()
+            return self._client.acquire()
         raise Exception("No database connection available.")
 
     async def get(self, measure_id: UUID) -> OutcomeMeasure | None:
