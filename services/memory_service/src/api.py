@@ -21,58 +21,16 @@ from .schemas import (
     UserProfileRequest, UserProfileResponse,
 )
 
-# Authentication dependencies from shared security library
-try:
-    from solace_security.middleware import (
-        AuthenticatedUser,
-        AuthenticatedService,
-        get_current_user,
-        get_current_user_optional,
-        get_current_service,
-        require_roles,
-        require_permissions,
-    )
-    from solace_security import Role, Permission
-except ImportError:
-    # Fallback for testing/development without security library
-    from dataclasses import dataclass
-    from typing import Optional
-
-    @dataclass
-    class AuthenticatedUser:
-        user_id: UUID
-        email: str
-        roles: list[str]
-        permissions: list[str]
-
-    @dataclass
-    class AuthenticatedService:
-        service_id: str
-        service_name: str
-        permissions: list[str]
-
-    async def get_current_user() -> AuthenticatedUser:
-        raise HTTPException(status_code=501, detail="Authentication not configured")
-
-    async def get_current_user_optional() -> Optional[AuthenticatedUser]:
-        return None
-
-    async def get_current_service() -> AuthenticatedService:
-        raise HTTPException(status_code=501, detail="Service auth not configured")
-
-    def require_roles(*roles):
-        return get_current_user
-
-    def require_permissions(*perms):
-        return get_current_user
-
-    class Role:
-        ADMIN = "admin"
-        CLINICIAN = "clinician"
-        USER = "user"
-
-    class Permission:
-        DELETE_USER_DATA = "delete:user_data"
+from solace_security.middleware import (
+    AuthenticatedUser,
+    AuthenticatedService,
+    get_current_user,
+    get_current_user_optional,
+    get_current_service,
+    require_roles,
+    require_permissions,
+)
+from solace_security import Role, Permission
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["memory"])
@@ -94,7 +52,7 @@ async def store_memory(
 ) -> StoreMemoryResponse:
     """Store a memory record to the specified tier."""
     # Verify user can only store memories for themselves (unless clinician/admin)
-    if request.user_id != current_user.user_id and "clinician" not in current_user.roles and "admin" not in current_user.roles:
+    if request.user_id != current_user.user_id and Role.CLINICIAN not in current_user.roles and Role.ADMIN not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot store memories for other users")
     logger.info("store_memory_requested", user_id=str(request.user_id), tier=request.tier.value,
                 authenticated_user=str(current_user.user_id))
@@ -119,7 +77,7 @@ async def retrieve_memories(
 ) -> RetrieveMemoryResponse:
     """Retrieve memories based on query and filters."""
     # Verify user can only retrieve their own memories (unless clinician/admin)
-    if request.user_id != current_user.user_id and "clinician" not in current_user.roles and "admin" not in current_user.roles:
+    if request.user_id != current_user.user_id and Role.CLINICIAN not in current_user.roles and Role.ADMIN not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot retrieve other user's memories")
     logger.info("retrieve_memories_requested", user_id=str(request.user_id), query=request.query,
                 authenticated_user=str(current_user.user_id))
@@ -150,7 +108,7 @@ async def assemble_context(
 ) -> ContextAssemblyResponse:
     """Assemble context for LLM within token budget."""
     # Verify user can only access their own context (unless clinician/admin)
-    if request.user_id != current_user.user_id and "clinician" not in current_user.roles and "admin" not in current_user.roles:
+    if request.user_id != current_user.user_id and Role.CLINICIAN not in current_user.roles and Role.ADMIN not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot access other user's context")
     logger.info("context_assembly_requested", user_id=str(request.user_id),
                 token_budget=request.token_budget, authenticated_user=str(current_user.user_id))
@@ -177,7 +135,7 @@ async def start_session(
 ) -> SessionStartResponse:
     """Start a new session for user."""
     # Verify user can only start sessions for themselves (unless clinician/admin)
-    if request.user_id != current_user.user_id and "clinician" not in current_user.roles and "admin" not in current_user.roles:
+    if request.user_id != current_user.user_id and Role.CLINICIAN not in current_user.roles and Role.ADMIN not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot start sessions for other users")
     logger.info("session_start_requested", user_id=str(request.user_id),
                 session_type=request.session_type, authenticated_user=str(current_user.user_id))
@@ -201,7 +159,7 @@ async def end_session(
 ) -> SessionEndResponse:
     """End a session and optionally trigger consolidation."""
     # Verify user can only end their own sessions (unless clinician/admin)
-    if request.user_id != current_user.user_id and "clinician" not in current_user.roles and "admin" not in current_user.roles:
+    if request.user_id != current_user.user_id and Role.CLINICIAN not in current_user.roles and Role.ADMIN not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot end other user's sessions")
     logger.info("session_end_requested", user_id=str(request.user_id),
                 session_id=str(request.session_id), authenticated_user=str(current_user.user_id))
@@ -226,7 +184,7 @@ async def add_message(
 ) -> AddMessageResponse:
     """Add a message to the current session."""
     # Verify user can only add messages to their own sessions (unless clinician/admin)
-    if request.user_id != current_user.user_id and "clinician" not in current_user.roles and "admin" not in current_user.roles:
+    if request.user_id != current_user.user_id and Role.CLINICIAN not in current_user.roles and Role.ADMIN not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot add messages to other user's sessions")
     logger.info("add_message_requested", user_id=str(request.user_id),
                 session_id=str(request.session_id), role=request.role,
@@ -253,7 +211,7 @@ async def trigger_consolidation(
 ) -> ConsolidationResponse:
     """Trigger memory consolidation pipeline for a session."""
     # Verify user can only consolidate their own sessions (unless clinician/admin)
-    if request.user_id != current_user.user_id and "clinician" not in current_user.roles and "admin" not in current_user.roles:
+    if request.user_id != current_user.user_id and Role.CLINICIAN not in current_user.roles and Role.ADMIN not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot consolidate other user's sessions")
     logger.info("consolidation_requested", user_id=str(request.user_id),
                 session_id=str(request.session_id), authenticated_user=str(current_user.user_id))
@@ -282,7 +240,7 @@ async def get_user_profile(
 ) -> UserProfileResponse:
     """Get user profile from memory."""
     # Verify user can only access their own profile (unless clinician/admin)
-    if user_id != current_user.user_id and "clinician" not in current_user.roles and "admin" not in current_user.roles:
+    if user_id != current_user.user_id and Role.CLINICIAN not in current_user.roles and Role.ADMIN not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot access other user's profile")
     logger.info("user_profile_requested", user_id=str(user_id), authenticated_user=str(current_user.user_id))
     result = await memory_service.get_user_profile(
@@ -315,7 +273,7 @@ async def delete_user_data(
 ) -> Response:
     """Delete all memory data for a user (GDPR compliance)."""
     # Only allow self-deletion or admin deletion
-    if user_id != current_user.user_id and "admin" not in current_user.roles:
+    if user_id != current_user.user_id and Role.ADMIN not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot delete other user's data without admin role")
     logger.info("user_data_deletion_requested", user_id=str(user_id),
                 authenticated_user=str(current_user.user_id))

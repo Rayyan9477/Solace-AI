@@ -98,7 +98,7 @@ class DiagnosisServiceConfig(BaseSettings):
     environment: str = Field(default="development")
     debug: bool = Field(default=False)
     host: str = Field(default="0.0.0.0")
-    port: int = Field(default=8003)
+    port: int = Field(default=8004)
     enable_longitudinal_tracking: bool = Field(default=True)
     enable_hitop_dimensions: bool = Field(default=True)
     enable_clinical_codes: bool = Field(default=True)

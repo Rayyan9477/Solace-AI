@@ -159,7 +159,7 @@ class MemoryEventPublisher:
             logger.debug("event_publishing_disabled", event_type=event.event_type)
             return False
         try:
-            await self._publisher.publish(MEMORY_TOPIC, event.to_dict())
+            await self._publisher.publish(event, MEMORY_TOPIC)
             self._stats["published"] += 1
             logger.debug("event_published", event_type=event.event_type, event_id=str(event.metadata.event_id))
             return True

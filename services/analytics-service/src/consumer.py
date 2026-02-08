@@ -313,6 +313,7 @@ class AnalyticsConsumer:
         """Start the consumer."""
         self._running = True
         logger.info("analytics_consumer_started", topics=self._config.topics)
+        self._consume_task = asyncio.create_task(self.consume_loop())
 
     async def stop(self) -> None:
         """Stop the consumer."""

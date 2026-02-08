@@ -32,8 +32,8 @@ class HealthCheckType(str, Enum):
 
 class KongSettings(BaseSettings):
     """Kong Admin API configuration settings."""
-    admin_url: str = Field(default="http://localhost:8001")
-    admin_token: str = Field(default="")
+    admin_url: str = Field(default="https://localhost:8444", description="Kong admin API URL - use HTTPS in production")
+    admin_token: str = Field(description="Kong admin API token - MUST be set via KONG_ADMIN_TOKEN env var")
     timeout_seconds: float = Field(default=10.0, ge=1.0, le=60.0)
     max_retries: int = Field(default=3, ge=0, le=10)
     enable_ssl_verify: bool = Field(default=True)

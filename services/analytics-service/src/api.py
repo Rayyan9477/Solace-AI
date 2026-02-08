@@ -48,38 +48,13 @@ except ImportError:
     )
     from consumer import AnalyticsConsumer
 
-# Authentication dependencies from shared security library
-try:
-    from solace_security.middleware import (
-        AuthenticatedUser,
-        AuthenticatedService,
-        get_current_user,
-        get_current_service,
-        require_roles,
-    )
-except ImportError:
-    from dataclasses import dataclass as _dataclass
-
-    @_dataclass
-    class AuthenticatedUser:
-        user_id: str
-        token_type: str = "access"
-        roles: list = None
-        permissions: list = None
-
-    @_dataclass
-    class AuthenticatedService:
-        service_name: str
-        permissions: list = None
-
-    async def get_current_user() -> AuthenticatedUser:
-        raise HTTPException(status_code=501, detail="Authentication not configured")
-
-    async def get_current_service() -> AuthenticatedService:
-        raise HTTPException(status_code=501, detail="Service auth not configured")
-
-    def require_roles(*roles):
-        return get_current_user
+from solace_security.middleware import (
+    AuthenticatedUser,
+    AuthenticatedService,
+    get_current_user,
+    get_current_service,
+    require_roles,
+)
 
 logger = structlog.get_logger(__name__)
 

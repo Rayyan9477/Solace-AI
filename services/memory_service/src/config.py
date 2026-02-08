@@ -137,7 +137,7 @@ class MemoryServiceConfig(BaseSettings):
     debug: bool = Field(default=False)
     log_level: str = Field(default="INFO")
     host: str = Field(default="0.0.0.0")
-    port: int = Field(default=8003, ge=1, le=65535)
+    port: int = Field(default=8005, ge=1, le=65535)
     workers: int = Field(default=4, ge=1, le=32)
     enable_metrics: bool = Field(default=True)
     enable_tracing: bool = Field(default=True)

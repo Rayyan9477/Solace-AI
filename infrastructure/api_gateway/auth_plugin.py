@@ -46,7 +46,7 @@ class UserRole(str, Enum):
 
 class JWTConfig(BaseSettings):
     """JWT authentication configuration."""
-    secret_key: str = Field(default="your-secret-key-change-in-production")
+    secret_key: str = Field(description="JWT secret key - MUST be set via JWT_SECRET_KEY env var")
     algorithm: str = Field(default="HS256")
     access_token_expire_minutes: int = Field(default=30, ge=1)
     refresh_token_expire_days: int = Field(default=7, ge=1)
@@ -239,8 +239,6 @@ class JWTAuthPlugin:
 
     def authorize(self, claims: TokenClaims, required_roles: list[UserRole] | None = None) -> bool:
         if not required_roles:
-            return True
-        if UserRole.ADMIN in claims.roles or UserRole.SYSTEM in claims.roles:
             return True
         return claims.has_any_role(required_roles)
 

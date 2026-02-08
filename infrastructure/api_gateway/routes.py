@@ -68,8 +68,12 @@ class RouteDefinition:
         for route_path in self.paths:
             if route_path.startswith("~"):
                 pattern = route_path[1:]
-                if re.match(pattern, path):
-                    return True
+                try:
+                    if re.match(pattern, path, re.DOTALL):
+                        return True
+                except re.error:
+                    logger.warning("invalid_route_regex", pattern=pattern)
+                    continue
             elif path.startswith(route_path):
                 return True
         return False

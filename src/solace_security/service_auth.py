@@ -214,8 +214,16 @@ class ServiceTokenManager:
             p.value for p in SERVICE_PERMISSIONS.get(service_identity, [])
         ]
 
-        # Add additional permissions if provided
-        all_permissions = list(set(base_permissions + (additional_permissions or [])))
+        # Add additional permissions if provided (validated against known permissions)
+        valid_permission_values = {p.value for p in ServicePermission}
+        validated_additional = [
+            p for p in (additional_permissions or [])
+            if p in valid_permission_values
+        ]
+        if additional_permissions and len(validated_additional) != len(additional_permissions):
+            rejected = set(additional_permissions) - valid_permission_values
+            logger.warning("rejected_unknown_permissions", rejected=list(rejected), service=service_name)
+        all_permissions = list(set(base_permissions + validated_additional))
 
         # Create expiration
         expire_mins = expire_minutes or (

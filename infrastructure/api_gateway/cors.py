@@ -24,7 +24,7 @@ class CORSPreset(str, Enum):
 
 class CORSConfig(BaseSettings):
     """CORS configuration settings."""
-    origins: str = Field(default="*")
+    origins: str = Field(default="", description="Comma-separated allowed origins. Must be set explicitly - wildcard not allowed with credentials.")
     methods: str = Field(default="GET,POST,PUT,PATCH,DELETE,OPTIONS")
     headers: str = Field(default="Content-Type,Authorization,X-Request-ID,X-Correlation-ID")
     expose_headers: str = Field(default="X-Request-ID,X-Correlation-ID,X-RateLimit-Limit,X-RateLimit-Remaining")

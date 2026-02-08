@@ -14,7 +14,7 @@ from uuid import UUID
 
 import structlog
 
-from models import TableName, AnalyticsEvent, MetricRecord, AggregationRecord
+from .models import TableName, AnalyticsEvent, MetricRecord, AggregationRecord
 
 logger = structlog.get_logger(__name__)
 
@@ -187,7 +187,8 @@ class ClickHouseRepository(AnalyticsRepository):
             if user_id:
                 query += " AND user_id = %(user_id)s"
                 params["user_id"] = str(user_id)
-            query += f" ORDER BY timestamp DESC LIMIT {limit}"
+            query += " ORDER BY timestamp DESC LIMIT %(limit)s"
+            params["limit"] = int(limit)
             result = self._client.query(query, parameters=params)
             return [AnalyticsEvent(
                 event_id=UUID(row[0]), event_type=row[1], category=row[2],
@@ -211,9 +212,10 @@ class ClickHouseRepository(AnalyticsRepository):
                 FROM {TableName.METRICS.value}
                 WHERE metric_name = %(metric_name)s
                 AND timestamp >= %(start_time)s AND timestamp < %(end_time)s
-                ORDER BY timestamp DESC LIMIT {limit}"""
+                ORDER BY timestamp DESC LIMIT %(limit)s"""
             params: dict[str, Any] = {
-                "metric_name": metric_name, "start_time": start_time, "end_time": end_time}
+                "metric_name": metric_name, "start_time": start_time, "end_time": end_time,
+                "limit": int(limit)}
             result = self._client.query(query, parameters=params)
             return [MetricRecord(
                 metric_id=UUID(row[0]), metric_name=row[1], value=Decimal(str(row[2])),

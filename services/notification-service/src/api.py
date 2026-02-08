@@ -16,60 +16,16 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel, Field, EmailStr
 import structlog
 
-# Authentication dependencies from shared security library
-try:
-    from solace_security.middleware import (
-        AuthenticatedUser,
-        AuthenticatedService,
-        get_current_user,
-        get_current_user_optional,
-        get_current_service,
-        require_roles,
-        require_permissions,
-    )
-    from solace_security import Role, Permission
-    _AUTH_AVAILABLE = True
-except ImportError:
-    # Fallback for testing/development without security library
-    from dataclasses import dataclass
-    _AUTH_AVAILABLE = False
-
-    @dataclass
-    class AuthenticatedUser:
-        user_id: UUID
-        email: str
-        roles: list[str]
-        permissions: list[str]
-
-    @dataclass
-    class AuthenticatedService:
-        service_id: str
-        service_name: str
-        permissions: list[str]
-
-    async def get_current_user() -> AuthenticatedUser:
-        raise HTTPException(status_code=501, detail="Authentication not configured")
-
-    async def get_current_user_optional() -> Optional[AuthenticatedUser]:
-        return None
-
-    async def get_current_service() -> AuthenticatedService:
-        raise HTTPException(status_code=501, detail="Service auth not configured")
-
-    def require_roles(*roles):
-        return get_current_user
-
-    def require_permissions(*perms):
-        return get_current_user
-
-    class Role:
-        ADMIN = "admin"
-        CLINICIAN = "clinician"
-        USER = "user"
-        SERVICE = "service"
-
-    class Permission:
-        SEND_NOTIFICATION = "notification:send"
+from solace_security.middleware import (
+    AuthenticatedUser,
+    AuthenticatedService,
+    get_current_user,
+    get_current_user_optional,
+    get_current_service,
+    require_roles,
+    require_permissions,
+)
+from solace_security import Role, Permission
 
 try:
     from .domain import (
@@ -253,7 +209,7 @@ async def send_notification(
     Requires admin, clinician role, or notification:send permission.
     """
     # Only admins, clinicians, or services can send bulk notifications
-    if "admin" not in current_user.roles and "clinician" not in current_user.roles and "service" not in current_user.roles:
+    if Role.ADMIN not in current_user.roles and Role.CLINICIAN not in current_user.roles and Role.SERVICE not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions to send notifications")
     logger.info("api_send_notification", template=request.template_type,
                recipients=len(request.recipients), authenticated_user=str(current_user.user_id))
@@ -293,7 +249,7 @@ async def send_email(
     service: NotificationService = Depends(_get_notification_service),
 ) -> NotificationResponse:
     """Send a single email notification. Requires admin, clinician, or service role."""
-    if "admin" not in current_user.roles and "clinician" not in current_user.roles and "service" not in current_user.roles:
+    if Role.ADMIN not in current_user.roles and Role.CLINICIAN not in current_user.roles and Role.SERVICE not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions to send emails")
     logger.info("api_send_email", to=request.to_email, template=request.template_type,
                 authenticated_user=str(current_user.user_id))
@@ -317,7 +273,7 @@ async def send_sms(
     service: NotificationService = Depends(_get_notification_service),
 ) -> NotificationResponse:
     """Send a single SMS notification. Requires admin, clinician, or service role."""
-    if "admin" not in current_user.roles and "clinician" not in current_user.roles and "service" not in current_user.roles:
+    if Role.ADMIN not in current_user.roles and Role.CLINICIAN not in current_user.roles and Role.SERVICE not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions to send SMS")
     logger.info("api_send_sms", to=request.to_phone, template=request.template_type,
                 authenticated_user=str(current_user.user_id))
@@ -341,7 +297,7 @@ async def send_push(
     service: NotificationService = Depends(_get_notification_service),
 ) -> NotificationResponse:
     """Send a single push notification. Requires admin, clinician, or service role."""
-    if "admin" not in current_user.roles and "clinician" not in current_user.roles and "service" not in current_user.roles:
+    if Role.ADMIN not in current_user.roles and Role.CLINICIAN not in current_user.roles and Role.SERVICE not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions to send push notifications")
     logger.info("api_send_push", template=request.template_type,
                 authenticated_user=str(current_user.user_id))
@@ -416,7 +372,7 @@ async def list_channels(
     service: NotificationService = Depends(_get_notification_service),
 ) -> list[ChannelInfo]:
     """List all configured notification channels. Requires admin role."""
-    if "admin" not in current_user.roles:
+    if Role.ADMIN not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required to view channel configuration")
     try:
         from .domain import ChannelRegistry, ChannelStatus
