@@ -3,6 +3,7 @@ Solace-AI Orchestrator Service - State Persistence.
 LangGraph state checkpointing with multiple backend support.
 """
 from __future__ import annotations
+import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
@@ -17,6 +18,12 @@ try:
     _POSTGRES_CHECKPOINT_AVAILABLE = True
 except ImportError:
     _POSTGRES_CHECKPOINT_AVAILABLE = False
+
+try:
+    import asyncpg
+    _ASYNCPG_AVAILABLE = True
+except ImportError:
+    _ASYNCPG_AVAILABLE = False
 
 from ..config import PersistenceSettings, get_config
 from ..langgraph.state_schema import OrchestratorState
@@ -156,6 +163,176 @@ class MemoryStateStore(StateStore):
         return len(expired)
 
 
+class PostgresStateStore(StateStore):
+    """PostgreSQL-backed state store for production use."""
+
+    CREATE_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS orchestrator_checkpoints (
+        thread_id VARCHAR(200) PRIMARY KEY,
+        checkpoint_id VARCHAR(200) NOT NULL,
+        user_id VARCHAR(200) NOT NULL,
+        session_id VARCHAR(200) NOT NULL,
+        state JSONB NOT NULL,
+        version INT NOT NULL DEFAULT 1,
+        size_bytes INT NOT NULL DEFAULT 0,
+        metadata JSONB NOT NULL DEFAULT '{}',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        expires_at TIMESTAMPTZ NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """
+
+    CREATE_INDEXES_SQL = [
+        "CREATE INDEX IF NOT EXISTS idx_orch_cp_user ON orchestrator_checkpoints(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_orch_cp_expires ON orchestrator_checkpoints(expires_at)",
+    ]
+
+    def __init__(self, dsn: str, min_size: int = 2, max_size: int = 10) -> None:
+        self._dsn = dsn
+        self._min_size = min_size
+        self._max_size = max_size
+        self._pool: Any = None
+
+    async def initialize(self) -> None:
+        """Create connection pool and ensure table exists."""
+        self._pool = await asyncpg.create_pool(
+            self._dsn, min_size=self._min_size, max_size=self._max_size,
+        )
+        async with self._pool.acquire() as conn:
+            await conn.execute(self.CREATE_TABLE_SQL)
+            for idx_sql in self.CREATE_INDEXES_SQL:
+                await conn.execute(idx_sql)
+        logger.info("postgres_state_store_initialized")
+
+    async def save(self, checkpoint: Checkpoint) -> bool:
+        """Save checkpoint to PostgreSQL."""
+        if self._pool is None:
+            logger.error("postgres_state_store_not_initialized")
+            return False
+        try:
+            async with self._pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO orchestrator_checkpoints
+                        (thread_id, checkpoint_id, user_id, session_id, state,
+                         version, size_bytes, metadata, created_at, expires_at, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+                    ON CONFLICT (thread_id) DO UPDATE SET
+                        checkpoint_id = $2, state = $5, version = $6,
+                        size_bytes = $7, metadata = $8, expires_at = $10, updated_at = NOW()
+                    """,
+                    checkpoint.metadata.thread_id,
+                    checkpoint.metadata.checkpoint_id,
+                    checkpoint.metadata.user_id,
+                    checkpoint.metadata.session_id,
+                    json.dumps(checkpoint.state, default=str),
+                    checkpoint.metadata.version,
+                    checkpoint.metadata.size_bytes,
+                    json.dumps(checkpoint.metadata.metadata),
+                    checkpoint.metadata.created_at,
+                    checkpoint.metadata.expires_at,
+                )
+            logger.debug("checkpoint_saved_postgres", thread_id=checkpoint.metadata.thread_id)
+            return True
+        except Exception:
+            logger.exception("checkpoint_save_failed", thread_id=checkpoint.metadata.thread_id)
+            return False
+
+    async def load(self, thread_id: str) -> Checkpoint | None:
+        """Load checkpoint from PostgreSQL."""
+        if self._pool is None:
+            return None
+        try:
+            async with self._pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT * FROM orchestrator_checkpoints WHERE thread_id = $1 AND expires_at > NOW()",
+                    thread_id,
+                )
+            if not row:
+                return None
+            state = json.loads(row["state"]) if isinstance(row["state"], str) else row["state"]
+            meta_data = json.loads(row["metadata"]) if isinstance(row["metadata"], str) else (row["metadata"] or {})
+            metadata = CheckpointMetadata(
+                checkpoint_id=row["checkpoint_id"],
+                thread_id=row["thread_id"],
+                user_id=row["user_id"],
+                session_id=row["session_id"],
+                created_at=row["created_at"],
+                expires_at=row["expires_at"],
+                version=row["version"],
+                size_bytes=row["size_bytes"],
+                metadata=meta_data,
+            )
+            return Checkpoint(metadata=metadata, state=state)
+        except Exception:
+            logger.exception("checkpoint_load_failed", thread_id=thread_id)
+            return None
+
+    async def delete(self, thread_id: str) -> bool:
+        """Delete checkpoint from PostgreSQL."""
+        if self._pool is None:
+            return False
+        try:
+            async with self._pool.acquire() as conn:
+                result = await conn.execute(
+                    "DELETE FROM orchestrator_checkpoints WHERE thread_id = $1", thread_id,
+                )
+            return result == "DELETE 1"
+        except Exception:
+            logger.exception("checkpoint_delete_failed", thread_id=thread_id)
+            return False
+
+    async def list_checkpoints(self, user_id: str | None = None) -> list[CheckpointMetadata]:
+        """List checkpoints from PostgreSQL."""
+        if self._pool is None:
+            return []
+        try:
+            async with self._pool.acquire() as conn:
+                if user_id:
+                    rows = await conn.fetch(
+                        "SELECT * FROM orchestrator_checkpoints WHERE user_id = $1 AND expires_at > NOW() ORDER BY created_at DESC",
+                        user_id,
+                    )
+                else:
+                    rows = await conn.fetch(
+                        "SELECT * FROM orchestrator_checkpoints WHERE expires_at > NOW() ORDER BY created_at DESC",
+                    )
+            return [
+                CheckpointMetadata(
+                    checkpoint_id=r["checkpoint_id"], thread_id=r["thread_id"],
+                    user_id=r["user_id"], session_id=r["session_id"],
+                    created_at=r["created_at"], expires_at=r["expires_at"],
+                    version=r["version"], size_bytes=r["size_bytes"],
+                    metadata=json.loads(r["metadata"]) if isinstance(r["metadata"], str) else (r["metadata"] or {}),
+                )
+                for r in rows
+            ]
+        except Exception:
+            logger.exception("checkpoint_list_failed")
+            return []
+
+    async def cleanup_expired(self) -> int:
+        """Remove expired checkpoints from PostgreSQL."""
+        if self._pool is None:
+            return 0
+        try:
+            async with self._pool.acquire() as conn:
+                result = await conn.execute(
+                    "DELETE FROM orchestrator_checkpoints WHERE expires_at < NOW()",
+                )
+            count = int(result.split()[-1]) if result else 0
+            return count
+        except Exception:
+            logger.exception("checkpoint_cleanup_failed")
+            return 0
+
+    async def close(self) -> None:
+        """Close connection pool."""
+        if self._pool:
+            await self._pool.close()
+            self._pool = None
+
+
 class StatePersistenceManager:
     """Manages state persistence for LangGraph orchestration."""
 
@@ -165,16 +342,19 @@ class StatePersistenceManager:
         self._langgraph_saver = self._create_langgraph_checkpointer()
         self._save_count = 0
         self._load_count = 0
+        self._cleanup_task: asyncio.Task[None] | None = None
 
     def _create_store(self) -> StateStore:
         """Create appropriate state store based on configuration."""
         backend = self._settings.checkpoint_backend
-        if backend == "memory":
-            return MemoryStateStore()
-        if backend == "postgres":
-            logger.info("using_memory_state_store_with_postgres_checkpointer")
-            return MemoryStateStore()
-        logger.warning("unknown_backend_using_memory", backend=backend)
+        if backend == "postgres" and _ASYNCPG_AVAILABLE:
+            postgres_url = self._settings.postgres_url
+            logger.info("creating_postgres_state_store")
+            return PostgresStateStore(postgres_url)
+        if backend == "postgres" and not _ASYNCPG_AVAILABLE:
+            logger.warning("asyncpg_unavailable_using_memory_state_store")
+        if backend != "memory":
+            logger.warning("unknown_backend_using_memory", backend=backend)
         return MemoryStateStore()
 
     def _create_langgraph_checkpointer(self) -> Any:
@@ -240,6 +420,46 @@ class StatePersistenceManager:
     async def list_user_checkpoints(self, user_id: str) -> list[CheckpointMetadata]:
         """List all checkpoints for a user."""
         return await self._store.list_checkpoints(user_id)
+
+    async def initialize(self) -> None:
+        """Initialize the state store (create tables for postgres)."""
+        if isinstance(self._store, PostgresStateStore):
+            await self._store.initialize()
+        self.start_cleanup_task()
+
+    async def shutdown(self) -> None:
+        """Shutdown the persistence manager."""
+        self.stop_cleanup_task()
+        if isinstance(self._store, PostgresStateStore):
+            await self._store.close()
+
+    def start_cleanup_task(self, interval_seconds: int = 300) -> None:
+        """Start background task to clean up expired checkpoints."""
+        if self._cleanup_task is not None:
+            return
+
+        async def _cleanup_loop() -> None:
+            while True:
+                try:
+                    await asyncio.sleep(interval_seconds)
+                    count = await self._store.cleanup_expired()
+                    if count > 0:
+                        logger.info("background_cleanup_expired", count=count)
+                except asyncio.CancelledError:
+                    break
+                except Exception:
+                    logger.exception("background_cleanup_error")
+
+        try:
+            self._cleanup_task = asyncio.create_task(_cleanup_loop())
+        except RuntimeError:
+            logger.debug("no_event_loop_for_cleanup_task")
+
+    def stop_cleanup_task(self) -> None:
+        """Stop background cleanup task."""
+        if self._cleanup_task:
+            self._cleanup_task.cancel()
+            self._cleanup_task = None
 
     async def cleanup_expired(self) -> int:
         """Remove expired checkpoints."""

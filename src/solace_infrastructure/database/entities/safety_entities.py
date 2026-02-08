@@ -14,7 +14,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, ClassVar
 
 from sqlalchemy import (
     Boolean,
@@ -86,21 +86,26 @@ class SafetyAssessment(ClinicalBase):
     """
 
     __tablename__ = "safety_assessments"
+    __phi_fields__: ClassVar[list[str]] = ["content_assessed", "assessment_notes", "review_notes"]
 
-    # Primary identification
-    id: Mapped[uuid.UUID] = mapped_column(
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-        nullable=False,
+        nullable=True,
+        index=True,
+        comment="Session during which assessment was performed"
     )
 
-    # Assessment metadata
     assessment_type: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
         index=True,
         comment="Type of assessment: PRE_CHECK, POST_CHECK, CONTINUOUS, etc."
+    )
+
+    # Content assessed (encrypted PHI)
+    content_assessed: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+        comment="The content that was assessed for safety (encrypted PHI)"
     )
 
     risk_level: Mapped[str] = mapped_column(
@@ -110,47 +115,75 @@ class SafetyAssessment(ClinicalBase):
         comment="Overall risk level: MINIMAL, LOW, MODERATE, HIGH, CRITICAL"
     )
 
-    # Assessment details (encrypted as PHI)
     risk_score: Mapped[float | None] = mapped_column(
-        Float,
-        nullable=True,
+        Float, nullable=True,
         comment="Numerical risk score (0.0-1.0)"
     )
 
+    crisis_level: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, index=True,
+        comment="Crisis level if detected"
+    )
+
+    is_safe: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True,
+        comment="Whether the content was deemed safe"
+    )
+
     risk_factors: Mapped[dict[str, Any]] = mapped_column(
-        JSONB,
-        nullable=False,
-        default=dict,
-        comment="Detailed risk factors identified (encrypted)"
+        JSONB, nullable=False, default=dict,
+        comment="Detailed risk factors identified"
     )
 
     protective_factors: Mapped[dict[str, Any]] = mapped_column(
-        JSONB,
-        nullable=False,
-        default=dict,
-        comment="Protective factors present (encrypted)"
+        JSONB, nullable=False, default=dict,
+        comment="Protective factors present"
     )
 
-    assessment_notes: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
-        comment="Clinical notes from assessment (encrypted as PHI)"
+    trigger_indicators: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=list,
+        comment="Trigger indicators detected"
+    )
+
+    detection_layers_triggered: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=list,
+        comment="Which detection layers triggered"
     )
 
     # Recommendations
+    recommended_action: Mapped[str | None] = mapped_column(
+        String(100), nullable=True,
+        comment="Recommended action: CONTINUE, ESCALATE, REFER, etc."
+    )
+
     recommended_interventions: Mapped[dict[str, Any]] = mapped_column(
-        JSONB,
-        nullable=False,
-        default=dict,
+        JSONB, nullable=False, default=dict,
         comment="Recommended interventions based on assessment"
     )
 
-    immediate_actions_required: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        default=False,
-        index=True,
-        comment="Whether immediate intervention is required"
+    requires_escalation: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, index=True,
+        comment="Whether escalation to human clinician is required"
+    )
+
+    requires_human_review: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False,
+        comment="Whether human review is recommended"
+    )
+
+    detection_time_ms: Mapped[int | None] = mapped_column(
+        Integer, nullable=True,
+        comment="Detection processing time in milliseconds"
+    )
+
+    context: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict,
+        comment="Additional assessment context"
+    )
+
+    assessment_notes: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+        comment="Clinical notes from assessment (encrypted as PHI)"
     )
 
     # Timing and follow-up
@@ -159,14 +192,22 @@ class SafetyAssessment(ClinicalBase):
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
         index=True,
-        comment="Timestamp when assessment was performed"
     )
 
     next_assessment_due: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-        index=True,
-        comment="When next assessment is due"
+        DateTime(timezone=True), nullable=True, index=True,
+    )
+
+    # Review tracking
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    reviewed_by: Mapped[str | None] = mapped_column(
+        String(64), nullable=True,
+    )
+    review_notes: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+        comment="Review notes (encrypted PHI)"
     )
 
     # Assessment provenance
@@ -174,12 +215,10 @@ class SafetyAssessment(ClinicalBase):
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
-        comment="ID of clinician/system who performed assessment"
     )
 
     assessment_method: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
+        String(100), nullable=True,
         comment="Method used: AI, CLINICAL_INTERVIEW, STANDARDIZED_TOOL, etc."
     )
 
@@ -193,7 +232,7 @@ class SafetyAssessment(ClinicalBase):
     def __repr__(self) -> str:
         return (
             f"<SafetyAssessment(id={self.id}, user_id={self.user_id}, "
-            f"risk_level={self.risk_level}, assessed_at={self.assessed_at})>"
+            f"risk_level={self.risk_level}, is_safe={self.is_safe})>"
         )
 
 
@@ -208,74 +247,50 @@ class SafetyPlan(ClinicalBase):
     """
 
     __tablename__ = "safety_plans"
+    __phi_fields__: ClassVar[list[str]] = ["clinician_notes"]
 
-    # Primary identification
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-        nullable=False,
-    )
-
-    # Plan metadata
     status: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
         default=SafetyPlanStatus.DRAFT.value,
         index=True,
-        comment="Plan status: DRAFT, ACTIVE, UNDER_REVIEW, EXPIRED, ARCHIVED"
     )
 
-    # Link to assessment
     assessment_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("safety_assessments.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
-        comment="Associated safety assessment"
     )
 
-    # Plan content (all encrypted as PHI)
+    # Plan content (all JSONB, encrypted at application layer)
     warning_signs: Mapped[dict[str, Any]] = mapped_column(
-        JSONB,
-        nullable=False,
-        default=dict,
-        comment="List of warning signs and triggers (encrypted)"
+        JSONB, nullable=False, default=list,
     )
-
     coping_strategies: Mapped[dict[str, Any]] = mapped_column(
-        JSONB,
-        nullable=False,
-        default=dict,
-        comment="Coping strategies and self-help techniques (encrypted)"
+        JSONB, nullable=False, default=list,
     )
-
     emergency_contacts: Mapped[dict[str, Any]] = mapped_column(
-        JSONB,
-        nullable=False,
-        default=dict,
-        comment="Emergency contacts list (encrypted as PHI)"
+        JSONB, nullable=False, default=list,
     )
-
     safe_environment_actions: Mapped[dict[str, Any]] = mapped_column(
-        JSONB,
-        nullable=False,
-        default=dict,
-        comment="Actions to make environment safer (encrypted)"
+        JSONB, nullable=False, default=list,
     )
-
+    reasons_to_live: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=list,
+        comment="User's reasons to live (critical for safety plans)"
+    )
     professional_resources: Mapped[dict[str, Any]] = mapped_column(
-        JSONB,
-        nullable=False,
-        default=dict,
-        comment="Professional resources and crisis lines"
+        JSONB, nullable=False, default=list,
     )
 
-    # Plan notes
-    plan_notes: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
-        comment="Additional notes about the safety plan (encrypted)"
+    clinician_notes: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+        comment="Clinician notes about the plan (encrypted PHI)"
+    )
+
+    plan_metadata: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict,
     )
 
     # Plan validity
@@ -284,28 +299,23 @@ class SafetyPlan(ClinicalBase):
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
         index=True,
-        comment="When plan becomes effective"
     )
 
     expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-        index=True,
-        comment="When plan expires (for periodic review)"
+        DateTime(timezone=True), nullable=True, index=True,
     )
 
     # Review tracking
     last_reviewed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-        comment="Last time plan was reviewed"
+        DateTime(timezone=True), nullable=True,
     )
 
-    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
-        comment="Clinician who last reviewed the plan"
+    last_reviewed_by: Mapped[str | None] = mapped_column(
+        String(64), nullable=True,
+    )
+
+    next_review_due: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
     )
 
     # Relationships
@@ -317,7 +327,7 @@ class SafetyPlan(ClinicalBase):
     def __repr__(self) -> str:
         return (
             f"<SafetyPlan(id={self.id}, user_id={self.user_id}, "
-            f"status={self.status}, effective_from={self.effective_from})>"
+            f"status={self.status})>"
         )
 
 
@@ -330,14 +340,6 @@ class RiskFactor(ClinicalBase):
     """
 
     __tablename__ = "risk_factors"
-
-    # Primary identification
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-        nullable=False,
-    )
 
     # Link to assessment
     assessment_id: Mapped[uuid.UUID] = mapped_column(
@@ -417,14 +419,6 @@ class ContraindicationCheck(SafetyEventBase):
     """
 
     __tablename__ = "contraindication_checks"
-
-    # Primary identification
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-        nullable=False,
-    )
 
     # Check metadata
     check_type: Mapped[str] = mapped_column(

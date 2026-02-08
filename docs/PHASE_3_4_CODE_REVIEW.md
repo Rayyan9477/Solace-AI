@@ -20,6 +20,44 @@
 
 **Verdict:** Phase 3 (Testing) provides a **false sense of coverage** - mocks don't test real behavior, 18+ tests can never fail, and critical paths have zero coverage. Phase 4 (ML) has **1,500+ lines of duplicated provider code** and dual competing architectures (generic LLMClient vs Portkey) that are not integrated. The supporting infrastructure (Kafka, Events) has **silent failure modes** that mask production issues.
 
+### Resolution Status (Updated 2026-02-08)
+
+**0 of 12 critical and 0 of 24 high issues resolved.** All issues in this file are planned for Tiers 5-7.
+
+| Issue ID | Description | Status | Planned |
+|----------|-------------|--------|---------|
+| CRITICAL-014 | MockPostgresClient doesn't test DB behavior | OPEN | Tier 5 (T5.3) |
+| CRITICAL-015 | Contract tests don't verify contracts | OPEN | Tier 5 (T5.3) |
+| CRITICAL-016 | ServiceContainer has no real startup | OPEN | Tier 5 (T5.3) |
+| CRITICAL-017 | Tautological assertions (tests can never fail) | OPEN | Tier 5 (T5.3) |
+| CRITICAL-018 | Transaction tests don't verify rollback | OPEN | Tier 5 (T5.3) |
+| CRITICAL-019 | 1,500+ lines duplicated provider code | OPEN | Tier 7 (T7.1) |
+| CRITICAL-020 | Dual competing ML architectures | OPEN | Tier 7 (T7.1) |
+| CRITICAL-021 | Kafka ImportError fallback masks dependencies | OPEN | Tier 6 (T6.2) |
+| CRITICAL-022 | SASL credentials as plain strings | OPEN | Tier 6 (T6.3) |
+| CRITICAL-023 | Audit log index allows writes | OPEN | Tier 6 (T6.4) |
+| HIGH-015 | MockPostgresConnection returns empty results | OPEN | Tier 5 (T5.3) |
+| HIGH-016 | MockWeaviateClient doesn't rank by similarity | OPEN | Tier 5 (T5.3) |
+| HIGH-017 | MockLLMClient always returns same response | OPEN | Tier 5 (T5.3) |
+| HIGH-018 | MockEventPublisher no async safety | OPEN | Backlog |
+| HIGH-019 | Factory seed pollutes global state | OPEN | Backlog |
+| HIGH-020 | KafkaFixture offset tracking broken | OPEN | Backlog |
+| HIGH-021 | HealthWaiter backoff can exceed timeout | OPEN | Backlog |
+| HIGH-022 | DataSeeder no transaction safety | OPEN | Backlog |
+| HIGH-023 | Duplicate email test doesn't verify constraint | OPEN | Tier 5 (T5.3) |
+| HIGH-024 | Search test assumes case-insensitive | OPEN | Tier 5 (T5.3) |
+| HIGH-025 | API integration tests only check status 200 | OPEN | Tier 5 (T5.3) |
+| HIGH-026 | Mock test tests mock, not real code | OPEN | Tier 5 (T5.3) |
+| HIGH-027 | Contract test verifies trivial case only | OPEN | Tier 5 (T5.3) |
+| HIGH-028 | API keys as plain strings in Portkey | OPEN | Tier 6 (T6.5) |
+| HIGH-029 | Bare `except Exception` in all providers | OPEN | Tier 7 (T7.7) |
+| HIGH-030 | Minimax missing timeout in streaming | OPEN | Deleted (dead code) |
+| HIGH-031 | Non-thread-safe counter in partitioner | OPEN | Backlog |
+| HIGH-032 | Unknown event type silently returns BaseEvent | OPEN | Tier 6 (T6.17) |
+| HIGH-033 | MockKafkaConsumerAdapter hides real issues | OPEN | Backlog |
+| HIGH-034 | DLQ retry time set when max retries exceeded | OPEN | Tier 4 (T4.4) |
+| HIGH-035 | Redis PubSub listener never restarts | OPEN | Tier 6 (T6.15) |
+
 ---
 
 ## PHASE 3: COMPREHENSIVE TESTING

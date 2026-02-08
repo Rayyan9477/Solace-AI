@@ -30,6 +30,105 @@ This review supplements the line-by-line Phase 1-10 reviews (401 issues) with a 
 
 3. **Everything is in-memory.** Sessions, token revocation, rate limiting, metrics, memory tiers, orchestrator state, event outbox, DLQ, analytics aggregations -- all stored in Python dicts that evaporate on restart. Six of the seven planned centralized entity modules don't exist yet.
 
+### Resolution Status (Updated 2026-02-08)
+
+**Significant progress on systemic issues.** Of the three most damaging systemic issues identified above:
+1. **Authentication** — Largely resolved (Tiers 0-1): JWT unified, auth fallbacks removed, 30+ endpoints secured, in-memory stores replaced with Redis
+2. **Event-driven architecture** — Mostly open (Tiers 3-4): Memory event publisher fixed, but 5 services still lack bridges
+3. **In-memory stores** — Partially resolved (Tier 2): Sessions, tokens, rate limits moved to Redis; entity modules created; memory service wired to persistent storage; orchestrator state persistence added
+
+#### Service Integration (INT-*)
+
+| Issue ID | Description | Status | Fix Reference |
+|----------|-------------|--------|---------------|
+| INT-CRIT-01 | ServiceAuthenticatedClient never used | OPEN | Tier 4 (T4.9) |
+| INT-CRIT-02 | Crisis notifications route to non-existent emails | OPEN | Tier 3 (T3.1) |
+| INT-CRIT-03 | SafetyAssessment domain vs DB field mismatches | **RESOLVED** | T2.6 |
+| INT-CRIT-04 | Safety event bridge drops 4 of 6 event types | OPEN | Tier 3 (T3.5) |
+| INT-CRIT-05 | Three incompatible crisis/risk level enums | OPEN | Tier 3 (T3.4) |
+| INT-HIGH-01 | Kong gateway only configures 3 of 8+ services | OPEN | Backlog |
+| INT-HIGH-02 | Gateway routes reference non-existent services | OPEN | Backlog |
+| INT-HIGH-03 | Orchestrator missing user/notification clients | OPEN | Backlog |
+| INT-HIGH-04 | solace_common and solace_ml imported by zero services | OPEN | Partial (dead providers deleted) |
+| INT-HIGH-05 | Therapy event bridge drops critical events | OPEN | Tier 3 (T3.5) |
+| INT-HIGH-06 | Three independent JWT/auth implementations | **RESOLVED** | T1.1 |
+| INT-HIGH-07 | All services degrade to no-auth on ImportError | **RESOLVED** | T1.2 |
+| INT-HIGH-08 | `any` vs `Any` type bug in safety_entities.py | **RESOLVED** | T0.7 |
+
+#### Missing Implementations (IMPL-*)
+
+| Issue ID | Description | Status | Fix Reference |
+|----------|-------------|--------|---------------|
+| IMPL-CRIT-01 | Six centralized entity modules never created | **RESOLVED** | T2.1 |
+| IMPL-CRIT-02 | Memory service uses in-memory dicts for all tiers | **RESOLVED** | T2.4 |
+| IMPL-CRIT-03 | Safety LLM assessor falls back to mock responses | OPEN | Tier 3 (T3.9) |
+| IMPL-CRIT-04 | In-memory repos remain default for 4 services | **RESOLVED** | T2.10 |
+| IMPL-CRIT-05 | Therapy `_acquire()` infinite recursion | **RESOLVED** | T0.1 |
+| IMPL-CRIT-06 | Zero test coverage for PostgreSQL repositories | OPEN | Tier 5 (T5.2) |
+| IMPL-CRIT-07 | langgraph-checkpoint-postgres installed but never wired | **RESOLVED** | T2.2 |
+| IMPL-HIGH-01 | Entire solace_ml package is dead code | OPEN | Partial (dead providers deleted) |
+| IMPL-HIGH-02 | solace_testing only tested by own tests | OPEN | Backlog |
+| IMPL-HIGH-03 | MockPostgresConnection always returns [] | OPEN | Tier 5 (T5.3) |
+| IMPL-HIGH-04 | Two competing LLM architectures | OPEN | Tier 7 (T7.1) |
+| IMPL-HIGH-05 | Memory semantic filter is substring matching | OPEN | Tier 7 (T7.4) |
+| IMPL-HIGH-06 | ~30 unused packages in requirements.txt | OPEN | Tier 5 (T5.4) |
+| IMPL-HIGH-07 | No integration tests for cross-service communication | OPEN | Tier 5 (T5.2) |
+| IMPL-HIGH-08 | Safety LLM assessor test mocks away actual LLM | OPEN | Backlog |
+| IMPL-HIGH-09 | Push notification google-auth undeclared | OPEN | Backlog |
+| IMPL-HIGH-10 | Missing report generators (2 of 6 types) | OPEN | Tier 7 (T7.6) |
+| IMPL-HIGH-11 | Analytics absolute import should be relative | **RESOLVED** | T0.10 |
+| IMPL-HIGH-12 | All 5 LLM health_check() return None not False | OPEN | Backlog |
+
+#### Configuration & Deployment (CFG-*)
+
+| Issue ID | Description | Status | Fix Reference |
+|----------|-------------|--------|---------------|
+| CFG-CRIT-01 | Massive port conflicts | **RESOLVED** | T0.6 |
+| CFG-CRIT-02 | SAFETY_ env prefix collision | OPEN | Tier 5 (T5.8) |
+| CFG-CRIT-03 | All CI/CD disabled except linting | OPEN | Tier 5 (T5.1) |
+| CFG-CRIT-04 | Database name mismatch across services | **RESOLVED** | T2.7 |
+| CFG-CRIT-05 | Hardcoded default secrets in multiple files | **RESOLVED** | T0.4 |
+| CFG-CRIT-06 | .env file exists on disk with test JWT secret | **RESOLVED** | T0.4 |
+| CFG-CRIT-07 | Analytics/Config service no Docker entries | OPEN | Tier 5 (T5.9) |
+| CFG-CRIT-08 | Docker naming inconsistency | OPEN | Tier 5 (T5.9) |
+| CFG-HIGH-01 | Therapy config port collides with Memory | **RESOLVED** | T0.6 |
+| CFG-HIGH-02 | User service __main__ hardcodes port | **RESOLVED** | T0.6 |
+| CFG-HIGH-03 to 13 | Various env prefix/config inconsistencies | OPEN | Tier 5 (T5.8-T5.10) |
+
+#### Security Architecture (SEC-*)
+
+| Issue ID | Description | Status | Fix Reference |
+|----------|-------------|--------|---------------|
+| SEC-CRIT-01 | Three JWT implementations incompatible | **RESOLVED** | T1.1 |
+| SEC-CRIT-02 | 30+ unauthenticated endpoints exposing PHI | **RESOLVED** | T1.3 |
+| SEC-CRIT-03 | Unauthenticated WebSocket for therapy chat | **RESOLVED** | T1.3 |
+| SEC-CRIT-04 | All token/session/brute-force tracking in-memory | **RESOLVED** | T1.4 |
+| SEC-CRIT-05 | Fernet keys regenerated on restart | **RESOLVED** | T0.3 |
+| SEC-CRIT-06 | User-service has no token revocation | OPEN | Backlog |
+| SEC-CRIT-07 | Config service API key validation is no-op | **RESOLVED** | T1.17 |
+| SEC-HIGH-01 | Silent auth fallback stubs on ImportError | **RESOLVED** | T1.2 |
+| SEC-HIGH-02 | String-based role checks bypass PolicyEngine | **RESOLVED** | T1.12 |
+| SEC-HIGH-03 | PHI logged in structured logs; sanitizer unused | OPEN | Tier 6 (T6.9) |
+| SEC-HIGH-04 | Status endpoint leaks JWT config | OPEN | Backlog |
+| SEC-HIGH-05 | EncryptedFieldMixin stores metadata only | **RESOLVED** | T2.5 |
+| SEC-HIGH-06 | User-service get_current_user incompatible | OPEN | Backlog |
+
+#### Event Bus & Async Flow (EVT-*)
+
+| Issue ID | Description | Status | Fix Reference |
+|----------|-------------|--------|---------------|
+| EVT-CRIT-01 | Memory service event publisher crashes at runtime | **RESOLVED** | T0.2 |
+| EVT-CRIT-02 | Orchestrator EventBus calls handlers synchronously | OPEN | Tier 4 (T4.5) |
+| EVT-CRIT-03 | Dual divergent event schemas for safety | OPEN | Tier 4 (T4.6) |
+| EVT-CRIT-04 | Dual divergent event schemas for memory | OPEN | Tier 4 (T4.6) |
+| EVT-HIGH-01 | In-memory DLQ store loses records on restart | OPEN | Tier 4 (T4.4) |
+| EVT-HIGH-02 | In-memory outbox loses events on restart | OPEN | Tier 4 (T4.2) |
+| EVT-HIGH-03 | 5 of 7 services have no Kafka bridge | OPEN | Tier 4 (T4.1) |
+| EVT-HIGH-04 | Analytics consumer not connected to Kafka | OPEN | Backlog |
+| EVT-HIGH-05 | WebSocket no buffering/reconnection/heartbeat | OPEN | Backlog |
+| EVT-HIGH-06 | Session/working memory entirely in-memory | **RESOLVED** | T2.4 |
+| EVT-HIGH-07 | Orchestrator state falls back to MemoryStateStore | **RESOLVED** | T2.2 |
+
 ---
 
 ## 1. SERVICE INTEGRATION & DATA FLOW

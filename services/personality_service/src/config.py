@@ -16,8 +16,8 @@ class DatabaseSettings(BaseSettings):
     """Database configuration for personality service."""
     host: str = Field(default="localhost")
     port: int = Field(default=5432)
-    name: str = Field(default="personality_db")
-    user: str = Field(default="personality_user")
+    name: str = Field(default="solace")
+    user: str = Field(default="solace")
     password: str = Field(description="Database password - set via PERSONALITY_DB_PASSWORD env var")
     pool_size: int = Field(default=10, ge=1, le=100)
     max_overflow: int = Field(default=20, ge=0, le=100)

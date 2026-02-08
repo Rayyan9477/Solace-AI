@@ -16,8 +16,8 @@ class DatabaseSettings(BaseSettings):
     """Database configuration."""
     host: str = Field(default="localhost")
     port: int = Field(default=5432)
-    name: str = Field(default="diagnosis_db")
-    user: str = Field(default="diagnosis_user")
+    name: str = Field(default="solace")
+    user: str = Field(default="solace")
     password: str = Field(default="")
     pool_size: int = Field(default=10)
     max_overflow: int = Field(default=20)

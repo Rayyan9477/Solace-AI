@@ -259,6 +259,65 @@ class PostgresUserRepository(UserRepository):
                 rows = await conn.fetch(query, role)
         return [self._row_to_entity(dict(row)) for row in rows]
 
+    async def assign_patient_to_clinician(
+        self, clinician_id: UUID, patient_id: UUID,
+    ) -> bool:
+        """Assign a patient to a clinician in PostgreSQL."""
+        query = f"""
+            INSERT INTO {self._schema}.clinician_patient_assignments
+                (clinician_id, patient_id, assigned_at)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (clinician_id, patient_id) DO NOTHING
+        """
+        async with self._acquire() as conn:
+            await conn.execute(query, clinician_id, patient_id)
+            return True
+
+    async def unassign_patient_from_clinician(
+        self, clinician_id: UUID, patient_id: UUID,
+    ) -> bool:
+        """Remove a patient assignment from a clinician."""
+        query = f"""
+            DELETE FROM {self._schema}.clinician_patient_assignments
+            WHERE clinician_id = $1 AND patient_id = $2
+        """
+        async with self._acquire() as conn:
+            result = await conn.execute(query, clinician_id, patient_id)
+            return result == "DELETE 1"
+
+    async def is_patient_assigned_to_clinician(
+        self, clinician_id: UUID, patient_id: UUID,
+    ) -> bool:
+        """Check if a specific patient is assigned to a specific clinician."""
+        query = f"""
+            SELECT 1 FROM {self._schema}.clinician_patient_assignments
+            WHERE clinician_id = $1 AND patient_id = $2
+        """
+        async with self._acquire() as conn:
+            row = await conn.fetchrow(query, clinician_id, patient_id)
+            return row is not None
+
+    async def get_assigned_patients(self, clinician_id: UUID) -> list[UUID]:
+        """Get all patient IDs assigned to a clinician."""
+        query = f"""
+            SELECT patient_id FROM {self._schema}.clinician_patient_assignments
+            WHERE clinician_id = $1
+        """
+        async with self._acquire() as conn:
+            rows = await conn.fetch(query, clinician_id)
+            return [row["patient_id"] for row in rows]
+
+    async def get_assigned_clinician(self, patient_id: UUID) -> UUID | None:
+        """Get the clinician assigned to a patient, if any."""
+        query = f"""
+            SELECT clinician_id FROM {self._schema}.clinician_patient_assignments
+            WHERE patient_id = $1
+            LIMIT 1
+        """
+        async with self._acquire() as conn:
+            row = await conn.fetchrow(query, patient_id)
+            return row["clinician_id"] if row else None
+
     def _row_to_entity(self, row: dict[str, Any]) -> User:
         """Convert a database row to a User entity."""
         return User(

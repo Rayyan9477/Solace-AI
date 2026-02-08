@@ -34,6 +34,71 @@
 | Phase 7-8 | 21 | 26 | 35 | 16 | 98 |
 | **Grand Total** | **58** | **103** | **110** | **51** | **322** |
 
+### Resolution Status (Updated 2026-02-08)
+
+**12 of 21 critical resolved. 1 of 26 high resolved. 1 of 35 medium resolved.**
+
+#### Critical Issues
+
+| Issue ID | Description | Status | Fix Reference |
+|----------|-------------|--------|---------------|
+| CRITICAL-068 | All personality endpoints unauthenticated | **RESOLVED** | T1.3 |
+| CRITICAL-069 | EmotionStateDTO type error — string vs enum | **RESOLVED** | T0.11 |
+| CRITICAL-070 | EmpathyAdapter type mismatch in emotion mapping | **RESOLVED** | T0.11 |
+| CRITICAL-071 | RoBERTa model never loaded — all predictions fake | OPEN | Tier 7 (T7.2) |
+| CRITICAL-072 | LIWC evidence computation has TypeError | **RESOLVED** | T0.13 |
+| CRITICAL-073 | LLM detector timeout never enforced | OPEN | Tier 7 (T7.3) |
+| CRITICAL-074 | Empathy template format crashes with KeyError | **RESOLVED** | T0.12 |
+| CRITICAL-075 | Null pointer in add_assessment() on first call | OPEN | Backlog |
+| CRITICAL-076 | PostgreSQL repository schema mismatch | **RESOLVED** | T2.3 |
+| CRITICAL-077 | Database password defaults to empty string | **RESOLVED** | T0.18 |
+| CRITICAL-078 | Auth fallback stubs allow service without auth | **RESOLVED** | T1.2 |
+| CRITICAL-079 | Local stub functions shadow real agent imports | OPEN | Tier 4 (T4.7) |
+| CRITICAL-080 | Crisis handler unreachable from supervisor routing | OPEN | Tier 3 (T3.3) |
+| CRITICAL-081 | Conditional edges expect string but router returns list | **RESOLVED** | T0.17 |
+| CRITICAL-082 | Diagnosis agent async node never awaited | OPEN | Tier 4 (T4.3) |
+| CRITICAL-083 | Therapy agent same async issue | OPEN | Tier 4 (T4.3) |
+| CRITICAL-084 | Personality agent same async issue | OPEN | Tier 4 (T4.3) |
+| CRITICAL-085 | Response aggregation returns fallback silently | OPEN | Tier 4 (T4.8) |
+| CRITICAL-086 | Safety wrapper resource deduplication not thread-through | OPEN | Backlog |
+| CRITICAL-087 | In-memory state store has memory leak | **RESOLVED** | T2.9 |
+| CRITICAL-088 | JSON deserialization crash on successful response | **RESOLVED** | T0.16 |
+
+#### High Issues
+
+| Issue ID | Description | Status | Fix Reference |
+|----------|-------------|--------|---------------|
+| HIGH-102 | ProfileStore race condition — no locks | OPEN | Tier 7 (T7.8) |
+| HIGH-103 | LLM detection silently returns default scores | OPEN | Backlog |
+| HIGH-104 | All 5 ML models are heuristic stubs | OPEN | Tier 7 (T7.2) |
+| HIGH-105 | Embedding cache never evicts (memory leak) | OPEN | Tier 7 (T7.10) |
+| HIGH-106 | LLM detector heuristic fallback non-functional | OPEN | Backlog |
+| HIGH-107 | Multimodal division by zero not caught | OPEN | Tier 7 (T7.12) |
+| HIGH-108 | Compassionate strategy missing affective response | OPEN | Tier 7 (T7.13) |
+| HIGH-109 | user_id defaults to random UUID | OPEN | Tier 7 (T7.16) |
+| HIGH-110 | InMemory repository missing feature flag | OPEN | Backlog |
+| HIGH-111 | Missing user_id in snapshot INSERT | OPEN | Backlog |
+| HIGH-112 | Orphaned validator never called | OPEN | Tier 7 (T7.14) |
+| HIGH-113 | PostgresPersonalityRepository not exported | OPEN | Tier 7 (T7.15) |
+| HIGH-114 | CORS allows all origins with credentials | **RESOLVED** | T1.8 |
+| HIGH-115 | Safety precheck async/sync mismatch | OPEN | Tier 4 (T4.3) |
+| HIGH-116 | Risk level merge function loses safety data | OPEN | Tier 4 (T4.11) |
+| HIGH-117 | Settings loaded twice with potential inconsistency | OPEN | Backlog |
+| HIGH-118 | Safety agent crashes graph when fallback disabled | OPEN | Backlog |
+| HIGH-119 | Safety crisis resources never populated | OPEN | Tier 3 (T3.8) |
+| HIGH-120 | Safety confidence score inverted | OPEN | Tier 3 (T3.6) |
+| HIGH-121 | Aggregator strategy selection is dead code | OPEN | Backlog |
+| HIGH-122 | StructureAdjuster is a complete no-op | OPEN | Tier 7 (T7.9) |
+| HIGH-123 | Safety content filter removes clinical advice | OPEN | Tier 3 (T3.7) |
+| HIGH-124 | Generator misattributes agent type | OPEN | Tier 7 (T7.11) |
+| HIGH-125 | Service client retries without exponential backoff | OPEN | Tier 4 (T4.13) |
+| HIGH-126 | State serialization uses lossy `default=str` | OPEN | Tier 4 (T4.14) |
+| HIGH-127 | WebSocket receive timeout returns None | OPEN | Tier 4 (T4.12) |
+
+#### Medium/Low Summary
+- MEDIUM-105 (Memory node uses wrong AgentType): **RESOLVED** (T0.19)
+- Remaining 34 medium + 16 low: OPEN (planned for Tiers 3-7 or backlog)
+
 ---
 
 ## PHASE 7: PERSONALITY SERVICE

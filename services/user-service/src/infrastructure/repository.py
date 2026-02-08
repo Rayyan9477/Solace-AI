@@ -238,6 +238,37 @@ class UserRepository(ABC):
         """
         pass
 
+    @abstractmethod
+    async def assign_patient_to_clinician(
+        self, clinician_id: UUID, patient_id: UUID,
+    ) -> bool:
+        """Assign a patient to a clinician."""
+        pass
+
+    @abstractmethod
+    async def unassign_patient_from_clinician(
+        self, clinician_id: UUID, patient_id: UUID,
+    ) -> bool:
+        """Remove a patient assignment from a clinician."""
+        pass
+
+    @abstractmethod
+    async def is_patient_assigned_to_clinician(
+        self, clinician_id: UUID, patient_id: UUID,
+    ) -> bool:
+        """Check if a specific patient is assigned to a specific clinician."""
+        pass
+
+    @abstractmethod
+    async def get_assigned_patients(self, clinician_id: UUID) -> list[UUID]:
+        """Get all patient IDs assigned to a clinician."""
+        pass
+
+    @abstractmethod
+    async def get_assigned_clinician(self, patient_id: UUID) -> UUID | None:
+        """Get the clinician assigned to a patient, if any."""
+        pass
+
 
 class UserPreferencesRepository(ABC):
     """
@@ -363,6 +394,7 @@ class InMemoryUserRepository(UserRepository):
             raise RuntimeError("In-memory repositories are not allowed in production.")
         self._users: dict[UUID, User] = {}
         self._users_by_email: dict[str, UUID] = {}
+        self._assignments: dict[UUID, set[UUID]] = {}  # clinician_id -> set of patient_ids
         self._lock = asyncio.Lock()
 
     async def save(self, user: User) -> User:
@@ -480,12 +512,52 @@ class InMemoryUserRepository(UserRepository):
 
         return users
 
+    async def assign_patient_to_clinician(
+        self, clinician_id: UUID, patient_id: UUID,
+    ) -> bool:
+        """Assign a patient to a clinician."""
+        async with self._lock:
+            if clinician_id not in self._assignments:
+                self._assignments[clinician_id] = set()
+            self._assignments[clinician_id].add(patient_id)
+            return True
+
+    async def unassign_patient_from_clinician(
+        self, clinician_id: UUID, patient_id: UUID,
+    ) -> bool:
+        """Remove a patient assignment from a clinician."""
+        async with self._lock:
+            patients = self._assignments.get(clinician_id)
+            if patients and patient_id in patients:
+                patients.discard(patient_id)
+                return True
+            return False
+
+    async def is_patient_assigned_to_clinician(
+        self, clinician_id: UUID, patient_id: UUID,
+    ) -> bool:
+        """Check if a specific patient is assigned to a specific clinician."""
+        patients = self._assignments.get(clinician_id, set())
+        return patient_id in patients
+
+    async def get_assigned_patients(self, clinician_id: UUID) -> list[UUID]:
+        """Get all patient IDs assigned to a clinician."""
+        return list(self._assignments.get(clinician_id, set()))
+
+    async def get_assigned_clinician(self, patient_id: UUID) -> UUID | None:
+        """Get the clinician assigned to a patient, if any."""
+        for clinician_id, patients in self._assignments.items():
+            if patient_id in patients:
+                return clinician_id
+        return None
+
     # --- Testing Utilities ---
 
     def clear(self) -> None:
         """Clear all data (for testing)."""
         self._users.clear()
         self._users_by_email.clear()
+        self._assignments.clear()
 
     async def search_users(self, query: str, limit: int = 20) -> list[User]:
         """

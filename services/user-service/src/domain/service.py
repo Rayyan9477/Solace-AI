@@ -991,6 +991,58 @@ class UserService:
                 error_code="UPDATE_FAILED",
             )
 
+    # --- Clinician-Patient Assignments ---
+
+    async def assign_patient(
+        self, clinician_id: UUID, patient_id: UUID, requesting_user_id: UUID, requesting_role: str,
+    ) -> UpdateUserResult:
+        """Assign a patient to a clinician. Only admins can assign."""
+        if requesting_role not in ("admin", "system"):
+            return UpdateUserResult(error="Only admins can assign patients", error_code="FORBIDDEN")
+
+        clinician = await self._user_repo.get_by_id(clinician_id)
+        if not clinician or clinician.role != UserRole.CLINICIAN:
+            return UpdateUserResult(error="Clinician not found", error_code="NOT_FOUND")
+
+        patient = await self._user_repo.get_by_id(patient_id)
+        if not patient:
+            return UpdateUserResult(error="Patient not found", error_code="NOT_FOUND")
+
+        await self._user_repo.assign_patient_to_clinician(clinician_id, patient_id)
+        logger.info("patient_assigned", clinician_id=str(clinician_id), patient_id=str(patient_id))
+        return UpdateUserResult(success=True)
+
+    async def unassign_patient(
+        self, clinician_id: UUID, patient_id: UUID, requesting_user_id: UUID, requesting_role: str,
+    ) -> UpdateUserResult:
+        """Unassign a patient from a clinician. Only admins can unassign."""
+        if requesting_role not in ("admin", "system"):
+            return UpdateUserResult(error="Only admins can unassign patients", error_code="FORBIDDEN")
+
+        success = await self._user_repo.unassign_patient_from_clinician(clinician_id, patient_id)
+        if not success:
+            return UpdateUserResult(error="Assignment not found", error_code="NOT_FOUND")
+
+        logger.info("patient_unassigned", clinician_id=str(clinician_id), patient_id=str(patient_id))
+        return UpdateUserResult(success=True)
+
+    async def verify_clinician_patient_access(
+        self, clinician_id: UUID, patient_id: UUID,
+    ) -> bool:
+        """Verify a clinician has access to a specific patient.
+
+        Returns True if:
+        - The clinician is assigned to the patient, OR
+        - The user is an admin/system role (checked by caller)
+        """
+        return await self._user_repo.is_patient_assigned_to_clinician(
+            clinician_id, patient_id,
+        )
+
+    async def get_clinician_patients(self, clinician_id: UUID) -> list[UUID]:
+        """Get all patient IDs assigned to a clinician."""
+        return await self._user_repo.get_assigned_patients(clinician_id)
+
     # --- Progress Tracking ---
 
     async def get_progress(self, user_id: UUID) -> UserProgress | None:

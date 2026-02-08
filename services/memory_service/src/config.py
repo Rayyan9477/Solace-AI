@@ -18,7 +18,7 @@ class PostgresConfig(BaseSettings):
     """PostgreSQL database configuration."""
     host: str = Field(default="localhost")
     port: int = Field(default=5432, ge=1, le=65535)
-    database: str = Field(default="solace_memory")
+    database: str = Field(default="solace")
     user: str = Field(default="solace")
     password: str = Field(default="")
     pool_size: int = Field(default=10, ge=1, le=100)

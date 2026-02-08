@@ -1,665 +1,237 @@
 # Solace-AI Comprehensive Remediation Plan
 
 **Created:** 2026-02-07
-**Timeline:** 12-16 weeks
-**Priority:** Database Consolidation → Security → Testing → ML Integration → Permissions → Migration
+**Updated:** 2026-02-08
+**Based on:** 6 code review reports totaling ~496 issues (109 critical, 170 high, 131 medium, 61 low)
+**Strategy:** Incremental fixes (no rewrite), core therapy flow first
 
 ---
 
-## Executive Summary
+## Progress Summary
 
-This document outlines the comprehensive remediation plan for the Solace-AI platform, addressing critical technical debt across database infrastructure, security, testing, and ML integration. The plan was created following a thorough codebase audit that identified:
+| Tier | Description | Tasks | Status |
+|------|-------------|-------|--------|
+| **Tier 0** | Immediate Crash & Data-Loss Bugs | 20/20 | **COMPLETE** |
+| **Tier 1** | Authentication & Authorization | 17/17 | **COMPLETE** |
+| **Tier 2** | Core Flow Persistence | 14/14 | **COMPLETE** |
+| **Tier 3** | Safety Pipeline & Crisis Flow | 0/11 | Pending |
+| **Tier 4** | Event Bus & Orchestrator Integration | 0/14 | Pending |
+| **Tier 5** | Configuration, Testing & CI/CD | 0/13 | Pending |
+| **Tier 6** | Security Hardening | 0/20 | Pending |
+| **Tier 7** | ML, Features & Polish | 0/18 | Pending |
 
-- **70+ pass statements** in abstract methods
-- **~40 scattered connection pools** (target: ~12)
-- **600-800 lines of duplicated ML provider code**
-- **Zero test coverage** in critical security paths
-- **HIPAA compliance gaps** (optional encryption, missing audit trails)
-
----
-
-## Phase 1: Database Infrastructure Consolidation (Weeks 1-4)
-
-**Priority:** HIGHEST
-**Goal:** Eliminate fragmented database infrastructure, reduce connections by 70%, enforce data integrity
-
-### Phase 1.1: Centralized Schema Registry ✅ COMPLETED
-
-**Status:** ✅ COMPLETED
-**Completion Date:** 2026-02-07
-
-**Deliverables:**
-- ✅ [schema_registry.py](../src/solace_infrastructure/database/schema_registry.py) - Decorator-based entity registration
-- ✅ [entities/safety_entities.py](../src/solace_infrastructure/database/entities/safety_entities.py) - 4 complete safety entities (zero pass statements)
-- ✅ [base_models.py](../src/solace_infrastructure/database/base_models.py) - EncryptedFieldMixin, AuditTrailMixin
-
-**Key Achievements:**
-- Eliminated 13+ fragmented schema files
-- Implemented 4 complete safety entities (SafetyAssessment, SafetyPlan, RiskFactor, ContraindicationCheck)
-- Zero pass statements in new entity implementations
-
-**Files Modified:**
-- `src/solace_infrastructure/database/schema_registry.py` (NEW)
-- `src/solace_infrastructure/database/entities/__init__.py` (NEW)
-- `src/solace_infrastructure/database/entities/safety_entities.py` (NEW)
-- `src/solace_infrastructure/database/base_models.py` (UPDATED - added mixins)
+**Cleanup completed:** Deleted `archive/` (118 legacy files), `services/user_service/` (duplicate), 4 dead ML providers (deepseek, minimax, xai, gemini).
 
 ---
 
-### Phase 1.2: Unified Connection Pool Manager (Weeks 1-2)
+## Tier 0 — Immediate Crash & Data-Loss Bugs — COMPLETE
 
-**Status:** 🔄 IN PROGRESS
-**Progress:** 60% complete
+All 20 tasks completed. Resolved issues:
 
-**Deliverables:**
-- ✅ [connection_manager.py](../src/solace_infrastructure/database/connection_manager.py) - Centralized pool management
-- ✅ [contraindication_db.py](../services/safety_service/src/db/contraindication_db.py) - Migrated to ConnectionPoolManager
-- ⏳ Refactor remaining service repositories (safety, user, therapy, memory)
-
-**Key Features Implemented:**
-- Singleton pattern for global pool management
-- Thread-safe lazy initialization
-- Support for multiple named database instances
-- Health monitoring and statistics
-- Automatic connection cleanup
-
-**Connection Reduction Progress:**
-| Service | Before | After | Status |
-|---------|--------|-------|--------|
-| Contraindication DB | Dedicated pool | Shared pool | ✅ Complete |
-| Safety Service (repos) | 8 pools | 1 pool | ⏳ Pending |
-| User Service | 6 pools | 1 pool | ⏳ Pending |
-| Therapy Service | 8 pools | 1 pool | ⏳ Pending |
-| Memory Service | 4 pools | 1 pool | ⏳ Pending |
-| Other Services | 13 pools | 2 pools | ⏳ Pending |
-| **TOTAL** | **~40 pools** | **~12 pools** | **40% → 100%** |
-
-**Files Modified:**
-- `src/solace_infrastructure/database/connection_manager.py` (NEW)
-- `src/solace_infrastructure/database/__init__.py` (UPDATED - exports)
-- `services/safety_service/src/db/contraindication_db.py` (MIGRATED)
-
-**Remaining Work:**
-- [ ] Migrate `services/safety_service/src/infrastructure/repository.py`
-- [ ] Migrate `services/user-service/src/infrastructure/repository.py`
-- [ ] Migrate therapy service repositories
-- [ ] Migrate memory service repositories
-- [ ] Update PostgresClient to optionally use ConnectionPoolManager (backwards compatibility)
+| Task | Description | Issues Resolved |
+|------|-------------|-----------------|
+| T0.1 | Fix therapy/diagnosis infinite recursion | CRITICAL-006, CRITICAL-118, IMPL-CRIT-05 |
+| T0.2 | Fix memory service swapped publisher arguments | EVT-CRIT-01 |
+| T0.3 | Fix Fernet keys regenerated on startup | CRITICAL-107, SEC-CRIT-05 |
+| T0.4 | Replace hardcoded secrets + remove .env from repo | CRITICAL-059, CRITICAL-099, CRITICAL-067, CFG-CRIT-05, CFG-CRIT-06, HIGH-097 |
+| T0.5 | Fix SQL injection in analytics LIMIT clause | CRITICAL-115, HIGH-091 |
+| T0.6 | Fix port conflicts across all services | CFG-CRIT-01, CFG-HIGH-01, CFG-HIGH-02 |
+| T0.7 | Fix `any` vs `Any` type bug (12 occurrences) | CRITICAL-001, INT-HIGH-08 |
+| T0.8 | Fix analytics consumer never consuming | CRITICAL-117 |
+| T0.9 | Fix memory node calling non-existent method | CRITICAL-062 |
+| T0.10 | Fix missing relative import in analytics | CRITICAL-066, IMPL-HIGH-11 |
+| T0.11 | Fix EmotionStateDTO string-vs-enum crash | CRITICAL-069, CRITICAL-070 |
+| T0.12 | Fix empathy template format KeyError | CRITICAL-074 |
+| T0.13 | Fix LIWC evidence TypeError (operator precedence) | CRITICAL-072 |
+| T0.14 | Fix ConnectionPoolManager race condition | CRITICAL-004 |
+| T0.15 | Fix missing AssessmentType import in safety | CRITICAL-007 |
+| T0.16 | Fix JSON deserialization crash in orchestrator | CRITICAL-088 |
+| T0.17 | Fix LangGraph conditional edges return type | CRITICAL-081 |
+| T0.18 | Fix database password defaults to empty string | CRITICAL-077 |
+| T0.19 | Fix memory node wrong AgentType | CRITICAL-063, MEDIUM-105 |
+| T0.20 | Fix consolidation crash when pipeline is None | CRITICAL-065 |
 
 ---
 
-### Phase 1.3: Eliminate Pass Statements (Weeks 2-3)
+## Tier 1 — Authentication & Authorization — COMPLETE
 
-**Status:** ⏳ PENDING
-**Goal:** Remove 70+ pass statements from abstract repository methods
+All 17 tasks completed. Resolved issues:
 
-**Target Files:**
-- `services/safety_service/src/infrastructure/repository.py` (15+ pass statements)
-  - Lines 45-77: Abstract SafetyAssessmentRepository
-  - Lines 78-110: Abstract SafetyPlanRepository
-  - Lines 111-143: Abstract RiskFactorRepository
-- `services/user-service/src/infrastructure/repository.py` (12+ pass statements)
-- `services/therapy-service/src/infrastructure/repository.py` (10+ pass statements)
-- `services/memory-service/src/infrastructure/repository.py` (8+ pass statements)
-- Other service repositories (25+ pass statements)
-
-**Implementation Strategy:**
-1. Replace abstract methods with concrete PostgreSQL implementations
-2. Use ConnectionPoolManager for all database access
-3. Implement proper error handling and logging
-4. Add query parameter validation
-5. Use prepared statements to prevent SQL injection
-
-**Acceptance Criteria:**
-- Zero pass statements in production code paths
-- All abstract methods have concrete implementations
-- Query results properly mapped to domain entities
-- Comprehensive error handling for database operations
+| Task | Description | Issues Resolved |
+|------|-------------|-----------------|
+| T1.1 | Unify JWT issuer/audience | SEC-CRIT-01, INT-HIGH-06 |
+| T1.2 | Remove auth fallback stubs | CRITICAL-078, CRITICAL-113, SEC-HIGH-01, HIGH-095 |
+| T1.3 | Add auth to 30+ unauthenticated endpoints | CRITICAL-056, CRITICAL-057, CRITICAL-058, CRITICAL-068, CRITICAL-106, CRITICAL-114, CRITICAL-119, SEC-CRIT-02, SEC-CRIT-03, HIGH-075, HIGH-076, HIGH-080, MEDIUM-054 |
+| T1.4 | Replace in-memory session/token stores with Redis | CRITICAL-100, CRITICAL-104, CRITICAL-109, SEC-CRIT-04, HIGH-078, HIGH-008, HIGH-009, MEDIUM-099 |
+| T1.5 | Remove admin/system role blanket bypass | CRITICAL-060, CRITICAL-101 |
+| T1.6 | Fix service token permission escalation | CRITICAL-061 |
+| T1.7 | Fix token refresh — validate session status | CRITICAL-108, MEDIUM-102, MEDIUM-104 |
+| T1.8 | Fix wildcard CORS with credentials | CRITICAL-103, HIGH-102, HIGH-114 |
+| T1.9 | Fix Kong admin API exposure | CRITICAL-102 |
+| T1.10 | Fix route regex ReDoS vulnerability | CRITICAL-105 |
+| T1.11 | Fix weak email validation | CRITICAL-110 |
+| T1.12 | Replace string-based role checks with enum | HIGH-074, HIGH-105, HIGH-079, HIGH-122 |
+| T1.13 | Fix password change must invalidate sessions | HIGH-111 |
+| T1.14 | Fix clinician-patient relationship verification | HIGH-110, HIGH-077 |
+| T1.15 | Fix consent type silent default | HIGH-107 |
+| T1.16 | Make token blacklist mandatory | CRITICAL-008 |
+| T1.17 | Fix Config service API key validation | SEC-CRIT-07 |
 
 ---
 
-### Phase 1.4: Migrate Raw SQL to ORM (Weeks 3-4)
+## Tier 2 — Core Flow Persistence — COMPLETE
 
-**Status:** ⏳ PENDING
-**Goal:** Convert 20+ raw SQL INSERT queries to SQLAlchemy ORM
+All 14 tasks completed. Resolved issues:
 
-**Target Areas:**
-- `services/safety_service/src/infrastructure/repository.py` (Lines 441-486)
-  - 20+ INSERT INTO statements
-  - Manual SQL string concatenation
-  - No parameterization in some queries
-- Seed data loaders with raw SQL
-- Migration scripts with string-based queries
-
-**Benefits:**
-- Type safety from SQLAlchemy models
-- Automatic parameterization (SQL injection prevention)
-- Query builder for complex dynamic queries
-- Better integration with centralized entities
-- Easier unit testing with ORM mocks
-
-**Implementation Approach:**
-```python
-# BEFORE (Raw SQL)
-query = f"INSERT INTO safety_assessments (id, user_id, assessment_type, risk_level) VALUES ($1, $2, $3, $4)"
-await conn.execute(query, assessment_id, user_id, assessment_type, risk_level)
-
-# AFTER (ORM)
-from solace_infrastructure.database.entities import SafetyAssessment
-assessment = SafetyAssessment(
-    id=assessment_id,
-    user_id=user_id,
-    assessment_type=assessment_type,
-    risk_level=risk_level
-)
-session.add(assessment)
-await session.commit()
-```
+| Task | Description | Issues Resolved |
+|------|-------------|-----------------|
+| T2.1 | Create 6 missing centralized entity modules | IMPL-CRIT-01, MEDIUM-002 |
+| T2.2 | Wire LangGraph postgres checkpointer | IMPL-CRIT-07, EVT-HIGH-07 |
+| T2.3 | Fix personality postgres_repository schema mismatch | CRITICAL-076 |
+| T2.4 | Wire memory service to persistent storage | IMPL-CRIT-02, CRITICAL-064, EVT-HIGH-06 |
+| T2.5 | Wire EncryptedFieldMixin to actual Encryptor | SEC-HIGH-05, MEDIUM-012 |
+| T2.6 | Create safety entity mapper layer | INT-CRIT-03 |
+| T2.7 | Fix database name mismatch | CFG-CRIT-04 |
+| T2.8 | Implement PostgreSQL audit store | CRITICAL-010, CRITICAL-011 |
+| T2.9 | Fix in-memory state store + wire postgres | CRITICAL-087, MEDIUM-109 |
+| T2.10 | Fix in-memory repos default to postgres | IMPL-CRIT-04, HIGH-007 |
+| T2.11 | Fix redundant `id` field redefinitions | HIGH-001 |
+| T2.12 | Fix `add_change_record()` KeyError risk | HIGH-003 |
+| T2.13 | Fix mutable default in AuditTrailMixin | CRITICAL-002 |
+| T2.14 | Fix Schema Registry name collision | CRITICAL-003 |
 
 ---
 
-### Phase 1.5: Deprecate In-Memory Repositories (Week 4)
+## Tier 3 — Safety Pipeline & Crisis Flow — PENDING
 
-**Status:** ⏳ PENDING
-**Goal:** Remove mock implementations with production runtime guards
-
-**Target Files:**
-- `services/safety_service/src/infrastructure/repository.py` (Lines 176-208: InMemorySafetyAssessmentRepository)
-- `services/user-service/src/infrastructure/repository.py` (InMemoryUserRepository)
-- Other in-memory repository implementations
-
-**Deprecation Strategy:**
-1. Add `@deprecated` decorators with migration timeline
-2. Add runtime environment checks (raise error in production)
-3. Add logging warnings in development/staging
-4. Provide clear migration path in error messages
-5. Remove in-memory code after 2-sprint grace period
-
-**Implementation:**
-```python
-import os
-from deprecated import deprecated
-
-@deprecated(
-    version="2.0.0",
-    reason="In-memory repositories are deprecated. Use PostgreSQL-backed repositories instead.",
-    action="error"  # Raises DeprecationError
-)
-class InMemorySafetyAssessmentRepository(SafetyAssessmentRepository):
-    def __init__(self):
-        if os.getenv("ENVIRONMENT") == "production":
-            raise RuntimeError(
-                "In-memory repositories are not allowed in production. "
-                "Configure PostgreSQL connection via POSTGRES_* environment variables."
-            )
-        logger.warning("Using in-memory repository - data will not persist!")
-```
+| Task | Description | Issues |
+|------|-------------|--------|
+| T3.1 | Replace hardcoded notification fallback emails | CRITICAL-111, INT-CRIT-02, HIGH-088, HIGH-090, HIGH-115 |
+| T3.2 | Fix SMS truncation losing safety info | CRITICAL-112, MEDIUM-062 |
+| T3.3 | Wire crisis handler to supervisor routing | CRITICAL-080 |
+| T3.4 | Unify crisis/risk level enums | INT-CRIT-05 |
+| T3.5 | Fix safety event bridge to convert all 6 event types | INT-CRIT-04, INT-HIGH-05 |
+| T3.6 | Fix safety confidence inversion | HIGH-120 |
+| T3.7 | Fix safety content filter false positives | HIGH-123 |
+| T3.8 | Populate crisis resources in safety agent | HIGH-119 |
+| T3.9 | Fix safety LLM assessor mock fallback | IMPL-CRIT-03 |
+| T3.10 | Add crisis notification deduplication | HIGH-114 |
+| T3.11 | Fix safety token budget — never zero | HIGH-086, HIGH-087 |
 
 ---
 
-## Phase 2: Security Critical Fixes (Weeks 5-7)
+## Tier 4 — Event Bus & Orchestrator Integration — PENDING
 
-**Priority:** HIGH
-**Goal:** Achieve HIPAA compliance, eliminate security vulnerabilities
-
-### Phase 2.1: PostgreSQL-Backed Audit Store (Week 5)
-
-**Status:** ⏳ PENDING
-**Goal:** Replace in-memory audit logs with persistent PostgreSQL storage
-
-**Deliverables:**
-- `src/solace_security/audit/postgres_audit_store.py` - PostgreSQL audit backend
-- Migration script for audit_logs table
-- Retention policy implementation (90-day clinical data, 7-year compliance data)
-
-**Schema:**
-```sql
-CREATE TABLE audit_logs (
-    id UUID PRIMARY KEY,
-    timestamp TIMESTAMPTZ NOT NULL,
-    user_id UUID NOT NULL,
-    action VARCHAR(100) NOT NULL,
-    resource_type VARCHAR(100) NOT NULL,
-    resource_id UUID,
-    outcome VARCHAR(20) NOT NULL,  -- success, failure, denied
-    metadata JSONB,
-    ip_address INET,
-    user_agent TEXT,
-    session_id UUID,
-    encryption_key_id VARCHAR(64) NOT NULL,  -- Encrypted at rest
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX idx_audit_user_timestamp ON audit_logs (user_id, timestamp DESC);
-CREATE INDEX idx_audit_resource ON audit_logs (resource_type, resource_id);
-CREATE INDEX idx_audit_action ON audit_logs (action, timestamp DESC);
-```
+| Task | Description | Issues |
+|------|-------------|--------|
+| T4.1 | Create Kafka event bridges for remaining 5 services | EVT-HIGH-03 |
+| T4.2 | Move event outbox from in-memory to Postgres | EVT-HIGH-02 |
+| T4.3 | Fix async/sync mismatches in LangGraph agent nodes | CRITICAL-082, CRITICAL-083, CRITICAL-084, HIGH-084, HIGH-115 |
+| T4.4 | Move DLQ from in-memory to Postgres | EVT-HIGH-01, HIGH-034 |
+| T4.5 | Fix orchestrator EventBus sync handler invocation | EVT-CRIT-02 |
+| T4.6 | Align dual divergent event schemas | EVT-CRIT-03, EVT-CRIT-04 |
+| T4.7 | Remove local stubs shadowing real agent imports | CRITICAL-079 |
+| T4.8 | Fix response aggregation silent failure | CRITICAL-085 |
+| T4.9 | Wire ServiceAuthenticatedClient for inter-service calls | INT-CRIT-01 |
+| T4.10 | Add WebSocket authentication | SEC-CRIT-03, CRITICAL-056, MEDIUM-110 |
+| T4.11 | Fix safety_flags merge losing data | HIGH-116 |
+| T4.12 | Fix WebSocket zombie connections | HIGH-127 |
+| T4.13 | Fix service client retry — use exponential backoff | HIGH-125, HIGH-100 |
+| T4.14 | Fix state serialization lossy `default=str` | HIGH-126 |
 
 ---
 
-### Phase 2.2: Enforce Encryption at Rest ✅ COMPLETED
+## Tier 5 — Configuration, Testing & CI/CD — PENDING
 
-**Status:** ✅ COMPLETED
-**Completion Date:** 2026-02-07
-
-**Achievements:**
-- ✅ Made `encryption_key_id` NOT NULL in EncryptedFieldMixin
-- ✅ Added EncryptedFieldMixin to ClinicalBase
-- ✅ Added AuditTrailMixin for PHI access tracking
-- ✅ Updated all clinical entities to inherit from ClinicalBase
-
-**Key Changes:**
-```python
-class EncryptedFieldMixin:
-    encryption_key_id: Mapped[str] = mapped_column(
-        String(64),
-        nullable=False,  # ← ENFORCED (was nullable=True)
-        index=True,
-        comment="ID of encryption key used for PHI fields (REQUIRED)"
-    )
-```
+| Task | Description | Issues |
+|------|-------------|--------|
+| T5.1 | Enable CI/CD pipeline stages | CFG-CRIT-03, HIGH-096, HIGH-100 |
+| T5.2 | Create integration tests for core therapy flow | IMPL-HIGH-07, IMPL-CRIT-06 |
+| T5.3 | Replace mock-based tests with real behavior tests | CRITICAL-014 to 018, HIGH-015 to 027 |
+| T5.4 | Prune unused dependencies | IMPL-HIGH-06, HIGH-098 |
+| T5.5 | Fix percentile calculation in analytics | CRITICAL-116, MEDIUM-066 |
+| T5.6 | Create per-service requirements.txt | HIGH-098 |
+| T5.7 | Pin dependency versions | HIGH-099, HIGH-101, LOW-011, LOW-012 |
+| T5.8 | Fix env prefix collisions | CFG-CRIT-02, CFG-HIGH-03 to 05, CFG-HIGH-13 |
+| T5.9 | Fix Docker naming + add missing entries | CFG-CRIT-07, CFG-CRIT-08, MEDIUM-072, MEDIUM-073 |
+| T5.10 | Fix Kafka config inconsistencies | CFG-HIGH-07, CFG-HIGH-06 |
+| T5.11 | Fix Ruff ignoring hardcoded password detection | MEDIUM-075 |
+| T5.12 | Fix Python version inconsistency | Verified remaining |
+| T5.13 | Fix pytest-asyncio version pin | CFG-HIGH-08 |
 
 ---
 
-### Phase 2.3: Enable SSL/TLS by Default (Week 6)
+## Tier 6 — Security Hardening — PENDING
 
-**Status:** ⏳ PENDING
-**Goal:** Enforce encrypted database connections in production
-
-**Implementation:**
-- Update `PostgresSettings.ssl_mode` default from "prefer" to "require"
-- Add SSL certificate validation
-- Environment-based SSL configuration (disabled in local dev, required in production)
-- Comprehensive logging for SSL connection attempts
-
-**Configuration:**
-```python
-class PostgresSettings(BaseSettings):
-    ssl_mode: str = Field(
-        default="require",  # Changed from "prefer"
-        description="SSL mode: disable, allow, prefer, require, verify-ca, verify-full"
-    )
-    ssl_cert: str | None = Field(default=None, description="Path to SSL certificate")
-    ssl_key: str | None = Field(default=None, description="Path to SSL key")
-    ssl_root_cert: str | None = Field(default=None, description="Path to root certificate")
-```
-
----
-
-### Phase 2.4: Production Environment Guards (Week 7)
-
-**Status:** ⏳ PENDING
-**Goal:** Prevent development keys/credentials in production
-
-**Implementation:**
-```python
-# src/solace_security/production_guards.py
-class ProductionGuardService:
-    """Prevents dangerous development settings in production."""
-
-    FORBIDDEN_IN_PRODUCTION = [
-        "SECRET_KEY=dev",
-        "DEBUG=true",
-        "ENCRYPTION_KEY=test",
-        "POSTGRES_PASSWORD=postgres",
-    ]
-
-    @classmethod
-    def validate_environment(cls) -> None:
-        """Raise error if dangerous settings detected in production."""
-        if os.getenv("ENVIRONMENT") != "production":
-            return
-
-        violations = []
-        for forbidden in cls.FORBIDDEN_IN_PRODUCTION:
-            key, value = forbidden.split("=")
-            if os.getenv(key, "").lower() == value.lower():
-                violations.append(f"{key} is set to development value")
-
-        if violations:
-            raise SecurityError(
-                "Production environment validation failed:\n" +
-                "\n".join(f"  - {v}" for v in violations)
-            )
-```
+| Task | Description | Issues |
+|------|-------------|--------|
+| T6.1 | Fix feature flag decorator async support | CRITICAL-005 |
+| T6.2 | Fix Kafka ImportError fallback — fail loud | CRITICAL-021 |
+| T6.3 | Change SASL credentials to SecretStr | CRITICAL-022 |
+| T6.4 | Fix audit log index immutability | CRITICAL-023 |
+| T6.5 | Change API keys to SecretStr in Portkey client | HIGH-028 |
+| T6.6 | Fix ownership policy overly permissive matching | HIGH-011 |
+| T6.7 | Implement `validate_auth_settings()` | HIGH-012 |
+| T6.8 | Add SSL certificate validation | HIGH-013, HIGH-014 |
+| T6.9 | Wire PHI sanitizer into logging pipeline | SEC-HIGH-03, MEDIUM-013, MEDIUM-014 |
+| T6.10 | Fix email verification user-token binding | HIGH-106 |
+| T6.11 | Fix event handler dispatch logic | HIGH-092 |
+| T6.12 | Fix unsafe UUID parsing in analytics consumer | HIGH-093 |
+| T6.13 | Add missing event category handlers | HIGH-094 |
+| T6.14 | Fix Kafka consumer failure swallowed at startup | HIGH-113 |
+| T6.15 | Fix Redis PubSub listener restart on error | HIGH-035 |
+| T6.16 | Fix DLQ jitter calculated twice | MEDIUM-030 |
+| T6.17 | Fix unknown event type silent BaseEvent | HIGH-032 |
+| T6.18 | Add connection timeout to ConnectionPoolManager | HIGH-004 |
+| T6.19 | Fix metrics reset race condition | HIGH-006 |
+| T6.20 | Fix Weaviate anonymous access | MEDIUM-070 |
 
 ---
 
-## Phase 3: Comprehensive Testing (Weeks 8-10)
+## Tier 7 — ML, Features & Polish — PENDING
 
-**Priority:** MEDIUM
-**Goal:** Achieve 80%+ test coverage on critical paths
-
-### Phase 3.1: Security Test Suite (Week 8)
-
-**Status:** ⏳ PENDING
-
-**Test Files to Create:**
-- `tests/security/test_authentication.py` - JWT validation, token expiry, refresh flow
-- `tests/security/test_authorization.py` - RBAC, permission checks, scope validation
-- `tests/security/test_encryption.py` - At-rest encryption, key rotation, decryption
-- `tests/security/test_audit.py` - Audit log integrity, retention, queries
-- `tests/security/test_rbac.py` - Role assignments, permission inheritance
-- `tests/security/test_session_management.py` - Session creation, expiry, invalidation
-- `tests/security/test_input_validation.py` - SQL injection, XSS, CSRF prevention
-
----
-
-### Phase 3.2: Database Integration Tests (Week 9)
-
-**Status:** ⏳ PENDING
-
-**Test Files to Create:**
-- `tests/infrastructure/test_connection_pool.py` - Pool creation, singleton behavior, concurrency
-- `tests/infrastructure/test_encryption_integration.py` - End-to-end encryption flow
-- `tests/infrastructure/test_migrations.py` - Migration idempotency, rollback
-- `tests/infrastructure/test_repository_implementations.py` - CRUD operations, error handling
+| Task | Description | Issues |
+|------|-------------|--------|
+| T7.1 | Choose ML architecture (Portkey vs generic) | CRITICAL-019, CRITICAL-020, IMPL-HIGH-01, IMPL-HIGH-04 |
+| T7.2 | Replace personality ML stubs with real models | CRITICAL-071, HIGH-104 |
+| T7.3 | Fix LLM detector timeout enforcement | CRITICAL-073 |
+| T7.4 | Wire vector search for memory retrieval | IMPL-HIGH-05 |
+| T7.5 | Wire PHI sanitizer into request/response pipeline | SEC-HIGH-03 |
+| T7.6 | Implement missing analytics report generators | HIGH-119 (P9-10) |
+| T7.7 | Fix bare `except Exception` in all 6 ML providers | HIGH-029 |
+| T7.8 | Fix ProfileStore race condition | HIGH-102 (P7-8) |
+| T7.9 | Fix StructureAdjuster no-op | HIGH-122 (P7-8) |
+| T7.10 | Fix embedding cache — add LRU eviction | HIGH-105 (P7-8) |
+| T7.11 | Fix generator misattributes AgentType | HIGH-124 |
+| T7.12 | Fix multimodal division by zero | HIGH-107 (P7-8) |
+| T7.13 | Fix compassionate strategy missing affective | HIGH-108 (P7-8) |
+| T7.14 | Fix orphaned ensemble weight validator | HIGH-112 |
+| T7.15 | Export PostgresPersonalityRepository | HIGH-113 |
+| T7.16 | Fix user_id defaults to random UUID | HIGH-109 (P7-8) |
+| T7.17 | Delete duplicate `services/user_service/` | COMPLETE (cleanup) |
+| T7.18 | Delete archive directory | COMPLETE (cleanup) |
 
 ---
 
-### Phase 3.3: Contract Tests (Week 10)
+## All Resolved Issue IDs (Tiers 0-2)
 
-**Status:** ⏳ PENDING
+For cross-referencing with review documents:
 
-**Test Files to Create:**
-- `tests/contracts/test_safety_service_contracts.py` - Safety service API contracts
-- `tests/contracts/test_user_service_contracts.py` - User service API contracts
-- `tests/contracts/test_orchestrator_contracts.py` - Orchestrator service contracts
+**CRITICAL resolved (51):** CRITICAL-001, 002, 003, 004, 006, 007, 008, 010, 011, 056, 057, 058, 059, 060, 061, 062, 063, 064, 065, 066, 067, 068, 069, 070, 072, 074, 076, 077, 078, 081, 087, 088, 099, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 113, 114, 115, 117, 118, 119
 
----
+**HIGH resolved (31):** HIGH-001, 003, 007, 008, 009, 074, 075, 076, 077, 078, 079, 080, 091, 095, 097, 102, 105, 107, 110, 111, 114, 122
 
-## Phase 4: ML Integration with Portkey (Weeks 11-13)
+**MEDIUM resolved (8):** MEDIUM-002, 012, 054, 099, 102, 104, 105, 109
 
-**Priority:** MEDIUM
-**Goal:** Eliminate 600-800 lines of duplicated provider code
-
-### Phase 4.1: Portkey Client Integration (Week 11)
-
-**Status:** ⏳ PENDING
-
-**Deliverables:**
-- `src/solace_ml/providers/portkey_client.py` - Unified Portkey wrapper
-- Remove duplicate provider implementations (OpenAI, Anthropic, Google, Cohere)
-- Centralized provider configuration
-
-**Benefits:**
-- Single integration point for all LLM providers
-- Built-in retries, timeouts, fallbacks
-- Cost tracking and analytics
-- Unified parameter format across providers
+**Cross-cutting resolved (20):** SEC-CRIT-01, 02, 03, 04, 05, 07; SEC-HIGH-01, 05; INT-CRIT-03, 05; INT-HIGH-06, 08; CFG-CRIT-01, 04, 05, 06; CFG-HIGH-01, 02; IMPL-CRIT-01, 02, 04, 05, 07; EVT-CRIT-01; EVT-HIGH-06, 07
 
 ---
 
-### Phase 4.2: Consolidate Provider Code (Week 11-12)
-
-**Status:** ⏳ PENDING
-
-**Code Elimination:**
-- Remove `src/solace_ml/providers/openai_provider.py` (~150 lines)
-- Remove `src/solace_ml/providers/anthropic_provider.py` (~180 lines)
-- Remove `src/solace_ml/providers/google_provider.py` (~160 lines)
-- Remove `src/solace_ml/providers/cohere_provider.py` (~140 lines)
-- Remove `src/solace_ml/providers/together_provider.py` (~120 lines)
-
-**Replace with:**
-- Single `PortkeyClient` (~100 lines)
-- **Net reduction:** 750 - 100 = **650 lines eliminated**
-
----
-
-### Phase 4.3: Parameter Auto-Adjustment (Week 12)
-
-**Status:** ⏳ PENDING
-
-**Add Missing Parameters to LLMSettings:**
-```python
-class LLMSettings(BaseModel):
-    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    top_p: float = Field(default=0.9, ge=0.0, le=1.0)  # MISSING
-    top_k: int = Field(default=40, ge=1, le=100)  # MISSING
-    repeat_penalty: float = Field(default=1.1, ge=0.0, le=2.0)  # MISSING
-    frequency_penalty: float = Field(default=0.0, ge=-2.0, le=2.0)  # MISSING
-    presence_penalty: float = Field(default=0.0, ge=-2.0, le=2.0)  # MISSING
-```
-
-**ParameterTuner Implementation:**
-```python
-class ParameterTuner:
-    """Intelligently adjusts LLM parameters based on response quality."""
-
-    def adjust_for_task(self, task_type: str, settings: LLMSettings) -> LLMSettings:
-        """Optimize parameters for specific task types."""
-        if task_type == "creative_writing":
-            settings.temperature = 0.9
-            settings.top_p = 0.95
-        elif task_type == "clinical_analysis":
-            settings.temperature = 0.3
-            settings.top_p = 0.85
-            settings.repeat_penalty = 1.2
-        # ... more task types
-        return settings
-```
-
----
-
-### Phase 4.4: Circuit Breaker Pattern (Week 13)
-
-**Status:** ⏳ PENDING
-
-**Implementation:**
-```python
-class ProviderHealthManager:
-    """Manages provider health and automatic failover."""
-
-    def __init__(self):
-        self._health_status: dict[str, ProviderHealth] = {}
-        self._circuit_breakers: dict[str, CircuitBreaker] = {}
-
-    async def call_with_failover(
-        self,
-        providers: list[str],
-        prompt: str,
-        **kwargs
-    ) -> LLMResponse:
-        """Call providers with automatic failover on failure."""
-        for provider in providers:
-            if self._circuit_breakers[provider].is_open:
-                continue  # Skip unhealthy provider
-
-            try:
-                response = await self._call_provider(provider, prompt, **kwargs)
-                self._circuit_breakers[provider].record_success()
-                return response
-            except ProviderError:
-                self._circuit_breakers[provider].record_failure()
-
-        raise AllProvidersFailedError()
-```
-
----
-
-## Phase 5: Granular Permissions (Week 14)
-
-**Priority:** LOW
-**Goal:** Implement fine-grained service-to-service authorization
-
-### Phase 5.1: Define Service Permissions (Week 14)
-
-**Status:** ⏳ PENDING
-
-**AGENT_PERMISSIONS Matrix:**
-```python
-AGENT_PERMISSIONS = {
-    "safety_agent": {
-        "safety_service": ["read", "create_assessment", "update_plan"],
-        "user_service": ["read_profile"],
-        "notification_service": ["send_alert"],
-    },
-    "therapy_agent": {
-        "therapy_service": ["read", "create_session", "update_notes"],
-        "user_service": ["read_profile"],
-        "safety_service": ["read_assessment"],
-    },
-    # ... more agents
-}
-```
-
----
-
-### Phase 5.2: Scoped Service Tokens (Week 14)
-
-**Status:** ⏳ PENDING
-
-**Implementation:**
-- Generate scoped JWT tokens for inter-service communication
-- Token includes `allowed_services` and `allowed_operations` claims
-- Middleware validates tokens on every service call
-
----
-
-### Phase 5.3: Permission Auditing (Week 14)
-
-**Status:** ⏳ PENDING
-
-**Implementation:**
-- Log all permission checks (granted and denied)
-- Alert on repeated permission violations
-- Dashboard for permission usage analytics
-
----
-
-## Phase 6: Migration & Rollout (Weeks 15-16)
-
-**Priority:** LOW
-**Goal:** Safe production deployment with rollback capability
-
-### Phase 6.1: Feature Flags (Week 15)
-
-**Status:** ⏳ PENDING
-
-**FeatureFlagManager:**
-```python
-class FeatureFlagManager:
-    """Manages gradual feature rollout with kill switches."""
-
-    FLAGS = {
-        "use_connection_pool_manager": {"enabled": True, "rollout_percentage": 100},
-        "use_centralized_entities": {"enabled": True, "rollout_percentage": 50},
-        "use_portkey_integration": {"enabled": False, "rollout_percentage": 0},
-    }
-```
-
----
-
-### Phase 6.2: Migration Scripts (Week 15-16)
-
-**Status:** ⏳ PENDING
-
-**Scripts to Create:**
-- `migrations/001_add_encryption_fields.sql` - Add encryption_key_id to existing tables
-- `migrations/002_add_audit_trail_fields.sql` - Add access tracking columns
-- `migrations/003_create_audit_logs_table.sql` - Persistent audit storage
-- `migrations/004_add_ssl_enforcement.sql` - Update connection settings
-
----
-
-### Phase 6.3: Migration Documentation (Week 16)
-
-**Status:** ⏳ PENDING
-
-**Documentation to Create:**
-- `MIGRATION_GUIDE.md` - Step-by-step migration instructions
-- `ROLLBACK_PROCEDURES.md` - Emergency rollback procedures
-- `TESTING_CHECKLIST.md` - Pre-deployment testing checklist
-
----
-
-## Progress Tracking
-
-### Overall Progress by Phase
-
-| Phase | Description | Status | Progress | Week |
-|-------|-------------|--------|----------|------|
-| 1.1 | Schema Registry | ✅ Complete | 100% | 1 |
-| 1.2 | Connection Pooling | ✅ Complete | 100% | 1-2 |
-| 1.3 | Eliminate Pass Statements | 🔄 In Progress | 40% | 2-3 |
-| 1.4 | Migrate SQL to ORM | ⏳ Pending | 0% | 3-4 |
-| 1.5 | Deprecate In-Memory | ✅ Complete | 100% | 4 |
-| 2.1 | Audit Store | ⏳ Pending | 0% | 5 |
-| 2.2 | Encryption Enforcement | ✅ Complete | 100% | 1 |
-| 2.3 | SSL/TLS | ⏳ Pending | 0% | 6 |
-| 2.4 | Production Guards | ⏳ Pending | 0% | 7 |
-| 3.1 | Security Tests | ⏳ Pending | 0% | 8 |
-| 3.2 | Database Tests | ⏳ Pending | 0% | 9 |
-| 3.3 | Contract Tests | ⏳ Pending | 0% | 10 |
-| 4.1 | Portkey Integration | ⏳ Pending | 0% | 11 |
-| 4.2 | Consolidate Providers | ⏳ Pending | 0% | 11-12 |
-| 4.3 | Parameter Tuning | ⏳ Pending | 0% | 12 |
-| 4.4 | Circuit Breaker | ⏳ Pending | 0% | 13 |
-| 5.1 | Service Permissions | ⏳ Pending | 0% | 14 |
-| 5.2 | Scoped Tokens | ⏳ Pending | 0% | 14 |
-| 5.3 | Permission Auditing | ⏳ Pending | 0% | 14 |
-| 6.1 | Feature Flags | ⏳ Pending | 0% | 15 |
-| 6.2 | Migration Scripts | ⏳ Pending | 0% | 15-16 |
-| 6.3 | Migration Docs | ⏳ Pending | 0% | 16 |
-
-### Key Metrics
-
-| Metric | Before | Target | Current | Progress |
-|--------|--------|--------|---------|----------|
-| Pass Statements | 70+ | 0 | 55 | 21% |
-| Connection Pools | ~40 | ~12 | ~38 | 5% |
-| Duplicated ML Code | 750 lines | 100 lines | 750 lines | 0% |
-| Test Coverage | 0% | 80% | 0% | 0% |
-| HIPAA Compliance | 40% | 100% | 60% | 50% |
-
----
-
-## Risk Register
-
-| Risk | Severity | Mitigation |
-|------|----------|------------|
-| Connection pool migration breaks production | HIGH | Feature flags, gradual rollout, comprehensive testing |
-| Encryption key rotation causes data loss | HIGH | Backup before migration, test key rotation in staging |
-| Performance regression from ORM migration | MEDIUM | Benchmark before/after, optimize hot paths |
-| Breaking changes to service APIs | MEDIUM | Contract tests, versioned APIs, deprecation warnings |
-| Team bandwidth insufficient for 16-week timeline | MEDIUM | Prioritize Phase 1-2, defer Phase 4-6 if needed |
-
----
-
-## Success Criteria
-
-### Phase 1 (Database) Success Metrics:
-- ✅ Zero pass statements in production repositories
-- ✅ Connection pools reduced from ~40 to ~12 (70% reduction)
-- ✅ All entities use centralized schema registry
-- ✅ All queries use parameterized ORM (no raw SQL in business logic)
-- ✅ In-memory repositories removed from production
-
-### Phase 2 (Security) Success Metrics:
-- ✅ 100% of PHI encrypted at rest with mandatory encryption_key_id
-- ✅ All database connections use SSL/TLS in production
-- ✅ Audit logs persisted to PostgreSQL with 90-day retention
-- ✅ Zero development keys/credentials in production environment
-
-### Phase 3 (Testing) Success Metrics:
-- ✅ 80%+ test coverage on security module
-- ✅ 70%+ test coverage on database infrastructure
-- ✅ Contract tests for all inter-service communication
-- ✅ All critical paths covered by integration tests
-
-### Phase 4 (ML Integration) Success Metrics:
-- ✅ 650+ lines of duplicated provider code eliminated
-- ✅ All LLM calls routed through Portkey
-- ✅ Auto-parameter adjustment based on task type
-- ✅ Circuit breaker prevents cascading provider failures
-
----
-
-## Appendix
-
-### Related Documentation
-- [Architecture Decision Records](./architecture/ADRs/)
-- [Database Schema Documentation](./database/SCHEMA.md)
-- [Security Implementation Guide](./security/IMPLEMENTATION.md)
-- [Testing Strategy](./testing/STRATEGY.md)
+## Review Documents
+
+- [Phase 1-2 Code Review](./PHASE_1_2_CODE_REVIEW.md) — 65 issues (13 critical)
+- [Phase 3-4 Code Review](./PHASE_3_4_CODE_REVIEW.md) — 80 issues (12 critical)
+- [Phase 5-6 Code Review](./PHASE_5_6_CODE_REVIEW.md) — 79 issues (12 critical)
+- [Phase 7-8 Code Review](./PHASE_7_8_CODE_REVIEW.md) — 98 issues (21 critical)
+- [Phase 9-10 Code Review](./PHASE_9_10_CODE_REVIEW.md) — 79 issues (21 critical)
+- [Cross-Cutting Review](./CROSS_CUTTING_REVIEW.md) — ~95 issues (~30 critical)

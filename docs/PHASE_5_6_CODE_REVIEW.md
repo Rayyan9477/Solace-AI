@@ -32,6 +32,64 @@
 | Phase 5-6 | 12 | 36 | 26 | 5 | 79 |
 | **Grand Total** | **37** | **77** | **75** | **35** | **224** |
 
+### Resolution Status (Updated 2026-02-08)
+
+**12 of 12 critical resolved. 12 of 28 high resolved. 1 of 26 medium resolved.**
+
+#### Critical Issues
+
+| Issue ID | Description | Status | Fix Reference |
+|----------|-------------|--------|---------------|
+| CRITICAL-056 | WebSocket endpoint zero authentication | **RESOLVED** | T1.3 |
+| CRITICAL-057 | Escalation endpoint unauthenticated | **RESOLVED** | T1.3 |
+| CRITICAL-058 | Orchestrator batch/session endpoints missing auth | **RESOLVED** | T1.3 |
+| CRITICAL-059 | Hardcoded JWT secret default | **RESOLVED** | T0.4 |
+| CRITICAL-060 | Admin role bypasses all authorization | **RESOLVED** | T1.5 |
+| CRITICAL-061 | Service token accepts arbitrary permission escalation | **RESOLVED** | T1.6 |
+| CRITICAL-062 | Memory node calls non-existent method | **RESOLVED** | T0.9 |
+| CRITICAL-063 | Memory node uses wrong AgentType | **RESOLVED** | T0.19 |
+| CRITICAL-064 | Unbounded memory growth in all tiers | **RESOLVED** | T2.4 |
+| CRITICAL-065 | Consolidation crashes when pipeline is None | **RESOLVED** | T0.20 |
+| CRITICAL-066 | Missing relative import breaks analytics | **RESOLVED** | T0.10 |
+| CRITICAL-067 | .env file with secrets committed to repo | **RESOLVED** | T0.4 |
+
+#### High Issues
+
+| Issue ID | Description | Status | Fix Reference |
+|----------|-------------|--------|---------------|
+| HIGH-074 | String-based role checks throughout all services | **RESOLVED** | T1.12 |
+| HIGH-075 | Therapy service endpoints mostly unauthenticated | **RESOLVED** | T1.3 |
+| HIGH-076 | Memory service cross-user data access | **RESOLVED** | T1.3 |
+| HIGH-077 | Service-to-service auth without user verification | **RESOLVED** | T1.14 |
+| HIGH-078 | Token blacklist in-memory & optional | **RESOLVED** | T1.4 |
+| HIGH-079 | Invalid role silently ignored | **RESOLVED** | T1.12 |
+| HIGH-080 | Detailed health endpoint leaks info without auth | **RESOLVED** | T1.3 |
+| HIGH-081 | Failed service identity not logged as security event | OPEN | Backlog |
+| HIGH-082 | Safety agent returns None content for non-crisis | OPEN | Backlog |
+| HIGH-083 | Hardcoded crisis response bypasses safety service | OPEN | Backlog |
+| HIGH-084 | ChatAgent.process() is synchronous in async graph | OPEN | Tier 4 (T4.3) |
+| HIGH-085 | Semantic filter is just substring match | OPEN | Tier 7 (T7.4) |
+| HIGH-086 | Safety context can get zero tokens | OPEN | Tier 3 (T3.11) |
+| HIGH-087 | Token budget can go negative | OPEN | Tier 3 (T3.11) |
+| HIGH-088 | Hardcoded fallback email addresses | OPEN | Tier 3 (T3.1) |
+| HIGH-089 | Google auth hard failure with no fallback | OPEN | Backlog |
+| HIGH-090 | Placeholder clinician email construction | OPEN | Tier 3 (T3.1) |
+| HIGH-091 | SQL injection in LIMIT clause | **RESOLVED** | T0.5 |
+| HIGH-092 | Event handler dispatch logic inverted | OPEN | Tier 6 (T6.11) |
+| HIGH-093 | Unsafe UUID parsing masks data corruption | OPEN | Tier 6 (T6.12) |
+| HIGH-094 | Missing event category handlers | OPEN | Tier 6 (T6.13) |
+| HIGH-095 | Mutable defaults in auth fallback dataclass | **RESOLVED** | T1.2 |
+| HIGH-096 | All CI/CD pipeline steps disabled | OPEN | Tier 5 (T5.1) |
+| HIGH-097 | Hardcoded default secrets in docker-compose | **RESOLVED** | T0.4 |
+| HIGH-098 | 6 services missing requirements.txt | OPEN | Tier 5 (T5.6) |
+| HIGH-099 | Loose version constraints in root requirements | OPEN | Tier 5 (T5.7) |
+| HIGH-100 | Pre-commit CI skips type checking and tests | OPEN | Tier 5 (T5.1) |
+| HIGH-101 | Uvicorn version inconsistency | OPEN | Tier 5 (T5.7) |
+
+#### Medium/Low Summary
+- MEDIUM-054 (Safety /status endpoint without auth): **RESOLVED** (T1.3)
+- Remaining 25 medium + 5 low: OPEN (planned for Tiers 3-7 or backlog)
+
 ---
 
 ## PHASE 5: GRANULAR PERMISSIONS & INTER-SERVICE AUTH

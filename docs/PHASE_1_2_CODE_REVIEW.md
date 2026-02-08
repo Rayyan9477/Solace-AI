@@ -20,6 +20,45 @@
 
 ---
 
+## Resolution Status (Updated 2026-02-08)
+
+**Resolved: 13/13 critical, 10/17 high** via Tiers 0-2 of remediation plan.
+
+| Issue ID | Severity | Status | Fix Reference |
+|----------|----------|--------|---------------|
+| CRITICAL-001 | Critical | **RESOLVED** | T0.7 — Fixed `any` → `Any` in safety_entities.py |
+| CRITICAL-002 | Critical | **RESOLVED** | T2.13 — Added `server_default` to change_history |
+| CRITICAL-003 | Critical | **RESOLVED** | T2.14 — Added class name collision warnings in SchemaRegistry |
+| CRITICAL-004 | Critical | **RESOLVED** | T0.14 — Fixed race condition with class-level asyncio.Lock |
+| CRITICAL-005 | Critical | OPEN | Planned: T6.1 |
+| CRITICAL-006 | Critical | **RESOLVED** | T0.1 — Fixed `_acquire()` → `_client.acquire()` |
+| CRITICAL-007 | Critical | **RESOLVED** | T0.15 — Added AssessmentType import |
+| CRITICAL-008 | Critical | **RESOLVED** | T1.16 — Made token blacklist mandatory |
+| CRITICAL-009 | Critical | OPEN | Backlog |
+| CRITICAL-010 | Critical | **RESOLVED** | T2.8 — Implemented PostgresAuditStore |
+| CRITICAL-011 | Critical | **RESOLVED** | T2.8 — Added HMAC chain integrity |
+| CRITICAL-012 | Critical | OPEN | Backlog |
+| CRITICAL-013 | Critical | OPEN | Backlog |
+| HIGH-001 | High | **RESOLVED** | T2.11 — Removed redundant id fields |
+| HIGH-002 | High | OPEN | Backlog |
+| HIGH-003 | High | **RESOLVED** | T2.12 — Fixed KeyError in add_change_record() |
+| HIGH-004 | High | OPEN | Planned: T6.18 |
+| HIGH-005 | High | OPEN | Backlog |
+| HIGH-006 | High | OPEN | Planned: T6.19 |
+| HIGH-007 | High | **RESOLVED** | T2.10 — Factory defaults to postgres in production |
+| HIGH-008 | High | **RESOLVED** | T1.4 — Replaced with Redis-backed store |
+| HIGH-009 | High | **RESOLVED** | T1.4 — Replaced with Redis-backed store |
+| HIGH-010 | High | OPEN | Backlog |
+| HIGH-011 | High | OPEN | Planned: T6.6 |
+| HIGH-012 | High | OPEN | Planned: T6.7 |
+| HIGH-013 | High | OPEN | Planned: T6.8 |
+| HIGH-014 | High | OPEN | Planned: T6.8 |
+| HIGH-015 to 027 | High | OPEN | Planned: T5.3 (test fixes) |
+| HIGH-028 | High | OPEN | Planned: T6.5 |
+| HIGH-029 | High | OPEN | Planned: T7.7 |
+
+---
+
 ## PHASE 1: DATABASE INFRASTRUCTURE
 
 ### Batch 1.1 - Schema Registry & Entities

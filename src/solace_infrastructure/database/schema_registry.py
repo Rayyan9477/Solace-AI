@@ -42,6 +42,7 @@ class SchemaRegistry:
 
     _entities: Dict[str, Type[BaseModel]] = {}
     _registered_tables: set[str] = set()
+    _class_names: Dict[str, list[str]] = {}  # class_name -> [table_names]
 
     @classmethod
     def register(cls, entity_class: Type[T]) -> Type[T]:
@@ -82,6 +83,20 @@ class SchemaRegistry:
                     f"{existing_class.__name__}. Cannot register {class_name}."
                 )
 
+        # Track class name collisions
+        if class_name not in cls._class_names:
+            cls._class_names[class_name] = []
+        if table_name not in cls._class_names[class_name]:
+            cls._class_names[class_name].append(table_name)
+        if len(cls._class_names[class_name]) > 1:
+            warnings.warn(
+                f"Class name '{class_name}' is used by multiple tables: "
+                f"{cls._class_names[class_name]}. Use get() with table_name "
+                f"instead of get_by_class_name() to avoid ambiguity.",
+                UserWarning,
+                stacklevel=2,
+            )
+
         # Register entity
         cls._entities[table_name] = entity_class
         cls._registered_tables.add(table_name)
@@ -117,11 +132,21 @@ class SchemaRegistry:
 
         Returns:
             The registered entity class if found, None otherwise
+
+        Warns:
+            UserWarning if multiple entities share the same class name
         """
-        for entity in cls._entities.values():
-            if entity.__name__ == class_name:
-                return entity
-        return None
+        table_names = cls._class_names.get(class_name, [])
+        if not table_names:
+            return None
+        if len(table_names) > 1:
+            warnings.warn(
+                f"Ambiguous class name '{class_name}' matches tables: "
+                f"{table_names}. Use get() with a specific table_name instead.",
+                UserWarning,
+                stacklevel=2,
+            )
+        return cls._entities.get(table_names[0])
 
     @classmethod
     def all_entities(cls) -> Dict[str, Type[BaseModel]]:
@@ -168,6 +193,7 @@ class SchemaRegistry:
         )
         cls._entities.clear()
         cls._registered_tables.clear()
+        cls._class_names.clear()
 
     @classmethod
     def get_statistics(cls) -> dict[str, int]:

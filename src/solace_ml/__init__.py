@@ -31,26 +31,6 @@ from solace_ml.openai import (
     ToolChoice,
     create_openai_client,
 )
-from solace_ml.gemini import (
-    GeminiSettings,
-    GeminiClient,
-    create_gemini_client,
-)
-from solace_ml.deepseek import (
-    DeepSeekSettings,
-    DeepSeekClient,
-    create_deepseek_client,
-)
-from solace_ml.xai import (
-    XAISettings,
-    XAIClient,
-    create_xai_client,
-)
-from solace_ml.minimax import (
-    MinimaxSettings,
-    MinimaxClient,
-    create_minimax_client,
-)
 from solace_ml.embeddings import (
     EmbeddingProvider,
     EmbeddingModel,
@@ -114,22 +94,6 @@ __all__ = [
     "OpenAIClient",
     "ToolChoice",
     "create_openai_client",
-    # Gemini
-    "GeminiSettings",
-    "GeminiClient",
-    "create_gemini_client",
-    # DeepSeek
-    "DeepSeekSettings",
-    "DeepSeekClient",
-    "create_deepseek_client",
-    # xAI
-    "XAISettings",
-    "XAIClient",
-    "create_xai_client",
-    # Minimax
-    "MinimaxSettings",
-    "MinimaxClient",
-    "create_minimax_client",
     # Embeddings
     "EmbeddingProvider",
     "EmbeddingModel",

@@ -348,7 +348,12 @@ class RepositoryFactory:
 
     @classmethod
     def get_default(cls) -> PersonalityRepositoryPort:
+        """Get default repository instance (singleton).
+
+        Defaults to PostgreSQL unless ENVIRONMENT=test or explicit in-memory config.
+        """
         if cls._instance is None:
+            env = os.getenv("ENVIRONMENT", "development")
             if cls._use_postgres and cls._postgres_client is not None:
                 from .postgres_repository import PostgresPersonalityRepository
                 cls._instance = PostgresPersonalityRepository(
@@ -356,6 +361,18 @@ class RepositoryFactory:
                     schema=cls._schema,
                 )
                 logger.info("personality_repository_created", type="postgres")
+            elif env != "test":
+                try:
+                    from solace_infrastructure.database import ConnectionPoolManager
+                    from .postgres_repository import PostgresPersonalityRepository
+                    cls._instance = PostgresPersonalityRepository(
+                        ConnectionPoolManager,
+                        schema=cls._schema,
+                    )
+                    logger.info("personality_repository_created", type="postgres_auto")
+                except (ImportError, Exception) as e:
+                    logger.warning("postgres_auto_unavailable", error=str(e), fallback="in_memory")
+                    cls._instance = cls.create_in_memory()
             else:
                 cls._instance = cls.create_in_memory()
                 logger.info("personality_repository_created", type="in_memory")

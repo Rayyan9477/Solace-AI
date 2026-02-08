@@ -33,6 +33,74 @@
 | Phase 9-10 | 21 | 27 | 21 | 10 | 79 |
 | **Grand Total** | **79** | **130** | **131** | **61** | **401** |
 
+### Resolution Status (Updated 2026-02-08)
+
+**17 of 21 critical resolved. 7 of 27 high resolved. 3 of 21 medium resolved.**
+
+#### Critical Issues
+
+| Issue ID | Description | Status | Fix Reference |
+|----------|-------------|--------|---------------|
+| CRITICAL-099 | Hardcoded default JWT secret key | **RESOLVED** | T0.4 |
+| CRITICAL-100 | Non-persistent token revocation (in-memory set) | **RESOLVED** | T1.4 |
+| CRITICAL-101 | Admin/system role bypasses all authorization | **RESOLVED** | T1.5 |
+| CRITICAL-102 | Kong admin API exposed without authentication | **RESOLVED** | T1.9 |
+| CRITICAL-103 | Wildcard CORS origins with credentials | **RESOLVED** | T1.8 |
+| CRITICAL-104 | Rate limiting is in-memory only | **RESOLVED** | T1.4 |
+| CRITICAL-105 | Route regex ReDoS vulnerability | **RESOLVED** | T1.10 |
+| CRITICAL-106 | Unauthenticated on-call clinician endpoint | **RESOLVED** | T1.3 |
+| CRITICAL-107 | Fernet encryption keys regenerated on startup | **RESOLVED** | T0.3 |
+| CRITICAL-108 | Token refresh doesn't validate session status | **RESOLVED** | T1.7 |
+| CRITICAL-109 | In-memory SessionManager | **RESOLVED** | T1.4 |
+| CRITICAL-110 | Weak email validation | **RESOLVED** | T1.11 |
+| CRITICAL-111 | Hardcoded fallback email addresses for crisis | OPEN | Tier 3 (T3.1) |
+| CRITICAL-112 | SMS truncation loses safety-critical info | OPEN | Tier 3 (T3.2) |
+| CRITICAL-113 | Auth fallback disables authentication entirely | **RESOLVED** | T1.2 |
+| CRITICAL-114 | Missing auth on ALL analytics endpoints | **RESOLVED** | T1.3 |
+| CRITICAL-115 | SQL injection in LIMIT clause | **RESOLVED** | T0.5 |
+| CRITICAL-116 | Incorrect percentile calculation | OPEN | Tier 5 (T5.5) |
+| CRITICAL-117 | Consumer start() never runs consume_loop | **RESOLVED** | T0.8 |
+| CRITICAL-118 | Confirmed infinite recursion in therapy repo | **RESOLVED** | T0.1 |
+| CRITICAL-119 | Five therapy endpoints unauthenticated | **RESOLVED** | T1.3 |
+
+#### High Issues
+
+| Issue ID | Description | Status | Fix Reference |
+|----------|-------------|--------|---------------|
+| HIGH-099 | Route default methods include DELETE on all routes | OPEN | Backlog |
+| HIGH-100 | Kong admin retry without backoff | OPEN | Tier 4 (T4.13) |
+| HIGH-101 | No secret key strength validation | OPEN | Backlog |
+| HIGH-102 | Unescaped regex in CORS origin patterns | **RESOLVED** | T1.8 |
+| HIGH-103 | JTI generation is deterministic | OPEN | Backlog |
+| HIGH-104 | RS algorithm support claimed but not implemented | OPEN | Backlog |
+| HIGH-105 | String-based role authorization | **RESOLVED** | T1.12 |
+| HIGH-106 | Email verification user-token binding | OPEN | Tier 6 (T6.10) |
+| HIGH-107 | Invalid consent type silently defaults | **RESOLVED** | T1.15 |
+| HIGH-108 | No rate limiting on login endpoint | OPEN | Backlog |
+| HIGH-109 | Session not included in JWT claims | OPEN | Backlog |
+| HIGH-110 | Clinician-patient relationship not verified | **RESOLVED** | T1.14 |
+| HIGH-111 | Password change doesn't invalidate sessions | **RESOLVED** | T1.13 |
+| HIGH-112 | Kafka consumer has no event authentication | OPEN | Backlog |
+| HIGH-113 | Kafka consumer failure silently swallowed | OPEN | Tier 6 (T6.14) |
+| HIGH-114 | No crisis notification deduplication | OPEN | Tier 3 (T3.10) |
+| HIGH-115 | Clinician email constructed from UUID | OPEN | Backlog |
+| HIGH-116 | Template variable injection in email subjects | OPEN | Backlog |
+| HIGH-117 | No data isolation by user in analytics | OPEN | Backlog |
+| HIGH-118 | Event ingestion has no source validation | OPEN | Backlog |
+| HIGH-119 | Missing report generators (2 of 6 types) | OPEN | Tier 7 (T7.6) |
+| HIGH-120 | Missing relative import in repository | **RESOLVED** | T0.10 |
+| HIGH-121 | ClickHouse connection has no retry logic | OPEN | Backlog |
+| HIGH-122 | String-based role checks in diagnosis (7 instances) | **RESOLVED** | T1.12 |
+| HIGH-123 | Diagnosis missing ownership verification | OPEN | Backlog |
+| HIGH-124 | Therapy delete has no soft-delete or audit trail | OPEN | Backlog |
+| HIGH-125 | Therapy session state mutations not atomic | OPEN | Backlog |
+
+#### Medium/Low Summary
+- MEDIUM-099 (Unbounded revoked token set): **RESOLVED** (T1.4)
+- MEDIUM-102 (Token refresh doesn't revoke old): **RESOLVED** (T1.7)
+- MEDIUM-104 (Logout revokes sessions but tokens valid): **RESOLVED** (T1.7)
+- Remaining 18 medium + 10 low: OPEN (planned for Tiers 3-7 or backlog)
+
 ---
 
 ## PHASE 9: API GATEWAY & USER SERVICE

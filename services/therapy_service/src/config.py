@@ -13,7 +13,7 @@ class DatabaseSettings(BaseSettings):
     """Database configuration settings."""
     host: str = Field(default="localhost")
     port: int = Field(default=5432)
-    database: str = Field(default="solace_therapy")
+    database: str = Field(default="solace")
     user: str = Field(default="solace")
     password: str = Field(default="")
     pool_size: int = Field(default=10, ge=1, le=100)

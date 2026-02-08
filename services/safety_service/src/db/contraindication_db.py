@@ -35,8 +35,8 @@ class ContraindicationDBConfig(BaseSettings):
 
     host: str = Field(default="localhost", description="PostgreSQL host")
     port: int = Field(default=5432, ge=1, le=65535, description="PostgreSQL port")
-    database: str = Field(default="solace_safety", description="Database name")
-    user: str = Field(default="safety_service", description="Database user")
+    database: str = Field(default="solace", description="Database name")
+    user: str = Field(default="solace", description="Database user")
     password: str = Field(default="", description="Database password")
     min_pool_size: int = Field(default=2, ge=1, le=20, description="Minimum connection pool size")
     max_pool_size: int = Field(default=10, ge=1, le=100, description="Maximum connection pool size")

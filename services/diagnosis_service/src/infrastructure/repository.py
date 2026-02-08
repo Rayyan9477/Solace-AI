@@ -339,8 +339,14 @@ class RepositoryFactory:
 
     @classmethod
     def get_default(cls) -> DiagnosisRepositoryPort:
-        """Get default repository instance (singleton)."""
+        """Get default repository instance (singleton).
+
+        Defaults to PostgreSQL unless ENVIRONMENT=test or explicit in-memory config.
+        Uses ConnectionPoolManager for pool management.
+        """
         if cls._instance is None:
+            env = os.getenv("ENVIRONMENT", "development")
+            # Explicit postgres configuration takes priority
             if cls._use_postgres and cls._postgres_client is not None:
                 from .postgres_repository import PostgresDiagnosisRepository
                 cls._instance = PostgresDiagnosisRepository(
@@ -348,6 +354,19 @@ class RepositoryFactory:
                     schema=cls._schema,
                 )
                 logger.info("diagnosis_repository_created", type="postgres")
+            elif env != "test":
+                # Auto-detect postgres via ConnectionPoolManager
+                try:
+                    from solace_infrastructure.database import ConnectionPoolManager
+                    from .postgres_repository import PostgresDiagnosisRepository
+                    cls._instance = PostgresDiagnosisRepository(
+                        ConnectionPoolManager,
+                        schema=cls._schema,
+                    )
+                    logger.info("diagnosis_repository_created", type="postgres_auto")
+                except (ImportError, Exception) as e:
+                    logger.warning("postgres_auto_unavailable", error=str(e), fallback="in_memory")
+                    cls._instance = cls.create_in_memory()
             else:
                 cls._instance = cls.create_in_memory()
                 logger.info("diagnosis_repository_created", type="in_memory")

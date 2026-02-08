@@ -25,6 +25,7 @@ from sqlalchemy import (
     Text,
     event,
     inspect,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.asyncio import AsyncAttrs
@@ -245,6 +246,7 @@ class AuditTrailMixin:
         JSONB,
         nullable=False,
         default=dict,
+        server_default=text("'{}'::jsonb"),
         comment="History of changes to this record (for compliance)"
     )
 
@@ -266,7 +268,7 @@ class AuditTrailMixin:
             changed_by: Who made the change
             changed_fields: Optional list of field names that changed
         """
-        if not self.change_history:
+        if not self.change_history or "changes" not in self.change_history:
             self.change_history = {"changes": []}
 
         change_record = {

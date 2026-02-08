@@ -57,7 +57,7 @@ class DatabaseConfig(BaseSettings):
 
     host: str = Field(default="localhost", description="Database host")
     port: int = Field(default=5432, ge=1, le=65535, description="Database port")
-    name: str = Field(default="solace_users", description="Database name")
+    name: str = Field(default="solace", description="Database name")
     user: str = Field(default="postgres", description="Database user")
     password: str = Field(
         ...,  # Required, no default

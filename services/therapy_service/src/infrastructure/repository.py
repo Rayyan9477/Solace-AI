@@ -312,19 +312,23 @@ class UnitOfWork:
             await self.commit()
 
 
-def create_unit_of_work(backend: str = "memory", **kwargs: Any) -> UnitOfWork:
+def create_unit_of_work(backend: str | None = None, **kwargs: Any) -> UnitOfWork:
     """Factory to create UnitOfWork with the configured backend.
 
     Args:
         backend: Storage backend type ("memory" or "postgres").
+            If None, auto-detects: postgres for non-test environments, memory for test.
         **kwargs: Backend-specific configuration (e.g., postgres_client for postgres).
 
     Returns:
         Configured UnitOfWork with appropriate repositories.
     """
+    if backend is None:
+        env = os.getenv("ENVIRONMENT", "development")
+        backend = "memory" if env == "test" else "postgres"
+
     if backend == "postgres":
         logger.info("therapy_repository_backend", backend="postgres")
-        # PostgreSQL backend - import here to avoid hard dependency
         try:
             from .postgres_repository import (
                 PostgresTreatmentPlanRepository,
@@ -332,7 +336,10 @@ def create_unit_of_work(backend: str = "memory", **kwargs: Any) -> UnitOfWork:
                 PostgresTechniqueRepository,
                 PostgresOutcomeMeasureRepository,
             )
-            client = kwargs["postgres_client"]
+            client = kwargs.get("postgres_client")
+            if client is None:
+                from solace_infrastructure.database import ConnectionPoolManager
+                client = ConnectionPoolManager
             return UnitOfWork(
                 treatment_plans=PostgresTreatmentPlanRepository(client),
                 sessions=PostgresTherapySessionRepository(client),
