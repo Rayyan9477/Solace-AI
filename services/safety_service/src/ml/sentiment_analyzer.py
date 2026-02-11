@@ -2,6 +2,7 @@
 Solace-AI Sentiment Analyzer - Clinical psychology-focused sentiment analysis for risk assessment.
 Uses adaptive approach: Small transformer model if GPU available, VADER otherwise, + clinical lexicon.
 """
+
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -19,27 +20,33 @@ import structlog
 # Check for CUDA availability
 try:
     import torch
+
     CUDA_AVAILABLE = torch.cuda.is_available()
 except Exception:
     CUDA_AVAILABLE = False
 
 try:
-    from safety_service.src.infrastructure.telemetry import traced, get_telemetry
+    from services.safety_service.src.infrastructure.telemetry import traced, get_telemetry
+
     TELEMETRY_AVAILABLE = True
 except ImportError:
     TELEMETRY_AVAILABLE = False
 
     def traced(*args, **kwargs):
         """No-op decorator when telemetry unavailable."""
+
         def decorator(func):
             return func
+
         return decorator
+
 
 # Try to load transformer model if CUDA available
 TRANSFORMERS_AVAILABLE = False
 if CUDA_AVAILABLE:
     try:
         from transformers import pipeline
+
         TRANSFORMERS_AVAILABLE = True
     except Exception:
         TRANSFORMERS_AVAILABLE = False
@@ -49,6 +56,7 @@ VADER_AVAILABLE = False
 if not TRANSFORMERS_AVAILABLE:
     try:
         from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+
         VADER_AVAILABLE = True
     except Exception:
         VADER_AVAILABLE = False
@@ -58,6 +66,7 @@ logger = structlog.get_logger(__name__)
 
 class SentimentPolarity(str, Enum):
     """Sentiment polarity classification."""
+
     VERY_NEGATIVE = "VERY_NEGATIVE"  # Extreme distress
     NEGATIVE = "NEGATIVE"  # Negative emotions
     NEUTRAL = "NEUTRAL"  # Balanced or informational
@@ -67,6 +76,7 @@ class SentimentPolarity(str, Enum):
 
 class EmotionalState(str, Enum):
     """Emotional state classification for mental health."""
+
     CRISIS = "CRISIS"  # Active crisis state
     SEVERE_DISTRESS = "SEVERE_DISTRESS"  # Severe emotional pain
     MODERATE_DISTRESS = "MODERATE_DISTRESS"  # Notable distress
@@ -78,6 +88,7 @@ class EmotionalState(str, Enum):
 
 class SentimentResult(BaseModel):
     """Result from sentiment analysis."""
+
     polarity: SentimentPolarity = Field(..., description="Overall sentiment polarity")
     emotional_state: EmotionalState = Field(..., description="Clinical emotional state")
     compound_score: Decimal = Field(..., ge=-1, le=1, description="Compound sentiment score")
@@ -85,28 +96,43 @@ class SentimentResult(BaseModel):
     confidence: Decimal = Field(..., ge=0, le=1, description="Confidence in analysis")
     positive_score: Decimal = Field(..., ge=0, le=1, description="Positive sentiment strength")
     negative_score: Decimal = Field(..., ge=0, le=1, description="Negative sentiment strength")
-    distress_indicators: list[str] = Field(default_factory=list, description="Detected distress phrases")
-    protective_indicators: list[str] = Field(default_factory=list, description="Detected protective factors")
+    distress_indicators: list[str] = Field(
+        default_factory=list, description="Detected distress phrases"
+    )
+    protective_indicators: list[str] = Field(
+        default_factory=list, description="Detected protective factors"
+    )
 
 
 class SentimentAnalyzerConfig(BaseSettings):
     """Configuration for sentiment analyzer."""
+
     # ML model settings (GPU-based)
     ml_model_name: str = Field(
         default="distilbert-base-uncased-finetuned-sst-2-english",
-        description="Small transformer model (~250MB) for accurate sentiment"
+        description="Small transformer model (~250MB) for accurate sentiment",
     )
     ml_weight: Decimal = Field(default=Decimal("0.7"), description="Weight for ML predictions")
-    lexicon_weight: Decimal = Field(default=Decimal("0.3"), description="Weight for clinical lexicon")
+    lexicon_weight: Decimal = Field(
+        default=Decimal("0.3"), description="Weight for clinical lexicon"
+    )
 
     # Lexicon-based settings
     enable_negation_handling: bool = Field(default=True, description="Handle negation in text")
     enable_intensifier_detection: bool = Field(default=True, description="Detect intensifiers")
     negation_window: int = Field(default=3, ge=1, description="Words to look back for negation")
-    intensifier_boost: Decimal = Field(default=Decimal("1.5"), description="Boost factor for intensifiers")
-    negation_flip_factor: Decimal = Field(default=Decimal("0.5"), description="Factor for negation reversal")
-    clinical_weight: Decimal = Field(default=Decimal("1.3"), description="Weight for clinical terms")
-    min_confidence_threshold: Decimal = Field(default=Decimal("0.6"), description="Minimum confidence")
+    intensifier_boost: Decimal = Field(
+        default=Decimal("1.5"), description="Boost factor for intensifiers"
+    )
+    negation_flip_factor: Decimal = Field(
+        default=Decimal("0.5"), description="Factor for negation reversal"
+    )
+    clinical_weight: Decimal = Field(
+        default=Decimal("1.3"), description="Weight for clinical terms"
+    )
+    min_confidence_threshold: Decimal = Field(
+        default=Decimal("0.6"), description="Minimum confidence"
+    )
 
     model_config = SettingsConfigDict(env_prefix="SENTIMENT_", env_file=".env", extra="ignore")
 
@@ -114,6 +140,7 @@ class SentimentAnalyzerConfig(BaseSettings):
 @dataclass
 class LexiconEntry:
     """Entry in sentiment lexicon."""
+
     word: str
     score: Decimal  # -1.0 to 1.0
     is_clinical: bool = False  # Clinical psychology term
@@ -145,15 +172,19 @@ class SentimentAnalyzer:
                     "sentiment-analysis",
                     model=self._config.ml_model_name,
                     device=device,
-                    truncation=True
+                    truncation=True,
                 )
-                self._mode = "hybrid_transformer_gpu" if CUDA_AVAILABLE else "hybrid_transformer_cpu"
-                logger.info("sentiment_analyzer_initialized",
-                           mode=self._mode,
-                           model=self._config.ml_model_name,
-                           device="cuda" if CUDA_AVAILABLE else "cpu",
-                           lexicon_size=len(self._lexicon),
-                           clinical_terms=sum(1 for e in self._lexicon.values() if e.is_clinical))
+                self._mode = (
+                    "hybrid_transformer_gpu" if CUDA_AVAILABLE else "hybrid_transformer_cpu"
+                )
+                logger.info(
+                    "sentiment_analyzer_initialized",
+                    mode=self._mode,
+                    model=self._config.ml_model_name,
+                    device="cuda" if CUDA_AVAILABLE else "cpu",
+                    lexicon_size=len(self._lexicon),
+                    clinical_terms=sum(1 for e in self._lexicon.values() if e.is_clinical),
+                )
             except Exception as e:
                 logger.warning("transformer_load_failed", error=str(e), fallback="vader")
                 self._ml_classifier = None
@@ -163,20 +194,24 @@ class SentimentAnalyzer:
             try:
                 self._vader = SentimentIntensityAnalyzer()
                 self._mode = "hybrid_vader"
-                logger.info("sentiment_analyzer_initialized",
-                           mode=self._mode,
-                           lexicon_size=len(self._lexicon),
-                           clinical_terms=sum(1 for e in self._lexicon.values() if e.is_clinical))
+                logger.info(
+                    "sentiment_analyzer_initialized",
+                    mode=self._mode,
+                    lexicon_size=len(self._lexicon),
+                    clinical_terms=sum(1 for e in self._lexicon.values() if e.is_clinical),
+                )
             except Exception as e:
                 logger.warning("vader_load_failed", error=str(e), fallback="lexicon_only")
                 self._vader = None
 
         # Final fallback: lexicon only
         if self._ml_classifier is None and self._vader is None:
-            logger.info("sentiment_analyzer_initialized",
-                       mode="lexicon_only",
-                       lexicon_size=len(self._lexicon),
-                       clinical_terms=sum(1 for e in self._lexicon.values() if e.is_clinical))
+            logger.info(
+                "sentiment_analyzer_initialized",
+                mode="lexicon_only",
+                lexicon_size=len(self._lexicon),
+                clinical_terms=sum(1 for e in self._lexicon.values() if e.is_clinical),
+            )
 
     def _build_clinical_lexicon(self) -> dict[str, LexiconEntry]:
         """
@@ -186,9 +221,11 @@ class SentimentAnalyzer:
         config_path = Path(__file__).parent.parent.parent / "config" / "clinical_lexicon.json"
 
         if not config_path.exists():
-            logger.error("clinical_lexicon_config_missing",
-                        path=str(config_path),
-                        action="create config/clinical_lexicon.json")
+            logger.error(
+                "clinical_lexicon_config_missing",
+                path=str(config_path),
+                action="create config/clinical_lexicon.json",
+            )
             raise FileNotFoundError(
                 f"Clinical lexicon configuration not found: {config_path}. "
                 "Please create the JSON config file for scalable deployment."
@@ -209,18 +246,20 @@ class SentimentAnalyzer:
                         word=word,
                         score=Decimal(str(score)),
                         is_clinical=is_clinical,
-                        is_crisis=is_crisis
+                        is_crisis=is_crisis,
                     )
 
             if not lexicon:
                 raise ValueError("Lexicon is empty - check JSON structure")
 
-            logger.info("clinical_lexicon_loaded",
-                       path=str(config_path),
-                       total_terms=len(lexicon),
-                       clinical_terms=sum(1 for e in lexicon.values() if e.is_clinical),
-                       crisis_terms=sum(1 for e in lexicon.values() if e.is_crisis),
-                       version=data.get("version"))
+            logger.info(
+                "clinical_lexicon_loaded",
+                path=str(config_path),
+                total_terms=len(lexicon),
+                clinical_terms=sum(1 for e in lexicon.values() if e.is_clinical),
+                crisis_terms=sum(1 for e in lexicon.values() if e.is_crisis),
+                version=data.get("version"),
+            )
             return lexicon
 
         except json.JSONDecodeError as e:
@@ -297,9 +336,9 @@ class SentimentAnalyzer:
         """
         try:
             scores = self._vader.polarity_scores(text)
-            compound = Decimal(str(scores['compound']))  # Already -1 to 1
+            compound = Decimal(str(scores["compound"]))  # Already -1 to 1
             # VADER confidence is based on magnitude
-            confidence = Decimal(str(abs(scores['compound'])))
+            confidence = Decimal(str(abs(scores["compound"])))
             return compound, confidence
         except Exception as e:
             logger.warning("vader_sentiment_failed", error=str(e))
@@ -391,7 +430,9 @@ class SentimentAnalyzer:
 
         # Combine ML (transformer/VADER) and lexicon scores if ML is available
         if ml_score is not None:
-            compound = (ml_score * self._config.ml_weight) + (lexicon_compound * self._config.lexicon_weight)
+            compound = (ml_score * self._config.ml_weight) + (
+                lexicon_compound * self._config.lexicon_weight
+            )
             final_confidence = (ml_confidence * self._config.ml_weight) + (
                 min(total_weight / Decimal("5.0"), Decimal("1.0")) * self._config.lexicon_weight
             )
@@ -422,8 +463,12 @@ class SentimentAnalyzer:
         )
 
         if user_id:
-            logger.info("sentiment_analyzed", user_id=str(user_id),
-                       emotional_state=emotional_state.value, risk_score=float(risk_score))
+            logger.info(
+                "sentiment_analyzed",
+                user_id=str(user_id),
+                emotional_state=emotional_state.value,
+                risk_score=float(risk_score),
+            )
 
         return result
 
@@ -459,8 +504,9 @@ class SentimentAnalyzer:
             return SentimentPolarity.NEGATIVE
         return SentimentPolarity.VERY_NEGATIVE
 
-    def _determine_emotional_state(self, compound: Decimal, crisis_count: int,
-                                   negative_score: Decimal) -> EmotionalState:
+    def _determine_emotional_state(
+        self, compound: Decimal, crisis_count: int, negative_score: Decimal
+    ) -> EmotionalState:
         """Determine clinical emotional state."""
         if crisis_count > 0 or compound <= Decimal("-0.7"):
             return EmotionalState.CRISIS
@@ -476,8 +522,9 @@ class SentimentAnalyzer:
             return EmotionalState.POSITIVE
         return EmotionalState.NEUTRAL
 
-    def _calculate_risk_score(self, compound: Decimal, crisis_count: int,
-                             negative_score: Decimal) -> Decimal:
+    def _calculate_risk_score(
+        self, compound: Decimal, crisis_count: int, negative_score: Decimal
+    ) -> Decimal:
         """Calculate risk score from sentiment analysis."""
         # Base risk from negative sentiment
         base_risk = (Decimal("1.0") - compound) / Decimal("2.0")  # Map -1..1 to 1..0

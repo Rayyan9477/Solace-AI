@@ -158,6 +158,51 @@ class BatchCompletedEvent(NotificationEvent):
     processing_time_ms: int = Field(default=0, ge=0)
 
 
+def to_kafka_event(event: NotificationEvent) -> Any:
+    """Convert local notification event to canonical Kafka event for inter-service messaging.
+
+    Only maps delivery-tracking events (sent, delivered, failed) to Kafka.
+    Returns None for internal events or if solace_events is not available.
+    """
+    try:
+        from src.solace_events.schemas import (
+            EventMetadata as KafkaMetadata,
+            NotificationSentKafkaEvent,
+            NotificationDeliveredKafkaEvent,
+            NotificationFailedKafkaEvent,
+        )
+    except ImportError:
+        logger.debug("solace_events_not_available_for_bridge")
+        return None
+
+    if not event.user_id or not event.notification_id:
+        return None
+
+    meta = KafkaMetadata(
+        event_id=event.event_id, timestamp=event.timestamp,
+        correlation_id=event.correlation_id, source_service="notification-service",
+    )
+    base: dict[str, Any] = {
+        "user_id": event.user_id, "session_id": None, "metadata": meta,
+        "notification_id": event.notification_id,
+    }
+
+    if isinstance(event, NotificationSentEvent):
+        return NotificationSentKafkaEvent(**base, channel=event.channel,
+            external_message_id=event.external_message_id, provider=event.provider)
+
+    if isinstance(event, NotificationDeliveredEvent):
+        return NotificationDeliveredKafkaEvent(**base, channel=event.channel,
+            delivery_time_ms=event.delivery_time_ms)
+
+    if isinstance(event, NotificationFailedEvent):
+        return NotificationFailedKafkaEvent(**base, channel=event.channel,
+            error_code=event.error_code, error_message=event.error_message,
+            retry_count=event.retry_count, will_retry=event.will_retry)
+
+    return None
+
+
 class NotificationEventHandler(ABC):
     """Abstract base class for notification event handlers."""
 

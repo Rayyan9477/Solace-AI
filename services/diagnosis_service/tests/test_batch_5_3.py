@@ -18,8 +18,9 @@ from services.diagnosis_service.src.domain.value_objects import (
     SeverityScore, ConfidenceScore, TemporalInfo, DiagnosisCriteria,
     HiTOPDimension, ClinicalHypothesis, SessionProgress,
 )
-from services.diagnosis_service.src.infrastructure.repository import (
-    InMemoryDiagnosisRepository, SessionQueryBuilder, RecordQueryBuilder, RepositoryFactory,
+from services.diagnosis_service.src.infrastructure.repository import RepositoryFactory
+from services.diagnosis_service.tests.fixtures import (
+    InMemoryDiagnosisRepository, SessionQueryBuilder, RecordQueryBuilder,
 )
 from services.diagnosis_service.src.events import (
     DiagnosisEvent, SessionStartedEvent, SessionEndedEvent, PhaseTransitionEvent,

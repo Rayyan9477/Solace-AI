@@ -2,6 +2,7 @@
 Solace-AI Orchestrator Service - FastAPI Application Entry Point.
 LangGraph-based multi-agent orchestration with WebSocket support.
 """
+
 from __future__ import annotations
 import logging
 import time
@@ -21,12 +22,13 @@ logger = structlog.get_logger(__name__)
 
 class OrchestratorAppSettings(BaseSettings):
     """Orchestrator service application configuration."""
+
     service_name: str = Field(default="orchestrator-service")
     version: str = Field(default="1.0.0")
     environment: str = Field(default="development")
     debug: bool = Field(default=False)
     host: str = Field(default="0.0.0.0")
-    port: int = Field(default=8001)
+    port: int = Field(default=8000)
     log_level: str = Field(default="INFO")
     cors_origins: str = Field(default="", description="Comma-separated allowed CORS origins")
     request_timeout_ms: int = Field(default=60000)
@@ -81,6 +83,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     from .langgraph import OrchestratorGraphBuilder
     from .langgraph.graph_builder import GraphBuilderSettings
+
     graph_settings = GraphBuilderSettings(enable_checkpointing=settings.enable_checkpointing)
     graph_builder = OrchestratorGraphBuilder(graph_settings)
     graph_builder.build()
@@ -121,6 +124,7 @@ def create_application() -> FastAPI:
         expose_headers=["X-Request-ID", "X-Correlation-ID", "X-Session-ID", "X-Thread-ID"],
     )
     from .api import router
+
     app.include_router(router, prefix="/api/v1/orchestrator")
     _register_middleware(app)
     _register_exception_handlers(app)
@@ -129,6 +133,7 @@ def create_application() -> FastAPI:
 
 def _register_middleware(app: FastAPI) -> None:
     """Register custom middleware for orchestrator service."""
+
     @app.middleware("http")
     async def request_tracking_middleware(request: Request, call_next):
         request_id = request.headers.get("X-Request-ID", str(uuid4()))
@@ -146,12 +151,17 @@ def _register_middleware(app: FastAPI) -> None:
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Correlation-ID"] = correlation_id
         response.headers["X-Process-Time-Ms"] = f"{process_time_ms:.2f}"
-        logger.info("request_completed", status_code=response.status_code, process_time_ms=round(process_time_ms, 2))
+        logger.info(
+            "request_completed",
+            status_code=response.status_code,
+            process_time_ms=round(process_time_ms, 2),
+        )
         return response
 
 
 def _register_exception_handlers(app: FastAPI) -> None:
     """Register global exception handlers."""
+
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
         errors = []
@@ -161,7 +171,13 @@ def _register_exception_handlers(app: FastAPI) -> None:
         logger.warning("validation_error", path=request.url.path, errors=errors)
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content={"error": {"code": "VALIDATION_ERROR", "message": "Request validation failed", "details": errors}},
+            content={
+                "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": "Request validation failed",
+                    "details": errors,
+                }
+            },
         )
 
     @app.exception_handler(ValueError)
@@ -174,10 +190,17 @@ def _register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
-        logger.error("unhandled_exception", path=request.url.path, error=str(exc), exc_type=type(exc).__name__)
+        logger.error(
+            "unhandled_exception",
+            path=request.url.path,
+            error=str(exc),
+            exc_type=type(exc).__name__,
+        )
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"error": {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred"}},
+            content={
+                "error": {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred"}
+            },
         )
 
 
@@ -194,7 +217,9 @@ async def root() -> dict[str, str]:
 async def readiness() -> JSONResponse:
     """Kubernetes readiness probe."""
     if not hasattr(app.state, "compiled_graph") or app.state.compiled_graph is None:
-        return JSONResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content={"status": "not_ready"})
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content={"status": "not_ready"}
+        )
     return JSONResponse(status_code=status.HTTP_200_OK, content={"status": "ready"})
 
 
@@ -207,12 +232,15 @@ async def liveness() -> dict[str, str]:
 @app.get("/health", include_in_schema=False)
 async def health_check() -> dict:
     """Health check endpoint with service status details."""
-    connection_count = sum(len(conns) for conns in getattr(app.state, "active_connections", {}).values())
+    connection_count = sum(
+        len(conns) for conns in getattr(app.state, "active_connections", {}).values()
+    )
     return {
         "status": "healthy",
         "service": "orchestrator-service",
         "version": "1.0.0",
-        "graph_ready": hasattr(app.state, "compiled_graph") and app.state.compiled_graph is not None,
+        "graph_ready": hasattr(app.state, "compiled_graph")
+        and app.state.compiled_graph is not None,
         "active_websocket_connections": connection_count,
         "agents": ["safety", "supervisor", "diagnosis", "therapy", "personality", "chat"],
     }
@@ -221,6 +249,7 @@ async def health_check() -> dict:
 def run_server() -> None:
     """Run the orchestrator service server."""
     import uvicorn
+
     settings = OrchestratorAppSettings()
     uvicorn.run(
         "services.orchestrator_service.src.main:app",

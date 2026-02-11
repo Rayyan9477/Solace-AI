@@ -2,6 +2,7 @@
 Solace-AI Orchestrator Service - Configuration.
 Centralized configuration management with validation and environment loading.
 """
+
 from __future__ import annotations
 from enum import Enum
 from typing import Any
@@ -15,6 +16,7 @@ logger = structlog.get_logger(__name__)
 
 class Environment(str, Enum):
     """Application environment types."""
+
     DEVELOPMENT = "development"
     STAGING = "staging"
     PRODUCTION = "production"
@@ -23,20 +25,22 @@ class Environment(str, Enum):
 
 class ServiceEndpoints(BaseSettings):
     """External service endpoint configuration."""
-    safety_service_url: str = Field(default="http://localhost:8001")
-    personality_service_url: str = Field(default="http://localhost:8002")
-    diagnosis_service_url: str = Field(default="http://localhost:8003")
-    therapy_service_url: str = Field(default="http://localhost:8004")
+
+    safety_service_url: str = Field(default="http://localhost:8002")
+    personality_service_url: str = Field(default="http://localhost:8007")
+    diagnosis_service_url: str = Field(default="http://localhost:8004")
+    therapy_service_url: str = Field(default="http://localhost:8006")
     memory_service_url: str = Field(default="http://localhost:8005")
-    user_service_url: str = Field(default="http://localhost:8006")
-    notification_service_url: str = Field(default="http://localhost:8007")
+    user_service_url: str = Field(default="http://localhost:8001")
+    notification_service_url: str = Field(default="http://localhost:8003")
     # Legacy alias for treatment service (therapy service)
-    treatment_service_url: str = Field(default="http://localhost:8004")
+    treatment_service_url: str = Field(default="http://localhost:8006")
     model_config = SettingsConfigDict(env_prefix="SERVICE_", env_file=".env", extra="ignore")
 
 
 class LLMSettings(BaseSettings):
     """LLM provider configuration."""
+
     provider: str = Field(default="anthropic")
     model_name: str = Field(default="claude-3-sonnet-20240229")
     max_tokens: int = Field(default=2048, ge=1, le=8192)
@@ -48,6 +52,7 @@ class LLMSettings(BaseSettings):
 
 class SafetySettings(BaseSettings):
     """Safety and crisis detection configuration."""
+
     enable_crisis_detection: bool = Field(default=True)
     crisis_confidence_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
     escalation_cooldown_minutes: int = Field(default=30, ge=1)
@@ -58,6 +63,7 @@ class SafetySettings(BaseSettings):
 
 class WebSocketSettings(BaseSettings):
     """WebSocket connection configuration."""
+
     heartbeat_interval_seconds: int = Field(default=30, ge=5, le=120)
     connection_timeout_seconds: int = Field(default=300, ge=30)
     max_connections_per_user: int = Field(default=5, ge=1, le=20)
@@ -68,6 +74,7 @@ class WebSocketSettings(BaseSettings):
 
 class PersistenceSettings(BaseSettings):
     """State persistence configuration."""
+
     enable_checkpointing: bool = Field(default=True)
     checkpoint_backend: str = Field(default="memory")
     redis_url: str = Field(default="redis://localhost:6379/0")
@@ -79,6 +86,7 @@ class PersistenceSettings(BaseSettings):
 
 class OrchestratorConfig(BaseSettings):
     """Master configuration aggregating all settings."""
+
     environment: Environment = Field(default=Environment.DEVELOPMENT)
     service_name: str = Field(default="orchestrator-service")
     version: str = Field(default="1.0.0")

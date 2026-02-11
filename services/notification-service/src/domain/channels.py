@@ -344,6 +344,30 @@ class SMSChannel(NotificationChannel):
     def channel_type(self) -> ChannelType:
         return ChannelType.SMS
 
+    @staticmethod
+    def _format_crisis_sms(metadata: dict[str, Any]) -> str:
+        """Format crisis SMS to fit within 160 chars.
+
+        Prioritizes: risk level, patient ID, first trigger, dashboard link.
+        """
+        risk_level = metadata.get("risk_level", metadata.get("variables", {}).get("risk_level", ""))
+        patient_id = metadata.get("patient_id", metadata.get("variables", {}).get("patient_id", ""))
+        triggers = metadata.get("trigger_indicators", metadata.get("variables", {}).get("trigger_indicators", ""))
+        first_trigger = triggers.split(",")[0].strip() if triggers else ""
+        dashboard = metadata.get("dashboard_link", metadata.get("variables", {}).get("dashboard_link", ""))
+
+        parts = [f"CRISIS {risk_level}"]
+        if patient_id:
+            parts.append(f"PT:{patient_id[:8]}")
+        if first_trigger:
+            parts.append(first_trigger[:30])
+        msg = " | ".join(parts)
+        if dashboard:
+            # Reserve space for link
+            max_text = 160 - len(dashboard) - 2  # " " + link
+            msg = msg[:max_text] + " " + dashboard
+        return msg[:160]
+
     async def _deliver(
         self,
         recipient: str,
@@ -352,9 +376,18 @@ class SMSChannel(NotificationChannel):
         html_body: str | None,
         metadata: dict[str, Any],
     ) -> DeliveryResult:
-        """Send SMS via Twilio-compatible API."""
-        sms_body = f"{subject}\n\n{body}" if subject else body
-        sms_body = sms_body[:1600]  # SMS length limit
+        """Send SMS via Twilio-compatible API.
+
+        For crisis notifications (detected via metadata), formats a compact
+        message fitting within 160 chars that prioritizes risk_level, patient_id,
+        first trigger keyword, and dashboard link.
+        """
+        is_crisis = metadata.get("template_type") in ("crisis_alert", "crisis_escalation") or metadata.get("is_crisis")
+        if is_crisis:
+            sms_body = self._format_crisis_sms(metadata)
+        else:
+            sms_body = f"{subject}\n\n{body}" if subject else body
+            sms_body = sms_body[:1600]  # SMS length limit
 
         url = f"{self._sms_config.provider_url}/Accounts/{self._sms_config.account_sid}/Messages.json"
 

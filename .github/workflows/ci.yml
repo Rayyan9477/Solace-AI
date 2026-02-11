@@ -130,6 +130,8 @@ jobs:
 #           - therapy_service
 #           - personality_service
 #           - orchestrator_service
+#           - analytics-service
+#           - config_service
 #     steps:
 #       - uses: actions/checkout@v4
 #       - name: Build Docker image

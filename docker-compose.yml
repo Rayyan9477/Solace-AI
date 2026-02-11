@@ -194,14 +194,14 @@ services:
       USER_SERVICE_PORT: 8001
       USER_SERVICE_JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
       USER_SERVICE_FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:-dev-encryption-key-32-characters}
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: solace
-      DB_USER: ${POSTGRES_USER:-solace}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-solace_dev_password}
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      USER_DB_HOST: postgres
+      USER_DB_PORT: 5432
+      USER_DB_NAME: solace
+      USER_DB_USER: ${POSTGRES_USER:-solace}
+      USER_DB_PASSWORD: ${POSTGRES_PASSWORD:-solace_dev_password}
+      USER_REDIS_HOST: redis
+      USER_REDIS_PORT: 6379
+      USER_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       SECURITY_JWT_SECRET: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
     ports:
       - "8001:8001"
@@ -225,13 +225,13 @@ services:
       dockerfile: Dockerfile
     container_name: solace-safety-service
     environment:
-      SAFETY_SERVICE_ENV: development
-      SAFETY_SERVICE_PORT: 8002
+      SAFETY_ENVIRONMENT: development
+      SAFETY_PORT: 8002
       ESCALATION_NOTIFICATION_SERVICE_URL: http://notification-service:8003
-      DB_HOST: postgres
-      DB_PORT: 5432
-      REDIS_HOST: redis
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SAFETY_REPO_STORAGE_BACKEND: postgres
+      SAFETY_REPO_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-solace}:${POSTGRES_PASSWORD:-solace_dev_password}@postgres:5432/solace
+      SAFETY_REPO_REDIS_URL: redis://redis:6379/0
+      SAFETY_EVENTS_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
     ports:
       - "8002:8002"
@@ -284,11 +284,15 @@ services:
       dockerfile: Dockerfile
     container_name: solace-diagnosis-service
     environment:
-      DIAGNOSIS_SERVICE_ENV: development
-      DIAGNOSIS_SERVICE_PORT: 8004
-      DB_HOST: postgres
-      REDIS_HOST: redis
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      DIAGNOSIS_ENVIRONMENT: development
+      DIAGNOSIS_PORT: 8004
+      DIAGNOSIS_DB_HOST: postgres
+      DIAGNOSIS_DB_PORT: 5432
+      DIAGNOSIS_DB_NAME: solace
+      DIAGNOSIS_DB_USER: ${POSTGRES_USER:-solace}
+      DIAGNOSIS_DB_PASSWORD: ${POSTGRES_PASSWORD:-solace_dev_password}
+      DIAGNOSIS_REDIS_HOST: redis
+      DIAGNOSIS_REDIS_PORT: 6379
       AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
     ports:
       - "8004:8004"
@@ -312,11 +316,16 @@ services:
     environment:
       MEMORY_SERVICE_ENV: development
       MEMORY_SERVICE_PORT: 8005
-      DB_HOST: postgres
-      REDIS_HOST: redis
+      MEMORY_DB_HOST: postgres
+      MEMORY_DB_PORT: 5432
+      MEMORY_DB_DATABASE: solace
+      MEMORY_DB_USER: ${POSTGRES_USER:-solace}
+      MEMORY_DB_PASSWORD: ${POSTGRES_PASSWORD:-solace_dev_password}
+      MEMORY_REDIS_HOST: redis
+      MEMORY_REDIS_PORT: 6379
       WEAVIATE_HOST: weaviate
       WEAVIATE_PORT: 8080
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MEMORY_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
     ports:
       - "8005:8005"
@@ -342,11 +351,15 @@ services:
       dockerfile: Dockerfile
     container_name: solace-therapy-service
     environment:
-      THERAPY_SERVICE_ENV: development
-      THERAPY_SERVICE_PORT: 8006
-      DB_HOST: postgres
-      REDIS_HOST: redis
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      THERAPY_ENVIRONMENT: development
+      THERAPY_PORT: 8006
+      THERAPY_DB_HOST: postgres
+      THERAPY_DB_PORT: 5432
+      THERAPY_DB_DATABASE: solace
+      THERAPY_DB_USER: ${POSTGRES_USER:-solace}
+      THERAPY_DB_PASSWORD: ${POSTGRES_PASSWORD:-solace_dev_password}
+      THERAPY_REDIS_HOST: redis
+      THERAPY_REDIS_PORT: 6379
       AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
     ports:
       - "8006:8006"
@@ -370,11 +383,15 @@ services:
       dockerfile: Dockerfile
     container_name: solace-personality-service
     environment:
-      PERSONALITY_SERVICE_ENV: development
-      PERSONALITY_SERVICE_PORT: 8007
-      DB_HOST: postgres
-      REDIS_HOST: redis
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      PERSONALITY_ENVIRONMENT: development
+      PERSONALITY_PORT: 8007
+      PERSONALITY_DB_HOST: postgres
+      PERSONALITY_DB_PORT: 5432
+      PERSONALITY_DB_NAME: solace
+      PERSONALITY_DB_USER: ${POSTGRES_USER:-solace}
+      PERSONALITY_DB_PASSWORD: ${POSTGRES_PASSWORD:-solace_dev_password}
+      PERSONALITY_REDIS_HOST: redis
+      PERSONALITY_REDIS_PORT: 6379
       AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
     ports:
       - "8007:8007"
@@ -396,14 +413,15 @@ services:
       dockerfile: Dockerfile
     container_name: solace-orchestrator-service
     environment:
-      ORCHESTRATOR_SERVICE_ENV: development
-      ORCHESTRATOR_SERVICE_PORT: 8000
-      PERSONALITY_SERVICE_URL: http://personality-service:8007
-      DIAGNOSIS_SERVICE_URL: http://diagnosis-service:8004
-      THERAPY_SERVICE_URL: http://therapy-service:8006
-      MEMORY_SERVICE_URL: http://memory-service:8005
-      SAFETY_SERVICE_URL: http://safety-service:8002
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      ORCHESTRATOR_ENVIRONMENT: development
+      ORCHESTRATOR_PORT: 8000
+      SERVICE_SAFETY_SERVICE_URL: http://safety-service:8002
+      SERVICE_PERSONALITY_SERVICE_URL: http://personality-service:8007
+      SERVICE_DIAGNOSIS_SERVICE_URL: http://diagnosis-service:8004
+      SERVICE_THERAPY_SERVICE_URL: http://therapy-service:8006
+      SERVICE_MEMORY_SERVICE_URL: http://memory-service:8005
+      SERVICE_USER_SERVICE_URL: http://user-service:8001
+      SERVICE_NOTIFICATION_SERVICE_URL: http://notification-service:8003
       AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
     ports:
       - "8000:8000"
@@ -415,6 +433,55 @@ services:
       - personality-service
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - solace-network
+
+  analytics-service:
+    build:
+      context: ./services/analytics-service
+      dockerfile: Dockerfile
+    container_name: solace-analytics-service
+    environment:
+      ANALYTICS_SERVICE_ENV: development
+      ANALYTICS_SERVICE_PORT: 8009
+      CONSUMER_KAFKA_ENABLED: "true"
+      CONSUMER_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+    ports:
+      - "8009:8009"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8009/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - solace-network
+
+  config-service:
+    build:
+      context: ./services/config_service
+      dockerfile: Dockerfile
+    container_name: solace-config-service
+    environment:
+      CONFIG_ENVIRONMENT: development
+      CONFIG_PORT: 8008
+      CONFIG_REDIS_URL: redis://redis:6379/0
+      AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+    ports:
+      - "8008:8008"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8008/health"]
       interval: 30s
       timeout: 10s
       retries: 3

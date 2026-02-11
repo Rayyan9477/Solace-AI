@@ -25,7 +25,7 @@ class PostgresConfig(BaseSettings):
     max_overflow: int = Field(default=5, ge=0, le=50)
     pool_timeout: int = Field(default=30, ge=1, le=300)
     echo_sql: bool = Field(default=False)
-    model_config = SettingsConfigDict(env_prefix="POSTGRES_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="MEMORY_DB_", env_file=".env", extra="ignore")
 
     @property
     def connection_url(self) -> str:
@@ -44,7 +44,7 @@ class RedisConfig(BaseSettings):
     key_prefix: str = Field(default="memory:")
     max_connections: int = Field(default=50, ge=5, le=500)
     socket_timeout: int = Field(default=5, ge=1, le=60)
-    model_config = SettingsConfigDict(env_prefix="REDIS_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="MEMORY_REDIS_", env_file=".env", extra="ignore")
 
     @property
     def connection_url(self) -> str:
@@ -80,7 +80,7 @@ class KafkaConfig(BaseSettings):
     session_timeout_ms: int = Field(default=30000, ge=1000)
     heartbeat_interval_ms: int = Field(default=10000, ge=500)
     max_poll_records: int = Field(default=100, ge=1, le=1000)
-    model_config = SettingsConfigDict(env_prefix="KAFKA_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="MEMORY_KAFKA_", env_file=".env", extra="ignore")
 
 
 class DecayConfig(BaseSettings):

@@ -66,7 +66,7 @@ class ConfigServiceSettings(BaseSettings):
     environment: ConfigEnvironment = Field(default=ConfigEnvironment.DEVELOPMENT)
     service_name: str = Field(default="config-service")
     host: str = Field(default="0.0.0.0")
-    port: int = Field(default=8001, ge=1, le=65535)
+    port: int = Field(default=8008, ge=1, le=65535)
     debug: bool = Field(default=False)
     log_level: str = Field(default="INFO")
     config_path: str = Field(default="./config")

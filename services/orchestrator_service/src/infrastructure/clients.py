@@ -2,6 +2,7 @@
 Solace-AI Orchestrator Service - Service Clients.
 HTTP clients for service-to-service communication with retry and circuit breaker.
 """
+
 from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -20,6 +21,7 @@ T = TypeVar("T")
 
 class CircuitState(str, Enum):
     """Circuit breaker states."""
+
     CLOSED = "closed"
     OPEN = "open"
     HALF_OPEN = "half_open"
@@ -28,6 +30,7 @@ class CircuitState(str, Enum):
 @dataclass
 class ClientConfig:
     """HTTP client configuration."""
+
     base_url: str
     timeout_seconds: float = 30.0
     max_retries: int = 3
@@ -39,6 +42,7 @@ class ClientConfig:
 @dataclass
 class ServiceResponse(Generic[T]):
     """Generic service response wrapper."""
+
     success: bool
     data: T | None = None
     error: str | None = None
@@ -104,7 +108,9 @@ class BaseServiceClient:
 
     def __init__(self, config: ClientConfig) -> None:
         self._config = config
-        self._circuit = CircuitBreaker(config.circuit_failure_threshold, config.circuit_recovery_timeout)
+        self._circuit = CircuitBreaker(
+            config.circuit_failure_threshold, config.circuit_recovery_timeout
+        )
         self._client: httpx.AsyncClient | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
@@ -140,7 +146,9 @@ class BaseServiceClient:
             try:
                 client = await self._get_client()
                 request_headers = {**(headers or {})}
-                response = await client.request(method, path, json=data, params=params, headers=request_headers)
+                response = await client.request(
+                    method, path, json=data, params=params, headers=request_headers
+                )
                 elapsed_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
                 if response.status_code >= 200 and response.status_code < 300:
                     self._circuit.record_success()
@@ -149,15 +157,20 @@ class BaseServiceClient:
                     except (ValueError, UnicodeDecodeError):
                         response_data = {"raw": response.text}
                     return ServiceResponse(
-                        success=True, data=response_data,
-                        status_code=response.status_code, response_time_ms=elapsed_ms,
+                        success=True,
+                        data=response_data,
+                        status_code=response.status_code,
+                        response_time_ms=elapsed_ms,
                     )
                 if response.status_code >= 500:
                     last_error = f"Server error: {response.status_code}"
                     self._circuit.record_failure()
                 else:
                     return ServiceResponse(
-                        success=False, error=response.text, status_code=response.status_code, response_time_ms=elapsed_ms,
+                        success=False,
+                        error=response.text,
+                        status_code=response.status_code,
+                        response_time_ms=elapsed_ms,
                     )
             except httpx.TimeoutException:
                 last_error = "Request timeout"
@@ -168,17 +181,25 @@ class BaseServiceClient:
             if attempt < self._config.max_retries:
                 await asyncio.sleep(self._config.retry_delay_seconds * (attempt + 1))
         elapsed_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
-        return ServiceResponse(success=False, error=last_error, status_code=503, response_time_ms=elapsed_ms)
+        return ServiceResponse(
+            success=False, error=last_error, status_code=503, response_time_ms=elapsed_ms
+        )
 
-    async def get(self, path: str, params: dict[str, Any] | None = None) -> ServiceResponse[dict[str, Any]]:
+    async def get(
+        self, path: str, params: dict[str, Any] | None = None
+    ) -> ServiceResponse[dict[str, Any]]:
         """Execute GET request."""
         return await self._request("GET", path, params=params)
 
-    async def post(self, path: str, data: dict[str, Any] | None = None) -> ServiceResponse[dict[str, Any]]:
+    async def post(
+        self, path: str, data: dict[str, Any] | None = None
+    ) -> ServiceResponse[dict[str, Any]]:
         """Execute POST request."""
         return await self._request("POST", path, data=data)
 
-    async def put(self, path: str, data: dict[str, Any] | None = None) -> ServiceResponse[dict[str, Any]]:
+    async def put(
+        self, path: str, data: dict[str, Any] | None = None
+    ) -> ServiceResponse[dict[str, Any]]:
         """Execute PUT request."""
         return await self._request("PUT", path, data=data)
 
@@ -210,11 +231,17 @@ class DiagnosisServiceClient(BaseServiceClient):
         eps = endpoints or get_config().endpoints()
         super().__init__(ClientConfig(base_url=eps.diagnosis_service_url))
 
-    async def get_assessment(self, user_id: UUID, session_id: UUID) -> ServiceResponse[dict[str, Any]]:
+    async def get_assessment(
+        self, user_id: UUID, session_id: UUID
+    ) -> ServiceResponse[dict[str, Any]]:
         """Get current assessment for user."""
-        return await self.get(f"/api/v1/diagnosis/{user_id}/assessment", {"session_id": str(session_id)})
+        return await self.get(
+            f"/api/v1/diagnosis/{user_id}/assessment", {"session_id": str(session_id)}
+        )
 
-    async def analyze_symptoms(self, user_id: UUID, symptoms: list[str]) -> ServiceResponse[dict[str, Any]]:
+    async def analyze_symptoms(
+        self, user_id: UUID, symptoms: list[str]
+    ) -> ServiceResponse[dict[str, Any]]:
         """Analyze symptoms for assessment."""
         return await self.post(f"/api/v1/diagnosis/{user_id}/symptoms", {"symptoms": symptoms})
 
@@ -249,13 +276,27 @@ class TherapyServiceClient(BaseServiceClient):
         params = {"modality": modality} if modality else None
         return await self.get("/api/v1/therapy/techniques", params)
 
-    async def start_session(self, user_id: UUID) -> ServiceResponse[dict[str, Any]]:
+    async def start_session(
+        self, user_id: UUID, treatment_plan_id: UUID
+    ) -> ServiceResponse[dict[str, Any]]:
         """Start a new therapy session."""
-        return await self.post("/api/v1/therapy/sessions", {"user_id": str(user_id)})
+        return await self.post(
+            "/api/v1/therapy/sessions/start",
+            {"user_id": str(user_id), "treatment_plan_id": str(treatment_plan_id)},
+        )
 
-    async def end_session(self, session_id: UUID) -> ServiceResponse[dict[str, Any]]:
+    async def end_session(
+        self, session_id: UUID, user_id: UUID, generate_summary: bool = True
+    ) -> ServiceResponse[dict[str, Any]]:
         """End a therapy session."""
-        return await self.post(f"/api/v1/therapy/sessions/{session_id}/end", {})
+        return await self.post(
+            f"/api/v1/therapy/sessions/{session_id}/end",
+            {
+                "session_id": str(session_id),
+                "user_id": str(user_id),
+                "generate_summary": generate_summary,
+            },
+        )
 
 
 # Alias for backwards compatibility
@@ -271,7 +312,9 @@ class TreatmentServiceClient(TherapyServiceClient):
         """Get treatment plan for user."""
         return await self.get(f"/api/v1/therapy/{user_id}/plan")
 
-    async def get_interventions(self, user_id: UUID, context: str) -> ServiceResponse[dict[str, Any]]:
+    async def get_interventions(
+        self, user_id: UUID, context: str
+    ) -> ServiceResponse[dict[str, Any]]:
         """Get recommended interventions."""
         return await self.post(f"/api/v1/therapy/{user_id}/interventions", {"context": context})
 
@@ -285,11 +328,18 @@ class MemoryServiceClient(BaseServiceClient):
 
     async def get_context(self, user_id: UUID, session_id: UUID) -> ServiceResponse[dict[str, Any]]:
         """Get conversation context."""
-        return await self.get(f"/api/v1/memory/{user_id}/context", {"session_id": str(session_id)})
+        return await self.post(
+            "/api/v1/memory/context", {"user_id": str(user_id), "session_id": str(session_id)}
+        )
 
-    async def store_memory(self, user_id: UUID, content: str, memory_type: str) -> ServiceResponse[dict[str, Any]]:
+    async def store_memory(
+        self, user_id: UUID, content: str, memory_type: str
+    ) -> ServiceResponse[dict[str, Any]]:
         """Store memory entry."""
-        return await self.post(f"/api/v1/memory/{user_id}/store", {"content": content, "type": memory_type})
+        return await self.post(
+            "/api/v1/memory/store",
+            {"user_id": str(user_id), "content": content, "content_type": memory_type},
+        )
 
     async def assemble_context(
         self,

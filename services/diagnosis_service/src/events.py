@@ -130,6 +130,51 @@ class UserDataDeletedEvent(DiagnosisEvent):
     sessions_deleted: int = 0
 
 
+def to_kafka_event(event: DiagnosisEvent) -> Any:
+    """Convert local diagnosis event to canonical Kafka event for inter-service messaging.
+
+    Maps diagnosis completion events to canonical schemas.
+    Returns None for internal-only events or if solace_events is not available.
+    """
+    try:
+        from src.solace_events.schemas import (
+            EventMetadata as KafkaMetadata,
+            DiagnosisCompletedEvent as KafkaDiagnosisCompleted,
+            ClinicalHypothesis, Confidence,
+        )
+    except ImportError:
+        logger.debug("solace_events_not_available_for_bridge")
+        return None
+
+    if not event.user_id:
+        return None
+
+    meta = KafkaMetadata(
+        event_id=event.event_id, timestamp=event.timestamp,
+        source_service="diagnosis-service",
+    )
+    base: dict[str, Any] = {"user_id": event.user_id, "session_id": event.session_id, "metadata": meta}
+
+    if isinstance(event, DiagnosisRecordedEvent):
+        primary = None
+        if event.primary_diagnosis:
+            severity_str = event.severity.value if hasattr(event.severity, "value") else str(event.severity)
+            severity_map = {"MILD": "MILD", "MODERATE": "MODERATE", "SEVERE": "SEVERE"}
+            primary = ClinicalHypothesis(
+                condition_code=event.dsm5_code or "unspecified",
+                condition_name=event.primary_diagnosis,
+                confidence=Confidence.MODERATE,
+                evidence_summary="",
+                severity=severity_map.get(severity_str.upper(), "MODERATE"),
+            )
+        return KafkaDiagnosisCompleted(
+            **base, assessment_id=event.record_id, primary_hypothesis=primary,
+            stepped_care_level=0,
+        )
+
+    return None
+
+
 class EventDispatcher:
     """Dispatcher for diagnosis domain events."""
 

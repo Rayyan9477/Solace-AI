@@ -2,6 +2,7 @@
 Solace-AI Safety Service Telemetry - OpenTelemetry instrumentation for observability.
 Provides distributed tracing and metrics for ML components.
 """
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -19,9 +20,16 @@ try:
     from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION
     from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
     from opentelemetry.trace import Status, StatusCode, SpanKind
+
     OPENTELEMETRY_AVAILABLE = True
 except ImportError:
     OPENTELEMETRY_AVAILABLE = False
+    # Define fallback types when OpenTelemetry is not available
+    trace = None  # type: ignore
+    TracerProvider = None  # type: ignore
+    Status = None  # type: ignore
+    StatusCode = None  # type: ignore
+    SpanKind = None  # type: ignore
 
 logger = structlog.get_logger(__name__)
 
@@ -38,13 +46,11 @@ class TelemetryConfig(BaseSettings):
     otlp_endpoint: str = Field(default="http://localhost:4317", description="OTLP gRPC endpoint")
     export_timeout_ms: int = Field(default=30000, ge=1000, le=60000, description="Export timeout")
     max_queue_size: int = Field(default=2048, ge=512, le=8192, description="Max span queue size")
-    schedule_delay_ms: int = Field(default=5000, ge=1000, le=30000, description="Batch schedule delay")
-
-    model_config = SettingsConfigDict(
-        env_prefix="TELEMETRY_",
-        env_file=".env",
-        extra="ignore"
+    schedule_delay_ms: int = Field(
+        default=5000, ge=1000, le=30000, description="Batch schedule delay"
     )
+
+    model_config = SettingsConfigDict(env_prefix="TELEMETRY_", env_file=".env", extra="ignore")
 
 
 class Telemetry:
@@ -82,10 +88,12 @@ class Telemetry:
     def _setup_tracer(self) -> None:
         """Initialize OpenTelemetry tracer with OTLP exporter."""
         try:
-            resource = Resource.create({
-                SERVICE_NAME: self._config.service_name,
-                SERVICE_VERSION: self._config.service_version,
-            })
+            resource = Resource.create(
+                {
+                    SERVICE_NAME: self._config.service_name,
+                    SERVICE_VERSION: self._config.service_version,
+                }
+            )
 
             self._provider = TracerProvider(resource=resource)
 
@@ -104,15 +112,12 @@ class Telemetry:
             self._provider.add_span_processor(span_processor)
             trace.set_tracer_provider(self._provider)
 
-            self._tracer = trace.get_tracer(
-                self._config.service_name,
-                self._config.service_version
-            )
+            self._tracer = trace.get_tracer(self._config.service_name, self._config.service_version)
 
             logger.info(
                 "telemetry_initialized",
                 service=self._config.service_name,
-                endpoint=self._config.otlp_endpoint
+                endpoint=self._config.otlp_endpoint,
             )
 
         except Exception as e:
@@ -125,19 +130,14 @@ class Telemetry:
         return self._tracer is not None
 
     @contextmanager
-    def create_span(
-        self,
-        name: str,
-        attributes: dict[str, Any] | None = None,
-        kind: SpanKind = SpanKind.INTERNAL
-    ):
+    def create_span(self, name: str, attributes: dict[str, Any] | None = None, kind: Any = None):
         """
         Create a traced span context manager.
 
         Args:
             name: Span name
             attributes: Optional span attributes
-            kind: Span kind (INTERNAL, SERVER, CLIENT, etc.)
+            kind: Span kind (INTERNAL, SERVER, CLIENT, etc.) - only used if OpenTelemetry is available
 
         Yields:
             The span object (or None if telemetry disabled)
@@ -146,15 +146,21 @@ class Telemetry:
             yield None
             return
 
-        with self._tracer.start_as_current_span(name, kind=kind) as span:
+        # Use SpanKind.INTERNAL as default if available
+        span_kind = (
+            kind if kind is not None else (SpanKind.INTERNAL if OPENTELEMETRY_AVAILABLE else None)
+        )
+        with self._tracer.start_as_current_span(name, kind=span_kind) as span:
             if attributes:
                 for key, value in attributes.items():
-                    span.set_attribute(key, str(value) if not isinstance(value, (str, int, float, bool)) else value)
+                    span.set_attribute(
+                        key, str(value) if not isinstance(value, (str, int, float, bool)) else value
+                    )
             yield span
 
     def record_error(self, span: Any, error: Exception, message: str | None = None) -> None:
         """Record an error on a span."""
-        if span is None or not self.is_enabled:
+        if span is None or not self.is_enabled or not OPENTELEMETRY_AVAILABLE:
             return
 
         span.record_exception(error)
@@ -190,9 +196,7 @@ def get_telemetry(config: TelemetryConfig | None = None) -> Telemetry:
 
 
 def traced(
-    name: str | None = None,
-    attributes: dict[str, Any] | None = None,
-    record_args: bool = False
+    name: str | None = None, attributes: dict[str, Any] | None = None, record_args: bool = False
 ) -> Callable[[Callable[P, T]], Callable[P, T]]:
     """
     Decorator to trace a function with OpenTelemetry.
@@ -205,6 +209,7 @@ def traced(
     Returns:
         Decorated function with tracing
     """
+
     def decorator(func: Callable[P, T]) -> Callable[P, T]:
         span_name = name or f"{func.__module__}.{func.__qualname__}"
 
@@ -223,7 +228,7 @@ def traced(
             with telemetry.create_span(span_name, attributes=span_attrs) as span:
                 try:
                     result = func(*args, **kwargs)
-                    if span:
+                    if span and OPENTELEMETRY_AVAILABLE:
                         span.set_status(Status(StatusCode.OK))
                     return result
                 except Exception as e:
@@ -245,7 +250,7 @@ def traced(
             with telemetry.create_span(span_name, attributes=span_attrs) as span:
                 try:
                     result = await func(*args, **kwargs)
-                    if span:
+                    if span and OPENTELEMETRY_AVAILABLE:
                         span.set_status(Status(StatusCode.OK))
                     return result
                 except Exception as e:
@@ -253,6 +258,7 @@ def traced(
                     raise
 
         import asyncio
+
         if asyncio.iscoroutinefunction(func):
             return async_wrapper
         return sync_wrapper
