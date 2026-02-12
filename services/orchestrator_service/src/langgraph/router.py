@@ -243,7 +243,7 @@ class AgentSelector:
 
     def _requires_immediate_safety(self, safety_flags: dict[str, Any], analysis: IntentAnalysis) -> bool:
         """Check if immediate safety response is required."""
-        return (safety_flags.get("crisis_detected") or safety_flags.get("risk_level") in ("high", "critical") or
+        return (safety_flags.get("crisis_detected") or safety_flags.get("risk_level") in ("HIGH", "CRITICAL") or
                 analysis.intent == IntentType.CRISIS_DISCLOSURE)
 
     def _map_intent_to_agents(
@@ -343,7 +343,7 @@ class Router:
             "router_processing",
             message_length=len(message),
             has_context=bool(context),
-            safety_risk=safety_flags.get("risk_level", "none"),
+            safety_risk=safety_flags.get("risk_level", "NONE"),
         )
         analysis = self._analyzer.analyze(message, context)
         decision = self._selector.select(analysis, safety_flags, has_treatment)

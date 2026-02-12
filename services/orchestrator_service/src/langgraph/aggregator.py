@@ -308,6 +308,39 @@ class Aggregator:
         """Perform the aggregation process."""
         contributions = self._ranker.rank(results)
         if not contributions:
+            # Check if we had results but all failed
+            failed_agents = [
+                r.get("agent_type", "unknown")
+                for r in results
+                if not r.get("success", True) or not r.get("response_content")
+            ]
+            all_failed = len(results) > 0 and len(failed_agents) == len(results)
+
+            if all_failed:
+                logger.warning(
+                    "all_agents_failed",
+                    total_agents=len(results),
+                    failed_agents=failed_agents,
+                    errors=[r.get("error", "no response") for r in results],
+                )
+                unavailable_msg = (
+                    "I'm experiencing some temporary difficulties right now. "
+                    "Your message is important to me, and I want to give you "
+                    "a thoughtful response. Could you please try again in a moment?"
+                )
+                return AggregationResult(
+                    final_content=unavailable_msg,
+                    primary_source=AgentType.CHAT,
+                    contributing_agents=[],
+                    overall_confidence=0.0,
+                    strategy_used=AggregationStrategy.FIRST_SUCCESS,
+                    contributions=[],
+                    metadata={
+                        "all_agents_failed": True,
+                        "failed_agents": failed_agents,
+                    },
+                )
+
             return AggregationResult(
                 final_content=self._settings.fallback_response,
                 primary_source=AgentType.CHAT,

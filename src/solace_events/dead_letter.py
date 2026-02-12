@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Protocol
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -54,7 +54,8 @@ class RetryPolicy(BaseModel):
                 self.initial_delay_ms * (self.multiplier ** attempt)
             ))
         delay = min(delay, self.max_delay_ms)
-        if self.jitter_percent > 0:
+        # DECORRELATED already incorporates randomness — skip additional jitter
+        if self.jitter_percent > 0 and self.strategy != RetryStrategy.DECORRELATED:
             import random
             jitter = delay * self.jitter_percent
             delay += random.uniform(-jitter, jitter)
@@ -127,8 +128,21 @@ class DeadLetterRecord(BaseModel):
         return True
 
 
+class DLQStore(Protocol):
+    """Protocol for DLQ persistence backends."""
+
+    async def save(self, record: DeadLetterRecord) -> None: ...
+    async def get(self, record_id: UUID) -> DeadLetterRecord | None: ...
+    async def get_retriable(self, topic: str | None = None, limit: int = 100) -> list[DeadLetterRecord]: ...
+    async def get_by_topic(self, dlq_topic: str, limit: int = 100) -> list[DeadLetterRecord]: ...
+    async def mark_resolved(self, record_id: UUID, notes: str | None = None) -> None: ...
+    async def delete(self, record_id: UUID) -> None: ...
+    async def count_by_topic(self) -> dict[str, int]: ...
+    async def count_unresolved(self) -> int: ...
+
+
 class DeadLetterStore:
-    """In-memory store for dead letter records."""
+    """In-memory store for dead letter records (for testing and development)."""
 
     def __init__(self) -> None:
         self._records: dict[UUID, DeadLetterRecord] = {}
@@ -214,17 +228,17 @@ class DeadLetterHandler:
 
     def __init__(
         self,
-        store: DeadLetterStore | None = None,
+        store: DLQStore | None = None,
         retry_policy: RetryPolicy | None = None,
         consumer_group: str = "unknown",
     ) -> None:
-        self._store = store or DeadLetterStore()
+        self._store: DLQStore = store or DeadLetterStore()
         self._retry_policy = retry_policy or RetryPolicy()
         self._consumer_group = consumer_group
         self._retry_handlers: dict[str, RetryHandler] = {}
 
     @property
-    def store(self) -> DeadLetterStore:
+    def store(self) -> DLQStore:
         """Get the DLQ store."""
         return self._store
 
@@ -311,9 +325,30 @@ def get_dlq_topic(topic: str | SolaceTopic) -> str:
 def create_dead_letter_handler(
     consumer_group: str,
     retry_policy: RetryPolicy | None = None,
-    store: DeadLetterStore | None = None,
+    store: DLQStore | None = None,
+    postgres_pool: Any = None,
 ) -> DeadLetterHandler:
-    """Factory function to create dead letter handler."""
+    """Factory function to create dead letter handler.
+
+    Args:
+        consumer_group: Name of the consumer group for tracking.
+        retry_policy: Retry configuration.
+        store: Explicit DLQ store override.
+        postgres_pool: asyncpg connection pool. When provided and no explicit
+            store is given, uses PostgresDLQStore for durable persistence.
+    """
+    if store is None:
+        if postgres_pool is not None:
+            from .postgres_stores import PostgresDLQStore
+            store = PostgresDLQStore(postgres_pool)
+            logger.info("dlq_using_postgres_store", consumer_group=consumer_group)
+        else:
+            store = DeadLetterStore()
+            logger.warning(
+                "dlq_using_in_memory_store",
+                consumer_group=consumer_group,
+                hint="Pass postgres_pool for durable persistence",
+            )
     return DeadLetterHandler(
         store=store,
         retry_policy=retry_policy,

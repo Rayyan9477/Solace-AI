@@ -148,6 +148,110 @@ class IncidentResolvedEvent(SafetyEvent):
     time_to_resolution_minutes: int | None = Field(default=None)
 
 
+def to_kafka_event(event: SafetyEvent) -> Any:
+    """Convert local safety event to canonical Kafka event for inter-service messaging.
+
+    Returns a canonical BaseEvent subclass, or None if no mapping exists
+    or solace_events is not available.
+    """
+    try:
+        from src.solace_events.schemas import (
+            EventMetadata as KafkaMetadata,
+            CrisisLevel as KafkaCrisisLevel,
+            CrisisDetectedEvent as KafkaCrisisDetected,
+            CrisisResolvedEvent as KafkaCrisisResolved,
+            SafetyAssessmentEvent as KafkaSafetyAssessment,
+            EscalationTriggeredEvent as KafkaEscalationTriggered,
+            EscalationAcknowledgedEvent as KafkaEscalationAcknowledged,
+            EscalationResolvedEvent as KafkaEscalationResolved,
+            RiskLevelChangedEvent as KafkaRiskLevelChanged,
+            IncidentCreatedEvent as KafkaIncidentCreated,
+            IncidentResolvedEvent as KafkaIncidentResolved,
+        )
+    except ImportError:
+        logger.debug("solace_events_not_available_for_bridge")
+        return None
+
+    if not event.user_id:
+        return None
+
+    meta = KafkaMetadata(
+        event_id=event.event_id, timestamp=event.timestamp,
+        correlation_id=event.correlation_id, source_service="safety-service",
+    )
+    base: dict[str, Any] = {"user_id": event.user_id, "session_id": event.session_id, "metadata": meta}
+
+    if isinstance(event, CrisisDetectedEvent):
+        return KafkaCrisisDetected(
+            **base, crisis_level=KafkaCrisisLevel(event.crisis_level),
+            trigger_indicators=event.trigger_indicators,
+            detection_layer=event.detection_layers[0] if event.detection_layers else 1,
+            confidence=event.risk_score,
+            escalation_action="escalate" if event.requires_escalation else "monitor",
+            requires_human_review=event.requires_human_review,
+        )
+
+    if isinstance(event, CrisisResolvedEvent):
+        return KafkaCrisisResolved(
+            **base, crisis_level=KafkaCrisisLevel(event.crisis_level),
+            resolution_notes=event.resolution_notes, resolved_by=event.resolved_by,
+            time_to_resolution_minutes=event.time_to_resolution_minutes,
+        )
+
+    if isinstance(event, EscalationTriggeredEvent):
+        return KafkaEscalationTriggered(
+            **base, escalation_reason=event.reason, priority=event.priority,
+            assigned_clinician_id=event.assigned_clinician_id,
+            notification_sent=bool(event.notification_channels),
+        )
+
+    if isinstance(event, EscalationAcknowledgedEvent):
+        return KafkaEscalationAcknowledged(
+            **base, escalation_id=event.escalation_id,
+            acknowledged_by=event.acknowledged_by,
+            time_to_acknowledge_seconds=event.time_to_acknowledge_seconds,
+        )
+
+    if isinstance(event, EscalationResolvedEvent):
+        return KafkaEscalationResolved(
+            **base, escalation_id=event.escalation_id,
+            resolved_by=event.resolved_by, resolution_notes=event.resolution_notes,
+            time_to_resolution_minutes=event.time_to_resolution_minutes,
+        )
+
+    if isinstance(event, SafetyCheckCompletedEvent):
+        return KafkaSafetyAssessment(
+            **base, risk_level=KafkaCrisisLevel(event.crisis_level),
+            risk_score=event.risk_score, detection_layer=1,
+            recommended_action="monitor" if event.is_safe else "review",
+        )
+
+    if isinstance(event, RiskLevelChangedEvent):
+        valid_trends = {"improving", "stable", "worsening"}
+        trend = event.risk_trend if event.risk_trend in valid_trends else "stable"
+        return KafkaRiskLevelChanged(
+            **base, previous_level=KafkaCrisisLevel(event.previous_level),
+            new_level=KafkaCrisisLevel(event.new_level),
+            change_reason=event.change_reason, risk_trend=trend,
+        )
+
+    if isinstance(event, IncidentCreatedEvent):
+        return KafkaIncidentCreated(
+            **base, incident_id=event.incident_id, severity=event.severity,
+            crisis_level=KafkaCrisisLevel(event.crisis_level), description=event.description,
+        )
+
+    if isinstance(event, IncidentResolvedEvent):
+        return KafkaIncidentResolved(
+            **base, incident_id=event.incident_id,
+            resolution_notes=event.resolution_notes, resolved_by=event.resolved_by,
+            time_to_resolution_minutes=event.time_to_resolution_minutes,
+        )
+
+    logger.debug("no_kafka_mapping_for_event", event_type=event.event_type.value)
+    return None
+
+
 class SafetyEventHandler(ABC):
     """Abstract base class for event handlers."""
 

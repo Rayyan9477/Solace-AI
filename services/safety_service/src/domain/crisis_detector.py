@@ -28,6 +28,56 @@ class CrisisLevel(str, Enum):
     CRITICAL = "CRITICAL"
 
     @classmethod
+    def from_string(cls, value: str) -> CrisisLevel:
+        """Case-insensitive lookup with common alias mapping.
+
+        Maps common alternative names to canonical CrisisLevel values:
+        - "moderate", "medium" -> ELEVATED
+        - "severe", "extreme", "imminent" -> CRITICAL
+        - "minimal" -> NONE
+        - "none" -> NONE
+        """
+        _ALIASES: dict[str, CrisisLevel] = {
+            "none": cls.NONE,
+            "minimal": cls.NONE,
+            "low": cls.LOW,
+            "moderate": cls.ELEVATED,
+            "medium": cls.ELEVATED,
+            "elevated": cls.ELEVATED,
+            "high": cls.HIGH,
+            "severe": cls.CRITICAL,
+            "extreme": cls.CRITICAL,
+            "imminent": cls.CRITICAL,
+            "critical": cls.CRITICAL,
+        }
+        normalized = value.strip().lower()
+        if normalized in _ALIASES:
+            return _ALIASES[normalized]
+        raise ValueError(
+            f"Unknown crisis level: '{value}'. "
+            f"Valid values: {', '.join(_ALIASES.keys())}"
+        )
+
+    def to_risk_severity(self) -> str:
+        """Map CrisisLevel to RiskSeverity string values for backward compatibility.
+
+        Returns the corresponding RiskSeverity enum value name:
+        - NONE -> MINIMAL
+        - LOW -> LOW
+        - ELEVATED -> MODERATE
+        - HIGH -> HIGH
+        - CRITICAL -> SEVERE
+        """
+        _SEVERITY_MAP: dict[CrisisLevel, str] = {
+            CrisisLevel.NONE: "MINIMAL",
+            CrisisLevel.LOW: "LOW",
+            CrisisLevel.ELEVATED: "MODERATE",
+            CrisisLevel.HIGH: "HIGH",
+            CrisisLevel.CRITICAL: "SEVERE",
+        }
+        return _SEVERITY_MAP[self]
+
+    @classmethod
     def from_score(
         cls, score: Decimal, settings: CrisisDetectorSettings | None = None
     ) -> CrisisLevel:
@@ -456,7 +506,16 @@ class Layer3OutputFilter:
 
     def __init__(self, settings: CrisisDetectorSettings) -> None:
         self._settings = settings
-        self._unsafe_phrases = ["just end it", "give up", "no point", "worthless", "burden to"]
+        # Context-aware harmful patterns: only flag directive/endorsing harm,
+        # NOT therapeutic reflections like "I hear you feel worthless"
+        self._harmful_patterns = [
+            re.compile(r"\byou\s+should\s+(just\s+)?(end|kill|hurt|give\s+up)", re.I),
+            re.compile(r"\bjust\s+(end|do)\s+it\b", re.I),
+            re.compile(r"\bthere'?s\s+no\s+point\s+(in|to)\s+(living|trying|going\s+on)", re.I),
+            re.compile(r"\byou'?re\s+(a\s+)?burden\b", re.I),
+            re.compile(r"\bnobody\s+(cares|would\s+miss)\b", re.I),
+            re.compile(r"\bgive\s+up\s+on\s+(everything|life|yourself)", re.I),
+        ]
         self._required_elements = {
             CrisisLevel.HIGH: ["support", "help", "resources"],
             CrisisLevel.CRITICAL: ["crisis", "988", "emergency", "immediate"],
@@ -465,15 +524,20 @@ class Layer3OutputFilter:
     def filter_output(
         self, response: str, crisis_level: CrisisLevel
     ) -> tuple[str, list[str], bool]:
-        """Filter output for safety and add required elements."""
+        """Filter output for safety and add required elements.
+
+        Uses context-aware patterns that detect directive harm
+        (e.g. 'you should end it') but allow therapeutic reflections
+        (e.g. 'I hear you feel worthless').
+        """
         modifications: list[str] = []
         filtered = response
-        for phrase in self._unsafe_phrases:
-            if phrase.lower() in filtered.lower():
-                modifications.append(f"Removed unsafe phrase: '{phrase}'")
-                filtered = re.sub(
-                    re.escape(phrase), "[supportive message]", filtered, flags=re.IGNORECASE
-                )
+        for pattern in self._harmful_patterns:
+            match = pattern.search(filtered)
+            if match:
+                phrase = match.group(0)
+                modifications.append(f"Removed harmful directive: '{phrase}'")
+                filtered = pattern.sub("[supportive message]", filtered)
         if crisis_level in self._required_elements:
             required = self._required_elements[crisis_level]
             missing = [elem for elem in required if elem.lower() not in filtered.lower()]

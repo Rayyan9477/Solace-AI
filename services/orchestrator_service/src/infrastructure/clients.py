@@ -10,6 +10,7 @@ from enum import Enum
 from typing import Any, Generic, TypeVar
 from uuid import UUID
 import asyncio
+import random
 import structlog
 import httpx
 
@@ -37,6 +38,8 @@ class ClientConfig:
     retry_delay_seconds: float = 1.0
     circuit_failure_threshold: int = 5
     circuit_recovery_timeout: int = 30
+    verify_ssl: bool = True
+    ssl_cert_path: str | None = None
 
 
 @dataclass
@@ -104,24 +107,47 @@ class CircuitBreaker:
 
 
 class BaseServiceClient:
-    """Base HTTP client with retry and circuit breaker."""
+    """Base HTTP client with retry, circuit breaker, and optional service auth."""
 
-    def __init__(self, config: ClientConfig) -> None:
+    def __init__(
+        self,
+        config: ClientConfig,
+        token_manager: Any = None,
+        service_name: str = "orchestrator-service",
+    ) -> None:
         self._config = config
         self._circuit = CircuitBreaker(
             config.circuit_failure_threshold, config.circuit_recovery_timeout
         )
         self._client: httpx.AsyncClient | None = None
+        self._token_manager = token_manager
+        self._service_name = service_name
 
     async def _get_client(self) -> httpx.AsyncClient:
-        """Get or create HTTP client."""
+        """Get or create HTTP client with SSL verification."""
         if self._client is None:
+            verify: bool | str = self._config.ssl_cert_path or self._config.verify_ssl
             self._client = httpx.AsyncClient(
                 base_url=self._config.base_url,
                 timeout=httpx.Timeout(self._config.timeout_seconds),
                 headers={"Content-Type": "application/json"},
+                verify=verify,
             )
         return self._client
+
+    def _get_auth_headers(self) -> dict[str, str]:
+        """Get service authentication headers if token manager is configured."""
+        if self._token_manager is None:
+            return {}
+        try:
+            credentials = self._token_manager.get_or_create_token(self._service_name)
+            return {
+                "Authorization": f"Bearer {credentials.token}",
+                "X-Service-Name": self._service_name,
+            }
+        except Exception as e:
+            logger.warning("service_auth_header_failed", error=str(e))
+            return {}
 
     async def close(self) -> None:
         """Close HTTP client."""
@@ -145,7 +171,7 @@ class BaseServiceClient:
         for attempt in range(self._config.max_retries + 1):
             try:
                 client = await self._get_client()
-                request_headers = {**(headers or {})}
+                request_headers = {**self._get_auth_headers(), **(headers or {})}
                 response = await client.request(
                     method, path, json=data, params=params, headers=request_headers
                 )
@@ -179,7 +205,10 @@ class BaseServiceClient:
                 last_error = str(e)
                 self._circuit.record_failure()
             if attempt < self._config.max_retries:
-                await asyncio.sleep(self._config.retry_delay_seconds * (attempt + 1))
+                base_delay = self._config.retry_delay_seconds * (2 ** attempt)
+                jitter = random.uniform(0, base_delay * 0.1)
+                delay = min(base_delay + jitter, 30.0)
+                await asyncio.sleep(delay)
         elapsed_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
         return ServiceResponse(
             success=False, error=last_error, status_code=503, response_time_ms=elapsed_ms
@@ -211,9 +240,9 @@ class BaseServiceClient:
 class PersonalityServiceClient(BaseServiceClient):
     """Client for Personality Service."""
 
-    def __init__(self, endpoints: ServiceEndpoints | None = None) -> None:
+    def __init__(self, endpoints: ServiceEndpoints | None = None, token_manager: Any = None) -> None:
         eps = endpoints or get_config().endpoints()
-        super().__init__(ClientConfig(base_url=eps.personality_service_url))
+        super().__init__(ClientConfig(base_url=eps.personality_service_url), token_manager=token_manager)
 
     async def get_style(self, user_id: UUID) -> ServiceResponse[dict[str, Any]]:
         """Get personality style for user."""
@@ -227,9 +256,9 @@ class PersonalityServiceClient(BaseServiceClient):
 class DiagnosisServiceClient(BaseServiceClient):
     """Client for Diagnosis Service."""
 
-    def __init__(self, endpoints: ServiceEndpoints | None = None) -> None:
+    def __init__(self, endpoints: ServiceEndpoints | None = None, token_manager: Any = None) -> None:
         eps = endpoints or get_config().endpoints()
-        super().__init__(ClientConfig(base_url=eps.diagnosis_service_url))
+        super().__init__(ClientConfig(base_url=eps.diagnosis_service_url), token_manager=token_manager)
 
     async def get_assessment(
         self, user_id: UUID, session_id: UUID
@@ -249,9 +278,9 @@ class DiagnosisServiceClient(BaseServiceClient):
 class TherapyServiceClient(BaseServiceClient):
     """Client for Therapy Service."""
 
-    def __init__(self, endpoints: ServiceEndpoints | None = None) -> None:
+    def __init__(self, endpoints: ServiceEndpoints | None = None, token_manager: Any = None) -> None:
         eps = endpoints or get_config().endpoints()
-        super().__init__(ClientConfig(base_url=eps.therapy_service_url))
+        super().__init__(ClientConfig(base_url=eps.therapy_service_url), token_manager=token_manager)
 
     async def process_message(
         self,
@@ -303,10 +332,10 @@ class TherapyServiceClient(BaseServiceClient):
 class TreatmentServiceClient(TherapyServiceClient):
     """Client for Treatment Service (alias for TherapyServiceClient)."""
 
-    def __init__(self, endpoints: ServiceEndpoints | None = None) -> None:
+    def __init__(self, endpoints: ServiceEndpoints | None = None, token_manager: Any = None) -> None:
         eps = endpoints or get_config().endpoints()
         # Use treatment_service_url for backwards compatibility
-        BaseServiceClient.__init__(self, ClientConfig(base_url=eps.treatment_service_url))
+        BaseServiceClient.__init__(self, ClientConfig(base_url=eps.treatment_service_url), token_manager=token_manager)
 
     async def get_plan(self, user_id: UUID) -> ServiceResponse[dict[str, Any]]:
         """Get treatment plan for user."""
@@ -322,9 +351,9 @@ class TreatmentServiceClient(TherapyServiceClient):
 class MemoryServiceClient(BaseServiceClient):
     """Client for Memory Service."""
 
-    def __init__(self, endpoints: ServiceEndpoints | None = None) -> None:
+    def __init__(self, endpoints: ServiceEndpoints | None = None, token_manager: Any = None) -> None:
         eps = endpoints or get_config().endpoints()
-        super().__init__(ClientConfig(base_url=eps.memory_service_url))
+        super().__init__(ClientConfig(base_url=eps.memory_service_url), token_manager=token_manager)
 
     async def get_context(self, user_id: UUID, session_id: UUID) -> ServiceResponse[dict[str, Any]]:
         """Get conversation context."""
@@ -363,9 +392,9 @@ class MemoryServiceClient(BaseServiceClient):
 class SafetyServiceClient(BaseServiceClient):
     """Client for Safety Service."""
 
-    def __init__(self, endpoints: ServiceEndpoints | None = None) -> None:
+    def __init__(self, endpoints: ServiceEndpoints | None = None, token_manager: Any = None) -> None:
         eps = endpoints or get_config().endpoints()
-        super().__init__(ClientConfig(base_url=eps.safety_service_url))
+        super().__init__(ClientConfig(base_url=eps.safety_service_url), token_manager=token_manager)
 
     async def check_safety(
         self,
@@ -409,46 +438,51 @@ class SafetyServiceClient(BaseServiceClient):
 
 
 class ServiceClientFactory:
-    """Factory for creating service clients."""
+    """Factory for creating service clients with optional service auth."""
 
-    def __init__(self, endpoints: ServiceEndpoints | None = None) -> None:
+    def __init__(
+        self,
+        endpoints: ServiceEndpoints | None = None,
+        token_manager: Any = None,
+    ) -> None:
         self._endpoints = endpoints or get_config().endpoints()
+        self._token_manager = token_manager
         self._clients: dict[str, BaseServiceClient] = {}
 
     def personality(self) -> PersonalityServiceClient:
         """Get personality service client."""
         if "personality" not in self._clients:
-            self._clients["personality"] = PersonalityServiceClient(self._endpoints)
+            self._clients["personality"] = PersonalityServiceClient(self._endpoints, self._token_manager)
         return self._clients["personality"]  # type: ignore
 
     def diagnosis(self) -> DiagnosisServiceClient:
         """Get diagnosis service client."""
         if "diagnosis" not in self._clients:
-            self._clients["diagnosis"] = DiagnosisServiceClient(self._endpoints)
+            self._clients["diagnosis"] = DiagnosisServiceClient(self._endpoints, self._token_manager)
         return self._clients["diagnosis"]  # type: ignore
 
     def treatment(self) -> TreatmentServiceClient:
         """Get treatment service client (alias for therapy)."""
         if "treatment" not in self._clients:
-            self._clients["treatment"] = TreatmentServiceClient(self._endpoints)
+            self._clients["treatment"] = TreatmentServiceClient(self._endpoints, self._token_manager)
         return self._clients["treatment"]  # type: ignore
 
     def therapy(self) -> TherapyServiceClient:
         """Get therapy service client."""
         if "therapy" not in self._clients:
-            self._clients["therapy"] = TherapyServiceClient(self._endpoints)
+            self._clients["therapy"] = TherapyServiceClient(self._endpoints, self._token_manager)
         return self._clients["therapy"]  # type: ignore
 
     def memory(self) -> MemoryServiceClient:
         """Get memory service client."""
         if "memory" not in self._clients:
-            self._clients["memory"] = MemoryServiceClient(self._endpoints)
+            self._clients["memory"] = MemoryServiceClient(self._endpoints, self._token_manager)
         return self._clients["memory"]  # type: ignore
 
     def safety(self) -> SafetyServiceClient:
         """Get safety service client."""
         if "safety" not in self._clients:
-            self._clients["safety"] = SafetyServiceClient(self._endpoints)
+            self._clients["safety"] = SafetyServiceClient(self._endpoints, self._token_manager)
         return self._clients["safety"]  # type: ignore
 
     async def close_all(self) -> None:

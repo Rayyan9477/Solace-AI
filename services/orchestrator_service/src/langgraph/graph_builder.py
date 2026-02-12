@@ -38,6 +38,43 @@ from ..agents.safety_agent import safety_agent_node as real_safety_agent_node
 logger = structlog.get_logger(__name__)
 
 
+class _CrisisResourceManager:
+    """Local crisis resource manager for the orchestrator.
+
+    Mirrors the safety service's CrisisResourceManager to avoid cross-service imports.
+    Provides crisis hotline/resource information for inclusion in crisis responses.
+    """
+
+    _RESOURCES = [
+        {"name": "Emergency Services", "contact": "911", "type": "phone", "available": "24/7"},
+        {"name": "988 Suicide & Crisis Lifeline", "contact": "Call or text 988", "type": "phone", "available": "24/7"},
+        {"name": "Crisis Text Line", "contact": "Text HOME to 741741", "type": "text", "available": "24/7"},
+        {"name": "SAMHSA National Helpline", "contact": "1-800-662-4357", "type": "phone", "available": "24/7"},
+        {"name": "Veterans Crisis Line", "contact": "988 (Press 1)", "type": "phone", "available": "24/7"},
+        {"name": "Trevor Project (LGBTQ+)", "contact": "1-866-488-7386", "type": "phone", "available": "24/7"},
+    ]
+
+    def get_resources_for_level(self, crisis_level: str) -> list[dict[str, str]]:
+        """Get appropriate resources for crisis level."""
+        level = crisis_level.upper()
+        if level == "CRITICAL":
+            return self._RESOURCES  # All resources including 911
+        if level == "HIGH":
+            return self._RESOURCES[1:]  # Skip 911 for HIGH
+        return self._RESOURCES[1:3]  # 988 + Crisis Text Line for lower levels
+
+
+_crisis_resource_manager: _CrisisResourceManager | None = None
+
+
+def _get_crisis_resource_manager() -> _CrisisResourceManager:
+    """Get singleton crisis resource manager."""
+    global _crisis_resource_manager
+    if _crisis_resource_manager is None:
+        _crisis_resource_manager = _CrisisResourceManager()
+    return _crisis_resource_manager
+
+
 class GraphBuilderSettings(BaseSettings):
     """Configuration for the graph builder."""
     enable_checkpointing: bool = Field(default=True)
@@ -49,8 +86,6 @@ class GraphBuilderSettings(BaseSettings):
     agent_timeout_ms: int = Field(default=30000)
     # Use full Safety Service for precheck instead of local rule-based check
     use_safety_service_precheck: bool = Field(default=False)
-    # Use local stub agents instead of HTTP service clients (for testing)
-    use_local_agents: bool = Field(default=False)
     model_config = SettingsConfigDict(env_prefix="ORCHESTRATOR_GRAPH_", env_file=".env", extra="ignore")
 
 
@@ -72,52 +107,56 @@ def safety_precheck_node(state: OrchestratorState) -> dict[str, Any]:
 
 
 def crisis_handler_node(state: OrchestratorState) -> dict[str, Any]:
-    """Crisis handler node - generates immediate safety response."""
+    """Crisis handler node - generates immediate safety response with crisis resources."""
     safety_flags = state.get("safety_flags", {})
-    risk_level = safety_flags.get("risk_level", "none")
+    risk_level = str(safety_flags.get("risk_level", "NONE")).upper()
     logger.warning("crisis_handler_activated", risk_level=risk_level)
-    crisis_response = """I'm really concerned about what you're sharing. Your safety is the most important thing right now.
 
-If you're having thoughts of harming yourself, please reach out for immediate support:
-- **988 Suicide & Crisis Lifeline**: Call or text 988 (available 24/7)
-- **Crisis Text Line**: Text HOME to 741741
-- **Emergency Services**: Call 911 if you're in immediate danger
+    # Get crisis resources from the resource manager
+    resource_manager = _get_crisis_resource_manager()
+    resources = resource_manager.get_resources_for_level(risk_level)
 
-I'm here with you, and I want you to know that these feelings can get better with the right support. Would you like to talk about what's been happening?"""
-    response_msg = MessageEntry.assistant_message(content=crisis_response, metadata={"is_crisis_response": True, "risk_level": risk_level})
-    agent_result = AgentResult(agent_type=AgentType.SAFETY, success=True, response_content=crisis_response, confidence=1.0, metadata={"is_crisis_response": True})
-    return {"final_response": crisis_response, "messages": [response_msg.to_dict()], "safety_flags": {**safety_flags, "safety_resources_shown": True}, "processing_phase": ProcessingPhase.CRISIS_HANDLING.value, "agent_results": [agent_result.to_dict()]}
+    # Build resource text from dynamic resources
+    resource_lines = "\n".join(
+        f"- **{r['name']}**: {r['contact']} ({r['available']})"
+        for r in resources
+    )
 
+    crisis_response = (
+        "I'm really concerned about what you're sharing. "
+        "Your safety is the most important thing right now.\n\n"
+        "Please reach out for immediate support:\n"
+        f"{resource_lines}\n\n"
+        "I'm here with you, and I want you to know that these feelings "
+        "can get better with the right support. Would you like to talk "
+        "about what's been happening?"
+    )
 
-def chat_agent_node(state: OrchestratorState) -> dict[str, Any]:
-    """Chat agent node - handles general conversation."""
-    message = state.get("current_message", "")
-    personality_style = state.get("personality_style", {})
-    logger.info("chat_agent_processing", message_length=len(message))
-    warmth = personality_style.get("warmth", 0.7)
-    response = ("Thank you for sharing that with me. I'm here to listen and support you. " if warmth > 0.7 else "I understand. ") + "How are you feeling about this?"
-    return {"agent_results": [AgentResult(agent_type=AgentType.CHAT, success=True, response_content=response, confidence=0.7, metadata={"warmth": warmth}).to_dict()]}
-
-
-def diagnosis_agent_node(state: OrchestratorState) -> dict[str, Any]:
-    """Diagnosis agent node - coordinates with diagnosis service."""
-    logger.info("diagnosis_agent_processing", message_length=len(state.get("current_message", "")))
-    response = "Based on what you've shared, it might be helpful to explore these feelings further. Would you like to talk more about when these symptoms started?"
-    return {"agent_results": [AgentResult(agent_type=AgentType.DIAGNOSIS, success=True, response_content=response, confidence=0.75, metadata={"assessment_type": "symptom_exploration"}).to_dict()]}
-
-
-def therapy_agent_node(state: OrchestratorState) -> dict[str, Any]:
-    """Therapy agent node - provides evidence-based therapeutic interventions."""
-    logger.info("therapy_agent_processing", message_length=len(state.get("current_message", "")), intent=state.get("intent", "general_chat"))
-    response = "It sounds like you're going through a difficult time. One thing that might help is to take a moment to notice how you're feeling right now, without trying to change it. Just observe your thoughts and feelings with curiosity."
-    return {"agent_results": [AgentResult(agent_type=AgentType.THERAPY, success=True, response_content=response, confidence=0.80, metadata={"technique": "mindfulness_observation", "modality": "ACT"}).to_dict()]}
-
-
-def personality_agent_node(state: OrchestratorState) -> dict[str, Any]:
-    """Personality agent node - applies Big Five personality adaptation."""
-    logger.info("personality_agent_processing", message_length=len(state.get("current_message", "")))
-    style = {"warmth": 0.7, "structure": 0.5, "complexity": 0.5, "directness": 0.5, "energy": 0.5, "validation_level": 0.6, "style_type": "balanced"}
-    return {"personality_style": style, "agent_results": [AgentResult(agent_type=AgentType.PERSONALITY, success=True, confidence=0.70, metadata={"style_params": style}).to_dict()]}
+    response_msg = MessageEntry.assistant_message(
+        content=crisis_response,
+        metadata={
+            "is_crisis_response": True,
+            "risk_level": risk_level,
+            "resources_provided": len(resources),
+        },
+    )
+    agent_result = AgentResult(
+        agent_type=AgentType.SAFETY,
+        success=True,
+        response_content=crisis_response,
+        confidence=1.0,
+        metadata={
+            "is_crisis_response": True,
+            "resources": resources,
+        },
+    )
+    return {
+        "final_response": crisis_response,
+        "messages": [response_msg.to_dict()],
+        "safety_flags": {**safety_flags, "safety_resources_shown": True},
+        "processing_phase": ProcessingPhase.CRISIS_HANDLING.value,
+        "agent_results": [agent_result.to_dict()],
+    }
 
 
 def aggregator_node(state: OrchestratorState) -> dict[str, Any]:
@@ -147,10 +186,21 @@ def safety_postcheck_node(state: OrchestratorState) -> dict[str, Any]:
 def route_after_safety(state: OrchestratorState) -> Literal["crisis_handler", "supervisor"]:
     """Route based on safety pre-check results."""
     safety_flags = state.get("safety_flags", {})
-    if safety_flags.get("crisis_detected") or safety_flags.get("risk_level") in ("high", "critical"):
-        logger.info("routing_to_crisis_handler")
-        return "crisis_handler"
-    return "supervisor"
+    crisis_detected = safety_flags.get("crisis_detected", False)
+    risk_level = str(safety_flags.get("risk_level", "NONE")).upper()
+    requires_escalation = safety_flags.get("requires_escalation", False)
+
+    route_to_crisis = crisis_detected or risk_level in ("HIGH", "CRITICAL") or requires_escalation
+    destination = "crisis_handler" if route_to_crisis else "supervisor"
+
+    logger.info(
+        "routing_decision",
+        destination=destination,
+        crisis_detected=crisis_detected,
+        risk_level=risk_level,
+        requires_escalation=requires_escalation,
+    )
+    return destination
 
 
 def route_to_agents(state: OrchestratorState) -> list[str]:
@@ -212,12 +262,10 @@ class OrchestratorGraphBuilder:
         Returns:
             Configured StateGraph instance
         """
-        use_local = self._settings.use_local_agents
         use_safety_service = self._settings.use_safety_service_precheck
         logger.info(
             "building_orchestrator_graph",
             checkpointing=self._settings.enable_checkpointing,
-            use_local_agents=use_local,
             use_safety_service_precheck=use_safety_service,
         )
         builder = StateGraph(OrchestratorState)
@@ -227,24 +275,15 @@ class OrchestratorGraphBuilder:
         else:
             builder.add_node("safety_precheck", safety_precheck_node)
         builder.add_node("supervisor", SupervisorAgent(self._supervisor_settings).process)
-        # Use local crisis handler for immediate crisis response
         builder.add_node("crisis_handler", crisis_handler_node)
-        # Agent nodes: use HTTP clients or local stubs based on configuration
-        if use_local:
-            # Use local stub implementations (for testing or when services unavailable)
-            builder.add_node("chat_agent", chat_agent_node)
-            builder.add_node("diagnosis_agent", diagnosis_agent_node)
-            builder.add_node("therapy_agent", therapy_agent_node)
-            builder.add_node("personality_agent", personality_agent_node)
-        else:
-            # Use real agent nodes that call actual services via HTTP
-            builder.add_node("chat_agent", real_chat_agent_node)
-            builder.add_node("diagnosis_agent", real_diagnosis_agent_node)
-            builder.add_node("therapy_agent", real_therapy_agent_node)
-            builder.add_node("personality_agent", real_personality_agent_node)
-        # Use local aggregator and post-check nodes
+        # Agent nodes: real service HTTP clients
+        builder.add_node("chat_agent", real_chat_agent_node)
+        builder.add_node("diagnosis_agent", real_diagnosis_agent_node)
+        builder.add_node("therapy_agent", real_therapy_agent_node)
+        builder.add_node("personality_agent", real_personality_agent_node)
         builder.add_node("aggregator", aggregator_node)
         builder.add_node("safety_postcheck", safety_postcheck_node)
+        # Edges
         builder.add_edge(START, "safety_precheck")
         builder.add_conditional_edges("safety_precheck", route_after_safety, ["crisis_handler", "supervisor"])
         builder.add_edge("crisis_handler", END)
@@ -256,7 +295,7 @@ class OrchestratorGraphBuilder:
         builder.add_edge("aggregator", "safety_postcheck")
         builder.add_edge("safety_postcheck", END)
         self._graph = builder
-        logger.info("orchestrator_graph_built", node_count=9, mode="local" if use_local else "http_clients")
+        logger.info("orchestrator_graph_built", node_count=9)
         return builder
 
     def compile(self) -> Any:

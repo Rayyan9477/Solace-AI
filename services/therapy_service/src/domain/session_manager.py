@@ -290,7 +290,7 @@ class SessionManager:
                 "criteria_met": criteria_met,
             }
 
-        if session.current_risk in [RiskLevel.HIGH, RiskLevel.IMMINENT]:
+        if session.current_risk in [RiskLevel.HIGH, RiskLevel.CRITICAL]:
             if target_phase == SessionPhase.CLOSING:
                 return {
                     "allowed": True,

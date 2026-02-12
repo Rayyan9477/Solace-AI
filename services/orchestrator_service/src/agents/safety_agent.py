@@ -156,7 +156,7 @@ class SafetyCheckResult:
         return {
             CrisisLevel.NONE: RiskLevel.NONE,
             CrisisLevel.LOW: RiskLevel.LOW,
-            CrisisLevel.ELEVATED: RiskLevel.MODERATE,
+            CrisisLevel.ELEVATED: RiskLevel.ELEVATED,
             CrisisLevel.HIGH: RiskLevel.HIGH,
             CrisisLevel.CRITICAL: RiskLevel.CRITICAL,
         }.get(self.crisis_level, RiskLevel.NONE)
@@ -171,7 +171,7 @@ class SafetyServiceClient:
 
     async def check_safety(self, request: SafetyCheckRequest) -> SafetyCheckResult:
         """Perform safety check via Safety Service."""
-        async with httpx.AsyncClient(timeout=self._settings.timeout_seconds) as client:
+        async with httpx.AsyncClient(timeout=self._settings.timeout_seconds, verify=True) as client:
             for attempt in range(self._settings.max_retries + 1):
                 try:
                     response = await client.post(
@@ -186,7 +186,7 @@ class SafetyServiceClient:
         raise RuntimeError("Safety service check failed after retries")
 
     async def get_crisis_resources(self, severity: str) -> list[dict[str, Any]]:
-        async with httpx.AsyncClient(timeout=self._settings.timeout_seconds) as client:
+        async with httpx.AsyncClient(timeout=self._settings.timeout_seconds, verify=True) as client:
             response = await client.get(
                 f"{self._base_url}/api/v1/safety/resources", params={"level": severity}
             )
@@ -201,7 +201,7 @@ class SafetyServiceClient:
         reason: str,
         risk_factors: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=self._settings.timeout_seconds) as client:
+        async with httpx.AsyncClient(timeout=self._settings.timeout_seconds, verify=True) as client:
             response = await client.post(
                 f"{self._base_url}/api/v1/safety/escalate",
                 json={
@@ -237,7 +237,7 @@ class SafetyAgent:
             "safety_agent_processing",
             user_id=user_id,
             message_length=len(message),
-            existing_risk=existing_flags.get("risk_level", "none"),
+            existing_risk=existing_flags.get("risk_level", "NONE"),
         )
         try:
             result = await self._perform_safety_check(user_id, session_id, message, messages)
@@ -327,7 +327,11 @@ class SafetyAgent:
             agent_type=AgentType.SAFETY,
             success=True,
             response_content=response_content,
-            confidence=float(1 - result.risk_score) if result.is_safe else float(result.risk_score),
+            confidence=float(
+                sum(rf.confidence for rf in result.risk_factors) / len(result.risk_factors)
+                if result.risk_factors
+                else (0.7 if result.is_safe else 0.5)
+            ),
             metadata={
                 "crisis_level": result.crisis_level.value,
                 "risk_factors_count": len(result.risk_factors),

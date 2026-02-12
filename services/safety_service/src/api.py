@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 import structlog
 
 from .domain.service import SafetyService
-from .domain.crisis_detector import DetectionResult
+from .domain.crisis_detector import CrisisLevel, DetectionResult
 from .domain.escalation import EscalationResult
 
 # Authentication dependencies from shared security library
@@ -27,15 +27,6 @@ from solace_security.middleware import (
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["safety"])
-
-
-class CrisisLevel(str, Enum):
-    """Crisis severity levels aligned with system design."""
-    NONE = "NONE"
-    LOW = "LOW"
-    ELEVATED = "ELEVATED"
-    HIGH = "HIGH"
-    CRITICAL = "CRITICAL"
 
 
 class SafetyCheckType(str, Enum):

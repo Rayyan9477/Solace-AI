@@ -44,10 +44,10 @@ class AssessmentType(str, Enum):
 
 
 class RiskLevel(str, Enum):
-    """Risk level classification for safety assessments."""
-    MINIMAL = "MINIMAL"
+    """Risk level classification for safety assessments. Aligned with canonical CrisisLevel."""
+    NONE = "NONE"
     LOW = "LOW"
-    MODERATE = "MODERATE"
+    ELEVATED = "ELEVATED"
     HIGH = "HIGH"
     CRITICAL = "CRITICAL"
 
@@ -112,7 +112,7 @@ class SafetyAssessment(ClinicalBase):
         String(20),
         nullable=False,
         index=True,
-        comment="Overall risk level: MINIMAL, LOW, MODERATE, HIGH, CRITICAL"
+        comment="Overall risk level: NONE, LOW, ELEVATED, HIGH, CRITICAL"
     )
 
     risk_score: Mapped[float | None] = mapped_column(
@@ -461,7 +461,7 @@ class ContraindicationCheck(SafetyEventBase):
     risk_assessment: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
-        comment="Overall risk: MINIMAL, LOW, MODERATE, HIGH, CRITICAL"
+        comment="Overall risk: NONE, LOW, ELEVATED, HIGH, CRITICAL"
     )
 
     # Recommendations

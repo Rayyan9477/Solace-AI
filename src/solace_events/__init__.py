@@ -38,10 +38,15 @@ from .dead_letter import (
     DeadLetterHandler,
     DeadLetterRecord,
     DeadLetterStore,
+    DLQStore,
     RetryPolicy,
     RetryStrategy,
     create_dead_letter_handler,
     get_dlq_topic,
+)
+from .postgres_stores import (
+    PostgresDLQStore,
+    PostgresOutboxStore,
 )
 from .publisher import (
     AIOKafkaProducerAdapter,
@@ -130,10 +135,14 @@ __all__ = [
     "DeadLetterHandler",
     "DeadLetterRecord",
     "DeadLetterStore",
+    "DLQStore",
     "RetryPolicy",
     "RetryStrategy",
     "create_dead_letter_handler",
     "get_dlq_topic",
+    # Postgres Stores
+    "PostgresDLQStore",
+    "PostgresOutboxStore",
     # Schemas - Base
     "BaseEvent",
     "EventMetadata",

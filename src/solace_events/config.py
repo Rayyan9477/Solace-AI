@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
 
@@ -99,7 +99,7 @@ class KafkaSettings(BaseSettings):
     security_protocol: SecurityProtocol = Field(default=SecurityProtocol.PLAINTEXT)
     sasl_mechanism: SaslMechanism | None = Field(default=None)
     sasl_username: str | None = Field(default=None)
-    sasl_password: str | None = Field(default=None)
+    sasl_password: SecretStr | None = Field(default=None)
     ssl_cafile: str | None = Field(default=None)
     ssl_certfile: str | None = Field(default=None)
     ssl_keyfile: str | None = Field(default=None)
@@ -126,7 +126,7 @@ class KafkaSettings(BaseSettings):
         if self.sasl_mechanism:
             params["sasl_mechanism"] = self.sasl_mechanism.value
             params["sasl_plain_username"] = self.sasl_username
-            params["sasl_plain_password"] = self.sasl_password
+            params["sasl_plain_password"] = self.sasl_password.get_secret_value() if self.sasl_password else None
         if self.ssl_cafile:
             params["ssl_context"] = self._create_ssl_context()
         return params

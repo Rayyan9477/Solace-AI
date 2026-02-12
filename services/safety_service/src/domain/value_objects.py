@@ -13,13 +13,38 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class RiskSeverity(str, Enum):
-    """Risk severity classification levels."""
+    """Risk severity classification levels.
+
+    This enum uses clinical severity grading (6 values) which differs from
+    the canonical CrisisLevel (5 values). Use to_crisis_level() to convert.
+    """
     MINIMAL = "MINIMAL"
     LOW = "LOW"
     MODERATE = "MODERATE"
     HIGH = "HIGH"
     SEVERE = "SEVERE"
     EXTREME = "EXTREME"
+
+    def to_crisis_level(self) -> str:
+        """Map RiskSeverity to canonical CrisisLevel string value.
+
+        Mapping:
+        - MINIMAL -> NONE
+        - LOW -> LOW
+        - MODERATE -> ELEVATED
+        - HIGH -> HIGH
+        - SEVERE -> CRITICAL
+        - EXTREME -> CRITICAL
+        """
+        _CRISIS_MAP: dict[RiskSeverity, str] = {
+            RiskSeverity.MINIMAL: "NONE",
+            RiskSeverity.LOW: "LOW",
+            RiskSeverity.MODERATE: "ELEVATED",
+            RiskSeverity.HIGH: "HIGH",
+            RiskSeverity.SEVERE: "CRITICAL",
+            RiskSeverity.EXTREME: "CRITICAL",
+        }
+        return _CRISIS_MAP[self]
 
 
 class TriggerCategory(str, Enum):

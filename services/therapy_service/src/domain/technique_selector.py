@@ -175,7 +175,7 @@ class TechniqueSelector:
                 days_since = (datetime.now(timezone.utc) - recent_uses[-1]["timestamp"]).days
                 if days_since < 7:
                     score -= self._settings.recency_penalty_weight * (7 - days_since) / 7
-            if user_context.get("current_risk", RiskLevel.NONE) in [RiskLevel.HIGH, RiskLevel.IMMINENT]:
+            if user_context.get("current_risk", RiskLevel.NONE) in [RiskLevel.HIGH, RiskLevel.CRITICAL]:
                 if technique.category in ["grounding", "distress_tolerance"]:
                     score += 0.2
             scores[technique.technique_id] = max(0.0, min(1.0, score))
@@ -228,7 +228,7 @@ class TechniqueSelector:
                 if any(ci in technique.contraindications for ci in user_contraindications):
                     reasoning_parts.append(f"{technique.name} excluded: contraindication")
                     continue
-            if risk_level in [RiskLevel.HIGH, RiskLevel.IMMINENT] and technique.category not in ["grounding", "distress_tolerance"]:
+            if risk_level in [RiskLevel.HIGH, RiskLevel.CRITICAL] and technique.category not in ["grounding", "distress_tolerance"]:
                 reasoning_parts.append(f"{technique.name} skipped: requires crisis techniques")
                 continue
             if selected is None:

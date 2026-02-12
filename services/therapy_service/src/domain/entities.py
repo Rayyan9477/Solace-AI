@@ -8,6 +8,9 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, ClassVar
 from uuid import UUID, uuid4
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 from ..schemas import (
     SessionPhase, TreatmentPhase, TherapyModality, SeverityLevel,
@@ -291,7 +294,11 @@ class TreatmentPlanEntity:
                 self.version += 1
                 return self.current_phase
         except ValueError:
-            pass
+            logger.warning(
+                "phase_advance_failed",
+                current_phase=self.current_phase.value,
+                reason="current phase not found in phase order",
+            )
         return None
 
     def update_outcome_score(self, phq9: int | None = None, gad7: int | None = None) -> None:

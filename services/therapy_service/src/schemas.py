@@ -132,12 +132,12 @@ class DeliveryMode(str, Enum):
 
 
 class RiskLevel(str, Enum):
-    """Risk assessment levels."""
-    NONE = "none"
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    IMMINENT = "imminent"
+    """Risk assessment levels. Aligned with canonical CrisisLevel."""
+    NONE = "NONE"
+    LOW = "LOW"
+    ELEVATED = "ELEVATED"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
 
 
 class TechniqueDTO(BaseModel):

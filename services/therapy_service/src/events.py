@@ -175,6 +175,66 @@ class SteppedCareChangedEvent(DomainEvent):
         return cls(aggregate_id=plan_id, user_id=user_id, payload={"from_level": from_level, "to_level": to_level, "reason": reason})
 
 
+def to_kafka_event(event: DomainEvent) -> Any:
+    """Convert local therapy event to canonical Kafka event for inter-service messaging.
+
+    Maps session lifecycle and intervention events to canonical schemas.
+    Returns None for internal-only events or if solace_events is not available.
+    """
+    try:
+        from decimal import Decimal
+        from src.solace_events.schemas import (
+            EventMetadata as KafkaMetadata,
+            TherapySessionStartedEvent as KafkaTherapyStarted,
+            InterventionDeliveredEvent as KafkaInterventionDelivered,
+            ProgressMilestoneEvent as KafkaMilestone,
+            TherapyModality,
+        )
+    except ImportError:
+        logger.debug("solace_events_not_available_for_bridge")
+        return None
+
+    if not event.user_id:
+        return None
+
+    meta = KafkaMetadata(
+        event_id=event.event_id, timestamp=event.timestamp,
+        correlation_id=event.correlation_id or event.event_id,
+        source_service="therapy-service",
+    )
+    base: dict[str, Any] = {"user_id": event.user_id, "session_id": None, "metadata": meta}
+
+    if event.event_type == EventType.SESSION_STARTED:
+        plan_id_str = event.payload.get("treatment_plan_id")
+        return KafkaTherapyStarted(
+            **base,
+            treatment_plan_id=UUID(plan_id_str) if plan_id_str else None,
+            session_number=event.payload.get("session_number", 1),
+        )
+
+    if event.event_type == EventType.INTERVENTION_COMPLETED:
+        modality_str = event.payload.get("modality", "CBT")
+        try:
+            modality = TherapyModality(modality_str)
+        except ValueError:
+            modality = TherapyModality.CBT
+        return KafkaInterventionDelivered(
+            **base, intervention_id=event.aggregate_id,
+            technique=event.payload.get("technique_name", "unknown"),
+            modality=modality,
+            user_engagement_score=Decimal(str(event.payload.get("engagement_score", "0.5"))),
+        )
+
+    if event.event_type == EventType.MILESTONE_ACHIEVED:
+        return KafkaMilestone(
+            **base, milestone_type="goal",
+            milestone_description=event.payload.get("description", ""),
+            sessions_to_milestone=0,
+        )
+
+    return None
+
+
 EventHandler = Callable[[DomainEvent], Coroutine[Any, Any, None]]
 
 

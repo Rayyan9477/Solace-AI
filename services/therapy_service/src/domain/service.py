@@ -327,7 +327,7 @@ class TherapyOrchestrator(ServiceBase):
                 from ..infrastructure import get_therapy_prompt
                 system_prompt = get_therapy_prompt(
                     treatment_plan.primary_modality.value,
-                    is_crisis=session.current_risk in [RiskLevel.HIGH, RiskLevel.IMMINENT],
+                    is_crisis=session.current_risk in [RiskLevel.HIGH, RiskLevel.CRITICAL],
                 )
                 context = None
                 if technique:

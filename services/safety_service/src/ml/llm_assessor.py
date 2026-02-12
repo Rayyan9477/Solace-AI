@@ -37,13 +37,37 @@ logger = structlog.get_logger(__name__)
 
 
 class RiskLevel(str, Enum):
-    """LLM-assessed risk level."""
-    CRITICAL = "CRITICAL"  # Immediate intervention required
-    HIGH = "HIGH"  # Urgent attention needed
-    ELEVATED = "ELEVATED"  # Monitoring required
-    MODERATE = "MODERATE"  # Standard support
+    """LLM-assessed risk level. Aligned with canonical CrisisLevel (5 values)."""
+    NONE = "NONE"  # No significant risk
     LOW = "LOW"  # Minimal concern
-    MINIMAL = "MINIMAL"  # No significant risk
+    ELEVATED = "ELEVATED"  # Monitoring required
+    HIGH = "HIGH"  # Urgent attention needed
+    CRITICAL = "CRITICAL"  # Immediate intervention required
+
+    @classmethod
+    def from_llm_assessment(cls, value: str) -> RiskLevel:
+        """Map LLM output strings (which may use old 6-value names) to canonical 5-value enum.
+
+        Handles backward compatibility with old LLM outputs that may return
+        MODERATE or MINIMAL instead of the canonical ELEVATED and NONE.
+        """
+        _ALIASES: dict[str, RiskLevel] = {
+            "none": cls.NONE,
+            "minimal": cls.NONE,
+            "low": cls.LOW,
+            "moderate": cls.ELEVATED,
+            "medium": cls.ELEVATED,
+            "elevated": cls.ELEVATED,
+            "high": cls.HIGH,
+            "severe": cls.CRITICAL,
+            "extreme": cls.CRITICAL,
+            "imminent": cls.CRITICAL,
+            "critical": cls.CRITICAL,
+        }
+        normalized = value.strip().lower()
+        if normalized in _ALIASES:
+            return _ALIASES[normalized]
+        raise ValueError(f"Unknown risk level from LLM: '{value}'")
 
 
 class RiskDimension(str, Enum):
@@ -97,6 +121,8 @@ class LLMAssessorConfig(BaseSettings):
     api_timeout_seconds: int = Field(default=30, ge=5, le=120, description="API timeout")
     enable_caching: bool = Field(default=True, description="Enable prompt caching")
     cache_ttl_minutes: int = Field(default=60, ge=1, le=1440, description="Cache TTL")
+    max_input_chars: int = Field(default=12000, ge=1000, le=100000, description="Max input characters before truncation")
+    min_tokens_floor: int = Field(default=500, ge=100, le=2000, description="Minimum response tokens guaranteed")
 
     model_config = SettingsConfigDict(env_prefix="LLM_ASSESSOR_", env_file=".env", extra="ignore")
 
@@ -122,9 +148,14 @@ class LLMAssessor:
         # Initialize LangChain components
         if LANGCHAIN_AVAILABLE:
             try:
+                # Ensure max_tokens is at least min_tokens_floor
+                effective_max_tokens = max(
+                    self._config.max_tokens,
+                    self._config.min_tokens_floor,
+                )
                 self._llm = ChatAnthropic(
                     model=self._config.model_name,
-                    max_tokens=self._config.max_tokens,
+                    max_tokens=effective_max_tokens,
                     temperature=float(self._config.temperature),
                     timeout=self._config.api_timeout_seconds
                 )
@@ -170,13 +201,13 @@ For each dimension present, provide:
 
 Also identify protective factors (hope, social support, coping skills, etc.).
 
-Provide an overall risk level (CRITICAL, HIGH, ELEVATED, MODERATE, LOW, MINIMAL) and quantitative risk score.
+Provide an overall risk level (CRITICAL, HIGH, ELEVATED, LOW, NONE) and quantitative risk score.
 
 If CRITICAL or HIGH risk, mark as requiring immediate intervention.
 
 Output must be valid JSON matching this schema:
 {{
-  "risk_level": "CRITICAL|HIGH|ELEVATED|MODERATE|LOW|MINIMAL",
+  "risk_level": "CRITICAL|HIGH|ELEVATED|LOW|NONE",
   "risk_score": 0.0-1.0,
   "confidence": 0.0-1.0,
   "risk_factors": [
@@ -203,11 +234,28 @@ Output must be valid JSON matching this schema:
 Be conservative: when uncertain, err on the side of caution and assess higher risk."""
 
     def _build_user_prompt(self, text: str, context: dict[str, Any] | None = None) -> str:
-        """Build user prompt with text to assess."""
+        """Build user prompt with text to assess.
+
+        Truncates input if it exceeds max_input_chars to stay within token budget
+        while ensuring min_tokens_floor is available for the response.
+        """
+        max_chars = self._config.max_input_chars
+        if len(text) > max_chars:
+            logger.warning(
+                "llm_assessor_input_truncated",
+                original_length=len(text),
+                truncated_to=max_chars,
+            )
+            text = text[:max_chars] + "\n\n[... content truncated for safety assessment ...]"
+
         prompt = f"Analyze the following text for mental health crisis risk:\n\n{text}"
 
         if context:
-            prompt += f"\n\nAdditional context:\n{json.dumps(context, indent=2)}"
+            context_str = json.dumps(context, indent=2)
+            remaining = max(0, max_chars - len(prompt))
+            if len(context_str) > remaining:
+                context_str = context_str[:remaining] + "..."
+            prompt += f"\n\nAdditional context:\n{context_str}"
 
         prompt += "\n\nProvide your risk assessment as JSON:"
         return prompt
@@ -304,19 +352,43 @@ Be conservative: when uncertain, err on the side of caution and assess higher ri
             except Exception as e:
                 logger.error("anthropic_call_failed", error=str(e), fallback="mock")
 
-        # Mock response for testing/fallback
-        mock_response = {
-            "risk_level": "MODERATE",
-            "risk_score": 0.5,
-            "confidence": 0.8,
+        # Rule-based fallback when LLM is unavailable
+        logger.warning("llm_unavailable_using_rule_based_fallback")
+
+        # Analyze user_prompt text for crisis keywords
+        text_lower = user_prompt.lower()
+        critical_keywords = ["suicide", "kill myself", "end my life", "want to die", "take my life"]
+        high_keywords = ["self-harm", "hurt myself", "cutting", "overdose", "no reason to live", "hopeless"]
+        elevated_keywords = ["depressed", "anxious", "overwhelmed", "can't cope", "breaking down"]
+
+        has_critical = any(kw in text_lower for kw in critical_keywords)
+        has_high = any(kw in text_lower for kw in high_keywords)
+        has_elevated = any(kw in text_lower for kw in elevated_keywords)
+
+        if has_critical:
+            risk_level, risk_score, immediate = "CRITICAL", 0.9, True
+        elif has_high:
+            risk_level, risk_score, immediate = "HIGH", 0.75, False
+        elif has_elevated:
+            risk_level, risk_score, immediate = "ELEVATED", 0.5, False
+        else:
+            risk_level, risk_score, immediate = "LOW", 0.2, False
+
+        return {
+            "risk_level": risk_level,
+            "risk_score": risk_score,
+            "confidence": 0.6,
             "risk_factors": [],
             "protective_factors": [],
-            "clinical_summary": "Assessment completed via fallback (LangChain not configured)",
-            "recommended_actions": ["Continue monitoring", "Provide support resources"],
-            "immediate_risk": False,
-            "contextual_notes": "LLM assessment not configured - using fallback"
+            "clinical_summary": f"Rule-based assessment (LLM unavailable): {risk_level}",
+            "recommended_actions": (
+                ["Escalate to human clinician", "Provide crisis resources"]
+                if immediate
+                else ["Continue monitoring", "Provide support resources"]
+            ),
+            "immediate_risk": immediate,
+            "contextual_notes": "LLM assessment not configured — rule-based keyword fallback used",
         }
-        return mock_response
 
     def _parse_llm_response(self, response: dict[str, Any]) -> RiskAssessment:
         """Parse LLM JSON response into RiskAssessment object."""
@@ -342,7 +414,7 @@ Be conservative: when uncertain, err on the side of caution and assess higher ri
         ]
 
         return RiskAssessment(
-            risk_level=RiskLevel(response["risk_level"]),
+            risk_level=RiskLevel.from_llm_assessment(response["risk_level"]),
             risk_score=Decimal(str(response["risk_score"])),
             confidence=Decimal(str(response["confidence"])),
             risk_factors=risk_factors,
@@ -356,7 +428,7 @@ Be conservative: when uncertain, err on the side of caution and assess higher ri
     def _create_minimal_assessment(self, reason: str) -> RiskAssessment:
         """Create minimal risk assessment."""
         return RiskAssessment(
-            risk_level=RiskLevel.MINIMAL,
+            risk_level=RiskLevel.NONE,
             risk_score=Decimal("0.0"),
             confidence=Decimal("1.0"),
             clinical_summary=f"Minimal assessment: {reason}",
@@ -370,7 +442,7 @@ Be conservative: when uncertain, err on the side of caution and assess higher ri
         critical_keywords = ["suicide", "kill myself", "end my life", "want to die"]
         has_critical = any(kw in text_lower for kw in critical_keywords)
 
-        risk_level = RiskLevel.HIGH if has_critical else RiskLevel.MODERATE
+        risk_level = RiskLevel.HIGH if has_critical else RiskLevel.ELEVATED
         risk_score = Decimal("0.8") if has_critical else Decimal("0.5")
 
         return RiskAssessment(

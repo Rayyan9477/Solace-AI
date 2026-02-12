@@ -7,6 +7,8 @@ import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
+from decimal import Decimal
+from enum import Enum
 from typing import Any
 from uuid import UUID
 import json
@@ -29,6 +31,27 @@ from ..config import PersistenceSettings, get_config
 from ..langgraph.state_schema import OrchestratorState
 
 logger = structlog.get_logger(__name__)
+
+
+def _state_serializer(obj: Any) -> Any:
+    """Explicit JSON serializer for orchestrator state types.
+
+    Handles UUID, datetime, Decimal, and Enum. Raises TypeError for
+    unknown types to prevent silent data loss from default=str.
+    """
+    if isinstance(obj, UUID):
+        return str(obj)
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, Enum):
+        return obj.value
+    if isinstance(obj, set):
+        return list(obj)
+    if isinstance(obj, bytes):
+        return obj.decode("utf-8", errors="replace")
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
 @dataclass
@@ -120,9 +143,18 @@ class StateStore(ABC):
 
 
 class MemoryStateStore(StateStore):
-    """In-memory state store for development and testing."""
+    """In-memory state store for development and testing.
+
+    Not allowed in production — data is lost on restart.
+    """
 
     def __init__(self) -> None:
+        import os
+        if os.getenv("ENVIRONMENT") == "production":
+            raise RuntimeError(
+                "In-memory state store is not allowed in production. "
+                "Configure PostgreSQL via checkpoint_backend='postgres'."
+            )
         self._checkpoints: dict[str, Checkpoint] = {}
 
     async def save(self, checkpoint: Checkpoint) -> bool:
@@ -225,7 +257,7 @@ class PostgresStateStore(StateStore):
                     checkpoint.metadata.checkpoint_id,
                     checkpoint.metadata.user_id,
                     checkpoint.metadata.session_id,
-                    json.dumps(checkpoint.state, default=str),
+                    json.dumps(checkpoint.state, default=_state_serializer),
                     checkpoint.metadata.version,
                     checkpoint.metadata.size_bytes,
                     json.dumps(checkpoint.metadata.metadata),
@@ -352,9 +384,12 @@ class StatePersistenceManager:
             logger.info("creating_postgres_state_store")
             return PostgresStateStore(postgres_url)
         if backend == "postgres" and not _ASYNCPG_AVAILABLE:
-            logger.warning("asyncpg_unavailable_using_memory_state_store")
-        if backend != "memory":
-            logger.warning("unknown_backend_using_memory", backend=backend)
+            logger.warning(
+                "asyncpg_unavailable_falling_back_to_memory",
+                msg="Install asyncpg for PostgreSQL state persistence",
+            )
+        elif backend != "memory":
+            logger.warning("unknown_checkpoint_backend_falling_back_to_memory", backend=backend)
         return MemoryStateStore()
 
     def _create_langgraph_checkpointer(self) -> Any:
@@ -383,7 +418,7 @@ class StatePersistenceManager:
         now = datetime.now(timezone.utc)
         ttl_hours = self._settings.checkpoint_ttl_hours
         state_dict = dict(state)
-        state_json = json.dumps(state_dict, default=str)
+        state_json = json.dumps(state_dict, default=_state_serializer)
         size_bytes = len(state_json.encode("utf-8"))
         metadata = CheckpointMetadata(
             checkpoint_id=f"{tid}_{int(now.timestamp())}",

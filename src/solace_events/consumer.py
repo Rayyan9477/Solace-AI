@@ -360,6 +360,18 @@ class EventConsumer:
         start_time = datetime.now(timezone.utc)
         try:
             event = deserialize_event(value)
+            if event is None:
+                logger.warning(
+                    "unknown_event_type_skipped",
+                    topic=topic,
+                    partition=partition,
+                    offset=offset,
+                    raw_type=value.get("event_type", "missing"),
+                )
+                return ProcessingResult(
+                    status=ProcessingStatus.SKIP,
+                    event_id=self._get_fallback_event_id(value, topic, partition, offset),
+                )
             handlers = (
                 self._handlers.get(event.event_type, []) or self._default_handlers
             )
@@ -389,10 +401,13 @@ class EventConsumer:
             )
             if self._dead_letter_handler:
                 try:
-                    event = deserialize_event(value)
-                    await self._dead_letter_handler(event, str(e))
-                except Exception:
-                    pass
+                    dlq_event = deserialize_event(value)
+                    if dlq_event is not None:
+                        await self._dead_letter_handler(dlq_event, str(e))
+                    else:
+                        logger.warning("dlq_skip_unknown_event", topic=topic, offset=offset)
+                except Exception as dlq_err:
+                    logger.error("dlq_handler_failed", error=str(dlq_err), topic=topic, offset=offset)
             # Generate unique fallback UUID to avoid duplicate tracking issues
             # Use offset/partition/topic hash to create deterministic but unique ID for failed events
             fallback_event_id = self._get_fallback_event_id(

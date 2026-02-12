@@ -292,7 +292,9 @@ class ConnectionPoolManager:
 
     @classmethod
     @asynccontextmanager
-    async def acquire(cls, pool_name: str = "default") -> AsyncIterator[asyncpg.Connection]:
+    async def acquire(
+        cls, pool_name: str = "default", timeout: float = 10.0
+    ) -> AsyncIterator[asyncpg.Connection]:
         """Acquire connection from pool with automatic return and leak detection.
 
         Context manager ensures connection is properly returned to pool.
@@ -300,6 +302,7 @@ class ConnectionPoolManager:
 
         Args:
             pool_name: Name of pool to acquire from (defaults to "default")
+            timeout: Maximum seconds to wait for a connection (defaults to 10.0)
 
         Yields:
             asyncpg.Connection: Database connection from the pool
@@ -318,7 +321,7 @@ class ConnectionPoolManager:
         acquire_start = time.time()
 
         try:
-            async with pool.acquire() as conn:
+            async with pool.acquire(timeout=timeout) as conn:
                 # Record acquisition
                 acquire_time = (time.time() - acquire_start) * 1000
                 metrics.acquisition_count += 1

@@ -366,6 +366,8 @@ class FeatureFlags:
 def feature_flagged(flag_name: str, fallback_return: Any = None):
     """Decorator to gate function execution behind a feature flag.
 
+    Supports both sync and async functions via inspect.iscoroutinefunction().
+
     Args:
         flag_name: Feature flag to check
         fallback_return: Value to return if feature is disabled
@@ -373,15 +375,21 @@ def feature_flagged(flag_name: str, fallback_return: Any = None):
     Example:
         @feature_flagged("use_new_algorithm", fallback_return=[])
         def process_data_new_algorithm(data: list) -> list:
-            # New implementation
             return processed_data
+
+        @feature_flagged("use_async_pipeline", fallback_return=None)
+        async def run_pipeline(data: list) -> dict:
+            return await pipeline.run(data)
     """
+    import functools
+    import inspect
 
     def decorator(func):
-        def wrapper(*args, **kwargs):
-            if FeatureFlags.is_enabled(flag_name):
-                return func(*args, **kwargs)
-            else:
+        if inspect.iscoroutinefunction(func):
+            @functools.wraps(func)
+            async def async_wrapper(*args, **kwargs):
+                if FeatureFlags.is_enabled(flag_name):
+                    return await func(*args, **kwargs)
                 logger.debug(
                     "feature_flag_disabled_skipping",
                     flag=flag_name,
@@ -389,7 +397,20 @@ def feature_flagged(flag_name: str, fallback_return: Any = None):
                 )
                 return fallback_return
 
-        return wrapper
+            return async_wrapper
+        else:
+            @functools.wraps(func)
+            def sync_wrapper(*args, **kwargs):
+                if FeatureFlags.is_enabled(flag_name):
+                    return func(*args, **kwargs)
+                logger.debug(
+                    "feature_flag_disabled_skipping",
+                    flag=flag_name,
+                    function=func.__name__,
+                )
+                return fallback_return
+
+            return sync_wrapper
 
     return decorator
 

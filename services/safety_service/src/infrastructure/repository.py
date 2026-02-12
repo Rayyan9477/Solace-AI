@@ -6,8 +6,6 @@ Updated to use ConnectionPoolManager for centralized connection pooling
 and FeatureFlags for gradual rollout.
 """
 from __future__ import annotations
-import asyncio
-import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from datetime import datetime, timezone, timedelta
@@ -177,206 +175,6 @@ class UserRiskProfileRepository(ABC):
         pass
 
 
-class InMemorySafetyAssessmentRepository(SafetyAssessmentRepository):
-    """In-memory implementation for development and testing.
-
-    DEPRECATED: Use PostgreSQL-backed repositories via ConnectionPoolManager.
-    This class will be removed in v2.0.0. In-memory repos are blocked in production.
-    """
-
-    def __init__(self) -> None:
-        if os.getenv("ENVIRONMENT") == "production":
-            raise RuntimeError(
-                "In-memory repositories are not allowed in production. "
-                "Configure PostgreSQL via POSTGRES_* environment variables."
-            )
-        logger.warning(
-            "in_memory_repo_deprecated",
-            repo="SafetyAssessmentRepository",
-            message="Using in-memory storage - data will not persist. Migrate to PostgreSQL.",
-        )
-        self._assessments: dict[UUID, SafetyAssessment] = {}
-        self._lock = asyncio.Lock()
-
-    async def save(self, assessment: SafetyAssessment) -> SafetyAssessment:
-        async with self._lock:
-            self._assessments[assessment.assessment_id] = assessment
-            logger.debug("assessment_saved", assessment_id=str(assessment.assessment_id))
-            return assessment
-
-    async def get_by_id(self, assessment_id: UUID) -> SafetyAssessment | None:
-        return self._assessments.get(assessment_id)
-
-    async def get_by_user(self, user_id: UUID, limit: int = 100) -> list[SafetyAssessment]:
-        assessments = [a for a in self._assessments.values() if a.user_id == user_id]
-        assessments.sort(key=lambda a: a.created_at, reverse=True)
-        return assessments[:limit]
-
-    async def get_by_session(self, session_id: UUID) -> list[SafetyAssessment]:
-        return [a for a in self._assessments.values() if a.session_id == session_id]
-
-    async def get_recent(self, user_id: UUID, hours: int = 24) -> list[SafetyAssessment]:
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-        return [a for a in self._assessments.values()
-                if a.user_id == user_id and a.created_at >= cutoff]
-
-    async def count_by_crisis_level(self, user_id: UUID, crisis_level: str) -> int:
-        return sum(1 for a in self._assessments.values()
-                   if a.user_id == user_id and a.crisis_level == crisis_level)
-
-
-class InMemorySafetyPlanRepository(SafetyPlanRepository):
-    """In-memory implementation for development and testing.
-
-    DEPRECATED: Use PostgreSQL-backed repositories via ConnectionPoolManager.
-    This class will be removed in v2.0.0. In-memory repos are blocked in production.
-    """
-
-    def __init__(self) -> None:
-        if os.getenv("ENVIRONMENT") == "production":
-            raise RuntimeError(
-                "In-memory repositories are not allowed in production. "
-                "Configure PostgreSQL via POSTGRES_* environment variables."
-            )
-        logger.warning(
-            "in_memory_repo_deprecated",
-            repo="SafetyPlanRepository",
-            message="Using in-memory storage - data will not persist. Migrate to PostgreSQL.",
-        )
-        self._plans: dict[UUID, SafetyPlan] = {}
-        self._lock = asyncio.Lock()
-
-    async def save(self, plan: SafetyPlan) -> SafetyPlan:
-        async with self._lock:
-            self._plans[plan.plan_id] = plan
-            logger.debug("plan_saved", plan_id=str(plan.plan_id))
-            return plan
-
-    async def get_by_id(self, plan_id: UUID) -> SafetyPlan | None:
-        return self._plans.get(plan_id)
-
-    async def get_by_user(self, user_id: UUID) -> list[SafetyPlan]:
-        return [p for p in self._plans.values() if p.user_id == user_id]
-
-    async def get_active_by_user(self, user_id: UUID) -> SafetyPlan | None:
-        for plan in self._plans.values():
-            if plan.user_id == user_id and plan.status == SafetyPlanStatus.ACTIVE:
-                return plan
-        return None
-
-    async def update(self, plan: SafetyPlan) -> SafetyPlan:
-        async with self._lock:
-            if plan.plan_id not in self._plans:
-                raise EntityNotFoundError("SafetyPlan", plan.plan_id)
-            self._plans[plan.plan_id] = plan
-            return plan
-
-    async def delete(self, plan_id: UUID) -> bool:
-        async with self._lock:
-            if plan_id in self._plans:
-                del self._plans[plan_id]
-                return True
-            return False
-
-
-class InMemorySafetyIncidentRepository(SafetyIncidentRepository):
-    """In-memory implementation for development and testing.
-
-    DEPRECATED: Use PostgreSQL-backed repositories via ConnectionPoolManager.
-    This class will be removed in v2.0.0. In-memory repos are blocked in production.
-    """
-
-    def __init__(self) -> None:
-        if os.getenv("ENVIRONMENT") == "production":
-            raise RuntimeError(
-                "In-memory repositories are not allowed in production. "
-                "Configure PostgreSQL via POSTGRES_* environment variables."
-            )
-        logger.warning(
-            "in_memory_repo_deprecated",
-            repo="SafetyIncidentRepository",
-            message="Using in-memory storage - data will not persist. Migrate to PostgreSQL.",
-        )
-        self._incidents: dict[UUID, SafetyIncident] = {}
-        self._lock = asyncio.Lock()
-
-    async def save(self, incident: SafetyIncident) -> SafetyIncident:
-        async with self._lock:
-            self._incidents[incident.incident_id] = incident
-            logger.debug("incident_saved", incident_id=str(incident.incident_id))
-            return incident
-
-    async def get_by_id(self, incident_id: UUID) -> SafetyIncident | None:
-        return self._incidents.get(incident_id)
-
-    async def get_by_user(self, user_id: UUID, limit: int = 100) -> list[SafetyIncident]:
-        incidents = [i for i in self._incidents.values() if i.user_id == user_id]
-        incidents.sort(key=lambda i: i.created_at, reverse=True)
-        return incidents[:limit]
-
-    async def get_open(self, user_id: UUID | None = None) -> list[SafetyIncident]:
-        open_statuses = {IncidentStatus.OPEN, IncidentStatus.ACKNOWLEDGED, IncidentStatus.IN_PROGRESS}
-        incidents = [i for i in self._incidents.values() if i.status in open_statuses]
-        if user_id:
-            incidents = [i for i in incidents if i.user_id == user_id]
-        return incidents
-
-    async def get_by_status(self, status: IncidentStatus) -> list[SafetyIncident]:
-        return [i for i in self._incidents.values() if i.status == status]
-
-    async def update(self, incident: SafetyIncident) -> SafetyIncident:
-        async with self._lock:
-            if incident.incident_id not in self._incidents:
-                raise EntityNotFoundError("SafetyIncident", incident.incident_id)
-            self._incidents[incident.incident_id] = incident
-            return incident
-
-
-class InMemoryUserRiskProfileRepository(UserRiskProfileRepository):
-    """In-memory implementation for development and testing.
-
-    DEPRECATED: Use PostgreSQL-backed repositories via ConnectionPoolManager.
-    This class will be removed in v2.0.0. In-memory repos are blocked in production.
-    """
-
-    def __init__(self) -> None:
-        if os.getenv("ENVIRONMENT") == "production":
-            raise RuntimeError(
-                "In-memory repositories are not allowed in production. "
-                "Configure PostgreSQL via POSTGRES_* environment variables."
-            )
-        logger.warning(
-            "in_memory_repo_deprecated",
-            repo="UserRiskProfileRepository",
-            message="Using in-memory storage - data will not persist. Migrate to PostgreSQL.",
-        )
-        self._profiles: dict[UUID, UserRiskProfile] = {}
-        self._lock = asyncio.Lock()
-
-    async def save(self, profile: UserRiskProfile) -> UserRiskProfile:
-        async with self._lock:
-            self._profiles[profile.user_id] = profile
-            logger.debug("profile_saved", user_id=str(profile.user_id))
-            return profile
-
-    async def get_by_user(self, user_id: UUID) -> UserRiskProfile | None:
-        return self._profiles.get(user_id)
-
-    async def get_or_create(self, user_id: UUID) -> UserRiskProfile:
-        async with self._lock:
-            if user_id not in self._profiles:
-                self._profiles[user_id] = UserRiskProfile(user_id=user_id)
-            return self._profiles[user_id]
-
-    async def update(self, profile: UserRiskProfile) -> UserRiskProfile:
-        async with self._lock:
-            self._profiles[profile.user_id] = profile
-            return profile
-
-    async def get_high_risk_users(self) -> list[UserRiskProfile]:
-        return [p for p in self._profiles.values() if p.high_risk_flag]
-
-
 class SafetyRepositoryFactory:
     """Factory for creating repository instances."""
 
@@ -390,25 +188,37 @@ class SafetyRepositoryFactory:
     def get_assessment_repository(self) -> SafetyAssessmentRepository:
         """Get or create assessment repository."""
         if self._assessment_repo is None:
-            self._assessment_repo = InMemorySafetyAssessmentRepository()
+            raise RepositoryError(
+                "PostgreSQL is required. Configure POSTGRES_* environment variables. "
+                "For tests, use InMemory repos from tests/fixtures.py"
+            )
         return self._assessment_repo
 
     def get_plan_repository(self) -> SafetyPlanRepository:
         """Get or create safety plan repository."""
         if self._plan_repo is None:
-            self._plan_repo = InMemorySafetyPlanRepository()
+            raise RepositoryError(
+                "PostgreSQL is required. Configure POSTGRES_* environment variables. "
+                "For tests, use InMemory repos from tests/fixtures.py"
+            )
         return self._plan_repo
 
     def get_incident_repository(self) -> SafetyIncidentRepository:
         """Get or create incident repository."""
         if self._incident_repo is None:
-            self._incident_repo = InMemorySafetyIncidentRepository()
+            raise RepositoryError(
+                "PostgreSQL is required. Configure POSTGRES_* environment variables. "
+                "For tests, use InMemory repos from tests/fixtures.py"
+            )
         return self._incident_repo
 
     def get_profile_repository(self) -> UserRiskProfileRepository:
         """Get or create profile repository."""
         if self._profile_repo is None:
-            self._profile_repo = InMemoryUserRiskProfileRepository()
+            raise RepositoryError(
+                "PostgreSQL is required. Configure POSTGRES_* environment variables. "
+                "For tests, use InMemory repos from tests/fixtures.py"
+            )
         return self._profile_repo
 
 
@@ -467,9 +277,8 @@ def get_repository_factory(
             )
             logger.info("safety_repository_factory_created", type="postgres_legacy")
         else:
-            # Priority 3: In-memory (blocked in production)
-            _factory = SafetyRepositoryFactory(config=repo_config)
-            logger.info("safety_repository_factory_created", type="in_memory")
+            # Priority 3: No database configured
+            raise RepositoryError("PostgreSQL is required in production")
     return _factory
 
 
@@ -1147,7 +956,7 @@ class PostgresSafetyRepositoryFactory(SafetyRepositoryFactory):
                     self._postgres_client, self._schema
                 )
             else:
-                self._assessment_repo = InMemorySafetyAssessmentRepository()
+                raise RepositoryError("PostgreSQL client or ConnectionPoolManager required")
         return self._assessment_repo
 
     def get_plan_repository(self) -> SafetyPlanRepository:
@@ -1158,7 +967,7 @@ class PostgresSafetyRepositoryFactory(SafetyRepositoryFactory):
                     self._postgres_client, self._schema
                 )
             else:
-                self._plan_repo = InMemorySafetyPlanRepository()
+                raise RepositoryError("PostgreSQL client or ConnectionPoolManager required")
         return self._plan_repo
 
     def get_incident_repository(self) -> SafetyIncidentRepository:
@@ -1169,7 +978,7 @@ class PostgresSafetyRepositoryFactory(SafetyRepositoryFactory):
                     self._postgres_client, self._schema
                 )
             else:
-                self._incident_repo = InMemorySafetyIncidentRepository()
+                raise RepositoryError("PostgreSQL client or ConnectionPoolManager required")
         return self._incident_repo
 
     def get_profile_repository(self) -> UserRiskProfileRepository:
@@ -1180,7 +989,7 @@ class PostgresSafetyRepositoryFactory(SafetyRepositoryFactory):
                     self._postgres_client, self._schema
                 )
             else:
-                self._profile_repo = InMemoryUserRiskProfileRepository()
+                raise RepositoryError("PostgreSQL client or ConnectionPoolManager required")
         return self._profile_repo
 
 

@@ -3,6 +3,7 @@ Solace-AI Personality Service - RoBERTa Big Five Classifier.
 Fine-tuned RoBERTa model for OCEAN personality trait detection from text.
 """
 from __future__ import annotations
+import collections
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -91,7 +92,12 @@ class SigmoidActivation:
 
 
 class PersonalityClassificationHead:
-    """Classification head for Big Five traits."""
+    """Classification head for Big Five traits.
+
+    Uses a linear projection (W @ pooled_output + bias) to compute logits.
+    Weights are initialised from a seeded RNG so behaviour is deterministic.
+    For production accuracy, load fine-tuned weights via ``load_weights()``.
+    """
 
     def __init__(self, settings: RoBERTaSettings) -> None:
         self._settings = settings
@@ -103,6 +109,40 @@ class PersonalityClassificationHead:
             PersonalityTrait.AGREEABLENESS: 3,
             PersonalityTrait.NEUROTICISM: 4,
         }
+        self._weights: list[list[float]] | None = None
+        self._bias: list[float] | None = None
+        self._weights_loaded = False
+
+    def load_weights(self, weights: list[list[float]], bias: list[float]) -> None:
+        """Load fine-tuned classification head weights.
+
+        Args:
+            weights: Matrix of shape (num_labels, hidden_dim).
+            bias: Bias vector of shape (num_labels,).
+        """
+        self._weights = weights
+        self._bias = bias
+        self._weights_loaded = True
+
+    def _ensure_weights(self, hidden_dim: int) -> tuple[list[list[float]], list[float]]:
+        """Return loaded weights or create Xavier-initialised defaults."""
+        if self._weights is not None and self._bias is not None:
+            return self._weights, self._bias
+        import random
+        rng = random.Random(42)
+        scale = (2.0 / (hidden_dim + self._settings.num_labels)) ** 0.5
+        self._weights = [
+            [rng.gauss(0.0, scale) for _ in range(hidden_dim)]
+            for _ in range(self._settings.num_labels)
+        ]
+        self._bias = [0.0] * self._settings.num_labels
+        if not self._weights_loaded:
+            import structlog
+            structlog.get_logger(__name__).warning(
+                "classification_head_using_default_weights",
+                hint="Load fine-tuned checkpoint via load_weights() for production accuracy",
+            )
+        return self._weights, self._bias
 
     def forward(self, pooled_output: list[float]) -> RoBERTaPrediction:
         """Forward pass through classification head."""
@@ -119,20 +159,20 @@ class PersonalityClassificationHead:
         )
 
     def _compute_logits(self, pooled_output: list[float]) -> list[float]:
-        """Compute logits from pooled output using learned weights."""
-        logits = []
-        for i in range(self._settings.num_labels):
-            weighted_sum = sum(
-                pooled_output[j % len(pooled_output)] * (0.1 + (i + j) % 10 * 0.05)
-                for j in range(min(50, len(pooled_output)))
-            )
-            logits.append(weighted_sum / 50.0)
-        return logits
+        """Compute logits via linear projection: W @ x + b."""
+        weights, bias = self._ensure_weights(len(pooled_output))
+        return [
+            sum(w * x for w, x in zip(weights[i], pooled_output)) + bias[i]
+            for i in range(self._settings.num_labels)
+        ]
 
     def _compute_confidence(self, probabilities: list[float]) -> float:
         """Compute overall prediction confidence."""
         variance = sum((p - 0.5) ** 2 for p in probabilities) / len(probabilities)
-        return min(0.95, 0.5 + variance * 2)
+        base = 0.5 + variance * 2
+        if not self._weights_loaded:
+            base *= 0.5  # Lower confidence when using default weights
+        return min(0.95, base)
 
 
 class RoBERTaPersonalityDetector:
@@ -150,7 +190,8 @@ class RoBERTaPersonalityDetector:
         self._preprocessor = TextPreprocessor()
         self._classification_head = PersonalityClassificationHead(self._settings)
         self._initialized = False
-        self._embedding_cache: dict[str, list[float]] = {}
+        self._embedding_cache: collections.OrderedDict[str, list[float]] = collections.OrderedDict()
+        self._cache_max_size = 1000
 
     async def initialize(self) -> None:
         """Initialize the RoBERTa detector."""
@@ -207,7 +248,9 @@ class RoBERTaPersonalityDetector:
             embeddings = await self._run_model(processed_text)
         else:
             embeddings = self._generate_heuristic_embeddings(processed_text)
-        if self._settings.cache_embeddings and len(self._embedding_cache) < 1000:
+        if self._settings.cache_embeddings:
+            if len(self._embedding_cache) >= self._cache_max_size:
+                self._embedding_cache.popitem(last=False)
             self._embedding_cache[cache_key] = embeddings
         return embeddings
 

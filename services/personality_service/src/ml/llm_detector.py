@@ -227,22 +227,32 @@ class LLMPersonalityDetector:
         system_prompt = self._prompt_builder.build_system_prompt()
         user_prompt = self._prompt_builder.build_analysis_prompt(text, include_reasoning)
         last_error: Exception | None = None
+        import asyncio
         for attempt in range(self._settings.retry_attempts + 1):
             try:
-                response = await self._llm_client.generate(
-                    system_prompt=system_prompt,
-                    user_message=user_prompt,
-                    service_name="personality_llm_detector",
-                    temperature=self._settings.temperature,
-                    max_tokens=self._settings.max_tokens,
+                response = await asyncio.wait_for(
+                    self._llm_client.generate(
+                        system_prompt=system_prompt,
+                        user_message=user_prompt,
+                        service_name="personality_llm_detector",
+                        temperature=self._settings.temperature,
+                        max_tokens=self._settings.max_tokens,
+                    ),
+                    timeout=self._settings.timeout_seconds,
                 )
                 result = self._response_parser.parse(response, include_reasoning)
                 if result.confidence >= self._settings.confidence_threshold:
                     return result
                 logger.warning("low_confidence_result", confidence=result.confidence, attempt=attempt)
+            except asyncio.TimeoutError:
+                last_error = TimeoutError(f"LLM call timed out after {self._settings.timeout_seconds}s")
+                logger.warning("llm_analysis_timeout", attempt=attempt, timeout_s=self._settings.timeout_seconds)
+            except (ValueError, KeyError, TypeError, json.JSONDecodeError) as e:
+                last_error = e
+                logger.warning("llm_analysis_parse_failed", attempt=attempt, error=str(e))
             except Exception as e:
                 last_error = e
-                logger.warning("llm_analysis_attempt_failed", attempt=attempt, error=str(e))
+                logger.warning("llm_analysis_attempt_failed", attempt=attempt, error_type=type(e).__name__, error=str(e))
         logger.error("llm_analysis_failed_all_attempts", error=str(last_error))
         if self._settings.fallback_on_error:
             return self._heuristic_fallback(text)

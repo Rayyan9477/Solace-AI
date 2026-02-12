@@ -5,7 +5,7 @@ load balancing, caching, and observability across all services.
 """
 from __future__ import annotations
 from typing import Any
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
 
@@ -19,15 +19,15 @@ class LLMClientSettings(BaseSettings):
     Environment variables use the LLM_ prefix for shared configuration.
     Services can override with service-specific prefixes.
     """
-    portkey_api_key: str = Field(default="")
+    portkey_api_key: SecretStr = Field(default=SecretStr(""))
     portkey_gateway_url: str = Field(default="https://api.portkey.ai/v1")
     primary_provider: str = Field(default="anthropic")
     primary_model: str = Field(default="claude-sonnet-4-20250514")
     fallback_provider: str = Field(default="openai")
     fallback_model: str = Field(default="gpt-4o")
-    anthropic_api_key: str = Field(default="")
-    openai_api_key: str = Field(default="")
-    azure_api_key: str = Field(default="")
+    anthropic_api_key: SecretStr = Field(default=SecretStr(""))
+    openai_api_key: SecretStr = Field(default=SecretStr(""))
+    azure_api_key: SecretStr = Field(default=SecretStr(""))
     azure_endpoint: str = Field(default="")
     max_tokens: int = Field(default=1024)
     temperature: float = Field(default=0.7)
@@ -98,7 +98,7 @@ class UnifiedLLMClient:
             from portkey_ai import AsyncPortkey
             config = self._build_portkey_config()
             self._client = AsyncPortkey(
-                api_key=self._settings.portkey_api_key,
+                api_key=self._settings.portkey_api_key.get_secret_value(),
                 base_url=self._settings.portkey_gateway_url,
                 config=config,
             )
@@ -112,7 +112,12 @@ class UnifiedLLMClient:
                 cache_mode=self._settings.cache_mode,
             )
         except ImportError:
-            logger.warning("portkey_ai_not_installed", fallback="using_mock_client")
+            import os
+            logger.error("portkey_ai_not_installed",
+                         hint="Install portkey-ai: pip install portkey-ai")
+            if os.environ.get("ENVIRONMENT", "").lower() == "production":
+                raise RuntimeError("portkey-ai package required in production")
+            logger.warning("portkey_ai_fallback", fallback="using_mock_client")
             self._client = None
             self._initialized = True
         except Exception as e:
@@ -143,10 +148,10 @@ class UnifiedLLMClient:
             "provider": self._settings.primary_provider,
             "override_params": {"model": self._settings.primary_model},
         }
-        if self._settings.primary_provider == "anthropic" and self._settings.anthropic_api_key:
-            primary_target["api_key"] = self._settings.anthropic_api_key
-        elif self._settings.primary_provider == "openai" and self._settings.openai_api_key:
-            primary_target["api_key"] = self._settings.openai_api_key
+        if self._settings.primary_provider == "anthropic" and self._settings.anthropic_api_key.get_secret_value():
+            primary_target["api_key"] = self._settings.anthropic_api_key.get_secret_value()
+        elif self._settings.primary_provider == "openai" and self._settings.openai_api_key.get_secret_value():
+            primary_target["api_key"] = self._settings.openai_api_key.get_secret_value()
 
         if self._settings.enable_load_balancing:
             primary_target["weight"] = self._settings.load_balance_weight_primary
@@ -158,10 +163,10 @@ class UnifiedLLMClient:
                 "provider": self._settings.fallback_provider,
                 "override_params": {"model": self._settings.fallback_model},
             }
-            if self._settings.fallback_provider == "openai" and self._settings.openai_api_key:
-                fallback_target["api_key"] = self._settings.openai_api_key
-            elif self._settings.fallback_provider == "anthropic" and self._settings.anthropic_api_key:
-                fallback_target["api_key"] = self._settings.anthropic_api_key
+            if self._settings.fallback_provider == "openai" and self._settings.openai_api_key.get_secret_value():
+                fallback_target["api_key"] = self._settings.openai_api_key.get_secret_value()
+            elif self._settings.fallback_provider == "anthropic" and self._settings.anthropic_api_key.get_secret_value():
+                fallback_target["api_key"] = self._settings.anthropic_api_key.get_secret_value()
 
             if self._settings.enable_load_balancing:
                 fallback_target["weight"] = 1.0 - self._settings.load_balance_weight_primary

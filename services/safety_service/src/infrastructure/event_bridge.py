@@ -7,67 +7,48 @@ Kafka event infrastructure, enabling real-time notifications for crisis events.
 """
 from __future__ import annotations
 
-import asyncio
-from decimal import Decimal
 from typing import Any
-from uuid import UUID
 
 import structlog
 
 from ..events import (
     SafetyEvent,
     SafetyEventHandler,
-    CrisisDetectedEvent as LocalCrisisDetectedEvent,
-    CrisisResolvedEvent as LocalCrisisResolvedEvent,
-    EscalationTriggeredEvent as LocalEscalationTriggeredEvent,
-    EscalationAcknowledgedEvent as LocalEscalationAcknowledgedEvent,
-    EscalationResolvedEvent as LocalEscalationResolvedEvent,
-    IncidentCreatedEvent as LocalIncidentCreatedEvent,
-    RiskLevelChangedEvent as LocalRiskLevelChangedEvent,
     EventType,
     get_event_publisher,
+    to_kafka_event,
 )
 
-# Import shared event schemas for Kafka publishing
+import os
+
 try:
-    from solace_events.schemas import (
-        BaseEvent,
-        CrisisDetectedEvent as KafkaCrisisDetectedEvent,
-        EscalationTriggeredEvent as KafkaEscalationTriggeredEvent,
-        SafetyAssessmentEvent as KafkaSafetyAssessmentEvent,
-        CrisisLevel,
-        EventMetadata,
-    )
-    from solace_events.publisher import EventPublisher, create_publisher
-    from solace_events.config import KafkaSettings, ProducerSettings
+    from src.solace_events.schemas import BaseEvent
+    from src.solace_events.publisher import EventPublisher, create_publisher
+    from src.solace_events.config import KafkaSettings, ProducerSettings
     _KAFKA_AVAILABLE = True
 except ImportError:
     _KAFKA_AVAILABLE = False
-    KafkaCrisisDetectedEvent = None
-    KafkaEscalationTriggeredEvent = None
     EventPublisher = None
+    _logger = structlog.get_logger(__name__)
+    _logger.error("kafka_import_failed", package="solace_events",
+                  hint="Install solace_events or set KAFKA_BOOTSTRAP_SERVERS")
+    if os.environ.get("ENVIRONMENT", "").lower() == "production":
+        raise RuntimeError("solace_events package required in production")
 
 logger = structlog.get_logger(__name__)
 
-
-def _crisis_level_to_enum(level: str) -> "CrisisLevel":
-    """Convert crisis level string to CrisisLevel enum."""
-    level_map = {
-        "NONE": CrisisLevel.NONE,
-        "LOW": CrisisLevel.LOW,
-        "ELEVATED": CrisisLevel.ELEVATED,
-        "MODERATE": CrisisLevel.ELEVATED,  # Map MODERATE to ELEVATED
-        "HIGH": CrisisLevel.HIGH,
-        "CRITICAL": CrisisLevel.CRITICAL,
-    }
-    return level_map.get(level.upper(), CrisisLevel.LOW)
-
-
-def _priority_to_literal(priority: str) -> str:
-    """Convert priority string to valid literal value."""
-    valid = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
-    upper = priority.upper()
-    return upper if upper in valid else "HIGH"
+# Event types that should be forwarded to Kafka
+_BRIDGED_EVENT_TYPES = frozenset({
+    EventType.CRISIS_DETECTED,
+    EventType.CRISIS_RESOLVED,
+    EventType.ESCALATION_TRIGGERED,
+    EventType.ESCALATION_ACKNOWLEDGED,
+    EventType.ESCALATION_RESOLVED,
+    EventType.SAFETY_CHECK_COMPLETED,
+    EventType.RISK_LEVEL_CHANGED,
+    EventType.INCIDENT_CREATED,
+    EventType.INCIDENT_RESOLVED,
+})
 
 
 class KafkaEventBridge(SafetyEventHandler):
@@ -81,8 +62,8 @@ class KafkaEventBridge(SafetyEventHandler):
 
     def __init__(
         self,
-        kafka_settings: "KafkaSettings | None" = None,
-        producer_settings: "ProducerSettings | None" = None,
+        kafka_settings: KafkaSettings | None = None,
+        producer_settings: ProducerSettings | None = None,
         use_mock: bool = False,
     ) -> None:
         if not _KAFKA_AVAILABLE:
@@ -93,7 +74,7 @@ class KafkaEventBridge(SafetyEventHandler):
         self._publisher = create_publisher(
             kafka_settings=kafka_settings,
             producer_settings=producer_settings,
-            use_outbox=True,  # Use outbox pattern for reliability
+            use_outbox=True,
             use_mock=use_mock,
         )
         self._started = False
@@ -114,13 +95,13 @@ class KafkaEventBridge(SafetyEventHandler):
             logger.info("kafka_event_bridge_stopped")
 
     async def handle(self, event: SafetyEvent) -> None:
-        """Handle a safety event by publishing to Kafka."""
+        """Handle a safety event by converting and publishing to Kafka."""
         if not self._publisher or not self._started:
             logger.debug("kafka_bridge_not_started", event_type=event.event_type.value)
             return
 
         try:
-            kafka_event = self._convert_to_kafka_event(event)
+            kafka_event = to_kafka_event(event)
             if kafka_event:
                 await self._publisher.publish(kafka_event)
                 logger.info(
@@ -129,6 +110,8 @@ class KafkaEventBridge(SafetyEventHandler):
                     event_id=str(event.event_id),
                     kafka_event_type=kafka_event.event_type,
                 )
+            else:
+                logger.debug("event_not_bridged_to_kafka", event_type=event.event_type.value)
         except Exception as e:
             logger.error(
                 "kafka_publish_failed",
@@ -136,58 +119,6 @@ class KafkaEventBridge(SafetyEventHandler):
                 event_id=str(event.event_id),
                 error=str(e),
             )
-
-    def _convert_to_kafka_event(self, event: SafetyEvent) -> "BaseEvent | None":
-        """Convert local safety event to Kafka event schema."""
-        if not _KAFKA_AVAILABLE:
-            return None
-
-        if isinstance(event, LocalCrisisDetectedEvent):
-            return self._convert_crisis_detected(event)
-        elif isinstance(event, LocalEscalationTriggeredEvent):
-            return self._convert_escalation_triggered(event)
-        # Add more conversions as needed
-        return None
-
-    def _convert_crisis_detected(
-        self, event: LocalCrisisDetectedEvent
-    ) -> "KafkaCrisisDetectedEvent":
-        """Convert local CrisisDetectedEvent to Kafka schema."""
-        return KafkaCrisisDetectedEvent(
-            user_id=event.user_id,
-            session_id=event.session_id,
-            metadata=EventMetadata(
-                event_id=event.event_id,
-                timestamp=event.timestamp,
-                correlation_id=event.correlation_id,
-                source_service="safety-service",
-            ),
-            crisis_level=_crisis_level_to_enum(event.crisis_level),
-            trigger_indicators=event.trigger_indicators,
-            detection_layer=event.detection_layers[0] if event.detection_layers else 1,
-            confidence=event.risk_score,
-            escalation_action="escalate" if event.requires_escalation else "monitor",
-            requires_human_review=event.requires_human_review,
-        )
-
-    def _convert_escalation_triggered(
-        self, event: LocalEscalationTriggeredEvent
-    ) -> "KafkaEscalationTriggeredEvent":
-        """Convert local EscalationTriggeredEvent to Kafka schema."""
-        return KafkaEscalationTriggeredEvent(
-            user_id=event.user_id,
-            session_id=event.session_id,
-            metadata=EventMetadata(
-                event_id=event.event_id,
-                timestamp=event.timestamp,
-                correlation_id=event.correlation_id,
-                source_service="safety-service",
-            ),
-            escalation_reason=event.reason,
-            priority=_priority_to_literal(event.priority),
-            assigned_clinician_id=event.assigned_clinician_id,
-            notification_sent=len(event.notification_channels) > 0,
-        )
 
 
 class SafetyCrisisNotificationBridge:
@@ -201,8 +132,8 @@ class SafetyCrisisNotificationBridge:
 
     def __init__(
         self,
-        kafka_settings: "KafkaSettings | None" = None,
-        producer_settings: "ProducerSettings | None" = None,
+        kafka_settings: KafkaSettings | None = None,
+        producer_settings: ProducerSettings | None = None,
         use_mock: bool = False,
     ) -> None:
         self._bridge = KafkaEventBridge(
@@ -218,15 +149,13 @@ class SafetyCrisisNotificationBridge:
 
         if not self._registered:
             publisher = get_event_publisher()
-            # Register for crisis-related events
-            publisher.register_handler(EventType.CRISIS_DETECTED, self._bridge)
-            publisher.register_handler(EventType.ESCALATION_TRIGGERED, self._bridge)
-            publisher.register_handler(EventType.ESCALATION_ACKNOWLEDGED, self._bridge)
-            publisher.register_handler(EventType.ESCALATION_RESOLVED, self._bridge)
-            publisher.register_handler(EventType.INCIDENT_CREATED, self._bridge)
-            publisher.register_handler(EventType.RISK_LEVEL_CHANGED, self._bridge)
+            for event_type in _BRIDGED_EVENT_TYPES:
+                publisher.register_handler(event_type, self._bridge)
             self._registered = True
-            logger.info("safety_notification_bridge_registered")
+            logger.info(
+                "safety_notification_bridge_registered",
+                event_types=[et.value for et in _BRIDGED_EVENT_TYPES],
+            )
 
     async def stop(self) -> None:
         """Stop the bridge."""
@@ -234,7 +163,6 @@ class SafetyCrisisNotificationBridge:
         logger.info("safety_notification_bridge_stopped")
 
 
-# Module-level singleton
 _notification_bridge: SafetyCrisisNotificationBridge | None = None
 
 
@@ -247,7 +175,7 @@ def get_notification_bridge() -> SafetyCrisisNotificationBridge:
 
 
 async def initialize_notification_bridge(
-    kafka_settings: "KafkaSettings | None" = None,
+    kafka_settings: KafkaSettings | None = None,
     use_mock: bool = False,
 ) -> SafetyCrisisNotificationBridge:
     """Initialize and start the notification bridge."""

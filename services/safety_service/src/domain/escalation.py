@@ -5,7 +5,7 @@ Handles escalation to human clinicians, notifications, and crisis response coord
 from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -178,13 +178,14 @@ class NotificationServiceClient:
         }
         channel = channel_map.get(notification_type, "email")
 
-        # Build notification payload
+        # Build notification payload — clinician contact resolved by notification service
         payload = {
             "template_type": "crisis_escalation",
             "recipients": [{
                 "user_id": str(clinician_id),
-                "email": f"clinician-{clinician_id}@solace-ai.com",  # Placeholder - should lookup from DB
-                "phone": None,  # Should lookup from clinician registry
+                "email": None,
+                "phone": None,
+                "resolve_from_registry": True,
             }],
             "channels": [channel],
             "variables": {
@@ -421,10 +422,14 @@ class EscalationManager:
         self._resource_manager = CrisisResourceManager()
         self._workflow = EscalationWorkflow(self._settings, self._notification_service, self._clinician_assigner)
         self._active_escalations: dict[UUID, EscalationRecord] = {}
+        # Deduplication: (user_id, crisis_level) -> last escalation timestamp
+        self._dedup_window: dict[tuple[UUID, str], datetime] = {}
+        self._dedup_ttl = timedelta(minutes=5)
         logger.info(
             "escalation_manager_initialized",
             auto_escalate_critical=self._settings.auto_escalate_critical,
-            notification_service_url=self._settings.notification_service_url
+            notification_service_url=self._settings.notification_service_url,
+            dedup_window_minutes=5,
         )
 
     async def shutdown(self) -> None:
@@ -435,7 +440,37 @@ class EscalationManager:
     async def escalate(self, user_id: UUID, session_id: UUID | None, crisis_level: str,
                        reason: str, context: dict[str, Any] | None = None,
                        priority_override: str | None = None) -> EscalationResult:
-        """Process escalation request through appropriate workflow."""
+        """Process escalation request through appropriate workflow.
+
+        Includes 5-minute deduplication per (user_id, crisis_level) pair to prevent
+        notification storms. Duplicate requests within the window return a
+        DEDUPLICATED status without re-notifying clinicians.
+        """
+        # Deduplication check
+        dedup_key = (user_id, crisis_level)
+        now = datetime.now(timezone.utc)
+        last_escalation_at = self._dedup_window.get(dedup_key)
+        if last_escalation_at and (now - last_escalation_at) < self._dedup_ttl:
+            logger.info(
+                "escalation_deduplicated",
+                user_id=str(user_id),
+                crisis_level=crisis_level,
+                seconds_since_last=(now - last_escalation_at).total_seconds(),
+            )
+            return EscalationResult(
+                status="DEDUPLICATED",
+                priority=EscalationPriority.from_crisis_level(crisis_level).value,
+                actions_taken=["Duplicate escalation suppressed within 5-minute window"],
+                resources_provided=False,
+            )
+
+        # Record this escalation for dedup
+        self._dedup_window[dedup_key] = now
+        # Clean expired entries
+        expired_keys = [k for k, ts in self._dedup_window.items() if (now - ts) >= self._dedup_ttl]
+        for k in expired_keys:
+            del self._dedup_window[k]
+
         priority = EscalationPriority(priority_override) if priority_override else EscalationPriority.from_crisis_level(crisis_level)
         escalation = EscalationRecord(
             user_id=user_id, session_id=session_id, crisis_level=crisis_level,

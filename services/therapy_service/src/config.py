@@ -5,7 +5,7 @@ Centralized service configuration using pydantic-settings.
 from __future__ import annotations
 from functools import lru_cache
 from typing import Any
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -66,7 +66,7 @@ class LLMSettings(BaseSettings):
     timeout_seconds: int = Field(default=60, ge=10, le=300)
     retry_attempts: int = Field(default=3, ge=1, le=10)
     retry_delay_seconds: float = Field(default=1.0, ge=0.1, le=10.0)
-    api_key: str = Field(default="")
+    api_key: SecretStr = Field(default=SecretStr(""))
 
     model_config = SettingsConfigDict(
         env_prefix="THERAPY_LLM_",

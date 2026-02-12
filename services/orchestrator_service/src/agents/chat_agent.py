@@ -343,10 +343,10 @@ class ChatAgent:
         self._response_generator = ResponseGenerator(self._settings)
         self._message_count = 0
 
-    def process(self, state: OrchestratorState) -> dict[str, Any]:
+    async def process(self, state: OrchestratorState) -> dict[str, Any]:
         """
         Process state and generate conversational response.
-        This is the main LangGraph node function (synchronous).
+        This is the main LangGraph node function.
 
         Args:
             state: Current orchestrator state
@@ -413,7 +413,7 @@ class ChatAgent:
         }
 
 
-def chat_agent_node(state: OrchestratorState) -> dict[str, Any]:
+async def chat_agent_node(state: OrchestratorState) -> dict[str, Any]:
     """
     LangGraph node function for chat agent processing.
 
@@ -424,4 +424,4 @@ def chat_agent_node(state: OrchestratorState) -> dict[str, Any]:
         State updates dictionary
     """
     agent = ChatAgent()
-    return agent.process(state)
+    return await agent.process(state)

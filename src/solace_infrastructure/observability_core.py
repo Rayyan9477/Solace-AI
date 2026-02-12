@@ -158,6 +158,7 @@ class MetricsRegistry:
         self._gauges: dict[str, float] = {}
         self._histograms: dict[str, list[float]] = {}
         self._labels: dict[str, dict[str, str]] = {}
+        self._lock = threading.Lock()
 
     def _make_key(self, name: str, labels: dict[str, str] | None = None) -> str:
         """Create unique key for metric with labels."""
@@ -213,11 +214,12 @@ class MetricsRegistry:
         }
 
     def reset(self) -> None:
-        """Reset all metrics."""
-        self._counters.clear()
-        self._gauges.clear()
-        self._histograms.clear()
-        self._labels.clear()
+        """Reset all metrics. Thread-safe via lock to prevent concurrent modification."""
+        with self._lock:
+            self._counters.clear()
+            self._gauges.clear()
+            self._histograms.clear()
+            self._labels.clear()
 
 
 _metrics_registry: MetricsRegistry | None = None

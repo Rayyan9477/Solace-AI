@@ -42,17 +42,17 @@ class DatabaseConfig(BaseSettings):
     Database configuration for PostgreSQL.
 
     Environment Variables:
-        DB_HOST: Database host (default: localhost)
-        DB_PORT: Database port (default: 5432)
-        DB_NAME: Database name (default: solace_users)
-        DB_USER: Database user (default: postgres)
-        DB_PASSWORD: Database password (REQUIRED - no default)
-        DB_POOL_SIZE: Connection pool size (default: 10)
-        DB_MAX_OVERFLOW: Max overflow connections (default: 20)
-        DB_POOL_TIMEOUT: Pool timeout in seconds (default: 30)
-        DB_ECHO: Echo SQL statements (default: false)
+        USER_DB_HOST: Database host (default: localhost)
+        USER_DB_PORT: Database port (default: 5432)
+        USER_DB_NAME: Database name (default: solace)
+        USER_DB_USER: Database user (default: postgres)
+        USER_DB_PASSWORD: Database password (REQUIRED - no default)
+        USER_DB_POOL_SIZE: Connection pool size (default: 10)
+        USER_DB_MAX_OVERFLOW: Max overflow connections (default: 20)
+        USER_DB_POOL_TIMEOUT: Pool timeout in seconds (default: 30)
+        USER_DB_ECHO: Echo SQL statements (default: false)
 
-    SECURITY: DB_PASSWORD is required and must be set via environment variable.
+    SECURITY: USER_DB_PASSWORD is required and must be set via environment variable.
     """
 
     host: str = Field(default="localhost", description="Database host")
@@ -61,7 +61,7 @@ class DatabaseConfig(BaseSettings):
     user: str = Field(default="postgres", description="Database user")
     password: str = Field(
         ...,  # Required, no default
-        description="Database password (REQUIRED - set via DB_PASSWORD env var)"
+        description="Database password (REQUIRED - set via USER_DB_PASSWORD env var)"
     )
 
     pool_size: int = Field(default=10, ge=1, le=100, description="Connection pool size")
@@ -69,7 +69,7 @@ class DatabaseConfig(BaseSettings):
     pool_timeout: int = Field(default=30, ge=1, le=300, description="Pool timeout in seconds")
     echo: bool = Field(default=False, description="Echo SQL statements")
 
-    model_config = SettingsConfigDict(env_prefix="DB_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="USER_DB_", env_file=".env", extra="ignore")
 
     @property
     def url(self) -> str:
@@ -82,12 +82,12 @@ class RedisConfig(BaseSettings):
     Redis configuration for caching and session storage.
 
     Environment Variables:
-        REDIS_HOST: Redis host (default: localhost)
-        REDIS_PORT: Redis port (default: 6379)
-        REDIS_DB: Redis database number (default: 0)
-        REDIS_PASSWORD: Redis password (optional)
-        REDIS_POOL_SIZE: Connection pool size (default: 10)
-        REDIS_TIMEOUT: Command timeout in seconds (default: 5)
+        USER_REDIS_HOST: Redis host (default: localhost)
+        USER_REDIS_PORT: Redis port (default: 6379)
+        USER_REDIS_DB: Redis database number (default: 0)
+        USER_REDIS_PASSWORD: Redis password (optional)
+        USER_REDIS_POOL_SIZE: Connection pool size (default: 10)
+        USER_REDIS_TIMEOUT: Command timeout in seconds (default: 5)
     """
 
     host: str = Field(default="localhost", description="Redis host")
@@ -98,7 +98,7 @@ class RedisConfig(BaseSettings):
     pool_size: int = Field(default=10, ge=1, le=100, description="Connection pool size")
     timeout: int = Field(default=5, ge=1, le=60, description="Command timeout in seconds")
 
-    model_config = SettingsConfigDict(env_prefix="REDIS_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="USER_REDIS_", env_file=".env", extra="ignore")
 
     @property
     def url(self) -> str:
@@ -246,11 +246,11 @@ class KafkaConfig(BaseSettings):
     Kafka configuration for event publishing.
 
     Environment Variables:
-        KAFKA_BOOTSTRAP_SERVERS: Kafka bootstrap servers (default: localhost:9092)
-        KAFKA_TOPIC_USERS: User events topic (default: solace.users)
-        KAFKA_PRODUCER_ACKS: Producer acknowledgments (default: all)
-        KAFKA_COMPRESSION_TYPE: Compression type (default: gzip)
-        KAFKA_ENABLE: Enable Kafka event publishing (default: true)
+        USER_KAFKA_BOOTSTRAP_SERVERS: Kafka bootstrap servers (default: localhost:9092)
+        USER_KAFKA_TOPIC_USERS: User events topic (default: solace.users)
+        USER_KAFKA_PRODUCER_ACKS: Producer acknowledgments (default: all)
+        USER_KAFKA_COMPRESSION_TYPE: Compression type (default: gzip)
+        USER_KAFKA_ENABLE: Enable Kafka event publishing (default: true)
     """
 
     bootstrap_servers: str = Field(default="localhost:9092", description="Kafka bootstrap servers")
@@ -263,7 +263,7 @@ class KafkaConfig(BaseSettings):
     )
     enable: bool = Field(default=True, description="Enable Kafka event publishing")
 
-    model_config = SettingsConfigDict(env_prefix="KAFKA_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="USER_KAFKA_", env_file=".env", extra="ignore")
 
 
 class UserServiceSettings(BaseSettings):
@@ -336,7 +336,7 @@ class UserServiceSettings(BaseSettings):
         if _is_unsafe_secret(self.database.password):
             raise ValueError(
                 "database.password appears to use an unsafe default value. "
-                "Please provide a secure password via DB_PASSWORD environment variable."
+                "Please provide a secure password via USER_DB_PASSWORD environment variable."
             )
         # Validate security JWT secret
         if _is_unsafe_secret(self.security.jwt_secret):
