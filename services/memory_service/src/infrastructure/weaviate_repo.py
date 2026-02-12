@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
 
@@ -22,7 +22,7 @@ class WeaviateSettings(BaseSettings):
     port: int = Field(default=8080)
     grpc_port: int = Field(default=50051)
     use_https: bool = Field(default=False)
-    api_key: str = Field(default="")
+    api_key: SecretStr = Field(default=SecretStr(""))
     timeout_seconds: int = Field(default=30)
     batch_size: int = Field(default=100)
     embedding_dimension: int = Field(default=1536)
@@ -80,14 +80,26 @@ class WeaviateRepository:
         """Initialize Weaviate client and create collections."""
         try:
             import weaviate
-            self._client = weaviate.connect_to_local(
-                host=self._settings.host, port=self._settings.port, grpc_port=self._settings.grpc_port,
-            )
+            import weaviate.classes as wvc
+            connect_kwargs: dict[str, Any] = {
+                "host": self._settings.host,
+                "port": self._settings.port,
+                "grpc_port": self._settings.grpc_port,
+            }
+            api_key_value = self._settings.api_key.get_secret_value()
+            if api_key_value:
+                connect_kwargs["auth_credentials"] = wvc.init.Auth.api_key(api_key_value)
+            self._client = weaviate.connect_to_local(**connect_kwargs)
             await self._ensure_collections()
             self._initialized = True
-            logger.info("weaviate_initialized", host=self._settings.host)
+            logger.info("weaviate_initialized", host=self._settings.host,
+                        authenticated=bool(api_key_value))
         except ImportError:
-            logger.warning("weaviate_client_not_installed")
+            import os
+            logger.error("weaviate_client_not_installed",
+                         hint="pip install weaviate-client")
+            if os.environ.get("ENVIRONMENT", "").lower() == "production":
+                raise RuntimeError("weaviate-client package required in production")
         except Exception as e:
             logger.error("weaviate_init_failed", error=str(e))
 

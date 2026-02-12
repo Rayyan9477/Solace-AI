@@ -238,13 +238,13 @@ class SafetyAssessmentFactory(BaseFactory[dict[str, Any]]):
     """Factory for generating safety assessment data."""
 
     def create(self, **overrides: Any) -> dict[str, Any]:
-        risk_level = overrides.get("risk_level", random.choice(["low", "medium", "high"]))
+        risk_level = overrides.get("risk_level", random.choice(["LOW", "ELEVATED", "HIGH"]))
         return {
             "id": overrides.get("id", f"safety-{self.random_uuid()}"),
             "user_id": overrides.get("user_id", f"user-{self.random_uuid()}"),
             "session_id": overrides.get("session_id", f"session-{self.random_uuid()}"),
             "message_id": overrides.get("message_id", f"msg-{self.random_uuid()}"),
-            "risk_level": risk_level, "crisis_detected": risk_level == "high",
+            "risk_level": risk_level, "crisis_detected": risk_level == "HIGH",
             "risk_factors": overrides.get("risk_factors", []),
             "recommended_actions": overrides.get("recommended_actions", []),
             "assessed_at": datetime.now(timezone.utc).isoformat(),

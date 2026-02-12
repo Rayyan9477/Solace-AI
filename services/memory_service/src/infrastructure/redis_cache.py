@@ -93,20 +93,35 @@ class RedisCache:
         self._initialized = False
         self._stats = {"hits": 0, "misses": 0, "sets": 0, "deletes": 0}
 
-    async def initialize(self) -> None:
-        """Initialize Redis connection."""
+    async def initialize(self, max_retries: int = 3) -> None:
+        """Initialize Redis connection with exponential backoff retry."""
         try:
             import redis.asyncio as redis
-            self._client = redis.Redis(host=self._settings.host, port=self._settings.port, db=self._settings.db,
-                password=self._settings.password if self._settings.password else None, ssl=self._settings.ssl,
-                socket_timeout=self._settings.socket_timeout, decode_responses=True)
-            await self._client.ping()
-            self._initialized = True
-            logger.info("redis_initialized", host=self._settings.host, db=self._settings.db)
         except ImportError:
-            logger.warning("redis_not_installed")
-        except Exception as e:
-            logger.error("redis_init_failed", error=str(e))
+            logger.error("redis_not_installed", hint="pip install redis")
+            return
+
+        for attempt in range(max_retries + 1):
+            try:
+                self._client = redis.Redis(
+                    host=self._settings.host, port=self._settings.port, db=self._settings.db,
+                    password=self._settings.password if self._settings.password else None,
+                    ssl=self._settings.ssl, socket_timeout=self._settings.socket_timeout,
+                    decode_responses=True,
+                )
+                await self._client.ping()
+                self._initialized = True
+                logger.info("redis_initialized", host=self._settings.host, db=self._settings.db)
+                return
+            except Exception as e:
+                if attempt < max_retries:
+                    import asyncio
+                    delay = min(2 ** attempt, 30.0)
+                    logger.warning("redis_connect_retry", attempt=attempt + 1,
+                                   max_retries=max_retries, delay_seconds=delay, error=str(e))
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error("redis_init_failed", error=str(e), attempts=max_retries + 1)
 
     async def close(self) -> None:
         """Close Redis connection."""

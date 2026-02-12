@@ -26,114 +26,115 @@ jobs:
       - name: Run ruff format check
         run: ruff format --check .
 
-#   typecheck:
-#     name: Type Check
-#     runs-on: ubuntu-latest
-#     steps:
-#       - uses: actions/checkout@v4
-#       - uses: actions/setup-python@v5
-#         with:
-#           python-version: "3.12"
-#       - name: Install dependencies
-#         run: |
-#           pip install -r requirements.txt
-#           pip install mypy types-redis
-#       - name: Run mypy
-#         run: mypy src/ --ignore-missing-imports
+  typecheck:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install mypy types-redis
+      - name: Run mypy
+        run: mypy src/ --ignore-missing-imports
 
-#   test:
-#     name: Tests
-#     runs-on: ubuntu-latest
-#     services:
-#       postgres:
-#         image: postgres:15-alpine
-#         env:
-#           POSTGRES_DB: solace_test
-#           POSTGRES_USER: solace
-#           POSTGRES_PASSWORD: test_password
-#         ports:
-#           - 5432:5432
-#         options: >-
-#           --health-cmd pg_isready
-#           --health-interval 10s
-#           --health-timeout 5s
-#           --health-retries 5
-#       redis:
-#         image: redis:7-alpine
-#         ports:
-#           - 6379:6379
-#         options: >-
-#           --health-cmd "redis-cli ping"
-#           --health-interval 10s
-#           --health-timeout 5s
-#           --health-retries 5
-#     env:
-#       POSTGRES_HOST: localhost
-#       POSTGRES_PORT: 5432
-#       POSTGRES_DATABASE: solace_test
-#       POSTGRES_USER: solace
-#       POSTGRES_PASSWORD: test_password
-#       REDIS_URL: redis://localhost:6379
-#     steps:
-#       - uses: actions/checkout@v4
-#       - uses: actions/setup-python@v5
-#         with:
-#           python-version: "3.12"
-#       - name: Install dependencies
-#         run: |
-#           pip install -r requirements.txt
-#           pip install pytest pytest-asyncio pytest-cov
-#       - name: Run tests
-#         run: |
-#           pytest tests/ -v --tb=short --cov=src --cov-report=xml --cov-report=term-missing
-#       - name: Upload coverage
-#         if: always()
-#         uses: actions/upload-artifact@v4
-#         with:
-#           name: coverage-report
-#           path: coverage.xml
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: solace_test
+          POSTGRES_USER: solace
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_DATABASE: solace_test
+      POSTGRES_USER: solace
+      POSTGRES_PASSWORD: test_password
+      REDIS_URL: redis://localhost:6379
+      ENVIRONMENT: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov
+      - name: Run tests
+        run: |
+          pytest tests/ services/ -v --tb=short --cov=src --cov-report=xml --cov-report=term-missing -x
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
 
-#   security-scan:
-#     name: Security Scan
-#     runs-on: ubuntu-latest
-#     steps:
-#       - uses: actions/checkout@v4
-#       - uses: actions/setup-python@v5
-#         with:
-#           python-version: "3.12"
-#       - name: Install bandit
-#         run: pip install bandit[toml]
-#       - name: Run bandit SAST scan
-#         run: |
-#           bandit -r src/ -f json -o bandit-report.json --severity-level medium || true
-#           bandit -r src/ --severity-level high
-#       - name: Upload security report
-#         if: always()
-#         uses: actions/upload-artifact@v4
-#         with:
-#           name: security-report
-#           path: bandit-report.json
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install bandit
+        run: pip install bandit[toml]
+      - name: Run bandit SAST scan
+        run: |
+          bandit -r src/ services/ -f json -o bandit-report.json --severity-level medium || true
+          bandit -r src/ services/ --severity-level high
+      - name: Upload security report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: bandit-report.json
 
-#   docker-build:
-#     name: Docker Build
-#     runs-on: ubuntu-latest
-#     needs: [lint, test]
-#     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-#     strategy:
-#       matrix:
-#         service:
-#           - user-service
-#           - safety_service
-#           - notification-service
-#           - diagnosis_service
-#           - memory_service
-#           - therapy_service
-#           - personality_service
-#           - orchestrator_service
-#           - analytics-service
-#           - config_service
-#     steps:
-#       - uses: actions/checkout@v4
-#       - name: Build Docker image
-#         run: |
-#           docker build -t solace-${{ matrix.service }}:${{ github.sha }} ./services/${{ matrix.service }}
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    strategy:
+      matrix:
+        service:
+          - user-service
+          - safety_service
+          - notification-service
+          - diagnosis_service
+          - memory_service
+          - therapy_service
+          - personality_service
+          - orchestrator_service
+          - analytics-service
+          - config_service
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: |
+          docker build -t solace-${{ matrix.service }}:${{ github.sha }} ./services/${{ matrix.service }}

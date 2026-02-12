@@ -160,7 +160,7 @@ class TestFactExtraction:
         """Test extracting personal info facts."""
         text = "I am a software engineer working at a tech company"
         facts = consolidation_pipeline._extract_facts_from_text(text, session_id)
-        assert len(facts) >= 0
+        assert len(facts) > 0, "Expected at least one fact for personal info text"
 
     def test_extract_facts_relationship(self, consolidation_pipeline: ConsolidationPipeline,
                                          session_id: uuid4) -> None:
@@ -174,7 +174,7 @@ class TestFactExtraction:
         """Test extracting feeling facts."""
         text = "I feel anxious about my upcoming presentation"
         facts = consolidation_pipeline._extract_facts_from_text(text, session_id)
-        assert len(facts) >= 0
+        assert len(facts) > 0, "Expected at least one fact for feeling-related text"
 
     def test_classify_fact_safety_critical(self, consolidation_pipeline: ConsolidationPipeline) -> None:
         """Test classification of safety-critical facts."""
@@ -206,8 +206,8 @@ class TestEntityExtraction:
         """Test extracting name entities."""
         text = "My sister Sarah and brother John help me cope"
         entities = consolidation_pipeline._extract_entities(text)
-        assert len(entities) >= 0
-        assert "Sarah" in entities or "John" in entities or len(entities) == 0
+        assert len(entities) > 0, "Expected at least one named entity"
+        assert "Sarah" in entities or "John" in entities
 
     def test_extract_entities_limited(self, consolidation_pipeline: ConsolidationPipeline) -> None:
         """Test that entity extraction is limited."""

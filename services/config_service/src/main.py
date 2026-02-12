@@ -23,13 +23,22 @@ logger = structlog.get_logger(__name__)
 
 def configure_logging(log_level: str) -> None:
     """Configure structured logging."""
+    try:
+        from solace_security.phi_protection import phi_sanitizer_processor
+        _phi_processor = phi_sanitizer_processor
+    except ImportError:
+        _phi_processor = None
+    processors = [
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso"),
+    ]
+    if _phi_processor:
+        processors.append(_phi_processor)
+    renderer = structlog.dev.ConsoleRenderer() if log_level == "DEBUG" else structlog.processors.JSONRenderer()
+    processors.append(renderer)
     structlog.configure(
-        processors=[
-            structlog.contextvars.merge_contextvars,
-            structlog.processors.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.dev.ConsoleRenderer() if log_level == "DEBUG" else structlog.processors.JSONRenderer(),
-        ],
+        processors=processors,
         wrapper_class=structlog.make_filtering_bound_logger(
             getattr(structlog.stdlib, log_level, structlog.stdlib.INFO)
         ),

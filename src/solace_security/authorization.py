@@ -174,16 +174,32 @@ class RBACPolicy(Policy):
 
 
 class OwnershipPolicy(Policy):
-    """Resource ownership policy."""
+    """Resource ownership policy — grants read/write access to resource owners.
+
+    Uses exact string match on user_id. Owners cannot delete or administer
+    their own resources via this policy — those require explicit permissions.
+    """
     name = "ownership_policy"
     priority = 20
 
+    _OWNER_ALLOWED: ClassVar[set[Permission]] = {
+        Permission.READ, Permission.WRITE,
+        Permission.CHAT_READ, Permission.CHAT_SEND,
+        Permission.SESSION_READ, Permission.SESSION_CREATE,
+        Permission.USER_READ, Permission.USER_WRITE,
+        Permission.ASSESSMENT_READ, Permission.ASSESSMENT_WRITE,
+    }
+
     def evaluate(self, context: AuthorizationContext, resource: Resource,
                  action: Permission) -> AuthorizationDecision | None:
-        if resource.owner_id and resource.owner_id == context.user_id:
-            allowed_actions = {Permission.READ, Permission.WRITE}
-            if action in allowed_actions or action.value.endswith(":read") or action.value.endswith(":write"):
-                return AuthorizationDecision.allow("Owner has access to own resource", self.name)
+        if not resource.owner_id or not context.user_id:
+            return None
+        if resource.owner_id != context.user_id:
+            return None
+        if action in self._OWNER_ALLOWED:
+            return AuthorizationDecision.allow("Owner has access to own resource", self.name)
+        logger.debug("ownership_policy_denied", action=action.value,
+                     reason="action not in owner-allowed set")
         return None
 
 

@@ -409,3 +409,24 @@ def detect_phi(text: str) -> PHIDetectionResult:
 def mask_phi(text: str) -> str:
     """Convenience function to mask PHI in text."""
     return PHIDetector().detect(text).masked_text
+
+
+_structlog_sanitizer: PHISanitizer | None = None
+
+
+def phi_sanitizer_processor(
+    logger_: Any, method_name: str, event_dict: dict[str, Any]
+) -> dict[str, Any]:
+    """Structlog processor that sanitizes PHI from log event dicts.
+
+    Add to the structlog processor chain before the renderer:
+        processors=[
+            ...,
+            phi_sanitizer_processor,
+            structlog.processors.JSONRenderer(),
+        ]
+    """
+    global _structlog_sanitizer
+    if _structlog_sanitizer is None:
+        _structlog_sanitizer = PHISanitizer()
+    return _structlog_sanitizer.sanitize_dict(event_dict)

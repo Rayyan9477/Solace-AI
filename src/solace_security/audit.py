@@ -316,6 +316,25 @@ class PostgresAuditStore(AsyncAuditStore):
         "CREATE INDEX IF NOT EXISTS idx_audit_contains_phi ON audit_events(contains_phi) WHERE contains_phi = TRUE",
     ]
 
+    IMMUTABILITY_RULES_SQL = [
+        """DO $$ BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_rules
+                WHERE rulename = 'prevent_audit_update' AND tablename = 'audit_events'
+            ) THEN
+                CREATE RULE prevent_audit_update AS ON UPDATE TO audit_events DO INSTEAD NOTHING;
+            END IF;
+        END $$""",
+        """DO $$ BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_rules
+                WHERE rulename = 'prevent_audit_delete' AND tablename = 'audit_events'
+            ) THEN
+                CREATE RULE prevent_audit_delete AS ON DELETE TO audit_events DO INSTEAD NOTHING;
+            END IF;
+        END $$""",
+    ]
+
     INSERT_SQL = """
     INSERT INTO audit_events (
         event_id, timestamp, event_type, action, outcome, severity,
@@ -354,7 +373,9 @@ class PostgresAuditStore(AsyncAuditStore):
             await conn.execute(self.CREATE_TABLE_SQL)
             for idx_sql in self.CREATE_INDEXES_SQL:
                 await conn.execute(idx_sql)
-        logger.info("postgres_audit_store_initialized")
+            for rule_sql in self.IMMUTABILITY_RULES_SQL:
+                await conn.execute(rule_sql)
+        logger.info("postgres_audit_store_initialized", immutable=True)
 
     async def store(self, event: AuditEvent) -> None:
         """Store audit event in PostgreSQL."""

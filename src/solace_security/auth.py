@@ -700,3 +700,46 @@ def create_jwt_manager(settings: AuthSettings | None = None) -> JWTManager:
 def create_session_manager() -> SessionManager:
     """Factory function to create session manager."""
     return SessionManager()
+
+
+def validate_auth_settings(settings: AuthSettings) -> None:
+    """Validate authentication settings at startup.
+
+    Raises ValueError if settings are insecure for the current environment.
+    Call this during service lifespan to fail fast on misconfiguration.
+    """
+    key_value = settings.secret_key.get_secret_value()
+    env = os.environ.get("ENVIRONMENT", "development").lower()
+
+    if len(key_value) < 32:
+        raise ValueError(
+            f"AUTH_SECRET_KEY must be at least 32 bytes, got {len(key_value)}")
+
+    if settings.algorithm not in ("HS256", "HS384", "HS512"):
+        raise ValueError(
+            f"Unsupported JWT algorithm: {settings.algorithm}. "
+            "Use HS256, HS384, or HS512.")
+
+    if settings.access_token_expire_minutes < 5:
+        raise ValueError("Access token TTL must be at least 5 minutes")
+
+    if settings.access_token_expire_minutes > 1440:
+        raise ValueError("Access token TTL must not exceed 24 hours (1440 minutes)")
+
+    if settings.refresh_token_expire_days > 30:
+        raise ValueError("Refresh token TTL must not exceed 30 days")
+
+    if env == "production":
+        if key_value.startswith("dev-") or "insecure" in key_value.lower():
+            raise ValueError(
+                "Production environment detected with development/insecure key. "
+                "Set AUTH_SECRET_KEY to a cryptographically random value.")
+        if len(key_value) < 64:
+            logger.warning("auth_key_length_advisory",
+                           length=len(key_value),
+                           recommendation="Use at least 64 bytes for production")
+
+    logger.info("auth_settings_validated",
+                algorithm=settings.algorithm,
+                access_ttl_minutes=settings.access_token_expire_minutes,
+                refresh_ttl_days=settings.refresh_token_expire_days)

@@ -54,6 +54,19 @@ class AnalyticsEvent:
     source_service: str
     payload: dict[str, Any]
 
+    _NIL_UUID = UUID("00000000-0000-0000-0000-000000000000")
+
+    @classmethod
+    def _safe_uuid(cls, value: Any, field_name: str = "unknown") -> UUID:
+        """Parse UUID safely, returning nil UUID on failure."""
+        if isinstance(value, UUID):
+            return value
+        try:
+            return UUID(str(value))
+        except (ValueError, AttributeError):
+            logger.warning("invalid_uuid_in_event", field=field_name, value=str(value)[:50])
+            return cls._NIL_UUID
+
     @classmethod
     def from_raw(cls, data: dict[str, Any]) -> AnalyticsEvent:
         """Create AnalyticsEvent from raw event data."""
@@ -61,14 +74,17 @@ class AnalyticsEvent:
         event_type = data.get("event_type", "unknown")
         category = cls._determine_category(event_type)
 
+        session_id_raw = data.get("session_id")
+        session_id = cls._safe_uuid(session_id_raw, "session_id") if session_id_raw else None
+
         return cls(
-            event_id=UUID(str(metadata.get("event_id", "00000000-0000-0000-0000-000000000000"))),
+            event_id=cls._safe_uuid(metadata.get("event_id"), "event_id"),
             event_type=event_type,
             category=category,
-            user_id=UUID(str(data.get("user_id", "00000000-0000-0000-0000-000000000000"))),
-            session_id=UUID(str(data["session_id"])) if data.get("session_id") else None,
+            user_id=cls._safe_uuid(data.get("user_id"), "user_id"),
+            session_id=session_id,
             timestamp=datetime.fromisoformat(metadata.get("timestamp", datetime.now(timezone.utc).isoformat())),
-            correlation_id=UUID(str(metadata.get("correlation_id", "00000000-0000-0000-0000-000000000000"))),
+            correlation_id=cls._safe_uuid(metadata.get("correlation_id"), "correlation_id"),
             source_service=metadata.get("source_service", "unknown"),
             payload=data,
         )
@@ -224,6 +240,15 @@ class AnalyticsEventProcessor:
             await self._handle_therapy_event(event)
         elif event.category == EventCategory.DIAGNOSIS:
             await self._handle_diagnosis_event(event)
+        elif event.category == EventCategory.MEMORY:
+            await self._handle_memory_event(event)
+        elif event.category == EventCategory.PERSONALITY:
+            await self._handle_personality_event(event)
+        elif event.category == EventCategory.SYSTEM:
+            await self._handle_system_event(event)
+        else:
+            logger.debug("unhandled_event_category", category=event.category.value,
+                         event_type=event.event_type)
 
     async def _handle_session_event(self, event: AnalyticsEvent) -> None:
         """Handle session-related events."""
@@ -277,6 +302,41 @@ class AnalyticsEventProcessor:
             severity=str(severity),
             stepped_care_level=int(stepped_care),
         )
+
+    async def _handle_memory_event(self, event: AnalyticsEvent) -> None:
+        """Handle memory-related events."""
+        metadata = {
+            "memory_type": event.payload.get("memory_type", "unknown"),
+            "collection": event.payload.get("collection"),
+            "importance": event.payload.get("importance"),
+        }
+        metadata = {k: v for k, v in metadata.items() if v is not None}
+        await self._aggregator.track_session_event(
+            event_type=event.event_type,
+            user_id=event.user_id,
+            session_id=event.session_id,
+            metadata=metadata,
+        )
+
+    async def _handle_personality_event(self, event: AnalyticsEvent) -> None:
+        """Handle personality-related events."""
+        metadata = {
+            "trait_type": event.payload.get("trait_type"),
+            "confidence": event.payload.get("confidence"),
+            "detection_method": event.payload.get("detection_method"),
+        }
+        metadata = {k: v for k, v in metadata.items() if v is not None}
+        await self._aggregator.track_session_event(
+            event_type=event.event_type,
+            user_id=event.user_id,
+            session_id=event.session_id,
+            metadata=metadata,
+        )
+
+    async def _handle_system_event(self, event: AnalyticsEvent) -> None:
+        """Handle system-level events (health, errors, metrics)."""
+        logger.debug("system_event_tracked", event_type=event.event_type,
+                     source=event.source_service)
 
 
 class AnalyticsConsumer:

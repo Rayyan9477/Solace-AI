@@ -3,10 +3,12 @@ Solace-AI Orchestrator Service - Events.
 Domain events for orchestrator lifecycle and agent coordination.
 """
 from __future__ import annotations
+import asyncio
+import inspect
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable, Union
 from uuid import UUID, uuid4
 import structlog
 
@@ -146,11 +148,77 @@ class EventFactory:
         )
 
 
-EventHandler = Callable[[OrchestratorEvent], None]
+def to_kafka_event(event: OrchestratorEvent) -> Any:
+    """Convert local orchestrator event to canonical Kafka event for inter-service messaging.
+
+    Maps session lifecycle and error events to canonical schemas.
+    Returns None for internal-only events or if solace_events is not available.
+    """
+    try:
+        from src.solace_events.schemas import (
+            EventMetadata as KafkaMetadata,
+            SessionStartedEvent as KafkaSessionStarted,
+            SessionEndedEvent as KafkaSessionEnded,
+            MessageReceivedEvent as KafkaMessageReceived,
+            ResponseGeneratedEvent as KafkaResponseGenerated,
+            ErrorOccurredEvent as KafkaErrorOccurred,
+        )
+    except ImportError:
+        logger.debug("solace_events_not_available_for_bridge")
+        return None
+
+    meta = KafkaMetadata(
+        event_id=event.event_id, timestamp=event.timestamp,
+        correlation_id=event.correlation_id or event.event_id,
+        source_service="orchestrator-service",
+    )
+    base: dict[str, Any] = {"user_id": event.user_id, "session_id": event.session_id, "metadata": meta}
+
+    if event.event_type == EventType.SESSION_STARTED:
+        return KafkaSessionStarted(**base, session_number=1, channel="web")
+
+    if event.event_type == EventType.SESSION_ENDED:
+        return KafkaSessionEnded(
+            **base, duration_seconds=int(event.payload.get("duration_seconds", 0)),
+            message_count=int(event.payload.get("message_count", 0)),
+            end_reason=event.payload.get("reason", "user_initiated"),
+        )
+
+    if event.event_type == EventType.MESSAGE_RECEIVED:
+        return KafkaMessageReceived(
+            **base, message_id=event.event_id,
+            content_length=int(event.payload.get("message_length", 0)),
+            content_hash="",
+        )
+
+    if event.event_type == EventType.MESSAGE_PROCESSED:
+        return KafkaResponseGenerated(
+            **base, response_id=event.event_id, response_length=0,
+            generation_time_ms=int(event.payload.get("processing_time_ms", 0)),
+            model_used=event.payload.get("model", "unknown"), tokens_used=0,
+        )
+
+    if event.event_type == EventType.ERROR_OCCURRED:
+        return KafkaErrorOccurred(
+            **base, error_code=event.payload.get("error_type", "UNKNOWN"),
+            error_category="application", severity="HIGH",
+            message=event.payload.get("error_message", "Unknown error"),
+        )
+
+    return None
+
+
+SyncHandler = Callable[[OrchestratorEvent], None]
+AsyncHandler = Callable[[OrchestratorEvent], Awaitable[None]]
+EventHandler = Union[SyncHandler, AsyncHandler]
 
 
 class EventBus:
-    """In-process event bus for orchestrator events."""
+    """In-process event bus for orchestrator events.
+
+    Supports both sync and async handlers. Async handlers are awaited
+    concurrently via asyncio.gather with error isolation per handler.
+    """
 
     def __init__(self) -> None:
         self._handlers: dict[EventType, list[EventHandler]] = {}
@@ -175,24 +243,48 @@ class EventBus:
         if event_type in self._handlers and handler in self._handlers[event_type]:
             self._handlers[event_type].remove(handler)
 
-    def publish(self, event: OrchestratorEvent) -> None:
-        """Publish event to all subscribers."""
+    async def publish(self, event: OrchestratorEvent) -> None:
+        """Publish event to all subscribers (async-aware).
+
+        Collects all handlers, invokes them concurrently, and logs
+        individual failures without affecting other handlers.
+        """
         self._event_history.append(event)
         if len(self._event_history) > self._max_history:
             self._event_history = self._event_history[-self._max_history:]
-        logger.info("event_published", event_type=event.event_type.value, event_id=str(event.event_id))
-        for handler in self._global_handlers:
-            self._safe_invoke(handler, event)
-        if event.event_type in self._handlers:
-            for handler in self._handlers[event.event_type]:
-                self._safe_invoke(handler, event)
 
-    def _safe_invoke(self, handler: EventHandler, event: OrchestratorEvent) -> None:
-        """Invoke handler with error isolation."""
+        logger.info("event_published", event_type=event.event_type.value, event_id=str(event.event_id))
+
+        handlers: list[EventHandler] = list(self._global_handlers)
+        if event.event_type in self._handlers:
+            handlers.extend(self._handlers[event.event_type])
+
+        if not handlers:
+            return
+
+        tasks = [self._safe_invoke(handler, event) for handler in handlers]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(
+                    "event_handler_error",
+                    event_type=event.event_type.value,
+                    handler=getattr(handlers[i], "__name__", str(handlers[i])),
+                    error=str(result),
+                )
+
+    async def _safe_invoke(self, handler: EventHandler, event: OrchestratorEvent) -> None:
+        """Invoke handler with error isolation. Supports sync and async."""
         try:
-            handler(event)
+            result = handler(event)
+            if inspect.isawaitable(result):
+                await result
         except Exception as e:
-            logger.error("event_handler_error", event_type=event.event_type.value, error=str(e))
+            logger.error(
+                "event_handler_error",
+                event_type=event.event_type.value,
+                error=str(e),
+            )
 
     def get_history(self, event_type: EventType | None = None, limit: int = 100) -> list[OrchestratorEvent]:
         """Get event history, optionally filtered by type."""

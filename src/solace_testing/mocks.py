@@ -59,7 +59,35 @@ class MockPostgresClient:
     async def _handle_select(self, query: str, params: tuple[Any, ...] | None) -> MockQueryResult:
         table = self._extract_table_name(query, "from")
         rows = self._tables.get(table, [])
+        rows = self._apply_where(query, params, rows)
         return MockQueryResult(rows=rows, row_count=len(rows))
+
+    def _apply_where(
+        self, query: str, params: tuple[Any, ...] | None, rows: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Apply basic WHERE column = $N filtering on in-memory rows."""
+        q_lower = query.lower()
+        where_idx = q_lower.find("where")
+        if where_idx == -1 or not params:
+            return rows
+        where_clause = q_lower[where_idx + 5:]
+        import re
+        conditions = re.findall(r"(\w+)\s*=\s*\$(\d+)", where_clause)
+        if not conditions:
+            return rows
+        filtered: list[dict[str, Any]] = []
+        for row in rows:
+            match = True
+            for col, param_num in conditions:
+                idx = int(param_num) - 1
+                if idx < len(params):
+                    row_val = row.get(col)
+                    if row_val is not None and str(row_val) != str(params[idx]):
+                        match = False
+                        break
+            if match:
+                filtered.append(row)
+        return filtered
 
     async def _handle_insert(self, query: str, params: tuple[Any, ...] | None) -> MockQueryResult:
         table = self._extract_table_name(query, "into")

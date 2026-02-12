@@ -7,7 +7,7 @@ Follows 12-factor app principles with environment-based configuration.
 from __future__ import annotations
 from decimal import Decimal
 from typing import Any
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
 
@@ -58,7 +58,7 @@ class WeaviateConfig(BaseSettings):
     port: int = Field(default=8080, ge=1, le=65535)
     grpc_port: int = Field(default=50051, ge=1, le=65535)
     use_https: bool = Field(default=False)
-    api_key: str = Field(default="")
+    api_key: SecretStr = Field(default=SecretStr(""))
     embedding_dimension: int = Field(default=1536, ge=64, le=4096)
     batch_size: int = Field(default=100, ge=1, le=1000)
     consistency_level: str = Field(default="ONE")

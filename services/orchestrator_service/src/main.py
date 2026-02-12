@@ -49,12 +49,19 @@ class OrchestratorAppSettings(BaseSettings):
 
 def configure_logging(settings: OrchestratorAppSettings) -> None:
     """Configure structured logging for the orchestrator service."""
+    try:
+        from solace_security.phi_protection import phi_sanitizer_processor
+        _phi_processor = phi_sanitizer_processor
+    except ImportError:
+        _phi_processor = None
     processors = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.StackInfoRenderer(),
     ]
+    if _phi_processor:
+        processors.append(_phi_processor)
     if settings.debug:
         processors.append(structlog.dev.ConsoleRenderer())
     else:

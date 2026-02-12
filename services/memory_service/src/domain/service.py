@@ -32,11 +32,13 @@ class MemoryService(ServiceBase):
     def __init__(self, settings: MemoryServiceSettings | None = None,
                  context_assembler: ContextAssembler | None = None,
                  consolidation_pipeline: ConsolidationPipeline | None = None,
-                 postgres_repo: PostgresRepository | None = None) -> None:
+                 postgres_repo: PostgresRepository | None = None,
+                 search_engine: Any | None = None) -> None:
         self._settings = settings or MemoryServiceSettings()
         self._context_assembler = context_assembler
         self._consolidation_pipeline = consolidation_pipeline
         self._postgres_repo = postgres_repo
+        self._search_engine = search_engine
         # Tiers 1-2: always in-memory (ephemeral per-session data)
         self._tier_1_input: dict[UUID, MemoryRecord] = {}
         self._tier_2_working: dict[UUID, list[MemoryRecord]] = {}
@@ -464,7 +466,16 @@ class MemoryService(ServiceBase):
         return record.created_at >= cutoff
 
     def _semantic_filter(self, records: list[MemoryRecord], query: str) -> list[MemoryRecord]:
-        """Basic semantic filtering (placeholder for vector search)."""
+        """Filter records using hybrid search engine (BM25 + semantic) with substring fallback."""
+        if self._search_engine is not None:
+            try:
+                for record in records:
+                    self._search_engine.index_document(record.id, record.content)
+                results = self._search_engine.search(query, limit=len(records))
+                ranked_ids = {r.doc_id for r in results if r.score > 0}
+                return [r for r in records if r.id in ranked_ids]
+            except Exception as e:
+                logger.warning("hybrid_search_failed_using_fallback", error=str(e))
         return [r for r in records if query.lower() in r.content.lower()]
 
     async def _get_previous_session_summary(self, user_id: UUID) -> str | None:

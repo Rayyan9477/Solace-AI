@@ -187,8 +187,8 @@ class PercentileAggregator(MetricAggregator[Decimal]):
         if not values:
             return Decimal("0")
         sorted_values = sorted(values)
-        index = int(len(sorted_values) * self.percentile / 100)
-        return sorted_values[min(index, len(sorted_values) - 1)]
+        index = int((len(sorted_values) - 1) * self.percentile / 100)
+        return sorted_values[index]
 
 
 class MetricsStore:

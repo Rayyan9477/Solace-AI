@@ -18,6 +18,8 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Import shared event infrastructure
+import os
+
 try:
     from solace_events.schemas import (
         BaseEvent,
@@ -34,6 +36,11 @@ except ImportError:
     CrisisDetectedEvent = None
     EscalationTriggeredEvent = None
     EventConsumer = None
+    structlog.get_logger(__name__).error(
+        "kafka_import_failed", package="solace_events",
+        hint="Install solace_events for Kafka consumer support")
+    if os.environ.get("ENVIRONMENT", "").lower() == "production":
+        raise RuntimeError("solace_events package required in production")
 
 # Import domain service
 try:
@@ -70,6 +77,10 @@ class UserServiceSettings(BaseSettings):
         ge=1.0,
         le=60.0,
         description="HTTP request timeout in seconds",
+    )
+    fallback_oncall_email: str = Field(
+        ...,
+        description="Fallback email when user service is unavailable (no default — must be configured)",
     )
 
     model_config = SettingsConfigDict(
@@ -122,8 +133,11 @@ class SafetyEventConsumer:
     async def start(self) -> None:
         """Start consuming safety events."""
         if not self._consumer:
-            logger.warning("cannot_start_consumer", reason="consumer not initialized")
-            return
+            logger.error("cannot_start_consumer", reason="consumer not initialized, Kafka unavailable")
+            raise RuntimeError(
+                "SafetyEventConsumer cannot start: Kafka consumer not initialized. "
+                "Ensure solace_events is installed and Kafka is reachable."
+            )
 
         await self._consumer.start([SolaceTopic.SAFETY])
         self._running = True
@@ -310,11 +324,11 @@ class SafetyEventConsumer:
 
         if not recipients:
             logger.warning("no_oncall_clinicians", event_id=str(event_id))
-            # Fall back to system default notification
+            # Fall back to configured fallback email
             recipients = [
                 NotificationRecipient(
-                    email="oncall@solace-ai.com",
-                    name="On-Call Team",
+                    email=self._user_service_settings.fallback_oncall_email,
+                    name="On-Call Team (fallback)",
                 )
             ]
 
@@ -347,14 +361,16 @@ class SafetyEventConsumer:
         recipients = []
 
         if clinician_id:
-            # In production, fetch clinician contact from user service
-            recipients.append(
-                NotificationRecipient(
-                    user_id=clinician_id,
-                    email=f"clinician-{clinician_id}@solace-ai.com",  # Placeholder
-                    name="Assigned Clinician",
+            # Fetch clinician contact from user service
+            clinician_contact = await self._get_clinician_contact(clinician_id)
+            if clinician_contact:
+                recipients.append(clinician_contact)
+            else:
+                logger.warning(
+                    "clinician_contact_not_found",
+                    clinician_id=str(clinician_id),
+                    fallback="oncall_team",
                 )
-            )
         else:
             # No assigned clinician - notify on-call team
             recipients = await self._get_oncall_clinicians()
@@ -362,8 +378,8 @@ class SafetyEventConsumer:
         if not recipients:
             recipients = [
                 NotificationRecipient(
-                    email="escalations@solace-ai.com",
-                    name="Escalation Team",
+                    email=self._user_service_settings.fallback_oncall_email,
+                    name="Escalation Team (fallback)",
                 )
             ]
 
@@ -398,8 +414,8 @@ class SafetyEventConsumer:
         if not recipients:
             recipients = [
                 NotificationRecipient(
-                    email="monitoring@solace-ai.com",
-                    name="Monitoring Team",
+                    email=self._user_service_settings.fallback_oncall_email,
+                    name="Monitoring Team (fallback)",
                 )
             ]
 
@@ -478,6 +494,34 @@ class SafetyEventConsumer:
                 error=str(e),
             )
             return []
+
+    async def _get_clinician_contact(self, clinician_id: UUID) -> NotificationRecipient | None:
+        """Fetch contact info for a specific clinician from User Service."""
+        try:
+            url = f"{self._user_service_settings.user_service_url}/api/v1/users/{clinician_id}"
+            timeout = httpx.Timeout(self._user_service_settings.request_timeout)
+
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                data = response.json()
+
+            if not data.get("email"):
+                return None
+
+            return NotificationRecipient(
+                user_id=clinician_id,
+                email=data["email"],
+                name=data.get("display_name", "Clinician"),
+                phone=data.get("phone_number"),
+            )
+        except Exception as e:
+            logger.warning(
+                "clinician_contact_lookup_failed",
+                clinician_id=str(clinician_id),
+                error=str(e),
+            )
+            return None
 
     async def _get_monitoring_team(self) -> list[NotificationRecipient]:
         """

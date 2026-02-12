@@ -203,11 +203,11 @@ class TestSafetyAssessmentFactory:
         assessment = factory.create()
         assert "id" in assessment
         assert "risk_level" in assessment
-        assert assessment["risk_level"] in ["low", "medium", "high"]
+        assert assessment["risk_level"] in ["LOW", "ELEVATED", "HIGH"]
 
     def test_high_risk_has_crisis(self) -> None:
         factory = SafetyAssessmentFactory()
-        assessment = factory.create(risk_level="high")
+        assessment = factory.create(risk_level="HIGH")
         assert assessment["crisis_detected"] is True
 
 

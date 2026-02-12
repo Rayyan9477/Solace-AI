@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Any
 from functools import lru_cache
 import structlog
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = structlog.get_logger(__name__)
@@ -47,7 +47,7 @@ class LLMSettings(BaseSettings):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     timeout_seconds: int = Field(default=60, ge=5, le=300)
     retry_attempts: int = Field(default=3, ge=0, le=10)
-    model_config = SettingsConfigDict(env_prefix="LLM_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="ORCH_LLM_", env_file=".env", extra="ignore")
 
 
 class SafetySettings(BaseSettings):
@@ -58,7 +58,7 @@ class SafetySettings(BaseSettings):
     escalation_cooldown_minutes: int = Field(default=30, ge=1)
     max_risk_level_before_block: str = Field(default="critical")
     enable_content_filtering: bool = Field(default=True)
-    model_config = SettingsConfigDict(env_prefix="SAFETY_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="ORCH_SAFETY_", env_file=".env", extra="ignore")
 
 
 class WebSocketSettings(BaseSettings):
@@ -82,6 +82,16 @@ class PersistenceSettings(BaseSettings):
     checkpoint_ttl_hours: int = Field(default=24, ge=1)
     max_checkpoint_size_mb: int = Field(default=10, ge=1, le=100)
     model_config = SettingsConfigDict(env_prefix="PERSISTENCE_", env_file=".env", extra="ignore")
+
+
+class ServiceAuthConfig(BaseSettings):
+    """Service-to-service authentication configuration."""
+
+    service_secret: SecretStr = Field(..., description="Shared secret for service JWT signing")
+    service_name: str = Field(default="orchestrator-service")
+    token_expire_minutes: int = Field(default=60, ge=5, le=1440)
+    enable_service_auth: bool = Field(default=True)
+    model_config = SettingsConfigDict(env_prefix="SERVICE_AUTH_", env_file=".env", extra="ignore")
 
 
 class OrchestratorConfig(BaseSettings):
@@ -131,6 +141,7 @@ class ConfigLoader:
         self._safety: SafetySettings | None = None
         self._websocket: WebSocketSettings | None = None
         self._persistence: PersistenceSettings | None = None
+        self._service_auth: ServiceAuthConfig | None = None
 
     def load(self) -> OrchestratorConfig:
         """Load main configuration."""
@@ -168,6 +179,16 @@ class ConfigLoader:
         if self._persistence is None:
             self._persistence = PersistenceSettings()
         return self._persistence
+
+    def service_auth(self) -> ServiceAuthConfig | None:
+        """Load service auth configuration. Returns None if not configured."""
+        if self._service_auth is None:
+            try:
+                self._service_auth = ServiceAuthConfig()
+            except Exception as e:
+                logger.warning("service_auth_not_configured", error=str(e))
+                return None
+        return self._service_auth
 
     def to_dict(self) -> dict[str, Any]:
         """Export all configuration as dictionary."""
