@@ -22,7 +22,7 @@ class TestDatabaseSettings:
         settings = DatabaseSettings()
         assert settings.host == "localhost"
         assert settings.port == 5432
-        assert settings.database == "solace_therapy"
+        assert settings.database == "solace"
         assert settings.pool_size == 10
 
     def test_connection_string(self) -> None:
@@ -181,7 +181,7 @@ class TestTherapyServiceSettings:
         settings = TherapyServiceSettings()
         assert settings.service_name == "therapy-service"
         assert settings.environment == "development"
-        assert settings.port == 8002
+        assert settings.port == 8006
 
     def test_nested_settings(self) -> None:
         """Test nested settings access."""

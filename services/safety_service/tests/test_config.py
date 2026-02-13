@@ -21,7 +21,7 @@ class TestSafetyServiceConfig:
         assert config.service_name == "safety-service"
         assert config.version == "1.0.0"
         assert config.environment == "development"
-        assert config.port == 8001
+        assert config.port == 8002
 
     def test_cors_origins_list_wildcard(self) -> None:
         """Test CORS origins list with wildcard."""

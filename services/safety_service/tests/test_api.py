@@ -20,6 +20,7 @@ from services.safety_service.src.domain.crisis_detector import (
     CrisisLevel as DomainCrisisLevel, RiskFactor,
 )
 from services.safety_service.src.domain.escalation import EscalationResult
+from solace_security.middleware import AuthenticatedService, get_current_service
 
 
 @pytest.fixture
@@ -30,12 +31,17 @@ def mock_safety_service() -> MagicMock:
     return service
 
 
+def _mock_service() -> AuthenticatedService:
+    return AuthenticatedService(service_name="test-service", permissions=["safety:read", "safety:write"])
+
+
 @pytest.fixture
 def app(mock_safety_service: MagicMock) -> FastAPI:
     """Create test FastAPI application."""
     test_app = FastAPI()
     test_app.include_router(router, prefix="/api/v1/safety")
     test_app.state.safety_service = mock_safety_service
+    test_app.dependency_overrides[get_current_service] = _mock_service
     return test_app
 
 

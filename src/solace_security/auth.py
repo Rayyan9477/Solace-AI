@@ -692,9 +692,14 @@ class SessionManager:
         return await self._store.get_user_sessions(user_id)
 
 
-def create_jwt_manager(settings: AuthSettings | None = None) -> JWTManager:
+def create_jwt_manager(
+    settings: AuthSettings | None = None,
+    token_blacklist: TokenBlacklist | None = None,
+) -> JWTManager:
     """Factory function to create JWT manager."""
-    return JWTManager(settings)
+    if token_blacklist is None:
+        token_blacklist = InMemoryTokenBlacklist()
+    return JWTManager(settings, token_blacklist=token_blacklist)
 
 
 def create_session_manager() -> SessionManager:

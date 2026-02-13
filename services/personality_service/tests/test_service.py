@@ -24,7 +24,8 @@ class TestProfileStore:
         """Create profile store."""
         return ProfileStore()
 
-    def test_save_and_get(self, store: ProfileStore) -> None:
+    @pytest.mark.asyncio
+    async def test_save_and_get(self, store: ProfileStore) -> None:
         """Test saving and retrieving profile."""
         user_id = uuid4()
         profile = PersonalityProfile(user_id=user_id)
@@ -32,7 +33,7 @@ class TestProfileStore:
             openness=0.7, conscientiousness=0.6, extraversion=0.5,
             agreeableness=0.8, neuroticism=0.4,
         )
-        saved = store.save(profile)
+        saved = await store.save(profile)
         assert saved.user_id == user_id
         retrieved = store.get(user_id)
         assert retrieved is not None
@@ -44,32 +45,36 @@ class TestProfileStore:
         result = store.get(uuid4())
         assert result is None
 
-    def test_exists(self, store: ProfileStore) -> None:
+    @pytest.mark.asyncio
+    async def test_exists(self, store: ProfileStore) -> None:
         """Test exists check."""
         user_id = uuid4()
         assert store.exists(user_id) is False
-        store.save(PersonalityProfile(user_id=user_id))
+        await store.save(PersonalityProfile(user_id=user_id))
         assert store.exists(user_id) is True
 
-    def test_delete(self, store: ProfileStore) -> None:
+    @pytest.mark.asyncio
+    async def test_delete(self, store: ProfileStore) -> None:
         """Test deleting profile."""
         user_id = uuid4()
-        store.save(PersonalityProfile(user_id=user_id))
+        await store.save(PersonalityProfile(user_id=user_id))
         assert store.exists(user_id) is True
-        result = store.delete(user_id)
+        result = await store.delete(user_id)
         assert result is True
         assert store.exists(user_id) is False
 
-    def test_delete_nonexistent(self, store: ProfileStore) -> None:
+    @pytest.mark.asyncio
+    async def test_delete_nonexistent(self, store: ProfileStore) -> None:
         """Test deleting nonexistent profile."""
-        result = store.delete(uuid4())
+        result = await store.delete(uuid4())
         assert result is False
 
-    def test_count(self, store: ProfileStore) -> None:
+    @pytest.mark.asyncio
+    async def test_count(self, store: ProfileStore) -> None:
         """Test counting profiles."""
         assert store.count() == 0
-        store.save(PersonalityProfile(user_id=uuid4()))
-        store.save(PersonalityProfile(user_id=uuid4()))
+        await store.save(PersonalityProfile(user_id=uuid4()))
+        await store.save(PersonalityProfile(user_id=uuid4()))
         assert store.count() == 2
 
 

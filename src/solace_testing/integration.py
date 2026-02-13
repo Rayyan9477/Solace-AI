@@ -295,7 +295,7 @@ class APITestClient:
         self._headers.pop("Authorization", None)
 
     def _build_url(self, path: str) -> str:
-        return f"/{path.lstrip('/')}"
+        return f"{self.base_url}/{path.lstrip('/')}"
 
     async def request(self, method: str, url: str, headers: dict[str, str] | None = None,
                       params: dict[str, Any] | None = None,

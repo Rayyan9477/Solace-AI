@@ -130,7 +130,7 @@ class TestSessionLifecycle:
 
     @pytest.mark.asyncio
     async def test_end_session_user_mismatch(self) -> None:
-        """Test ending session with wrong user raises error."""
+        """Test ending session with wrong user returns failure."""
         selector = TechniqueSelector()
         manager = SessionManager()
         orchestrator = TherapyOrchestrator(
@@ -139,8 +139,8 @@ class TestSessionLifecycle:
         )
         await orchestrator.initialize()
         start_result = await orchestrator.start_session(uuid4(), uuid4(), {})
-        with pytest.raises(ValueError, match="User ID mismatch"):
-            await orchestrator.end_session(start_result.session_id, uuid4())
+        result = await orchestrator.end_session(start_result.session_id, uuid4())
+        assert result.success is False
         await orchestrator.shutdown()
 
 
@@ -194,7 +194,7 @@ class TestMessageProcessing:
 
     @pytest.mark.asyncio
     async def test_process_message_user_mismatch(self) -> None:
-        """Test processing message with wrong user raises error."""
+        """Test processing message with wrong user returns failure."""
         selector = TechniqueSelector()
         manager = SessionManager()
         orchestrator = TherapyOrchestrator(
@@ -203,13 +203,13 @@ class TestMessageProcessing:
         )
         await orchestrator.initialize()
         start_result = await orchestrator.start_session(uuid4(), uuid4(), {})
-        with pytest.raises(ValueError, match="User ID mismatch"):
-            await orchestrator.process_message(
-                session_id=start_result.session_id,
-                user_id=uuid4(),
-                message="Test",
-                conversation_history=[],
-            )
+        result = await orchestrator.process_message(
+            session_id=start_result.session_id,
+            user_id=uuid4(),
+            message="Test",
+            conversation_history=[],
+        )
+        assert result.success is False
         await orchestrator.shutdown()
 
 

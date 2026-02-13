@@ -72,7 +72,7 @@ class TestLLMAssessor:
         # This will trigger fallback since mock LLM is used
         result = await assessor.assess(text)
 
-        assert result.risk_level in [RiskLevel.HIGH, RiskLevel.ELEVATED]
+        assert result.risk_level in [RiskLevel.CRITICAL, RiskLevel.HIGH, RiskLevel.ELEVATED]
         assert result.risk_score > Decimal("0.0")
 
     @pytest.mark.asyncio

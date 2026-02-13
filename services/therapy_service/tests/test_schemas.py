@@ -24,6 +24,7 @@ class TestEnums:
         assert SessionPhase.WORKING == "working"
         assert SessionPhase.CLOSING == "closing"
         assert SessionPhase.POST_SESSION == "post_session"
+        assert SessionPhase.CRISIS == "crisis"
 
     def test_therapy_modality_values(self) -> None:
         """Test TherapyModality enum values."""
@@ -38,6 +39,7 @@ class TestEnums:
         assert SeverityLevel.MINIMAL == "minimal"
         assert SeverityLevel.MILD == "mild"
         assert SeverityLevel.MODERATE == "moderate"
+        assert SeverityLevel.MODERATELY_SEVERE == "moderately_severe"
         assert SeverityLevel.SEVERE == "severe"
 
     def test_risk_level_values(self) -> None:
