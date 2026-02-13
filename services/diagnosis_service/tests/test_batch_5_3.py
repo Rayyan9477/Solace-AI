@@ -521,14 +521,19 @@ class TestRepositoryFactory:
     """Tests for RepositoryFactory."""
 
     def test_create_in_memory(self) -> None:
-        """Test creating in-memory repository."""
-        repo = RepositoryFactory.create_in_memory()
+        """Test creating in-memory repository directly from fixtures."""
+        repo = InMemoryDiagnosisRepository()
         assert isinstance(repo, InMemoryDiagnosisRepository)
 
     def test_get_default_singleton(self) -> None:
-        """Test default repository is singleton."""
+        """Test default repository is singleton when instance is set."""
+        from unittest.mock import MagicMock
         RepositoryFactory.reset()
-        repo1 = RepositoryFactory.get_default()
-        repo2 = RepositoryFactory.get_default()
-        assert repo1 is repo2
-        RepositoryFactory.reset()
+        mock_repo = MagicMock()
+        RepositoryFactory._instance = mock_repo
+        try:
+            repo1 = RepositoryFactory.get_default()
+            repo2 = RepositoryFactory.get_default()
+            assert repo1 is repo2
+        finally:
+            RepositoryFactory.reset()

@@ -58,32 +58,32 @@ class TestMigrationSettings:
 
     def test_default_database_url(self) -> None:
         """Test default database URL is set."""
-        settings = MigrationSettings()
+        settings = MigrationSettings(database_url="postgresql://localhost/test")
         assert "postgresql" in settings.database_url
 
     def test_default_migrations_path(self) -> None:
         """Test default migrations path."""
-        settings = MigrationSettings()
+        settings = MigrationSettings(database_url="postgresql://localhost/test")
         assert settings.migrations_path == "migrations"
 
     def test_default_auto_upgrade_disabled(self) -> None:
         """Test auto upgrade is disabled by default."""
-        settings = MigrationSettings()
+        settings = MigrationSettings(database_url="postgresql://localhost/test")
         assert settings.auto_upgrade is False
 
     def test_pre_migration_check_enabled(self) -> None:
         """Test pre-migration check is enabled by default."""
-        settings = MigrationSettings()
+        settings = MigrationSettings(database_url="postgresql://localhost/test")
         assert settings.pre_migration_check is True
 
     def test_post_migration_validate_enabled(self) -> None:
         """Test post-migration validation is enabled by default."""
-        settings = MigrationSettings()
+        settings = MigrationSettings(database_url="postgresql://localhost/test")
         assert settings.post_migration_validate is True
 
     def test_lock_timeout_default(self) -> None:
         """Test lock timeout default value."""
-        settings = MigrationSettings()
+        settings = MigrationSettings(database_url="postgresql://localhost/test")
         assert settings.lock_timeout_seconds == 30
 
 
@@ -176,18 +176,18 @@ class TestMigrationRunner:
 
     def test_runner_initialization(self) -> None:
         """Test MigrationRunner can be initialized."""
-        runner = MigrationRunner()
+        runner = MigrationRunner(settings=MigrationSettings(database_url="postgresql://localhost/test"))
         assert runner is not None
 
     def test_runner_with_settings(self) -> None:
         """Test MigrationRunner with custom settings."""
-        settings = MigrationSettings(auto_upgrade=True)
+        settings = MigrationSettings(database_url="postgresql://localhost/test", auto_upgrade=True)
         runner = MigrationRunner(settings=settings)
         assert runner._settings.auto_upgrade is True
 
     def test_register_hook_valid_event(self) -> None:
         """Test registering a valid hook."""
-        runner = MigrationRunner()
+        runner = MigrationRunner(settings=MigrationSettings(database_url="postgresql://localhost/test"))
 
         async def test_hook() -> None:
             pass
@@ -197,7 +197,7 @@ class TestMigrationRunner:
 
     def test_register_hook_invalid_event(self) -> None:
         """Test registering an invalid hook raises error."""
-        runner = MigrationRunner()
+        runner = MigrationRunner(settings=MigrationSettings(database_url="postgresql://localhost/test"))
 
         async def test_hook() -> None:
             pass
@@ -207,7 +207,7 @@ class TestMigrationRunner:
 
     def test_hooks_initialized_empty(self) -> None:
         """Test hooks are initialized as empty lists."""
-        runner = MigrationRunner()
+        runner = MigrationRunner(settings=MigrationSettings(database_url="postgresql://localhost/test"))
         assert "pre_upgrade" in runner._hooks
         assert "post_upgrade" in runner._hooks
         assert "pre_downgrade" in runner._hooks
@@ -222,13 +222,13 @@ class TestCreateMigrationRunner:
     async def test_create_migration_runner_returns_runner(self) -> None:
         """Test factory function returns MigrationRunner."""
         with patch.object(MigrationRunner, "initialize", new_callable=AsyncMock):
-            runner = await create_migration_runner()
+            runner = await create_migration_runner(MigrationSettings(database_url="postgresql://localhost/test"))
             assert isinstance(runner, MigrationRunner)
 
     @pytest.mark.asyncio
     async def test_create_migration_runner_with_settings(self) -> None:
         """Test factory function accepts settings."""
-        settings = MigrationSettings(auto_upgrade=True)
+        settings = MigrationSettings(database_url="postgresql://localhost/test", auto_upgrade=True)
         with patch.object(MigrationRunner, "initialize", new_callable=AsyncMock):
             runner = await create_migration_runner(settings)
             assert runner._settings.auto_upgrade is True

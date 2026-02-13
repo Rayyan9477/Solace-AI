@@ -13,6 +13,7 @@ from solace_security.audit import (
     InMemoryAuditStore,
     AuditLogger,
     get_audit_logger,
+    configure_audit_logger,
     create_audit_logger,
 )
 
@@ -228,7 +229,7 @@ class TestAuditLogger:
 
     @pytest.fixture
     def audit_logger(self):
-        return AuditLogger()
+        return AuditLogger(store=InMemoryAuditStore())
 
     @pytest.fixture
     def actor(self):
@@ -328,6 +329,7 @@ class TestGlobalAuditLogger:
     """Tests for global audit logger singleton."""
 
     def test_get_audit_logger_singleton(self):
+        configure_audit_logger(InMemoryAuditStore())
         logger1 = get_audit_logger()
         logger2 = get_audit_logger()
         assert logger1 is logger2
@@ -337,7 +339,7 @@ class TestFactoryFunction:
     """Tests for factory function."""
 
     def test_create_audit_logger(self):
-        logger = create_audit_logger()
+        logger = create_audit_logger(store=InMemoryAuditStore())
         assert isinstance(logger, AuditLogger)
 
     def test_create_audit_logger_with_store(self):

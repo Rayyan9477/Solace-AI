@@ -12,6 +12,17 @@ import httpx
 from httpx import ASGITransport
 from services.diagnosis_service.src.main import app
 from services.diagnosis_service.src.schemas import DiagnosisPhase
+from solace_security.middleware import AuthenticatedUser, get_current_user
+from solace_security.auth import TokenType
+
+
+def _mock_user() -> AuthenticatedUser:
+    return AuthenticatedUser(
+        user_id="test-user",
+        token_type=TokenType.ACCESS,
+        roles=["user"],
+        permissions=["diagnosis:read", "diagnosis:write"],
+    )
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -38,11 +49,15 @@ async def async_client() -> AsyncIterator[httpx.AsyncClient]:
     app.state.symptom_extractor = extractor
     app.state.differential_generator = generator
 
+    # Override auth dependency
+    app.dependency_overrides[get_current_user] = _mock_user
+
     transport = ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
 
     # Cleanup
+    app.dependency_overrides.clear()
     await service.shutdown()
 
 

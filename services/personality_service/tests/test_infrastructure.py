@@ -370,7 +370,7 @@ class TestInMemoryRepository:
         """Test saving and retrieving snapshot."""
         repo = InMemoryPersonalityRepository()
         profile = PersonalityProfile.create_for_user(uuid4())
-        profile.add_assessment(TraitAssessment(ocean_scores=OceanScores.neutral()))
+        profile.add_assessment(TraitAssessment(user_id=profile.user_id, ocean_scores=OceanScores.neutral()))
         snapshot = ProfileSnapshot.from_profile(profile)
         await repo.save_snapshot(snapshot)
         retrieved = await repo.get_snapshot(snapshot.snapshot_id)
@@ -416,7 +416,7 @@ class TestProfileQueryBuilder:
             agreeableness=Decimal("0.5"),
             neuroticism=Decimal("0.4"),
         )
-        profile.add_assessment(TraitAssessment(ocean_scores=scores))
+        profile.add_assessment(TraitAssessment(user_id=profile.user_id, ocean_scores=scores))
         await repo.save_profile(profile)
         query = ProfileQueryBuilder(repo)
         results = await query.with_style_type(CommunicationStyleType.ANALYTICAL).execute()
@@ -457,10 +457,12 @@ class TestAssessmentQueryBuilder:
         """Test querying by assessment source."""
         repo = InMemoryPersonalityRepository()
         await repo.save_assessment(TraitAssessment(
+            user_id=uuid4(),
             ocean_scores=OceanScores.neutral(),
             source=AssessmentSource.TEXT_ANALYSIS,
         ))
         await repo.save_assessment(TraitAssessment(
+            user_id=uuid4(),
             ocean_scores=OceanScores.neutral(),
             source=AssessmentSource.ENSEMBLE,
         ))

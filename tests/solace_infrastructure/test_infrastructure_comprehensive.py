@@ -44,7 +44,7 @@ class TestPostgresSettings:
 
     def test_default_settings(self) -> None:
         """Test default Postgres settings."""
-        settings = PostgresSettings()
+        settings = PostgresSettings(password="test_password")
         assert settings.host == "localhost"
         assert settings.port == 5432
         assert settings.database == "solace"
@@ -55,6 +55,7 @@ class TestPostgresSettings:
             host="db.example.com",
             port=5433,
             database="custom_db",
+            password="test_password",
         )
         assert settings.host == "db.example.com"
         assert settings.port == 5433
@@ -67,6 +68,7 @@ class TestPostgresSettings:
             port=5433,
             database="test_db",
             user="test_user",
+            password="test_password",
         )
         dsn = settings.get_dsn()
         assert "postgresql" in dsn
@@ -77,16 +79,16 @@ class TestPostgresSettings:
 
     def test_pool_size_boundaries(self) -> None:
         """Test pool size boundaries."""
-        settings_min = PostgresSettings(min_pool_size=1, max_pool_size=1)
+        settings_min = PostgresSettings(min_pool_size=1, max_pool_size=1, password="test_password")
         assert settings_min.min_pool_size == 1
 
-        settings_max = PostgresSettings(min_pool_size=50, max_pool_size=100)
+        settings_max = PostgresSettings(min_pool_size=50, max_pool_size=100, password="test_password")
         assert settings_max.max_pool_size == 100
 
     def test_ssl_mode_options(self) -> None:
         """Test SSL mode options."""
         for mode in ["disable", "prefer", "require", "verify-ca", "verify-full"]:
-            settings = PostgresSettings(ssl_mode=mode)
+            settings = PostgresSettings(ssl_mode=mode, password="test_password")
             assert settings.ssl_mode == mode
 
 
@@ -132,7 +134,7 @@ class TestPostgresClient:
 
     @pytest.fixture
     def client(self) -> PostgresClient:
-        return PostgresClient(PostgresSettings())
+        return PostgresClient(PostgresSettings(password="test_password"))
 
     def test_initial_state(self, client) -> None:
         """Test client initial state."""

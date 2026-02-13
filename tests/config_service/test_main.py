@@ -140,4 +140,4 @@ class TestConfigServiceSettings:
     def test_settings_host_and_port(self) -> None:
         settings = ConfigServiceSettings()
         assert settings.host == "0.0.0.0"
-        assert settings.port == 8001
+        assert settings.port == 8008

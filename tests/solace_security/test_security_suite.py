@@ -122,28 +122,25 @@ class TestAuthenticationSecurity:
 
     def test_jwt_token_creation_and_decode(self):
         """JWT tokens must be decodable with the same secret."""
-        from solace_security.auth import AuthSettings, JWTManager, TokenType
+        from solace_security.auth import AuthSettings, JWTManager, InMemoryTokenBlacklist
         settings = AuthSettings.for_development()
-        jwt_mgr = JWTManager(settings)
-        token = jwt_mgr.create_token(
-            subject="user-123",
-            token_type=TokenType.ACCESS,
-            claims={"role": "patient"},
-        )
+        jwt_mgr = JWTManager(settings, token_blacklist=InMemoryTokenBlacklist())
+        token = jwt_mgr.create_access_token(user_id="user-123", roles=["patient"])
         assert token is not None
-        payload = jwt_mgr.decode_token(token)
-        assert payload.sub == "user-123"
+        result = jwt_mgr.validate_access_token(token)
+        assert result.success
+        assert result.payload.sub == "user-123"
 
     def test_jwt_rejects_tampered_token(self):
         """JWT must reject tokens signed with a different secret."""
-        from solace_security.auth import AuthSettings, JWTManager, TokenType
+        from solace_security.auth import AuthSettings, JWTManager, InMemoryTokenBlacklist
         settings1 = AuthSettings(secret_key="first-secret-key-32-bytes-long!!")
         settings2 = AuthSettings(secret_key="second-secret-key-32bytes-long!!")
-        jwt1 = JWTManager(settings1)
-        jwt2 = JWTManager(settings2)
-        token = jwt1.create_token(subject="user-123", token_type=TokenType.ACCESS)
-        with pytest.raises(Exception):
-            jwt2.decode_token(token)
+        jwt1 = JWTManager(settings1, token_blacklist=InMemoryTokenBlacklist())
+        jwt2 = JWTManager(settings2, token_blacklist=InMemoryTokenBlacklist())
+        token = jwt1.create_access_token(user_id="user-123")
+        result = jwt2.validate_access_token(token)
+        assert not result.success
 
     def test_development_keys_flag(self):
         """for_development() must mark settings appropriately."""
@@ -162,37 +159,45 @@ class TestEncryptionSecurity:
 
     def test_encryption_roundtrip(self):
         """Encrypt and decrypt must produce original data."""
-        from solace_security.encryption import FieldEncryptor, EncryptionSettings
+        from pydantic import SecretStr
+        from solace_security.encryption import Encryptor, FieldEncryptor, EncryptionSettings
         settings = EncryptionSettings.for_development()
-        encryptor = FieldEncryptor(settings)
+        settings = settings.model_copy(update={"search_hash_salt": SecretStr("test-salt-for-search-hashing!!")})
+        enc = Encryptor(settings)
+        field_enc = FieldEncryptor(enc, settings=settings)
         original = "sensitive-patient-data"
-        encrypted = encryptor.encrypt(original)
+        encrypted = field_enc.encrypt_field(original, "test_field")
         assert encrypted != original
-        decrypted = encryptor.decrypt(encrypted)
+        decrypted = field_enc.decrypt_field(encrypted, "test_field")
         assert decrypted == original
 
     def test_different_keys_cannot_decrypt(self):
         """Data encrypted with one key must not decrypt with another."""
-        from solace_security.encryption import FieldEncryptor, EncryptionSettings
+        from pydantic import SecretStr
+        from solace_security.encryption import Encryptor, FieldEncryptor, EncryptionSettings
         settings1 = EncryptionSettings.for_development()
-        encryptor1 = FieldEncryptor(settings1)
-        encrypted = encryptor1.encrypt("secret data")
-        # Attempting to decrypt with a different encryptor should fail
-        settings2 = EncryptionSettings.for_development()
-        # Force a different key
-        import os
-        settings2.master_key = os.urandom(32).hex()
-        encryptor2 = FieldEncryptor(settings2)
+        settings1 = settings1.model_copy(update={"search_hash_salt": SecretStr("test-salt-for-search-hashing!!")})
+        enc1 = Encryptor(settings1)
+        field_enc1 = FieldEncryptor(enc1, settings=settings1)
+        encrypted = field_enc1.encrypt_field("secret data", "test_field")
+        # Create a different key
+        settings2 = EncryptionSettings(master_key="X" * 32)
+        settings2 = settings2.model_copy(update={"search_hash_salt": SecretStr("test-salt-for-search-hashing!!")})
+        enc2 = Encryptor(settings2)
+        field_enc2 = FieldEncryptor(enc2, settings=settings2)
         with pytest.raises(Exception):
-            encryptor2.decrypt(encrypted)
+            field_enc2.decrypt_field(encrypted, "test_field")
 
     def test_encrypted_data_not_plaintext(self):
         """Encrypted output must not contain the plaintext input."""
-        from solace_security.encryption import FieldEncryptor, EncryptionSettings
+        from pydantic import SecretStr
+        from solace_security.encryption import Encryptor, FieldEncryptor, EncryptionSettings
         settings = EncryptionSettings.for_development()
-        encryptor = FieldEncryptor(settings)
+        settings = settings.model_copy(update={"search_hash_salt": SecretStr("test-salt-for-search-hashing!!")})
+        enc = Encryptor(settings)
+        field_enc = FieldEncryptor(enc, settings=settings)
         plaintext = "John Smith SSN 123-45-6789"
-        encrypted = encryptor.encrypt(plaintext)
+        encrypted = field_enc.encrypt_field(plaintext, "test_field")
         assert plaintext not in str(encrypted)
         assert "123-45-6789" not in str(encrypted)
 
@@ -208,21 +213,21 @@ class TestPHISafety:
         """SSN patterns must be detected."""
         from solace_security.phi_protection import detect_phi
         result = detect_phi("My SSN is 123-45-6789")
-        assert result.has_phi is True
+        assert result.contains_phi is True
         assert any(m.phi_type.value == "ssn" for m in result.matches)
 
     def test_email_detection(self):
         """Email addresses must be detected as PHI."""
         from solace_security.phi_protection import detect_phi
         result = detect_phi("Contact me at patient@hospital.com")
-        assert result.has_phi is True
+        assert result.contains_phi is True
         assert any(m.phi_type.value == "email" for m in result.matches)
 
     def test_phone_detection(self):
         """Phone numbers must be detected as PHI."""
         from solace_security.phi_protection import detect_phi
         result = detect_phi("Call me at (555) 123-4567")
-        assert result.has_phi is True
+        assert result.contains_phi is True
 
     def test_masking_replaces_phi(self):
         """PHI masking must replace sensitive data with mask characters."""
@@ -241,7 +246,7 @@ class TestPHISafety:
         )
         result = detect_phi(clean_text)
         # Therapeutic content should generally not contain PHI
-        assert result.has_phi is False
+        assert result.contains_phi is False
 
     def test_medical_record_number_detection(self):
         """Medical record numbers should be detected if configured."""
@@ -249,13 +254,13 @@ class TestPHISafety:
         result = detect_phi("MRN: 12345678")
         # MRN detection depends on configured patterns
         # At minimum, the detector should not crash
-        assert isinstance(result.has_phi, bool)
+        assert isinstance(result.contains_phi, bool)
 
     def test_credit_card_detection(self):
         """Credit card numbers must be detected."""
         from solace_security.phi_protection import detect_phi
         result = detect_phi("Card number: 4111-1111-1111-1111")
-        assert result.has_phi is True
+        assert result.contains_phi is True
 
 
 # ---------------------------------------------------------------------------

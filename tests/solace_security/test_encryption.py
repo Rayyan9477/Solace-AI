@@ -217,7 +217,10 @@ class TestFieldEncryptor:
 
     @pytest.fixture
     def field_encryptor(self):
-        return FieldEncryptor(Encryptor(EncryptionSettings.for_development()))
+        from pydantic import SecretStr
+        settings = EncryptionSettings.for_development()
+        settings = settings.model_copy(update={"search_hash_salt": SecretStr("test-search-hash-salt-for-dev!!")})
+        return FieldEncryptor(Encryptor(settings), settings=settings)
 
     def test_encrypt_field(self, field_encryptor):
         value = "sensitive-data"
@@ -282,8 +285,10 @@ class TestFactoryFunctions:
         assert isinstance(encryptor, Encryptor)
 
     def test_create_field_encryptor(self):
-        # Must provide encryptor with valid settings
+        # Must provide encryptor with valid settings including search_hash_salt
+        from pydantic import SecretStr
         settings = EncryptionSettings.for_development()
+        settings = settings.model_copy(update={"search_hash_salt": SecretStr("test-search-hash-salt-for-dev!!")})
         encryptor = create_encryptor(settings)
-        field_encryptor = create_field_encryptor(encryptor)
+        field_encryptor = create_field_encryptor(encryptor, settings=settings)
         assert isinstance(field_encryptor, FieldEncryptor)

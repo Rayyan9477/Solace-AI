@@ -22,7 +22,7 @@ class TestPostgresSettings:
     """Tests for PostgresSettings configuration."""
 
     def test_default_settings(self):
-        settings = PostgresSettings()
+        settings = PostgresSettings(password="test_password")
         assert settings.host == "localhost"
         assert settings.port == 5432
         assert settings.database == "solace"
@@ -30,7 +30,7 @@ class TestPostgresSettings:
         assert settings.max_pool_size == 20
 
     def test_get_dsn(self):
-        settings = PostgresSettings(host="db.example.com", port=5433, database="testdb", user="admin")
+        settings = PostgresSettings(host="db.example.com", port=5433, database="testdb", user="admin", password="test_password")
         dsn = settings.get_dsn()
         assert "db.example.com:5433" in dsn
         assert "testdb" in dsn
@@ -39,7 +39,8 @@ class TestPostgresSettings:
     def test_custom_settings(self):
         settings = PostgresSettings(
             host="custom-host", port=5434, database="custom_db",
-            min_pool_size=10, max_pool_size=50, command_timeout=120.0
+            min_pool_size=10, max_pool_size=50, command_timeout=120.0,
+            password="test_password",
         )
         assert settings.host == "custom-host"
         assert settings.port == 5434
@@ -114,7 +115,7 @@ class TestPostgresClient:
 
     @pytest.fixture
     def client(self):
-        return PostgresClient(PostgresSettings())
+        return PostgresClient(PostgresSettings(password="test_password"))
 
     def test_initial_state(self, client):
         assert not client.is_connected
@@ -253,7 +254,7 @@ class TestPostgresRepository:
     @pytest.mark.asyncio
     async def test_count_with_where(self, repository, mock_client):
         mock_client.fetch_val.return_value = 5
-        result = await repository.count("status = $1", "active")
+        result = await repository.count({"status": "active"})
         assert result == 5
 
     @pytest.mark.asyncio
@@ -318,5 +319,5 @@ class TestFactoryFunction:
         mock_pool = MagicMock()
         mock_pool.get_size.return_value = 5
         with patch("solace_infrastructure.postgres.asyncpg.create_pool", new_callable=AsyncMock, return_value=mock_pool):
-            client = await create_postgres_client(PostgresSettings())
+            client = await create_postgres_client(PostgresSettings(password="test_password"))
             assert client.is_connected

@@ -28,14 +28,23 @@ from .state_schema import (
 )
 from .supervisor import SupervisorAgent, SupervisorSettings
 
-# Import real agent node functions that call actual services via HTTP
-from ..agents.chat_agent import chat_agent_node as real_chat_agent_node
-from ..agents.diagnosis_agent import diagnosis_agent_node as real_diagnosis_agent_node
-from ..agents.therapy_agent import therapy_agent_node as real_therapy_agent_node
-from ..agents.personality_agent import personality_agent_node as real_personality_agent_node
-from ..agents.safety_agent import safety_agent_node as real_safety_agent_node
-
 logger = structlog.get_logger(__name__)
+
+
+def _import_agent_nodes() -> dict[str, Any]:
+    """Lazy import of agent node functions to avoid circular imports."""
+    from ..agents.chat_agent import chat_agent_node as real_chat_agent_node
+    from ..agents.diagnosis_agent import diagnosis_agent_node as real_diagnosis_agent_node
+    from ..agents.therapy_agent import therapy_agent_node as real_therapy_agent_node
+    from ..agents.personality_agent import personality_agent_node as real_personality_agent_node
+    from ..agents.safety_agent import safety_agent_node as real_safety_agent_node
+    return {
+        "chat": real_chat_agent_node,
+        "diagnosis": real_diagnosis_agent_node,
+        "therapy": real_therapy_agent_node,
+        "personality": real_personality_agent_node,
+        "safety": real_safety_agent_node,
+    }
 
 
 class _CrisisResourceManager:
@@ -268,19 +277,20 @@ class OrchestratorGraphBuilder:
             checkpointing=self._settings.enable_checkpointing,
             use_safety_service_precheck=use_safety_service,
         )
+        agent_nodes = _import_agent_nodes()
         builder = StateGraph(OrchestratorState)
         # Safety precheck: use full Safety Service or local rule-based check
         if use_safety_service:
-            builder.add_node("safety_precheck", real_safety_agent_node)
+            builder.add_node("safety_precheck", agent_nodes["safety"])
         else:
             builder.add_node("safety_precheck", safety_precheck_node)
         builder.add_node("supervisor", SupervisorAgent(self._supervisor_settings).process)
         builder.add_node("crisis_handler", crisis_handler_node)
         # Agent nodes: real service HTTP clients
-        builder.add_node("chat_agent", real_chat_agent_node)
-        builder.add_node("diagnosis_agent", real_diagnosis_agent_node)
-        builder.add_node("therapy_agent", real_therapy_agent_node)
-        builder.add_node("personality_agent", real_personality_agent_node)
+        builder.add_node("chat_agent", agent_nodes["chat"])
+        builder.add_node("diagnosis_agent", agent_nodes["diagnosis"])
+        builder.add_node("therapy_agent", agent_nodes["therapy"])
+        builder.add_node("personality_agent", agent_nodes["personality"])
         builder.add_node("aggregator", aggregator_node)
         builder.add_node("safety_postcheck", safety_postcheck_node)
         # Edges

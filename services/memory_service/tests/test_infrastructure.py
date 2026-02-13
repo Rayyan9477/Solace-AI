@@ -32,7 +32,7 @@ class TestPostgresSettings:
     """Tests for PostgreSQL settings."""
 
     def test_default_settings(self) -> None:
-        settings = PostgresSettings()
+        settings = PostgresSettings(password="test_password")
         assert settings.host == "localhost"
         assert settings.port == 5432
         assert settings.database == "solace_memory"

@@ -108,7 +108,7 @@ class TestConfigServiceSettings:
         assert settings.environment == ConfigEnvironment.DEVELOPMENT
         assert settings.service_name == "config-service"
         assert settings.host == "0.0.0.0"
-        assert settings.port == 8001
+        assert settings.port == 8008
         assert settings.debug is False
         assert settings.log_level == "INFO"
         assert settings.hot_reload_enabled is True

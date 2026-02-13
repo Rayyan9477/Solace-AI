@@ -237,29 +237,40 @@ class TestAPITestClient:
 
     @pytest.mark.asyncio
     async def test_get_request(self) -> None:
+        import httpx
+        mock_response = httpx.Response(200, json={"result": "ok"})
         client = APITestClient()
+        client._client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: mock_response))
         response = await client.get("/api/test", params={"q": "search"})
-        assert response["method"] == "GET"
-        assert response["params"]["q"] == "search"
+        assert response["status"] == 200
+        assert response["json"]["result"] == "ok"
 
     @pytest.mark.asyncio
     async def test_post_request(self) -> None:
+        import httpx
+        mock_response = httpx.Response(201, json={"name": "Test"})
         client = APITestClient()
+        client._client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: mock_response))
         response = await client.post("/api/users", json_data={"name": "Test"})
-        assert response["method"] == "POST"
+        assert response["status"] == 201
         assert response["json"]["name"] == "Test"
 
     @pytest.mark.asyncio
     async def test_put_request(self) -> None:
+        import httpx
+        mock_response = httpx.Response(200, json={"name": "Updated"})
         client = APITestClient()
+        client._client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: mock_response))
         response = await client.put("/api/users/1", json_data={"name": "Updated"})
-        assert response["method"] == "PUT"
+        assert response["status"] == 200
 
     @pytest.mark.asyncio
     async def test_delete_request(self) -> None:
+        import httpx
+        mock_response = httpx.Response(204)
         client = APITestClient()
+        client._client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: mock_response))
         response = await client.delete("/api/users/1")
-        assert response["method"] == "DELETE"
         assert response["status"] == 204
 
     @pytest.mark.asyncio

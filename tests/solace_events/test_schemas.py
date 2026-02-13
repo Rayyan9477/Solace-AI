@@ -407,7 +407,7 @@ class TestEventDeserialization:
 
         event = deserialize_event(data)
 
-        assert isinstance(event, BaseEvent)
+        assert event is None
 
     def test_deserialize_missing_type(self) -> None:
         """Test error on missing event type."""

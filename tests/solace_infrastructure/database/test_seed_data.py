@@ -66,27 +66,27 @@ class TestSeedSettings:
 
     def test_default_database_url(self) -> None:
         """Test default database URL is set."""
-        settings = SeedSettings()
+        settings = SeedSettings(database_url="postgresql://localhost/test")
         assert "postgresql" in settings.database_url
 
     def test_default_environment(self) -> None:
         """Test default environment is development."""
-        settings = SeedSettings()
+        settings = SeedSettings(database_url="postgresql://localhost/test")
         assert settings.environment == Environment.DEVELOPMENT
 
     def test_force_reseed_disabled(self) -> None:
         """Test force reseed is disabled by default."""
-        settings = SeedSettings()
+        settings = SeedSettings(database_url="postgresql://localhost/test")
         assert settings.force_reseed is False
 
     def test_validate_after_seed_enabled(self) -> None:
         """Test validation is enabled by default."""
-        settings = SeedSettings()
+        settings = SeedSettings(database_url="postgresql://localhost/test")
         assert settings.validate_after_seed is True
 
     def test_default_batch_size(self) -> None:
         """Test default batch size."""
-        settings = SeedSettings()
+        settings = SeedSettings(database_url="postgresql://localhost/test")
         assert settings.batch_size == 100
 
 
@@ -265,18 +265,18 @@ class TestSeedDataLoader:
 
     def test_loader_initialization(self) -> None:
         """Test SeedDataLoader can be initialized."""
-        loader = SeedDataLoader()
+        loader = SeedDataLoader(settings=SeedSettings(database_url="postgresql://localhost/test"))
         assert loader is not None
 
     def test_loader_with_settings(self) -> None:
         """Test SeedDataLoader with custom settings."""
-        settings = SeedSettings(environment=Environment.STAGING)
+        settings = SeedSettings(database_url="postgresql://localhost/test", environment=Environment.STAGING)
         loader = SeedDataLoader(settings=settings)
         assert loader._settings.environment == Environment.STAGING
 
     def test_register_provider(self) -> None:
         """Test registering a custom provider."""
-        loader = SeedDataLoader()
+        loader = SeedDataLoader(settings=SeedSettings(database_url="postgresql://localhost/test"))
         provider = SystemConfigSeedProvider()
         initial_count = len(loader._providers)
         loader.register_provider(provider)
@@ -290,13 +290,13 @@ class TestCreateSeedLoader:
     async def test_create_seed_loader_returns_loader(self) -> None:
         """Test factory function returns SeedDataLoader."""
         with patch.object(SeedDataLoader, "initialize", new_callable=AsyncMock):
-            loader = await create_seed_loader()
+            loader = await create_seed_loader(SeedSettings(database_url="postgresql://localhost/test"))
             assert isinstance(loader, SeedDataLoader)
 
     @pytest.mark.asyncio
     async def test_create_seed_loader_with_settings(self) -> None:
         """Test factory function accepts settings."""
-        settings = SeedSettings(environment=Environment.TEST)
+        settings = SeedSettings(database_url="postgresql://localhost/test", environment=Environment.TEST)
         with patch.object(SeedDataLoader, "initialize", new_callable=AsyncMock):
             loader = await create_seed_loader(settings)
             assert loader._settings.environment == Environment.TEST

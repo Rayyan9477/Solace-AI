@@ -4,8 +4,6 @@ from __future__ import annotations
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from services.safety_service.src.domain.escalation import NotificationServiceClient
-
 
 @pytest.fixture(autouse=True)
 def _mock_notification_http():
@@ -14,7 +12,12 @@ def _mock_notification_http():
     NotificationServiceClient makes real HTTP calls via httpx to the
     notification microservice. In tests, we mock _ensure_client to return
     a mock async client that always returns successful responses.
+
+    Uses lazy import to avoid triggering full app initialization via __init__.py.
     """
+    # Lazy import to avoid services.safety_service.src.__init__ → main → api → solace_security chain
+    from services.safety_service.src.domain.escalation import NotificationServiceClient
+
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {

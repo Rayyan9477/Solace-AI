@@ -12,6 +12,7 @@ from solace_security.auth import (
     AuthenticationResult,
     PasswordHasher,
     JWTManager,
+    InMemoryTokenBlacklist,
     APIKeyGenerator,
     SessionManager,
     create_jwt_manager,
@@ -149,7 +150,10 @@ class TestJWTManager:
 
     @pytest.fixture
     def jwt_manager(self):
-        return JWTManager(AuthSettings(secret_key="test-secret-key-32-bytes-long!!!"))
+        return JWTManager(
+            AuthSettings(secret_key="test-secret-key-32-bytes-long!!!"),
+            token_blacklist=InMemoryTokenBlacklist(),
+        )
 
     def test_create_access_token(self, jwt_manager):
         token = jwt_manager.create_access_token(
@@ -248,49 +252,56 @@ class TestSessionManager:
     def session_manager(self):
         return SessionManager()
 
-    def test_create_session(self, session_manager):
-        session_id = session_manager.create_session("user123", {"device": "web"})
+    @pytest.mark.asyncio
+    async def test_create_session(self, session_manager):
+        session_id = await session_manager.create_session("user123", {"device": "web"})
         assert session_id
         assert len(session_id) == 36
 
-    def test_validate_session(self, session_manager):
-        session_id = session_manager.create_session("user123")
-        assert session_manager.validate_session(session_id)
-        assert not session_manager.validate_session("invalid-session")
+    @pytest.mark.asyncio
+    async def test_validate_session(self, session_manager):
+        session_id = await session_manager.create_session("user123")
+        assert await session_manager.validate_session(session_id)
+        assert not await session_manager.validate_session("invalid-session")
 
-    def test_get_session(self, session_manager):
-        session_id = session_manager.create_session("user123", {"device": "mobile"})
-        session = session_manager.get_session(session_id)
+    @pytest.mark.asyncio
+    async def test_get_session(self, session_manager):
+        session_id = await session_manager.create_session("user123", {"device": "mobile"})
+        session = await session_manager.get_session(session_id)
         assert session["user_id"] == "user123"
         assert session["metadata"]["device"] == "mobile"
 
-    def test_update_activity(self, session_manager):
-        session_id = session_manager.create_session("user123")
-        initial_session = session_manager.get_session(session_id)
+    @pytest.mark.asyncio
+    async def test_update_activity(self, session_manager):
+        session_id = await session_manager.create_session("user123")
+        initial_session = await session_manager.get_session(session_id)
         initial_activity = initial_session["last_activity"]
-        session_manager.update_activity(session_id)
-        updated_session = session_manager.get_session(session_id)
+        await session_manager.update_activity(session_id)
+        updated_session = await session_manager.get_session(session_id)
         assert updated_session["last_activity"] >= initial_activity
 
-    def test_invalidate_session(self, session_manager):
-        session_id = session_manager.create_session("user123")
-        assert session_manager.validate_session(session_id)
-        assert session_manager.invalidate_session(session_id)
-        assert not session_manager.validate_session(session_id)
+    @pytest.mark.asyncio
+    async def test_invalidate_session(self, session_manager):
+        session_id = await session_manager.create_session("user123")
+        assert await session_manager.validate_session(session_id)
+        assert await session_manager.invalidate_session(session_id)
+        assert not await session_manager.validate_session(session_id)
 
-    def test_invalidate_user_sessions(self, session_manager):
-        session_manager.create_session("user123")
-        session_manager.create_session("user123")
-        session_manager.create_session("user456")
-        count = session_manager.invalidate_user_sessions("user123")
+    @pytest.mark.asyncio
+    async def test_invalidate_user_sessions(self, session_manager):
+        await session_manager.create_session("user123")
+        await session_manager.create_session("user123")
+        await session_manager.create_session("user456")
+        count = await session_manager.invalidate_user_sessions("user123")
         assert count == 2
-        assert len(session_manager.get_user_sessions("user123")) == 0
-        assert len(session_manager.get_user_sessions("user456")) == 1
+        assert len(await session_manager.get_user_sessions("user123")) == 0
+        assert len(await session_manager.get_user_sessions("user456")) == 1
 
-    def test_get_user_sessions(self, session_manager):
-        session_manager.create_session("user123")
-        session_manager.create_session("user123")
-        sessions = session_manager.get_user_sessions("user123")
+    @pytest.mark.asyncio
+    async def test_get_user_sessions(self, session_manager):
+        await session_manager.create_session("user123")
+        await session_manager.create_session("user123")
+        sessions = await session_manager.get_user_sessions("user123")
         assert len(sessions) == 2
 
 

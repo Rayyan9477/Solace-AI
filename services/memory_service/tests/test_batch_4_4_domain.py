@@ -337,7 +337,7 @@ class TestConfigSettings:
     def test_memory_service_config(self) -> None:
         config = MemoryServiceConfig()
         assert config.service_name == "memory-service"
-        assert config.port == 8003
+        assert config.port == 8005
 
     def test_settings_singleton(self) -> None:
         Settings.reset()
