@@ -21,7 +21,7 @@ from src.domain.service import (
     EmailVerificationResult,
     UpdatePreferencesResult,
 )
-from src.infrastructure.repository import (
+from .fixtures import (
     InMemoryUserRepository,
     InMemoryUserPreferencesRepository,
     InMemoryConsentRepository,

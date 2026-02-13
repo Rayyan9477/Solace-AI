@@ -13,12 +13,15 @@ import pytest
 from src.domain.entities import User, UserPreferences
 from src.domain.value_objects import UserRole, AccountStatus, ConsentType, ConsentRecord
 from src.infrastructure.repository import (
+    RepositoryFactory,
+    RepositoryError,
+    EntityNotFoundError,
+    DuplicateEntityError,
+)
+from .fixtures import (
     InMemoryUserRepository,
     InMemoryUserPreferencesRepository,
     InMemoryConsentRepository,
-    RepositoryFactory,
-    EntityNotFoundError,
-    DuplicateEntityError,
 )
 
 
@@ -434,33 +437,24 @@ class TestInMemoryConsentRepository:
 class TestRepositoryFactory:
     """Tests for RepositoryFactory."""
 
-    def test_creates_repositories(self) -> None:
-        """Test factory creates repositories."""
+    def test_raises_error_without_postgres(self) -> None:
+        """Test factory raises RepositoryError when PostgreSQL is not configured."""
         factory = RepositoryFactory()
 
-        user_repo = factory.get_user_repository()
-        prefs_repo = factory.get_preferences_repository()
-        consent_repo = factory.get_consent_repository()
+        with pytest.raises(RepositoryError):
+            factory.get_user_repository()
 
-        assert user_repo is not None
-        assert prefs_repo is not None
-        assert consent_repo is not None
+        with pytest.raises(RepositoryError):
+            factory.get_preferences_repository()
 
-    def test_returns_same_instance(self) -> None:
-        """Test factory returns singleton instances."""
-        factory = RepositoryFactory()
-
-        repo1 = factory.get_user_repository()
-        repo2 = factory.get_user_repository()
-
-        assert repo1 is repo2
+        with pytest.raises(RepositoryError):
+            factory.get_consent_repository()
 
     def test_reset_clears_instances(self) -> None:
         """Test reset clears repository instances."""
         factory = RepositoryFactory()
-
-        repo1 = factory.get_user_repository()
         factory.reset()
-        repo2 = factory.get_user_repository()
 
-        assert repo1 is not repo2
+        # After reset, should still raise without postgres
+        with pytest.raises(RepositoryError):
+            factory.get_user_repository()

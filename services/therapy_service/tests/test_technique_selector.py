@@ -283,7 +283,7 @@ class TestContraindicationValidation:
             modality=TherapyModality.CBT,
             session_phase=SessionPhase.WORKING,
             user_context={
-                "current_risk": RiskLevel.MEDIUM,
+                "current_risk": RiskLevel.ELEVATED,
                 "contraindications": ["trauma_dissociation"],
             },
             treatment_plan={"current_phase": 1, "skills_acquired": []},

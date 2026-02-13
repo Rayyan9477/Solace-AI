@@ -250,7 +250,7 @@ class TestGenerateRecommendations:
 
     def test_recommendations_with_risk(self) -> None:
         """Test recommendations include safety for elevated risk."""
-        session = MockSession(current_risk=RiskLevel.MEDIUM)
+        session = MockSession(current_risk=RiskLevel.ELEVATED)
         recs = ResponseGenerator.generate_recommendations(session)
         assert any("safety" in r.lower() for r in recs)
 

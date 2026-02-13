@@ -268,5 +268,5 @@ class TestLIWCProcessor:
         text = "I think deeply about complex problems. My insight helps me understand and realize new things. I discover and learn constantly."
         result = await processor.process(text)
         openness_score = next((s for s in result.trait_scores if s.trait == PersonalityTrait.OPENNESS), None)
-        if openness_score:
-            assert len(openness_score.evidence_markers) >= 0
+        assert openness_score is not None, "Expected openness trait score for text about deep thinking"
+        assert len(openness_score.evidence_markers) > 0, "Expected evidence markers for openness"

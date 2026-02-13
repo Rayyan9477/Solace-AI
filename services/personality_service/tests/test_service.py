@@ -156,7 +156,7 @@ class TestPersonalityOrchestrator:
         response = await orchestrator.get_style(style_request)
         assert response.user_id == user_id
         assert response.style_parameters is not None
-        assert len(response.recommendations) >= 0
+        assert isinstance(response.recommendations, list)
         assert response.profile_confidence > 0
 
     @pytest.mark.asyncio

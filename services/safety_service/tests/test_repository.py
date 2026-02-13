@@ -9,9 +9,11 @@ from decimal import Decimal
 from uuid import uuid4
 from services.safety_service.src.infrastructure.repository import (
     RepositoryError, EntityNotFoundError, DuplicateEntityError,
+    SafetyRepositoryFactory, get_repository_factory, reset_repositories,
+)
+from services.safety_service.tests.fixtures import (
     InMemorySafetyAssessmentRepository, InMemorySafetyPlanRepository,
     InMemorySafetyIncidentRepository, InMemoryUserRiskProfileRepository,
-    SafetyRepositoryFactory, get_repository_factory, reset_repositories,
 )
 from services.safety_service.src.domain.entities import (
     SafetyAssessment, AssessmentType, SafetyPlan, SafetyPlanStatus,
@@ -377,36 +379,29 @@ class TestInMemoryUserRiskProfileRepository:
 class TestSafetyRepositoryFactory:
     """Tests for SafetyRepositoryFactory."""
 
-    def test_get_assessment_repository(self) -> None:
-        """Test getting assessment repository."""
+    def test_get_assessment_repository_raises_without_postgres(self) -> None:
+        """Test getting assessment repository raises without PostgreSQL."""
         factory = SafetyRepositoryFactory()
-        repo = factory.get_assessment_repository()
-        assert isinstance(repo, InMemorySafetyAssessmentRepository)
+        with pytest.raises(RepositoryError, match="PostgreSQL is required"):
+            factory.get_assessment_repository()
 
-    def test_get_plan_repository(self) -> None:
-        """Test getting plan repository."""
+    def test_get_plan_repository_raises_without_postgres(self) -> None:
+        """Test getting plan repository raises without PostgreSQL."""
         factory = SafetyRepositoryFactory()
-        repo = factory.get_plan_repository()
-        assert isinstance(repo, InMemorySafetyPlanRepository)
+        with pytest.raises(RepositoryError, match="PostgreSQL is required"):
+            factory.get_plan_repository()
 
-    def test_get_incident_repository(self) -> None:
-        """Test getting incident repository."""
+    def test_get_incident_repository_raises_without_postgres(self) -> None:
+        """Test getting incident repository raises without PostgreSQL."""
         factory = SafetyRepositoryFactory()
-        repo = factory.get_incident_repository()
-        assert isinstance(repo, InMemorySafetyIncidentRepository)
+        with pytest.raises(RepositoryError, match="PostgreSQL is required"):
+            factory.get_incident_repository()
 
-    def test_get_profile_repository(self) -> None:
-        """Test getting profile repository."""
+    def test_get_profile_repository_raises_without_postgres(self) -> None:
+        """Test getting profile repository raises without PostgreSQL."""
         factory = SafetyRepositoryFactory()
-        repo = factory.get_profile_repository()
-        assert isinstance(repo, InMemoryUserRiskProfileRepository)
-
-    def test_singleton_repositories(self) -> None:
-        """Test that repositories are singletons within factory."""
-        factory = SafetyRepositoryFactory()
-        repo1 = factory.get_assessment_repository()
-        repo2 = factory.get_assessment_repository()
-        assert repo1 is repo2
+        with pytest.raises(RepositoryError, match="PostgreSQL is required"):
+            factory.get_profile_repository()
 
 
 class TestRepositoryFactorySingleton:
@@ -420,15 +415,14 @@ class TestRepositoryFactorySingleton:
         """Reset repositories after each test."""
         reset_repositories()
 
-    def test_get_repository_factory_singleton(self) -> None:
-        """Test singleton returns same instance."""
-        factory1 = get_repository_factory()
-        factory2 = get_repository_factory()
-        assert factory1 is factory2
+    def test_get_repository_factory_raises_without_postgres(self) -> None:
+        """Test singleton raises RepositoryError when no PostgreSQL is configured."""
+        with pytest.raises(RepositoryError, match="PostgreSQL is required in production"):
+            get_repository_factory()
 
     def test_reset_repositories(self) -> None:
-        """Test resetting repositories."""
-        factory1 = get_repository_factory()
+        """Test resetting repositories clears state."""
         reset_repositories()
-        factory2 = get_repository_factory()
-        assert factory1 is not factory2
+        # After reset, calling get_repository_factory should raise again
+        with pytest.raises(RepositoryError, match="PostgreSQL is required in production"):
+            get_repository_factory()

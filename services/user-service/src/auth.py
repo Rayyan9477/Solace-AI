@@ -794,6 +794,37 @@ class AuthenticationService:
                 error_code="VALIDATION_FAILED",
             )
 
+    async def validate_token_for_user(
+        self,
+        access_token: str,
+        expected_user_id: UUID,
+    ) -> SessionValidationResult:
+        """Validate access token and ensure it belongs to the expected user.
+
+        Prevents token misuse where User A's token is presented for User B's resources.
+
+        Args:
+            access_token: Access token to validate
+            expected_user_id: The user_id the token must belong to
+
+        Returns:
+            SessionValidationResult — valid only if token user_id matches expected_user_id
+        """
+        result = await self.validate_token(access_token)
+        if not result.valid:
+            return result
+        if result.user_id != expected_user_id:
+            logger.warning(
+                "token_user_id_mismatch",
+                token_user_id=str(result.user_id),
+                expected_user_id=str(expected_user_id),
+            )
+            return SessionValidationResult(
+                error="Token does not belong to the requested user",
+                error_code="USER_ID_MISMATCH",
+            )
+        return result
+
     async def logout(
         self,
         session_id: UUID,

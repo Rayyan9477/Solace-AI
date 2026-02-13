@@ -133,6 +133,59 @@ class EscalationTriggeredEvent(BaseEvent):
     notification_sent: bool = Field(default=False)
 
 
+class CrisisResolvedEvent(BaseEvent):
+    """Emitted when a crisis situation is resolved."""
+    event_type: Literal["safety.crisis.resolved"] = "safety.crisis.resolved"
+    crisis_level: CrisisLevel
+    resolution_notes: str | None = Field(default=None)
+    resolved_by: UUID | None = Field(default=None)
+    time_to_resolution_minutes: int | None = Field(default=None, ge=0)
+
+
+class EscalationAcknowledgedEvent(BaseEvent):
+    """Emitted when an escalation is acknowledged by a clinician."""
+    event_type: Literal["safety.escalation.acknowledged"] = "safety.escalation.acknowledged"
+    escalation_id: UUID
+    acknowledged_by: UUID
+    time_to_acknowledge_seconds: int | None = Field(default=None, ge=0)
+
+
+class EscalationResolvedEvent(BaseEvent):
+    """Emitted when an escalation case is resolved."""
+    event_type: Literal["safety.escalation.resolved"] = "safety.escalation.resolved"
+    escalation_id: UUID
+    resolved_by: UUID
+    resolution_notes: str
+    time_to_resolution_minutes: int | None = Field(default=None, ge=0)
+
+
+class RiskLevelChangedEvent(BaseEvent):
+    """Emitted when a user's risk level changes."""
+    event_type: Literal["safety.risk.level_changed"] = "safety.risk.level_changed"
+    previous_level: CrisisLevel
+    new_level: CrisisLevel
+    change_reason: str | None = Field(default=None)
+    risk_trend: Literal["improving", "stable", "worsening"] = "stable"
+
+
+class IncidentCreatedEvent(BaseEvent):
+    """Emitted when a safety incident is created."""
+    event_type: Literal["safety.incident.created"] = "safety.incident.created"
+    incident_id: UUID
+    severity: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    crisis_level: CrisisLevel
+    description: str
+
+
+class IncidentResolvedEvent(BaseEvent):
+    """Emitted when a safety incident is resolved."""
+    event_type: Literal["safety.incident.resolved"] = "safety.incident.resolved"
+    incident_id: UUID
+    resolution_notes: str
+    resolved_by: UUID | None = Field(default=None)
+    time_to_resolution_minutes: int | None = Field(default=None, ge=0)
+
+
 # Diagnosis Events
 class Confidence(str, Enum):
     """Clinical confidence levels."""
@@ -247,6 +300,25 @@ class MemoryRetrievedEvent(BaseEvent):
     relevance_threshold: Decimal = Field(ge=0, le=1)
 
 
+class MemoryDecayedEvent(BaseEvent):
+    """Emitted when memory decay is applied."""
+    event_type: Literal["memory.decayed"] = "memory.decayed"
+    records_processed: int = Field(ge=0)
+    records_archived: int = Field(ge=0)
+    records_deleted: int = Field(ge=0)
+    decay_run_id: UUID = Field(default_factory=uuid4)
+
+
+class ContextAssembledEvent(BaseEvent):
+    """Emitted when context is assembled for LLM."""
+    event_type: Literal["memory.context.assembled"] = "memory.context.assembled"
+    context_id: UUID
+    total_tokens: int = Field(ge=0)
+    sources_used: list[str] = Field(default_factory=list)
+    retrieval_count: int = Field(ge=0)
+    assembly_time_ms: int = Field(ge=0)
+
+
 # Personality Events
 class OceanScores(BaseModel):
     """Big Five personality scores."""
@@ -279,6 +351,54 @@ class StyleGeneratedEvent(BaseEvent):
     vocabulary_complexity: Decimal = Field(ge=0, le=1)
 
 
+class PersonalityProfileUpdatedEvent(BaseEvent):
+    """Emitted when a personality profile is updated."""
+    event_type: Literal["personality.profile.updated"] = "personality.profile.updated"
+    profile_id: UUID
+    assessment_count: int = Field(ge=0)
+    profile_version: int = Field(ge=1)
+
+
+class PersonalityTraitChangedEvent(BaseEvent):
+    """Emitted when a personality trait changes significantly."""
+    event_type: Literal["personality.trait.changed"] = "personality.trait.changed"
+    profile_id: UUID
+    trait_name: str
+    previous_value: Decimal = Field(ge=0, le=1)
+    new_value: Decimal = Field(ge=0, le=1)
+    change_magnitude: Decimal = Field(ge=0, le=1)
+
+
+# Notification Events
+class NotificationSentKafkaEvent(BaseEvent):
+    """Emitted when a notification is sent to a delivery channel."""
+    event_type: Literal["notification.sent"] = "notification.sent"
+    notification_id: UUID
+    channel: str
+    category: str = Field(default="general")
+    external_message_id: str | None = Field(default=None)
+    provider: str | None = Field(default=None)
+
+
+class NotificationDeliveredKafkaEvent(BaseEvent):
+    """Emitted when a notification is confirmed delivered."""
+    event_type: Literal["notification.delivered"] = "notification.delivered"
+    notification_id: UUID
+    channel: str
+    delivery_time_ms: int = Field(ge=0)
+
+
+class NotificationFailedKafkaEvent(BaseEvent):
+    """Emitted when a notification delivery fails."""
+    event_type: Literal["notification.failed"] = "notification.failed"
+    notification_id: UUID
+    channel: str
+    error_code: str | None = Field(default=None)
+    error_message: str
+    retry_count: int = Field(default=0, ge=0)
+    will_retry: bool = Field(default=False)
+
+
 # System Events
 class SystemHealthEvent(BaseEvent):
     """Emitted for system health monitoring."""
@@ -302,34 +422,57 @@ class ErrorOccurredEvent(BaseEvent):
 
 # Event Registry for deserialization
 EVENT_REGISTRY: dict[str, type[BaseEvent]] = {
+    # Session events
     "session.started": SessionStartedEvent, "session.ended": SessionEndedEvent,
     "session.message.received": MessageReceivedEvent, "session.response.generated": ResponseGeneratedEvent,
+    # Safety events
     "safety.assessment.completed": SafetyAssessmentEvent, "safety.crisis.detected": CrisisDetectedEvent,
-    "safety.escalation.triggered": EscalationTriggeredEvent, "diagnosis.completed": DiagnosisCompletedEvent,
-    "diagnosis.assessment.completed": AssessmentCompletedEvent, "therapy.session.started": TherapySessionStartedEvent,
-    "therapy.intervention.delivered": InterventionDeliveredEvent, "therapy.progress.milestone": ProgressMilestoneEvent,
+    "safety.crisis.resolved": CrisisResolvedEvent, "safety.escalation.triggered": EscalationTriggeredEvent,
+    "safety.escalation.acknowledged": EscalationAcknowledgedEvent,
+    "safety.escalation.resolved": EscalationResolvedEvent,
+    "safety.risk.level_changed": RiskLevelChangedEvent,
+    "safety.incident.created": IncidentCreatedEvent, "safety.incident.resolved": IncidentResolvedEvent,
+    # Diagnosis events
+    "diagnosis.completed": DiagnosisCompletedEvent, "diagnosis.assessment.completed": AssessmentCompletedEvent,
+    # Therapy events
+    "therapy.session.started": TherapySessionStartedEvent,
+    "therapy.intervention.delivered": InterventionDeliveredEvent,
+    "therapy.progress.milestone": ProgressMilestoneEvent,
+    # Memory events
     "memory.stored": MemoryStoredEvent, "memory.consolidated": MemoryConsolidatedEvent,
-    "memory.retrieved": MemoryRetrievedEvent, "personality.assessed": PersonalityAssessedEvent,
-    "personality.style.generated": StyleGeneratedEvent, "system.health": SystemHealthEvent,
-    "system.error": ErrorOccurredEvent,
+    "memory.retrieved": MemoryRetrievedEvent, "memory.decayed": MemoryDecayedEvent,
+    "memory.context.assembled": ContextAssembledEvent,
+    # Personality events
+    "personality.assessed": PersonalityAssessedEvent, "personality.style.generated": StyleGeneratedEvent,
+    "personality.profile.updated": PersonalityProfileUpdatedEvent,
+    "personality.trait.changed": PersonalityTraitChangedEvent,
+    # Notification events
+    "notification.sent": NotificationSentKafkaEvent, "notification.delivered": NotificationDeliveredKafkaEvent,
+    "notification.failed": NotificationFailedKafkaEvent,
+    # System events
+    "system.health": SystemHealthEvent, "system.error": ErrorOccurredEvent,
 }
 
 _TOPIC_MAP = {
     "session.": "solace.sessions", "safety.": "solace.safety", "diagnosis.": "solace.assessments",
     "therapy.": "solace.therapy", "memory.": "solace.memory", "personality.": "solace.personality",
-    "system.": "solace.analytics",
+    "notification.": "solace.notifications", "system.": "solace.analytics",
 }
 
 
-def deserialize_event(data: dict[str, Any]) -> BaseEvent:
-    """Deserialize event from dictionary using registry."""
+def deserialize_event(data: dict[str, Any]) -> BaseEvent | None:
+    """Deserialize event from dictionary using registry.
+
+    Returns None for unknown event types instead of falling back to BaseEvent,
+    allowing callers to handle unrecognized events explicitly.
+    """
     event_type = data.get("event_type")
     if not event_type:
         raise ValueError("Missing event_type in event data")
     event_class = EVENT_REGISTRY.get(event_type)
     if not event_class:
-        logger.warning("Unknown event type, using base", event_type=event_type)
-        return BaseEvent.model_validate(data)
+        logger.warning("unknown_event_type_skipped", event_type=event_type)
+        return None
     return event_class.model_validate(data)
 
 

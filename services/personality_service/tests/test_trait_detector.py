@@ -174,7 +174,7 @@ class TestTraitDetector:
         text = "I enjoy exploring new ideas and understanding different perspectives on complex topics."
         scores = await detector.detect(text, sources=[AssessmentSource.TEXT_ANALYSIS])
         assert scores is not None
-        assert len(scores.trait_scores) >= 0
+        assert len(scores.trait_scores) > 0, "Expected at least one trait score"
 
     @pytest.mark.asyncio
     async def test_shutdown(self, detector: TraitDetector) -> None:

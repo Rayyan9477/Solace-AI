@@ -19,8 +19,10 @@ from services.personality_service.src.config import (
     PersonalityServiceConfig, get_config, reload_config,
 )
 from services.personality_service.src.infrastructure.repository import (
-    InMemoryPersonalityRepository, ProfileQueryBuilder, AssessmentQueryBuilder,
     RepositoryFactory, UnitOfWork,
+)
+from services.personality_service.tests.fixtures import (
+    InMemoryPersonalityRepository, ProfileQueryBuilder, AssessmentQueryBuilder,
 )
 from services.personality_service.src.domain.entities import (
     PersonalityProfile, TraitAssessment, ProfileSnapshot,
@@ -496,19 +498,23 @@ class TestUnitOfWork:
 class TestRepositoryFactory:
     """Tests for RepositoryFactory."""
 
-    def test_create_in_memory(self) -> None:
-        """Test creating in-memory repository."""
-        repo = RepositoryFactory.create_in_memory()
-        assert isinstance(repo, InMemoryPersonalityRepository)
-
-    def test_get_default_singleton(self) -> None:
-        """Test singleton behavior."""
+    def test_get_default_raises_in_test_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that get_default raises RuntimeError when ENVIRONMENT=test."""
+        monkeypatch.setenv("ENVIRONMENT", "test")
         RepositoryFactory.reset()
-        repo1 = RepositoryFactory.get_default()
-        repo2 = RepositoryFactory.get_default()
-        assert repo1 is repo2
+        with pytest.raises(RuntimeError, match="tests/fixtures.py"):
+            RepositoryFactory.get_default()
 
-    def test_create_unit_of_work(self) -> None:
-        """Test creating unit of work."""
-        uow = RepositoryFactory.create_unit_of_work()
+    def test_get_default_raises_without_postgres(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that get_default raises RuntimeError without PostgreSQL config."""
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        RepositoryFactory.reset()
+        with pytest.raises(RuntimeError, match="PostgreSQL is required"):
+            RepositoryFactory.get_default()
+
+    def test_create_unit_of_work_with_explicit_repo(self) -> None:
+        """Test creating unit of work with an explicit repository."""
+        repo = InMemoryPersonalityRepository()
+        uow = RepositoryFactory.create_unit_of_work(repository=repo)
         assert isinstance(uow, UnitOfWork)
+        assert uow.repository is repo

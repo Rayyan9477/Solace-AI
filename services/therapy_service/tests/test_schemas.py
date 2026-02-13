@@ -42,11 +42,11 @@ class TestEnums:
 
     def test_risk_level_values(self) -> None:
         """Test RiskLevel enum values."""
-        assert RiskLevel.NONE == "none"
-        assert RiskLevel.LOW == "low"
-        assert RiskLevel.MEDIUM == "medium"
-        assert RiskLevel.HIGH == "high"
-        assert RiskLevel.IMMINENT == "imminent"
+        assert RiskLevel.NONE == "NONE"
+        assert RiskLevel.LOW == "LOW"
+        assert RiskLevel.ELEVATED == "ELEVATED"
+        assert RiskLevel.HIGH == "HIGH"
+        assert RiskLevel.CRITICAL == "CRITICAL"
 
 
 class TestTechniqueDTO:

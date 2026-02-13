@@ -33,7 +33,7 @@ class TestLLMAssessor:
         """Test assessment of empty text."""
         result = await assessor.assess("")
 
-        assert result.risk_level == RiskLevel.MINIMAL
+        assert result.risk_level == RiskLevel.NONE
         assert result.risk_score == Decimal("0.0")
 
     @pytest.mark.asyncio
@@ -72,7 +72,7 @@ class TestLLMAssessor:
         # This will trigger fallback since mock LLM is used
         result = await assessor.assess(text)
 
-        assert result.risk_level in [RiskLevel.HIGH, RiskLevel.MODERATE]
+        assert result.risk_level in [RiskLevel.HIGH, RiskLevel.ELEVATED]
         assert result.risk_score > Decimal("0.0")
 
     @pytest.mark.asyncio
@@ -142,7 +142,7 @@ class TestLLMAssessor:
         """Test creation of minimal assessment."""
         assessment = assessor._create_minimal_assessment("test reason")
 
-        assert assessment.risk_level == RiskLevel.MINIMAL
+        assert assessment.risk_level == RiskLevel.NONE
         assert assessment.risk_score == Decimal("0.0")
         assert "test reason" in assessment.clinical_summary
 
@@ -159,7 +159,7 @@ class TestLLMAssessor:
         text = "I'm feeling stressed"
         assessment = assessor._create_fallback_assessment(text, "error")
 
-        assert assessment.risk_level == RiskLevel.MODERATE
+        assert assessment.risk_level == RiskLevel.ELEVATED
         assert assessment.immediate_risk is False
 
     def test_generate_cache_key(self, assessor: LLMAssessor) -> None:
@@ -262,7 +262,7 @@ class TestLLMAssessor:
     def test_risk_assessment_attributes(self) -> None:
         """Test RiskAssessment model attributes."""
         assessment = RiskAssessment(
-            risk_level=RiskLevel.MODERATE,
+            risk_level=RiskLevel.ELEVATED,
             risk_score=Decimal("0.5"),
             confidence=Decimal("0.7"),
             clinical_summary="Test summary",
@@ -271,7 +271,7 @@ class TestLLMAssessor:
 
         assert assessment.assessment_id is not None
         assert assessment.timestamp is not None
-        assert assessment.risk_level == RiskLevel.MODERATE
+        assert assessment.risk_level == RiskLevel.ELEVATED
         assert len(assessment.recommended_actions) == 2
 
     def test_risk_factor_model(self) -> None:

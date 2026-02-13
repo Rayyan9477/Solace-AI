@@ -377,8 +377,19 @@ def create_publisher(
     outbox_store: OutboxStore | None = None,
     use_outbox: bool = True,
     use_mock: bool = False,
+    postgres_pool: Any = None,
 ) -> EventPublisher:
-    """Factory function to create event publisher."""
+    """Factory function to create event publisher.
+
+    Args:
+        kafka_settings: Kafka connection settings.
+        producer_settings: Producer tuning settings.
+        outbox_store: Explicit outbox store override.
+        use_outbox: Whether to use outbox pattern.
+        use_mock: Use mock producer (for testing).
+        postgres_pool: asyncpg connection pool. When provided and no explicit
+            outbox_store is given, uses PostgresOutboxStore for durable persistence.
+    """
     if use_mock:
         producer: KafkaProducerAdapter = MockKafkaProducerAdapter()
     else:
@@ -386,4 +397,17 @@ def create_publisher(
             kafka_settings or KafkaSettings(),
             producer_settings or ProducerSettings(),
         )
+
+    if outbox_store is None and use_outbox:
+        if postgres_pool is not None:
+            from .postgres_stores import PostgresOutboxStore
+            outbox_store = PostgresOutboxStore(postgres_pool)
+            logger.info("publisher_using_postgres_outbox")
+        else:
+            outbox_store = InMemoryOutboxStore()
+            logger.warning(
+                "publisher_using_in_memory_outbox",
+                hint="Pass postgres_pool for durable persistence",
+            )
+
     return EventPublisher(producer, outbox_store, use_outbox)
