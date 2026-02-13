@@ -3,6 +3,7 @@ Solace-AI Personality Service - Domain Service Orchestration.
 Orchestrates personality detection, profile management, and style adaptation.
 """
 from __future__ import annotations
+import asyncio
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -44,8 +45,8 @@ class PersonalityServiceSettings(BaseSettings):
 @dataclass
 class PersonalityProfile:
     """In-memory personality profile entity."""
+    user_id: UUID
     profile_id: UUID = field(default_factory=uuid4)
-    user_id: UUID = field(default_factory=uuid4)
     ocean_scores: OceanScoresDTO | None = None
     style_parameters: StyleParametersDTO | None = None
     assessment_count: int = 0
@@ -57,34 +58,48 @@ class PersonalityProfile:
 
 
 class ProfileStore:
-    """In-memory profile storage with caching."""
+    """In-memory profile storage with caching. Thread-safe via asyncio.Lock."""
 
     def __init__(self) -> None:
         self._profiles: dict[UUID, PersonalityProfile] = {}
         self._cache_timestamps: dict[UUID, float] = {}
+        self._locks: dict[UUID, asyncio.Lock] = {}
+        self._global_lock = asyncio.Lock()
+
+    async def _get_lock(self, user_id: UUID) -> asyncio.Lock:
+        """Get per-user lock, creating if needed."""
+        if user_id not in self._locks:
+            async with self._global_lock:
+                if user_id not in self._locks:
+                    self._locks[user_id] = asyncio.Lock()
+        return self._locks[user_id]
 
     def get(self, user_id: UUID) -> PersonalityProfile | None:
         """Get profile by user ID."""
         return self._profiles.get(user_id)
 
-    def save(self, profile: PersonalityProfile) -> PersonalityProfile:
-        """Save profile."""
-        profile.updated_at = datetime.now(timezone.utc)
-        self._profiles[profile.user_id] = profile
-        self._cache_timestamps[profile.user_id] = time.time()
-        return profile
+    async def save(self, profile: PersonalityProfile) -> PersonalityProfile:
+        """Save profile (per-user lock prevents concurrent overwrites)."""
+        lock = await self._get_lock(profile.user_id)
+        async with lock:
+            profile.updated_at = datetime.now(timezone.utc)
+            self._profiles[profile.user_id] = profile
+            self._cache_timestamps[profile.user_id] = time.time()
+            return profile
 
     def exists(self, user_id: UUID) -> bool:
         """Check if profile exists."""
         return user_id in self._profiles
 
-    def delete(self, user_id: UUID) -> bool:
+    async def delete(self, user_id: UUID) -> bool:
         """Delete profile."""
-        if user_id in self._profiles:
-            del self._profiles[user_id]
-            self._cache_timestamps.pop(user_id, None)
-            return True
-        return False
+        lock = await self._get_lock(user_id)
+        async with lock:
+            if user_id in self._profiles:
+                del self._profiles[user_id]
+                self._cache_timestamps.pop(user_id, None)
+                return True
+            return False
 
     def count(self) -> int:
         """Count total profiles."""
@@ -130,7 +145,7 @@ class PersonalityOrchestrator(ServiceBase):
             evidence = self._extract_evidence(ocean_scores)
         profile = self._get_or_create_profile(request.user_id)
         profile = self._update_profile_with_assessment(profile, ocean_scores)
-        self._profile_store.save(profile)
+        await self._profile_store.save(profile)
         processing_time_ms = (time.perf_counter() - start_time) * 1000
         logger.info("personality_detected", user_id=str(request.user_id), confidence=ocean_scores.overall_confidence, processing_time_ms=round(processing_time_ms, 2))
         return DetectPersonalityResponse(
@@ -157,7 +172,7 @@ class PersonalityOrchestrator(ServiceBase):
         recommendations = self._style_adapter.get_recommendations(profile.ocean_scores)
         if profile.style_parameters is None:
             profile.style_parameters = style
-            self._profile_store.save(profile)
+            await self._profile_store.save(profile)
         logger.info("style_retrieved", user_id=str(request.user_id), style_type=style.style_type.value)
         return GetStyleResponse(
             user_id=request.user_id,

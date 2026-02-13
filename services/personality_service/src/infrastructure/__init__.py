@@ -1,18 +1,14 @@
 """Personality Service - Infrastructure Layer."""
 from .repository import (
     PersonalityRepositoryPort,
-    InMemoryPersonalityRepository,
-    ProfileQueryBuilder,
-    AssessmentQueryBuilder,
     RepositoryFactory,
     UnitOfWork,
 )
+from .postgres_repository import PostgresPersonalityRepository
 
 __all__ = [
     "PersonalityRepositoryPort",
-    "InMemoryPersonalityRepository",
-    "ProfileQueryBuilder",
-    "AssessmentQueryBuilder",
+    "PostgresPersonalityRepository",
     "RepositoryFactory",
     "UnitOfWork",
 ]

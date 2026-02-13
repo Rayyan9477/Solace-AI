@@ -38,7 +38,7 @@ class TestTraitAssessment:
 
     def test_add_evidence(self) -> None:
         """Test adding evidence markers."""
-        assessment = TraitAssessment()
+        assessment = TraitAssessment(user_id=uuid4())
         assessment.add_evidence("high_openness")
         assessment.add_evidence("social_focus")
         assessment.add_evidence("high_openness")
@@ -119,7 +119,7 @@ class TestPersonalityProfile:
 
     def test_add_first_assessment(self) -> None:
         """Test adding first assessment."""
-        profile = PersonalityProfile()
+        profile = PersonalityProfile(user_id=uuid4())
         scores = OceanScores(
             openness=Decimal("0.7"),
             conscientiousness=Decimal("0.6"),
@@ -136,7 +136,7 @@ class TestPersonalityProfile:
 
     def test_add_multiple_assessments(self) -> None:
         """Test adding multiple assessments with aggregation."""
-        profile = PersonalityProfile()
+        profile = PersonalityProfile(user_id=uuid4())
         scores1 = OceanScores.neutral()
         scores2 = OceanScores(
             openness=Decimal("0.8"),
@@ -152,7 +152,7 @@ class TestPersonalityProfile:
 
     def test_stability_score_computation(self) -> None:
         """Test stability score computation."""
-        profile = PersonalityProfile()
+        profile = PersonalityProfile(user_id=uuid4())
         assert profile.stability_score == Decimal("0.0")
         scores = OceanScores.neutral()
         for _ in range(5):
@@ -161,7 +161,7 @@ class TestPersonalityProfile:
 
     def test_is_stable(self) -> None:
         """Test stability check."""
-        profile = PersonalityProfile()
+        profile = PersonalityProfile(user_id=uuid4())
         scores = OceanScores.neutral()
         for _ in range(5):
             profile.add_assessment(TraitAssessment(ocean_scores=scores))
@@ -169,7 +169,7 @@ class TestPersonalityProfile:
 
     def test_has_sufficient_data(self) -> None:
         """Test sufficient data check."""
-        profile = PersonalityProfile()
+        profile = PersonalityProfile(user_id=uuid4())
         assert profile.has_sufficient_data is False
         for _ in range(3):
             profile.add_assessment(TraitAssessment(ocean_scores=OceanScores.neutral()))
@@ -177,7 +177,7 @@ class TestPersonalityProfile:
 
     def test_dominant_traits(self) -> None:
         """Test dominant traits property."""
-        profile = PersonalityProfile()
+        profile = PersonalityProfile(user_id=uuid4())
         scores = OceanScores(
             openness=Decimal("0.85"),
             conscientiousness=Decimal("0.45"),
@@ -192,7 +192,7 @@ class TestPersonalityProfile:
 
     def test_style_type(self) -> None:
         """Test style type property."""
-        profile = PersonalityProfile()
+        profile = PersonalityProfile(user_id=uuid4())
         assert profile.style_type == CommunicationStyleType.BALANCED
         scores = OceanScores(
             openness=Decimal("0.8"),
@@ -206,7 +206,7 @@ class TestPersonalityProfile:
 
     def test_get_recent_assessments(self) -> None:
         """Test getting recent assessments."""
-        profile = PersonalityProfile()
+        profile = PersonalityProfile(user_id=uuid4())
         for i in range(10):
             profile.add_assessment(TraitAssessment(ocean_scores=OceanScores.neutral()))
         recent = profile.get_recent_assessments(5)
@@ -214,7 +214,7 @@ class TestPersonalityProfile:
 
     def test_get_trait_history(self) -> None:
         """Test getting trait history."""
-        profile = PersonalityProfile()
+        profile = PersonalityProfile(user_id=uuid4())
         for i in range(5):
             scores = OceanScores(
                 openness=Decimal(str(0.5 + i * 0.1)),
@@ -229,7 +229,7 @@ class TestPersonalityProfile:
 
     def test_calculate_trait_trend(self) -> None:
         """Test calculating trait trend."""
-        profile = PersonalityProfile()
+        profile = PersonalityProfile(user_id=uuid4())
         for i in range(5):
             scores = OceanScores(
                 openness=Decimal(str(0.5 + i * 0.1)),
@@ -244,7 +244,7 @@ class TestPersonalityProfile:
 
     def test_reset_scores(self) -> None:
         """Test resetting profile scores."""
-        profile = PersonalityProfile()
+        profile = PersonalityProfile(user_id=uuid4())
         profile.add_assessment(TraitAssessment(ocean_scores=OceanScores.neutral()))
         profile.reset_scores()
         assert profile.ocean_scores is None

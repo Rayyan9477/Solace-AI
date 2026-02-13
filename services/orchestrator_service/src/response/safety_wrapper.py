@@ -36,7 +36,7 @@ class SafetyWrapperSettings(BaseSettings):
     enable_resource_injection: bool = Field(default=True)
     enable_content_filtering: bool = Field(default=True)
     enable_disclaimer_injection: bool = Field(default=True)
-    resource_threshold: str = Field(default="moderate")
+    resource_threshold: str = Field(default="ELEVATED")
     always_include_988: bool = Field(default=True)
     max_resources_shown: int = Field(default=3, ge=1, le=5)
     filter_harmful_phrases: bool = Field(default=True)
@@ -151,7 +151,7 @@ class ResourceProvider:
             resources.append(self.CRISIS_RESOURCES[1])
             if len(resources) < self._settings.max_resources_shown:
                 resources.append(self.CRISIS_RESOURCES[3])
-        elif risk_level == RiskLevel.MODERATE:
+        elif risk_level == RiskLevel.ELEVATED:
             if self.CRISIS_RESOURCES[1] not in resources:
                 resources.append(self.CRISIS_RESOURCES[1])
         return resources[:self._settings.max_resources_shown]
@@ -281,7 +281,7 @@ class SafetyWrapper:
             content_length=len(content),
             crisis_detected=safety_flags.get("crisis_detected", False),
         )
-        risk_level = RiskLevel(safety_flags.get("risk_level", "none"))
+        risk_level = RiskLevel(safety_flags.get("risk_level", "NONE"))
         result = self._apply_safety_wrap(content, risk_level, safety_flags)
         updated_flags = {
             **safety_flags,
@@ -357,11 +357,11 @@ class SafetyWrapper:
             return False
         threshold = self._settings.resource_threshold
         threshold_map = {
-            "none": [RiskLevel.LOW, RiskLevel.MODERATE, RiskLevel.HIGH, RiskLevel.CRITICAL],
-            "low": [RiskLevel.LOW, RiskLevel.MODERATE, RiskLevel.HIGH, RiskLevel.CRITICAL],
-            "moderate": [RiskLevel.MODERATE, RiskLevel.HIGH, RiskLevel.CRITICAL],
-            "high": [RiskLevel.HIGH, RiskLevel.CRITICAL],
-            "critical": [RiskLevel.CRITICAL],
+            "NONE": [RiskLevel.LOW, RiskLevel.ELEVATED, RiskLevel.HIGH, RiskLevel.CRITICAL],
+            "LOW": [RiskLevel.LOW, RiskLevel.ELEVATED, RiskLevel.HIGH, RiskLevel.CRITICAL],
+            "ELEVATED": [RiskLevel.ELEVATED, RiskLevel.HIGH, RiskLevel.CRITICAL],
+            "HIGH": [RiskLevel.HIGH, RiskLevel.CRITICAL],
+            "CRITICAL": [RiskLevel.CRITICAL],
         }
         required_levels = threshold_map.get(threshold, [RiskLevel.HIGH, RiskLevel.CRITICAL])
         return risk_level in required_levels

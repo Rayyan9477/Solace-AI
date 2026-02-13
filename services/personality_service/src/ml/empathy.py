@@ -245,7 +245,7 @@ class MoELEmpathyGenerator:
 
     def _combine_components(self, cognitive: str, affective: str, compassionate: str, strategy: str) -> str:
         strategy_orders = {"validation_first": [affective, cognitive, compassionate], "cognitive_focus": [cognitive, affective, compassionate],
-                          "affective_focus": [affective, cognitive, compassionate], "compassionate_action": [cognitive, compassionate]}
+                          "affective_focus": [affective, cognitive, compassionate], "compassionate_action": [compassionate, affective, cognitive]}
         parts = strategy_orders.get(strategy, [cognitive, affective, compassionate])
         return " ".join(p for p in parts if p)
 

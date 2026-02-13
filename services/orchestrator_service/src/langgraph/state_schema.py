@@ -15,12 +15,12 @@ from pydantic import BaseModel, Field
 
 
 class RiskLevel(str, Enum):
-    """Safety risk levels for crisis detection."""
-    NONE = "none"
-    LOW = "low"
-    MODERATE = "moderate"
-    HIGH = "high"
-    CRITICAL = "critical"
+    """Safety risk levels for crisis detection. Aligned with canonical CrisisLevel."""
+    NONE = "NONE"
+    LOW = "LOW"
+    ELEVATED = "ELEVATED"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
 
 
 class IntentType(str, Enum):
@@ -111,7 +111,7 @@ class SafetyFlags:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SafetyFlags:
         la = datetime.fromisoformat(data["last_assessment_at"]) if isinstance(data.get("last_assessment_at"), str) else data.get("last_assessment_at")
-        return cls(risk_level=RiskLevel(data.get("risk_level", "none")), crisis_detected=data.get("crisis_detected", False), crisis_type=data.get("crisis_type"), requires_escalation=data.get("requires_escalation", False), escalation_reason=data.get("escalation_reason"), safety_resources_shown=data.get("safety_resources_shown", False), monitoring_level=data.get("monitoring_level", "standard"), contraindications=data.get("contraindications", []), triggered_keywords=data.get("triggered_keywords", []), last_assessment_at=la)
+        return cls(risk_level=RiskLevel(data.get("risk_level", "NONE")), crisis_detected=data.get("crisis_detected", False), crisis_type=data.get("crisis_type"), requires_escalation=data.get("requires_escalation", False), escalation_reason=data.get("escalation_reason"), safety_resources_shown=data.get("safety_resources_shown", False), monitoring_level=data.get("monitoring_level", "standard"), contraindications=data.get("contraindications", []), triggered_keywords=data.get("triggered_keywords", []), last_assessment_at=la)
 
     @classmethod
     def safe(cls) -> SafetyFlags:
@@ -176,25 +176,55 @@ def add_agent_results(left: list[dict[str, Any]], right: list[dict[str, Any]]) -
 
 
 def update_safety_flags(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
-    """Reducer for safety flags - merges with priority to higher risk."""
+    """Reducer for safety flags - deep merges with priority to higher risk.
+
+    Preserves non-None left values when right provides None.
+    Always escalates to the higher risk level.
+    """
     if not left:
         return right
     if not right:
         return left
-    risk_order = ["none", "low", "moderate", "high", "critical"]
-    left_risk = left.get("risk_level", "none")
-    right_risk = right.get("risk_level", "none")
-    merged = {**left, **right}
-    if risk_order.index(right_risk) > risk_order.index(left_risk):
-        merged["risk_level"] = right_risk
-    else:
-        merged["risk_level"] = left_risk
+
+    # Start with left, overlay right only where right provides non-None values
+    merged: dict[str, Any] = dict(left)
+    for key, value in right.items():
+        if value is not None:
+            merged[key] = value
+
+    # Risk level: always keep the higher of the two
+    risk_order = ["NONE", "LOW", "ELEVATED", "HIGH", "CRITICAL"]
+    left_risk = left.get("risk_level", "NONE").upper()
+    right_risk = right.get("risk_level", "NONE").upper()
+    left_idx = risk_order.index(left_risk) if left_risk in risk_order else 0
+    right_idx = risk_order.index(right_risk) if right_risk in risk_order else 0
+    merged["risk_level"] = risk_order[max(left_idx, right_idx)]
+
+    # Boolean flags: OR semantics (once detected, stays detected)
     if left.get("crisis_detected") or right.get("crisis_detected"):
         merged["crisis_detected"] = True
     if left.get("requires_escalation") or right.get("requires_escalation"):
         merged["requires_escalation"] = True
-    merged["contraindications"] = list(set(left.get("contraindications", []) + right.get("contraindications", [])))
-    merged["triggered_keywords"] = list(set(left.get("triggered_keywords", []) + right.get("triggered_keywords", [])))
+    if left.get("safety_resources_shown") or right.get("safety_resources_shown"):
+        merged["safety_resources_shown"] = True
+
+    # Lists: union (deduplicated)
+    merged["contraindications"] = list(set(
+        left.get("contraindications", []) + right.get("contraindications", [])
+    ))
+    merged["triggered_keywords"] = list(set(
+        left.get("triggered_keywords", []) + right.get("triggered_keywords", [])
+    ))
+
+    # Monitoring level: keep the more intensive
+    monitoring_order = {"standard": 0, "enhanced": 1, "intensive": 2}
+    left_mon = left.get("monitoring_level", "standard")
+    right_mon = right.get("monitoring_level", "standard")
+    if monitoring_order.get(right_mon, 0) > monitoring_order.get(left_mon, 0):
+        merged["monitoring_level"] = right_mon
+    else:
+        merged["monitoring_level"] = left_mon
+
     return merged
 
 

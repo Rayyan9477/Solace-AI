@@ -22,8 +22,8 @@ class TraitAssessment:
     Entity representing a single personality trait assessment.
     Contains the raw assessment results from a specific source.
     """
+    user_id: UUID
     assessment_id: UUID = field(default_factory=uuid4)
-    user_id: UUID = field(default_factory=uuid4)
     ocean_scores: OceanScores = field(default_factory=OceanScores.neutral)
     source: AssessmentSource = AssessmentSource.TEXT_ANALYSIS
     metadata: AssessmentMetadata | None = None
@@ -86,8 +86,8 @@ class PersonalityProfile:
     Aggregate root for personality profile management.
     Maintains the user's personality state and assessment history.
     """
+    user_id: UUID
     profile_id: UUID = field(default_factory=uuid4)
-    user_id: UUID = field(default_factory=uuid4)
     ocean_scores: OceanScores | None = None
     communication_style: CommunicationStyle | None = None
     assessment_count: int = 0
@@ -245,9 +245,9 @@ class PersonalityProfile:
 @dataclass
 class ProfileSnapshot:
     """Immutable snapshot of a personality profile at a point in time."""
+    user_id: UUID
     snapshot_id: UUID = field(default_factory=uuid4)
     profile_id: UUID = field(default_factory=uuid4)
-    user_id: UUID = field(default_factory=uuid4)
     ocean_scores: OceanScores = field(default_factory=OceanScores.neutral)
     communication_style: CommunicationStyle | None = None
     assessment_count: int = 0

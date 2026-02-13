@@ -69,7 +69,7 @@ class TestChatMessageResponse:
             session_id="session-456",
             intent="general_chat",
             intent_confidence=0.75,
-            safety_flags={"risk_level": "none"},
+            safety_flags={"risk_level": "NONE"},
             processing_time_ms=150.5,
             agents_used=["safety", "chat"],
         )
@@ -160,7 +160,7 @@ class TestRouterEndpoints:
             "final_response": "Test response",
             "intent": "general_chat",
             "intent_confidence": 0.75,
-            "safety_flags": {"risk_level": "none"},
+            "safety_flags": {"risk_level": "NONE"},
             "agent_results": [
                 {"agent_type": "safety", "success": True},
                 {"agent_type": "chat", "success": True},
@@ -343,7 +343,7 @@ class TestWebSocketProtocol:
             "response": "Hello, how can I help?",
             "intent": "general_chat",
             "intent_confidence": 0.75,
-            "safety_flags": {"risk_level": "none"},
+            "safety_flags": {"risk_level": "NONE"},
             "processing_time_ms": 150.5,
             "thread_id": "thread-123",
         }

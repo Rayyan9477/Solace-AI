@@ -238,7 +238,7 @@ class ResponseGenerator:
         messages: list[dict[str, Any]],
     ) -> ResponseContext:
         """Build context for response generation."""
-        risk_level = RiskLevel(safety_flags.get("risk_level", "none"))
+        risk_level = RiskLevel(safety_flags.get("risk_level", "NONE"))
         warmth = personality_style.get("warmth", 0.6)
         validation = personality_style.get("validation_level", 0.6)
         has_treatment = False

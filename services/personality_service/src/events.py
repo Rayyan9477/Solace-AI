@@ -149,6 +149,51 @@ class SnapshotCapturedEvent(DomainEvent):
         return cls(aggregate_id=snapshot_id, user_id=user_id, payload={"profile_id": str(profile_id), "reason": reason})
 
 
+def to_kafka_event(event: DomainEvent) -> Any:
+    """Convert local personality event to canonical Kafka event for inter-service messaging.
+
+    Maps profile updates and trait changes to canonical schemas.
+    Returns None for internal-only events or if solace_events is not available.
+    """
+    try:
+        from src.solace_events.schemas import (
+            EventMetadata as KafkaMetadata,
+            PersonalityProfileUpdatedEvent as KafkaProfileUpdated,
+            PersonalityTraitChangedEvent as KafkaTraitChanged,
+        )
+    except ImportError:
+        logger.debug("solace_events_not_available_for_bridge")
+        return None
+
+    if not event.user_id:
+        return None
+
+    meta = KafkaMetadata(
+        event_id=event.event_id, timestamp=event.timestamp,
+        correlation_id=event.correlation_id or event.event_id,
+        source_service="personality-service",
+    )
+    base: dict[str, Any] = {"user_id": event.user_id, "session_id": None, "metadata": meta}
+
+    if event.event_type == EventType.PROFILE_UPDATED:
+        return KafkaProfileUpdated(
+            **base, profile_id=event.aggregate_id,
+            assessment_count=event.payload.get("assessment_count", 0),
+            profile_version=event.payload.get("version", 1),
+        )
+
+    if event.event_type == EventType.TRAIT_CHANGED:
+        return KafkaTraitChanged(
+            **base, profile_id=event.aggregate_id,
+            trait_name=event.payload.get("trait", "unknown"),
+            previous_value=Decimal(str(event.payload.get("previous_value", "0.5"))),
+            new_value=Decimal(str(event.payload.get("new_value", "0.5"))),
+            change_magnitude=Decimal(str(event.payload.get("change_magnitude", "0"))),
+        )
+
+    return None
+
+
 EventHandler = Callable[[DomainEvent], Coroutine[Any, Any, None]]
 
 

@@ -31,16 +31,16 @@ class TestRiskLevel:
 
     def test_risk_level_values(self) -> None:
         """Test all risk level values exist."""
-        assert RiskLevel.NONE.value == "none"
-        assert RiskLevel.LOW.value == "low"
-        assert RiskLevel.MODERATE.value == "moderate"
-        assert RiskLevel.HIGH.value == "high"
-        assert RiskLevel.CRITICAL.value == "critical"
+        assert RiskLevel.NONE.value == "NONE"
+        assert RiskLevel.LOW.value == "LOW"
+        assert RiskLevel.ELEVATED.value == "ELEVATED"
+        assert RiskLevel.HIGH.value == "HIGH"
+        assert RiskLevel.CRITICAL.value == "CRITICAL"
 
     def test_risk_level_from_string(self) -> None:
         """Test creating risk level from string."""
-        assert RiskLevel("none") == RiskLevel.NONE
-        assert RiskLevel("critical") == RiskLevel.CRITICAL
+        assert RiskLevel("NONE") == RiskLevel.NONE
+        assert RiskLevel("CRITICAL") == RiskLevel.CRITICAL
 
 
 class TestIntentType:
@@ -139,20 +139,20 @@ class TestSafetyFlags:
             triggered_keywords=["suicide"],
         )
         data = flags.to_dict()
-        assert data["risk_level"] == "high"
+        assert data["risk_level"] == "HIGH"
         assert data["crisis_detected"] is True
         assert "suicide" in data["triggered_keywords"]
 
     def test_safety_flags_from_dict(self) -> None:
         """Test safety flags deserialization."""
         data = {
-            "risk_level": "moderate",
+            "risk_level": "ELEVATED",
             "crisis_detected": False,
             "monitoring_level": "enhanced",
             "contraindications": ["exposure_therapy"],
         }
         flags = SafetyFlags.from_dict(data)
-        assert flags.risk_level == RiskLevel.MODERATE
+        assert flags.risk_level == RiskLevel.ELEVATED
         assert flags.monitoring_level == "enhanced"
         assert "exposure_therapy" in flags.contraindications
 
@@ -247,24 +247,24 @@ class TestReducers:
 
     def test_update_safety_flags_reducer_escalates_risk(self) -> None:
         """Test safety flags reducer escalates to higher risk."""
-        left = {"risk_level": "low", "crisis_detected": False}
-        right = {"risk_level": "high", "crisis_detected": True}
+        left = {"risk_level": "LOW", "crisis_detected": False}
+        right = {"risk_level": "HIGH", "crisis_detected": True}
         result = update_safety_flags(left, right)
-        assert result["risk_level"] == "high"
+        assert result["risk_level"] == "HIGH"
         assert result["crisis_detected"] is True
 
     def test_update_safety_flags_reducer_preserves_higher_risk(self) -> None:
         """Test safety flags reducer preserves existing higher risk."""
-        left = {"risk_level": "critical", "crisis_detected": True}
-        right = {"risk_level": "moderate", "crisis_detected": False}
+        left = {"risk_level": "CRITICAL", "crisis_detected": True}
+        right = {"risk_level": "ELEVATED", "crisis_detected": False}
         result = update_safety_flags(left, right)
-        assert result["risk_level"] == "critical"
+        assert result["risk_level"] == "CRITICAL"
         assert result["crisis_detected"] is True
 
     def test_update_safety_flags_merges_contraindications(self) -> None:
         """Test safety flags reducer merges contraindications."""
-        left = {"risk_level": "low", "contraindications": ["a", "b"]}
-        right = {"risk_level": "low", "contraindications": ["b", "c"]}
+        left = {"risk_level": "LOW", "contraindications": ["a", "b"]}
+        right = {"risk_level": "LOW", "contraindications": ["b", "c"]}
         result = update_safety_flags(left, right)
         assert set(result["contraindications"]) == {"a", "b", "c"}
 

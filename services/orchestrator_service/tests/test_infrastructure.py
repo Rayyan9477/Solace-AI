@@ -151,9 +151,9 @@ class TestEventsModule:
 
     def test_event_factory_crisis_detected(self):
         from services.orchestrator_service.src.events import EventFactory, EventType
-        event = EventFactory.crisis_detected(uuid4(), uuid4(), "high", "self_harm")
+        event = EventFactory.crisis_detected(uuid4(), uuid4(), "HIGH", "self_harm")
         assert event.event_type == EventType.CRISIS_DETECTED
-        assert event.payload["risk_level"] == "high"
+        assert event.payload["risk_level"] == "HIGH"
         assert event.payload["crisis_type"] == "self_harm"
 
     def test_event_factory_agent_completed(self):

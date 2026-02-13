@@ -810,4 +810,4 @@ class TestAgentIntegration:
         agent = SafetyAgent()
         result = await agent.process(state)
         assert result["safety_flags"]["crisis_detected"] is True
-        assert result["safety_flags"]["risk_level"] in ("high", "critical")
+        assert result["safety_flags"]["risk_level"] in ("HIGH", "CRITICAL")

@@ -189,7 +189,7 @@ class AgentRouter:
         Returns:
             Tuple of (selected agents list, routing reason)
         """
-        if safety_flags.get("crisis_detected") or safety_flags.get("risk_level") in ("high", "critical"):
+        if safety_flags.get("crisis_detected") or safety_flags.get("risk_level") in ("HIGH", "CRITICAL"):
             return [AgentType.SAFETY], "Crisis detected - routing to safety agent exclusively"
         agent_mapping: dict[IntentType, tuple[list[AgentType], str]] = {
             IntentType.CRISIS_DISCLOSURE: (
@@ -272,7 +272,7 @@ class SupervisorAgent:
             "supervisor_processing",
             message_length=len(message),
             has_context=bool(context),
-            safety_risk=safety_flags.get("risk_level", "none"),
+            safety_risk=safety_flags.get("risk_level", "NONE"),
         )
         decision = self.make_decision(message, context, safety_flags, active_treatment)
         agent_result = AgentResult(
@@ -326,7 +326,7 @@ class SupervisorAgent:
         )
         requires_safety_override = (
             safety_flags.get("crisis_detected", False) or
-            safety_flags.get("risk_level") in ("high", "critical") or
+            safety_flags.get("risk_level") in ("HIGH", "CRITICAL") or
             intent == IntentType.CRISIS_DISCLOSURE
         )
         if requires_safety_override:

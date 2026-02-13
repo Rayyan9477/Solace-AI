@@ -11,14 +11,16 @@ from services.orchestrator_service.src.langgraph.graph_builder import (
     OrchestratorGraphBuilder,
     safety_precheck_node,
     crisis_handler_node,
-    chat_agent_node,
-    diagnosis_agent_node,
-    therapy_agent_node,
-    personality_agent_node,
     aggregator_node,
     safety_postcheck_node,
     route_after_safety,
     route_to_agents,
+)
+from services.orchestrator_service.tests.stubs import (
+    chat_agent_node,
+    diagnosis_agent_node,
+    therapy_agent_node,
+    personality_agent_node,
 )
 from services.orchestrator_service.src.langgraph.state_schema import (
     OrchestratorState,
@@ -62,21 +64,21 @@ class TestSafetyPrecheckNode:
         updates = safety_precheck_node(state)
         assert updates["processing_phase"] == ProcessingPhase.SAFETY_PRECHECK.value
         assert updates["safety_flags"]["crisis_detected"] is False
-        assert updates["safety_flags"]["risk_level"] == "none"
+        assert updates["safety_flags"]["risk_level"] == "NONE"
 
     def test_crisis_message(self) -> None:
         """Test safety precheck with crisis message."""
         state = create_initial_state("user-1", "session-1", "I want to kill myself")
         updates = safety_precheck_node(state)
         assert updates["safety_flags"]["crisis_detected"] is True
-        assert updates["safety_flags"]["risk_level"] in ("high", "critical")
+        assert updates["safety_flags"]["risk_level"] in ("HIGH", "CRITICAL")
         assert "kill myself" in updates["safety_flags"]["triggered_keywords"]
 
     def test_critical_crisis_message(self) -> None:
         """Test safety precheck with critical crisis indicators."""
         state = create_initial_state("user-1", "session-1", "I'm going to end my life tonight")
         updates = safety_precheck_node(state)
-        assert updates["safety_flags"]["risk_level"] == "critical"
+        assert updates["safety_flags"]["risk_level"] == "CRITICAL"
         assert updates["safety_flags"]["requires_escalation"] is True
 
     def test_mild_distress_message(self) -> None:
@@ -84,7 +86,7 @@ class TestSafetyPrecheckNode:
         state = create_initial_state("user-1", "session-1", "I've been feeling depressed lately")
         updates = safety_precheck_node(state)
         assert updates["safety_flags"]["crisis_detected"] is False
-        assert updates["safety_flags"]["risk_level"] == "low"
+        assert updates["safety_flags"]["risk_level"] == "LOW"
 
     def test_adds_agent_result(self) -> None:
         """Test that safety precheck adds agent result."""
@@ -100,7 +102,7 @@ class TestCrisisHandlerNode:
     def test_crisis_response_content(self) -> None:
         """Test crisis handler generates appropriate response."""
         state = create_initial_state("user-1", "session-1", "I want to hurt myself")
-        state["safety_flags"] = {"risk_level": "high", "crisis_detected": True}
+        state["safety_flags"] = {"risk_level": "HIGH", "crisis_detected": True}
         updates = crisis_handler_node(state)
         assert updates["processing_phase"] == ProcessingPhase.CRISIS_HANDLING.value
         assert "988" in updates["final_response"]
@@ -109,14 +111,14 @@ class TestCrisisHandlerNode:
     def test_crisis_shows_resources(self) -> None:
         """Test crisis handler shows safety resources."""
         state = create_initial_state("user-1", "session-1", "I don't want to live anymore")
-        state["safety_flags"] = {"risk_level": "critical"}
+        state["safety_flags"] = {"risk_level": "CRITICAL"}
         updates = crisis_handler_node(state)
         assert updates["safety_flags"]["safety_resources_shown"] is True
 
     def test_crisis_adds_message(self) -> None:
         """Test crisis handler adds response message."""
         state = create_initial_state("user-1", "session-1", "suicide")
-        state["safety_flags"] = {"risk_level": "high"}
+        state["safety_flags"] = {"risk_level": "HIGH"}
         updates = crisis_handler_node(state)
         assert len(updates["messages"]) == 1
         assert updates["messages"][0]["role"] == "assistant"
@@ -227,14 +229,14 @@ class TestRoutingFunctions:
     def test_route_after_safety_crisis(self) -> None:
         """Test routing to crisis handler after safety check."""
         state = create_initial_state("user-1", "session-1", "I want to die")
-        state["safety_flags"] = {"crisis_detected": True, "risk_level": "high"}
+        state["safety_flags"] = {"crisis_detected": True, "risk_level": "HIGH"}
         route = route_after_safety(state)
         assert route == "crisis_handler"
 
     def test_route_after_safety_safe(self) -> None:
         """Test routing to supervisor after safe check."""
         state = create_initial_state("user-1", "session-1", "Hello")
-        state["safety_flags"] = {"crisis_detected": False, "risk_level": "none"}
+        state["safety_flags"] = {"crisis_detected": False, "risk_level": "NONE"}
         route = route_after_safety(state)
         assert route == "supervisor"
 

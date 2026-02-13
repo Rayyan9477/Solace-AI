@@ -181,7 +181,7 @@ class TestAgentRouter:
         """Test routing when crisis is already detected."""
         agents, reason = router.select_agents(
             IntentType.GENERAL_CHAT,
-            {"crisis_detected": True, "risk_level": "high"},
+            {"crisis_detected": True, "risk_level": "HIGH"},
         )
         assert agents == [AgentType.SAFETY]
         assert "crisis" in reason.lower()
@@ -274,7 +274,7 @@ class TestSupervisorAgent:
         """Test making decision with existing safety flags."""
         decision = supervisor.make_decision(
             "Can we continue our conversation?",
-            safety_flags={"crisis_detected": True, "risk_level": "high"},
+            safety_flags={"crisis_detected": True, "risk_level": "HIGH"},
         )
         assert decision.requires_safety_override is True
 

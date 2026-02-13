@@ -46,12 +46,19 @@ class PersonalityServiceAppSettings(BaseSettings):
 
 def configure_logging(settings: PersonalityServiceAppSettings) -> None:
     """Configure structured logging for the personality service."""
+    try:
+        from solace_security.phi_protection import phi_sanitizer_processor
+        _phi_processor = phi_sanitizer_processor
+    except ImportError:
+        _phi_processor = None
     processors = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.StackInfoRenderer(),
     ]
+    if _phi_processor:
+        processors.append(_phi_processor)
     if settings.debug:
         processors.append(structlog.dev.ConsoleRenderer())
     else:
@@ -71,6 +78,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan manager for startup/shutdown."""
     settings = PersonalityServiceAppSettings()
     configure_logging(settings)
+    from .config import get_config
+    config = get_config()
+    if not config.validate_ensemble_weights():
+        logger.warning(
+            "ensemble_weights_invalid",
+            text=config.detection.ensemble_weight_text,
+            liwc=config.detection.ensemble_weight_liwc,
+            llm=config.detection.ensemble_weight_llm,
+        )
     logger.info("personality_service_starting", environment=settings.environment, host=settings.host, port=settings.port, version=settings.version)
     from .domain.service import PersonalityOrchestrator, PersonalityServiceSettings
     from .domain.trait_detector import TraitDetector, TraitDetectorSettings

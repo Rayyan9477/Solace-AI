@@ -185,7 +185,7 @@ class TestAgentSelector:
             risk_indicators=[],
             topic_signals=[],
         )
-        safety_flags = {"crisis_detected": True, "risk_level": "critical"}
+        safety_flags = {"crisis_detected": True, "risk_level": "CRITICAL"}
         decision = selector.select(analysis, safety_flags, False)
         assert AgentType.SAFETY in decision.primary_agents
 
@@ -801,7 +801,7 @@ class TestSafetyWrapper:
             message="Hello",
         )
         state["final_response"] = "Test response"
-        state["safety_flags"] = {"risk_level": "none", "crisis_detected": False}
+        state["safety_flags"] = {"risk_level": "NONE", "crisis_detected": False}
         result = wrapper.wrap(state)
         assert "final_response" in result
         assert result["processing_phase"] == ProcessingPhase.SAFETY_POSTCHECK.value
@@ -816,7 +816,7 @@ class TestSafetyWrapper:
         )
         state["final_response"] = "I hear you and I'm concerned."
         state["safety_flags"] = {
-            "risk_level": "high",
+            "risk_level": "HIGH",
             "crisis_detected": True,
             "safety_resources_shown": False,
         }
@@ -841,7 +841,7 @@ class TestSafetyWrapperNode:
             message="Hello",
         )
         state["final_response"] = "Test response"
-        state["safety_flags"] = {"risk_level": "none"}
+        state["safety_flags"] = {"risk_level": "NONE"}
         result = safety_wrapper_node(state)
         assert "final_response" in result
 
@@ -892,7 +892,7 @@ class TestResponsePipelineIntegration:
         assert route_result["intent"] == IntentType.CRISIS_DISCLOSURE.value
         state.update(route_result)
         state["safety_flags"] = {
-            "risk_level": "critical",
+            "risk_level": "CRITICAL",
             "crisis_detected": True,
             "safety_resources_shown": False,
         }
