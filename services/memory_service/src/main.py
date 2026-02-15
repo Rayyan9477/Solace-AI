@@ -102,10 +102,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from .domain.consolidation import ConsolidationPipeline, ConsolidationSettings
     context_assembler = ContextAssembler(ContextAssemblerSettings())
     consolidation_pipeline = ConsolidationPipeline(ConsolidationSettings())
+
+    # Initialize Weaviate for vector search (optional — degrades gracefully)
+    weaviate_repo = None
+    try:
+        from .infrastructure.weaviate_repo import WeaviateRepository, WeaviateSettings
+        weaviate_repo = WeaviateRepository(WeaviateSettings())
+        logger.info("weaviate_repository_created")
+    except Exception as e:
+        logger.debug("weaviate_not_available", error=str(e), hint="Using fallback search")
+
+    # Initialize Postgres for persistent tiers 3-5
+    postgres_repo = None
+    try:
+        from .infrastructure.postgres_repo import PostgresRepository
+        postgres_repo = PostgresRepository()
+        logger.info("postgres_repository_created")
+    except Exception as e:
+        logger.debug("postgres_repo_not_available", error=str(e), hint="Using in-memory storage")
+
     memory_service = MemoryService(
         settings=MemoryServiceSettings(),
         context_assembler=context_assembler,
         consolidation_pipeline=consolidation_pipeline,
+        postgres_repo=postgres_repo,
+        weaviate_repo=weaviate_repo,
     )
     await memory_service.initialize()
     app.state.settings = settings

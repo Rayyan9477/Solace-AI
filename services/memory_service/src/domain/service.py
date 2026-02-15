@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from .context_assembler import ContextAssembler
     from .consolidation import ConsolidationPipeline
     from ..infrastructure.postgres_repo import PostgresRepository
+    from ..infrastructure.weaviate_repo import WeaviateRepository
 
 logger = structlog.get_logger(__name__)
 
@@ -33,12 +34,14 @@ class MemoryService(ServiceBase):
                  context_assembler: ContextAssembler | None = None,
                  consolidation_pipeline: ConsolidationPipeline | None = None,
                  postgres_repo: PostgresRepository | None = None,
-                 search_engine: Any | None = None) -> None:
+                 search_engine: Any | None = None,
+                 weaviate_repo: WeaviateRepository | None = None) -> None:
         self._settings = settings or MemoryServiceSettings()
         self._context_assembler = context_assembler
         self._consolidation_pipeline = consolidation_pipeline
         self._postgres_repo = postgres_repo
         self._search_engine = search_engine
+        self._weaviate_repo = weaviate_repo
         # Tiers 1-2: always in-memory (ephemeral per-session data)
         self._tier_1_input: dict[UUID, MemoryRecord] = {}
         self._tier_2_working: dict[UUID, list[MemoryRecord]] = {}
@@ -59,6 +62,13 @@ class MemoryService(ServiceBase):
         if self._postgres_repo:
             await self._postgres_repo.initialize()
             logger.info("memory_service_postgres_connected")
+        if self._weaviate_repo:
+            try:
+                await self._weaviate_repo.initialize()
+                logger.info("memory_service_weaviate_connected")
+            except Exception as e:
+                logger.warning("weaviate_init_failed", error=str(e), hint="Vector search unavailable")
+                self._weaviate_repo = None
         self._initialized = True
         logger.info("memory_service_initialized", settings={
             "working_memory_max": self._settings.working_memory_max_tokens,
@@ -74,6 +84,11 @@ class MemoryService(ServiceBase):
             await self.end_session(session.user_id, session.session_id, False, False)
         if self._postgres_repo:
             await self._postgres_repo.close()
+        if self._weaviate_repo:
+            try:
+                await self._weaviate_repo.close()
+            except Exception:
+                pass
         self._initialized = False
 
     async def store_memory(self, user_id: UUID, session_id: UUID | None, content: str,
@@ -95,6 +110,24 @@ class MemoryService(ServiceBase):
                 await self._postgres_repo.store_memory_record(record)
             except Exception:
                 logger.exception("postgres_store_failed", record_id=str(record.record_id), tier=tier)
+        # Index in Weaviate for vector search (tiers 3-5 only — persistent memories)
+        if self._weaviate_repo and tier in ("tier_3_session", "tier_4_episodic", "tier_5_semantic"):
+            try:
+                from ..infrastructure.weaviate_repo import VectorRecord, CollectionName
+                _tier_to_collection = {
+                    "tier_3_session": CollectionName.CONVERSATION_MEMORY.value,
+                    "tier_4_episodic": CollectionName.SESSION_SUMMARY.value,
+                    "tier_5_semantic": CollectionName.USER_FACT.value,
+                }
+                vector_record = VectorRecord(
+                    record_id=record.record_id, user_id=user_id,
+                    session_id=session_id, content=content,
+                    collection=_tier_to_collection.get(tier, CollectionName.CONVERSATION_MEMORY.value),
+                    importance=float(importance_score), metadata=metadata,
+                )
+                await self._weaviate_repo.store_vector(vector_record)
+            except Exception:
+                logger.debug("weaviate_index_failed", record_id=str(record.record_id))
         storage_time_ms = int((time.perf_counter() - start_time) * 1000)
         logger.debug("memory_stored", user_id=str(user_id), tier=tier, time_ms=storage_time_ms)
         return StoreMemoryResult(record_id=record.record_id, tier=tier, stored=True,
@@ -141,7 +174,7 @@ class MemoryService(ServiceBase):
                                 all_records.append(record)
 
         if query:
-            all_records = self._semantic_filter(all_records, query)
+            all_records = await self._semantic_filter(all_records, query, user_id=user_id)
         all_records = sorted(all_records, key=lambda r: (r.importance_score, r.created_at), reverse=True)[:limit]
         retrieval_time_ms = int((time.perf_counter() - start_time) * 1000)
         return RetrieveMemoryResult(
@@ -465,8 +498,24 @@ class MemoryService(ServiceBase):
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
         return record.created_at >= cutoff
 
-    def _semantic_filter(self, records: list[MemoryRecord], query: str) -> list[MemoryRecord]:
-        """Filter records using hybrid search engine (BM25 + semantic) with substring fallback."""
+    async def _semantic_filter(self, records: list[MemoryRecord], query: str,
+                                user_id: UUID | None = None) -> list[MemoryRecord]:
+        """Filter records using Weaviate vector search, in-memory BM25, or substring fallback."""
+        # Tier 1: Weaviate keyword search (no embedding needed)
+        if self._weaviate_repo and user_id:
+            try:
+                weaviate_results = await self._weaviate_repo.search_by_keyword(
+                    keyword=query, user_id=user_id, limit=len(records),
+                )
+                if weaviate_results:
+                    ranked_ids = {str(r.record_id) for r in weaviate_results if r.score > 0}
+                    filtered = [r for r in records if str(r.record_id) in ranked_ids]
+                    if filtered:
+                        return filtered
+            except Exception as e:
+                logger.warning("weaviate_search_failed", error=str(e))
+
+        # Tier 2: In-memory hybrid search engine
         if self._search_engine is not None:
             try:
                 for record in records:
@@ -476,6 +525,8 @@ class MemoryService(ServiceBase):
                 return [r for r in records if r.id in ranked_ids]
             except Exception as e:
                 logger.warning("hybrid_search_failed_using_fallback", error=str(e))
+
+        # Tier 3: Substring fallback
         return [r for r in records if query.lower() in r.content.lower()]
 
     async def _get_previous_session_summary(self, user_id: UUID) -> str | None:

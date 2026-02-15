@@ -87,10 +87,8 @@ class ResponseGeneratedEvent(BaseEvent):
     tokens_used: int = Field(ge=0)
 
 
-# Safety Events
-class CrisisLevel(str, Enum):
-    """Crisis severity levels."""
-    NONE, LOW, ELEVATED, HIGH, CRITICAL = "NONE", "LOW", "ELEVATED", "HIGH", "CRITICAL"
+# Safety Events — CrisisLevel imported from canonical source
+from solace_common.enums import CrisisLevel  # noqa: E402
 
 
 class RiskFactor(BaseModel):

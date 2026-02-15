@@ -6,11 +6,12 @@ Implements secure token-based authentication with expiry and refresh capabilitie
 """
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import jwt
 import structlog
@@ -42,15 +43,19 @@ class TokenPayload:
     email: str
     role: str
     token_type: TokenType
+    jti: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert payload to dictionary."""
-        return {
+        d: dict[str, Any] = {
             "user_id": str(self.user_id),
             "email": self.email,
             "role": self.role,
             "type": self.token_type.value,
         }
+        if self.jti:
+            d["jti"] = self.jti
+        return d
 
 
 @dataclass
@@ -77,6 +82,51 @@ class TokenInvalidError(JWTError):
     pass
 
 
+class TokenBlacklist(ABC):
+    """Interface for token revocation blacklisting."""
+
+    @abstractmethod
+    async def add(self, jti: str, expires_at: datetime) -> None:
+        """Add a token JTI to the blacklist until its natural expiry."""
+
+    @abstractmethod
+    async def is_blacklisted(self, jti: str) -> bool:
+        """Check if a token JTI is in the blacklist."""
+
+
+class InMemoryTokenBlacklist(TokenBlacklist):
+    """In-memory token blacklist for development/testing."""
+
+    def __init__(self) -> None:
+        self._blacklist: dict[str, datetime] = {}
+
+    async def add(self, jti: str, expires_at: datetime) -> None:
+        self._blacklist[jti] = expires_at
+
+    async def is_blacklisted(self, jti: str) -> bool:
+        if jti in self._blacklist:
+            if self._blacklist[jti] > datetime.now(timezone.utc):
+                return True
+            del self._blacklist[jti]
+        return False
+
+
+class RedisTokenBlacklist(TokenBlacklist):
+    """Redis-backed token blacklist for production."""
+
+    def __init__(self, redis_client: Any) -> None:
+        self._redis = redis_client
+
+    async def add(self, jti: str, expires_at: datetime) -> None:
+        ttl = int((expires_at - datetime.now(timezone.utc)).total_seconds())
+        if ttl > 0:
+            await self._redis.setex(f"token_blacklist:{jti}", ttl, "1")
+
+    async def is_blacklisted(self, jti: str) -> bool:
+        result = await self._redis.get(f"token_blacklist:{jti}")
+        return result is not None
+
+
 class JWTService:
     """
     JWT Service for token generation and verification.
@@ -88,14 +138,16 @@ class JWTService:
     - Payload extraction
     """
 
-    def __init__(self, config: JWTConfig):
+    def __init__(self, config: JWTConfig, blacklist: TokenBlacklist | None = None):
         """
         Initialize JWT service.
 
         Args:
             config: JWT configuration
+            blacklist: Optional token blacklist for revocation support
         """
         self.config = config
+        self._blacklist = blacklist
         self.logger = structlog.get_logger(__name__)
 
     def generate_token_pair(
@@ -148,7 +200,7 @@ class JWTService:
             expires_in=self.config.access_token_expire_minutes * 60,
         )
 
-    def verify_token(self, token: str, expected_type: TokenType = TokenType.ACCESS) -> TokenPayload:
+    async def verify_token(self, token: str, expected_type: TokenType = TokenType.ACCESS) -> TokenPayload:
         """
         Verify and decode JWT token.
 
@@ -161,7 +213,7 @@ class JWTService:
 
         Raises:
             TokenExpiredError: If token has expired
-            TokenInvalidError: If token is invalid
+            TokenInvalidError: If token is invalid or revoked
         """
         try:
             payload = jwt.decode(
@@ -171,6 +223,12 @@ class JWTService:
                 audience=self.config.audience,
                 issuer=self.config.issuer,
             )
+
+            # Check revocation blacklist
+            jti = payload.get("jti")
+            if jti and self._blacklist:
+                if await self._blacklist.is_blacklisted(jti):
+                    raise TokenInvalidError("Token has been revoked")
 
             # Validate token type
             token_type = TokenType(payload.get("type"))
@@ -183,6 +241,7 @@ class JWTService:
                 email=payload["email"],
                 role=payload["role"],
                 token_type=token_type,
+                jti=jti,
             )
 
             self.logger.debug(
@@ -203,7 +262,45 @@ class JWTService:
             self.logger.warning("token_malformed", error=str(e))
             raise TokenInvalidError("Malformed token payload") from e
 
-    def refresh_access_token(self, refresh_token: str) -> str:
+    async def revoke_token(self, token: str) -> bool:
+        """
+        Revoke a token by adding its JTI to the blacklist.
+
+        Args:
+            token: JWT token string to revoke
+
+        Returns:
+            True if token was revoked, False if blacklist unavailable
+        """
+        if not self._blacklist:
+            self.logger.warning("token_revocation_unavailable", hint="No blacklist configured")
+            return False
+
+        try:
+            payload = jwt.decode(
+                token,
+                self.config.secret_key,
+                algorithms=[self.config.algorithm],
+                audience=self.config.audience,
+                issuer=self.config.issuer,
+            )
+            jti = payload.get("jti")
+            if not jti:
+                self.logger.warning("token_has_no_jti")
+                return False
+
+            expires_at = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+            await self._blacklist.add(jti, expires_at)
+            self.logger.info("token_revoked", jti=jti, user_id=payload.get("user_id"))
+            return True
+
+        except jwt.ExpiredSignatureError:
+            return True  # Already expired, no need to revoke
+        except jwt.InvalidTokenError as e:
+            self.logger.warning("revoke_invalid_token", error=str(e))
+            return False
+
+    async def refresh_access_token(self, refresh_token: str) -> str:
         """
         Generate new access token from refresh token.
 
@@ -218,7 +315,7 @@ class JWTService:
             TokenInvalidError: If refresh token is invalid
         """
         # Verify refresh token
-        payload = self.verify_token(refresh_token, expected_type=TokenType.REFRESH)
+        payload = await self.verify_token(refresh_token, expected_type=TokenType.REFRESH)
 
         # Generate new access token
         access_token = self._generate_token(
@@ -275,9 +372,11 @@ class JWTService:
         """
         now = datetime.now(timezone.utc)
         expires_at = now + expires_delta
+        jti = str(uuid4())
 
         jwt_payload = {
             **payload.to_dict(),
+            "jti": jti,
             "exp": expires_at,
             "iat": now,
             "nbf": now,

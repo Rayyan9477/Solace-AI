@@ -16,7 +16,7 @@ import structlog
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .auth import AuthSettings, JWTManager, TokenType
+from .auth import AuthSettings, InMemoryTokenBlacklist, JWTManager, TokenType
 
 logger = structlog.get_logger(__name__)
 
@@ -172,14 +172,14 @@ class ServiceTokenManager:
     ) -> None:
         self._auth_settings = auth_settings
         self._service_settings = service_settings
-        self._jwt_manager = JWTManager(auth_settings) if auth_settings else None
+        self._jwt_manager = JWTManager(auth_settings, token_blacklist=InMemoryTokenBlacklist()) if auth_settings else None
         self._token_cache: dict[str, ServiceCredentials] = {}
 
     def _get_jwt_manager(self) -> JWTManager:
         """Get or create JWT manager."""
         if self._jwt_manager is None:
             try:
-                self._jwt_manager = JWTManager(self._auth_settings)
+                self._jwt_manager = JWTManager(self._auth_settings, token_blacklist=InMemoryTokenBlacklist())
             except Exception as e:
                 logger.error("jwt_manager_creation_failed", error=str(e))
                 raise ValueError(

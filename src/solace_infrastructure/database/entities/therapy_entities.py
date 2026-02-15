@@ -92,12 +92,7 @@ class SessionRiskLevel(str, Enum):
     IMMINENT = "IMMINENT"
 
 
-class SeverityLevel(str, Enum):
-    MINIMAL = "MINIMAL"
-    MILD = "MILD"
-    MODERATE = "MODERATE"
-    MODERATELY_SEVERE = "MODERATELY_SEVERE"
-    SEVERE = "SEVERE"
+from solace_common.enums import SeverityLevel  # noqa: E402
 
 
 class SteppedCareLevel(str, Enum):

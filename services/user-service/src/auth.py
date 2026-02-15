@@ -694,7 +694,7 @@ class AuthenticationService:
             # Verify refresh token
             from .infrastructure.jwt_service import TokenType
 
-            payload = self._jwt_service.verify_token(
+            payload = await self._jwt_service.verify_token(
                 refresh_token,
                 expected_type=TokenType.REFRESH,
             )
@@ -761,7 +761,7 @@ class AuthenticationService:
         try:
             from .infrastructure.jwt_service import TokenType
 
-            payload = self._jwt_service.verify_token(
+            payload = await self._jwt_service.verify_token(
                 access_token,
                 expected_type=TokenType.ACCESS,
             )

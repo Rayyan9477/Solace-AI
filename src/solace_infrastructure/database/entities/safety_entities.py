@@ -43,13 +43,7 @@ class AssessmentType(str, Enum):
     SCHEDULED = "SCHEDULED"
 
 
-class RiskLevel(str, Enum):
-    """Risk level classification for safety assessments. Aligned with canonical CrisisLevel."""
-    NONE = "NONE"
-    LOW = "LOW"
-    ELEVATED = "ELEVATED"
-    HIGH = "HIGH"
-    CRITICAL = "CRITICAL"
+from solace_common.enums import CrisisLevel as RiskLevel  # noqa: E402
 
 
 class SafetyPlanStatus(str, Enum):

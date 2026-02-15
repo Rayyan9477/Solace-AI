@@ -182,7 +182,24 @@ async def lifespan(app: FastAPI):
         access_token_expire_minutes=settings.access_token_expire_minutes,
         refresh_token_expire_days=settings.refresh_token_expire_days,
     )
-    jwt_service = JWTService(jwt_config)
+    # Token blacklist (Redis-backed for production, in-memory fallback)
+    from .infrastructure.jwt_service import RedisTokenBlacklist, InMemoryTokenBlacklist
+    token_blacklist: Any = None
+    try:
+        import redis.asyncio as aioredis
+        redis_client = aioredis.from_url(
+            settings.redis.url,
+            decode_responses=True,
+            socket_timeout=settings.redis.timeout,
+        )
+        await redis_client.ping()
+        token_blacklist = RedisTokenBlacklist(redis_client)
+        logger.info("token_blacklist_initialized", backend="redis")
+    except Exception as bl_err:
+        logger.warning("redis_blacklist_unavailable", error=str(bl_err), hint="Using in-memory blacklist")
+        token_blacklist = InMemoryTokenBlacklist()
+
+    jwt_service = JWTService(jwt_config, blacklist=token_blacklist)
 
     # Password Service
     password_config = PasswordConfig(

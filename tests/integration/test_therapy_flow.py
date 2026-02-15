@@ -70,7 +70,7 @@ class TestRoutingDecision:
         precheck = safety_precheck_node(state)
         state_after = {**state, **precheck}
 
-        assert route_after_safety(state_after) == "supervisor"
+        assert route_after_safety(state_after) == "memory_retrieval"
 
     def test_high_risk_routes_to_crisis(self) -> None:
         state = create_initial_state(

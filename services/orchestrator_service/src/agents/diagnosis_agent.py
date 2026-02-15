@@ -42,13 +42,7 @@ class SymptomType(str, Enum):
     EMOTIONAL = "EMOTIONAL"
 
 
-class SeverityLevel(str, Enum):
-    """Severity levels for symptoms and diagnoses."""
-    MINIMAL = "MINIMAL"
-    MILD = "MILD"
-    MODERATE = "MODERATE"
-    MODERATELY_SEVERE = "MODERATELY_SEVERE"
-    SEVERE = "SEVERE"
+from solace_common.enums import SeverityLevel  # noqa: E402
 
 
 class DiagnosisAgentSettings(BaseSettings):
