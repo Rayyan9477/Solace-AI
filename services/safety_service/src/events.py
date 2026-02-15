@@ -148,6 +148,46 @@ class IncidentResolvedEvent(SafetyEvent):
     time_to_resolution_minutes: int | None = Field(default=None)
 
 
+class SafetyPlanCreatedEvent(SafetyEvent):
+    """Event fired when a safety plan is created for a user."""
+    event_type: EventType = Field(default=EventType.SAFETY_PLAN_CREATED)
+    plan_id: UUID = Field(...)
+    crisis_level: str = Field(...)
+    plan_components: list[str] = Field(default_factory=list)
+
+
+class SafetyPlanActivatedEvent(SafetyEvent):
+    """Event fired when a safety plan is activated."""
+    event_type: EventType = Field(default=EventType.SAFETY_PLAN_ACTIVATED)
+    plan_id: UUID = Field(...)
+    activation_reason: str = Field(...)
+
+
+class SafetyPlanUpdatedEvent(SafetyEvent):
+    """Event fired when a safety plan is updated."""
+    event_type: EventType = Field(default=EventType.SAFETY_PLAN_UPDATED)
+    plan_id: UUID = Field(...)
+    updated_components: list[str] = Field(default_factory=list)
+    update_reason: str = Field(default="")
+
+
+class OutputFilteredEvent(SafetyEvent):
+    """Event fired when AI output is filtered for safety."""
+    event_type: EventType = Field(default=EventType.OUTPUT_FILTERED)
+    modifications_count: int = Field(default=0, ge=0)
+    filter_reason: str = Field(default="")
+    resources_appended: bool = Field(default=False)
+
+
+class TrajectoryAlertEvent(SafetyEvent):
+    """Event fired when risk trajectory analysis detects concerning patterns."""
+    event_type: EventType = Field(default=EventType.TRAJECTORY_ALERT)
+    alert_type: str = Field(...)
+    trend: str = Field(default="worsening")
+    message_count_analyzed: int = Field(default=0, ge=0)
+    risk_score_delta: Decimal = Field(default=Decimal("0.0"))
+
+
 def to_kafka_event(event: SafetyEvent) -> Any:
     """Convert local safety event to canonical Kafka event for inter-service messaging.
 
@@ -167,6 +207,11 @@ def to_kafka_event(event: SafetyEvent) -> Any:
             RiskLevelChangedEvent as KafkaRiskLevelChanged,
             IncidentCreatedEvent as KafkaIncidentCreated,
             IncidentResolvedEvent as KafkaIncidentResolved,
+            SafetyPlanCreatedEvent as KafkaSafetyPlanCreated,
+            SafetyPlanActivatedEvent as KafkaSafetyPlanActivated,
+            SafetyPlanUpdatedEvent as KafkaSafetyPlanUpdated,
+            OutputFilteredEvent as KafkaOutputFiltered,
+            TrajectoryAlertEvent as KafkaTrajectoryAlert,
         )
     except ImportError:
         logger.debug("solace_events_not_available_for_bridge")
@@ -246,6 +291,42 @@ def to_kafka_event(event: SafetyEvent) -> Any:
             **base, incident_id=event.incident_id,
             resolution_notes=event.resolution_notes, resolved_by=event.resolved_by,
             time_to_resolution_minutes=event.time_to_resolution_minutes,
+        )
+
+    if isinstance(event, SafetyPlanCreatedEvent):
+        return KafkaSafetyPlanCreated(
+            **base, plan_id=event.plan_id,
+            crisis_level=KafkaCrisisLevel(event.crisis_level),
+            plan_components=event.plan_components,
+        )
+
+    if isinstance(event, SafetyPlanActivatedEvent):
+        return KafkaSafetyPlanActivated(
+            **base, plan_id=event.plan_id,
+            activation_reason=event.activation_reason,
+        )
+
+    if isinstance(event, SafetyPlanUpdatedEvent):
+        return KafkaSafetyPlanUpdated(
+            **base, plan_id=event.plan_id,
+            updated_components=event.updated_components,
+            update_reason=event.update_reason,
+        )
+
+    if isinstance(event, OutputFilteredEvent):
+        return KafkaOutputFiltered(
+            **base, modifications_count=event.modifications_count,
+            filter_reason=event.filter_reason,
+            resources_appended=event.resources_appended,
+        )
+
+    if isinstance(event, TrajectoryAlertEvent):
+        valid_trends = {"improving", "stable", "worsening"}
+        trend = event.trend if event.trend in valid_trends else "worsening"
+        return KafkaTrajectoryAlert(
+            **base, alert_type=event.alert_type, trend=trend,
+            message_count_analyzed=event.message_count_analyzed,
+            risk_score_delta=event.risk_score_delta,
         )
 
     logger.debug("no_kafka_mapping_for_event", event_type=event.event_type.value)

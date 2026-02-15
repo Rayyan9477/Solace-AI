@@ -277,6 +277,23 @@ async def lifespan(app: FastAPI):
     # Store in module-level for test access
     _state = state
 
+    # Initialize Kafka event bridge for cross-service event publishing
+    event_bridge = None
+    try:
+        from .infrastructure.event_bridge import initialize_event_bridge
+        # Get postgres pool for durable event outbox
+        _event_pool = None
+        try:
+            from solace_infrastructure.database.connection_manager import ConnectionPoolManager
+            _event_pool = await ConnectionPoolManager.get_pool()
+        except Exception:
+            logger.debug("event_outbox_pool_not_available", hint="Using in-memory outbox")
+        event_bridge = await initialize_event_bridge(postgres_pool=_event_pool)
+        state.event_bridge = event_bridge
+        logger.info("user_kafka_bridge_started")
+    except Exception as e:
+        logger.warning("user_kafka_bridge_not_configured", error=str(e))
+
     logger.info(
         "user_service_initialized",
         jwt_algorithm=settings.jwt_algorithm,
@@ -288,6 +305,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # --- Cleanup ---
+    if event_bridge:
+        await event_bridge.stop()
     logger.info("user_service_shutting_down", stats=state.stats)
     state.initialized = False
     _state = None

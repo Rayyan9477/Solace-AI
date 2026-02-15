@@ -131,9 +131,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             except ImportError:
                 logger.warning("solace_events_not_available", reason="Cannot configure Kafka settings")
 
+            # Get postgres pool for durable event outbox
+            _event_pool = None
+            try:
+                from solace_infrastructure.database.connection_manager import ConnectionPoolManager
+                _event_pool = await ConnectionPoolManager.get_pool()
+            except Exception:
+                logger.debug("event_outbox_pool_not_available", hint="Using in-memory outbox")
+
             notification_bridge = await initialize_notification_bridge(
                 kafka_settings=kafka_settings,
                 use_mock=settings.kafka_use_mock,
+                postgres_pool=_event_pool,
             )
             app.state.notification_bridge = notification_bridge
             logger.info("notification_bridge_started")

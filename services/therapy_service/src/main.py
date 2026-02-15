@@ -125,6 +125,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as e:
         logger.warning("context_assembler_init_failed", error=str(e))
 
+    # Initialize persistent repository via UnitOfWork
+    unit_of_work = None
+    try:
+        from .infrastructure.repository import create_unit_of_work
+        unit_of_work = create_unit_of_work()
+        logger.info("therapy_unit_of_work_initialized")
+    except Exception as e:
+        if settings.environment == "production":
+            raise RuntimeError(f"PostgreSQL repository required in production: {e}") from e
+        logger.warning("therapy_unit_of_work_fallback", error=str(e), fallback="in_memory")
+
     therapy_orchestrator = TherapyOrchestrator(
         settings=TherapyOrchestratorSettings(),
         technique_selector=technique_selector,
@@ -132,6 +143,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         llm_client=llm_client,
         event_bus=event_bus,
         context_assembler=context_assembler,
+        unit_of_work=unit_of_work,
     )
     await therapy_orchestrator.initialize()
     app.state.settings = settings
@@ -156,10 +168,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             except ImportError:
                 logger.warning("solace_events_not_available", reason="Cannot configure Kafka settings")
 
+            # Get postgres pool for durable event outbox
+            _event_pool = None
+            try:
+                from solace_infrastructure.database.connection_manager import ConnectionPoolManager
+                _event_pool = await ConnectionPoolManager.get_pool()
+            except Exception:
+                logger.debug("event_outbox_pool_not_available", hint="Using in-memory outbox")
+
             event_bridge = await initialize_event_bridge(
                 event_bus=event_bus,
                 kafka_settings=kafka_settings,
                 use_mock=settings.kafka_use_mock,
+                postgres_pool=_event_pool,
             )
             app.state.event_bridge = event_bridge
             logger.info("kafka_event_bridge_started")

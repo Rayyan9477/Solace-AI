@@ -3,10 +3,11 @@ Solace-AI Orchestrator Service - Supervisor Agent.
 Supervisor node for intent classification, agent selection, and routing decisions.
 """
 from __future__ import annotations
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
 import structlog
 from pydantic import Field
@@ -21,7 +22,39 @@ from .state_schema import (
     AgentResult,
 )
 
+if TYPE_CHECKING:
+    from services.shared.infrastructure.llm_client import UnifiedLLMClient
+
 logger = structlog.get_logger(__name__)
+
+# Module-level LLM client reference, set during orchestrator startup
+_supervisor_llm_client: UnifiedLLMClient | None = None
+
+
+def configure_supervisor_llm(client: UnifiedLLMClient | None) -> None:
+    """Set the LLM client for the supervisor. Called during orchestrator startup."""
+    global _supervisor_llm_client
+    _supervisor_llm_client = client
+
+
+# Valid IntentType values for LLM response parsing
+_INTENT_VALUES: set[str] = {it.value for it in IntentType}
+
+INTENT_CLASSIFICATION_PROMPT = (
+    "You are an intent classifier for a mental health support platform. "
+    "Classify the user's message into exactly one of these intents:\n"
+    "- crisis_disclosure: Expressing suicidal thoughts, self-harm intent, or immediate danger\n"
+    "- emotional_support: Seeking comfort, validation, or emotional processing\n"
+    "- symptom_discussion: Discussing specific mental health symptoms or conditions\n"
+    "- treatment_inquiry: Asking about therapy techniques, treatments, or what to do\n"
+    "- progress_update: Sharing updates on how they're doing or feeling\n"
+    "- assessment_request: Requesting a formal assessment or screening\n"
+    "- coping_strategy: Seeking specific coping skills or techniques\n"
+    "- psychoeducation: Asking informational questions about mental health\n"
+    "- session_management: Administrative requests (scheduling, session changes)\n"
+    "- general_chat: Casual conversation, greetings, or off-topic discussion\n\n"
+    'Respond with ONLY valid JSON: {"intent": "<intent_value>", "confidence": <0.0-1.0>}'
+)
 
 
 class SupervisorSettings(BaseSettings):
@@ -78,8 +111,13 @@ class SupervisorDecision:
 class IntentClassifier:
     """Classifies user intent from message content."""
 
-    def __init__(self, settings: SupervisorSettings) -> None:
+    def __init__(
+        self,
+        settings: SupervisorSettings,
+        llm_client: UnifiedLLMClient | None = None,
+    ) -> None:
         self._settings = settings
+        self._llm_client = llm_client
         self._crisis_keywords = set(kw.lower() for kw in settings.crisis_keywords)
         self._emotional_keywords = set(kw.lower() for kw in settings.emotional_keywords)
         self._symptom_keywords = set(kw.lower() for kw in settings.symptom_keywords)
@@ -165,6 +203,64 @@ class IntentClassifier:
         edu_indicators = ["what is", "explain", "tell me about", "how does", "why do i"]
         return any(ind in message for ind in edu_indicators)
 
+    async def refine_with_llm(
+        self,
+        message: str,
+        keyword_intent: IntentType,
+        keyword_confidence: float,
+    ) -> tuple[IntentType, float]:
+        """Refine intent classification using LLM when keyword confidence is low."""
+        if self._llm_client is None or not self._llm_client.is_available:
+            return keyword_intent, keyword_confidence
+        try:
+            response = await self._llm_client.generate(
+                system_prompt=INTENT_CLASSIFICATION_PROMPT,
+                user_message=message,
+                service_name="orchestrator_supervisor",
+                task_type="structured",
+                max_tokens=100,
+            )
+            if not response:
+                return keyword_intent, keyword_confidence
+
+            parsed = json.loads(response.strip())
+            llm_intent_str = parsed.get("intent", "")
+            llm_confidence = float(parsed.get("confidence", 0.5))
+
+            if llm_intent_str not in _INTENT_VALUES:
+                logger.debug("llm_intent_unknown_value", value=llm_intent_str)
+                return keyword_intent, keyword_confidence
+
+            llm_intent = IntentType(llm_intent_str)
+
+            # LLM agrees with keyword classifier - boost confidence
+            if llm_intent == keyword_intent:
+                boosted = min(max(keyword_confidence, llm_confidence) + 0.1, 1.0)
+                logger.info(
+                    "llm_intent_confirmed",
+                    intent=keyword_intent.value,
+                    boosted_confidence=boosted,
+                )
+                return keyword_intent, boosted
+
+            # LLM disagrees - use LLM only if substantially more confident
+            if llm_confidence > keyword_confidence + 0.15:
+                logger.info(
+                    "llm_intent_override",
+                    keyword_intent=keyword_intent.value,
+                    llm_intent=llm_intent.value,
+                    llm_confidence=llm_confidence,
+                )
+                return llm_intent, llm_confidence
+
+            return keyword_intent, keyword_confidence
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
+            logger.debug("llm_intent_parse_failed", error=str(e))
+            return keyword_intent, keyword_confidence
+        except Exception as e:
+            logger.warning("llm_intent_classification_failed", error=str(e))
+            return keyword_intent, keyword_confidence
+
 
 class AgentRouter:
     """Routes requests to appropriate agents based on intent and context."""
@@ -246,13 +342,17 @@ class SupervisorAgent:
     Handles intent classification, agent routing, and coordination.
     """
 
-    def __init__(self, settings: SupervisorSettings | None = None) -> None:
+    def __init__(
+        self,
+        settings: SupervisorSettings | None = None,
+        llm_client: UnifiedLLMClient | None = None,
+    ) -> None:
         self._settings = settings or SupervisorSettings()
-        self._intent_classifier = IntentClassifier(self._settings)
+        self._intent_classifier = IntentClassifier(self._settings, llm_client=llm_client)
         self._agent_router = AgentRouter(self._settings)
         self._decision_count = 0
 
-    def process(self, state: OrchestratorState) -> dict[str, Any]:
+    async def process(self, state: OrchestratorState) -> dict[str, Any]:
         """
         Process state and make supervisor decision.
         This is the main LangGraph node function.
@@ -274,7 +374,7 @@ class SupervisorAgent:
             has_context=bool(context),
             safety_risk=safety_flags.get("risk_level", "NONE"),
         )
-        decision = self.make_decision(message, context, safety_flags, active_treatment)
+        decision = await self.make_decision(message, context, safety_flags, active_treatment)
         agent_result = AgentResult(
             agent_type=AgentType.SUPERVISOR,
             success=True,
@@ -299,7 +399,7 @@ class SupervisorAgent:
             "metadata": {**state.get("metadata", {}), "supervisor_decision": decision.to_dict()},
         }
 
-    def make_decision(
+    async def make_decision(
         self,
         message: str,
         conversation_context: str = "",
@@ -320,6 +420,13 @@ class SupervisorAgent:
         """
         safety_flags = safety_flags or {}
         intent, confidence, matched_keywords = self._intent_classifier.classify(message, conversation_context)
+
+        # Refine with LLM when keyword confidence is below threshold
+        if confidence < self._settings.intent_confidence_threshold:
+            intent, confidence = await self._intent_classifier.refine_with_llm(
+                message, intent, confidence,
+            )
+
         has_active_treatment = active_treatment is not None
         selected_agents, routing_reason = self._agent_router.select_agents(
             intent, safety_flags, has_active_treatment
@@ -357,7 +464,7 @@ class SupervisorAgent:
         }
 
 
-def supervisor_node(state: OrchestratorState) -> dict[str, Any]:
+async def supervisor_node(state: OrchestratorState) -> dict[str, Any]:
     """
     LangGraph node function for supervisor processing.
     Creates a SupervisorAgent and processes the state.
@@ -368,5 +475,5 @@ def supervisor_node(state: OrchestratorState) -> dict[str, Any]:
     Returns:
         State updates dictionary
     """
-    supervisor = SupervisorAgent()
-    return supervisor.process(state)
+    supervisor = SupervisorAgent(llm_client=_supervisor_llm_client)
+    return await supervisor.process(state)

@@ -3,9 +3,10 @@ Solace-AI Diagnosis Service - DSM-5-TR/HiTOP Differential Generation.
 Generates clinical hypotheses with confidence scores and dimensional mapping.
 """
 from __future__ import annotations
+import json
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -13,7 +14,24 @@ import structlog
 
 from ..schemas import SymptomDTO, HypothesisDTO, SymptomType, SeverityLevel
 
+if TYPE_CHECKING:
+    from services.shared.infrastructure.llm_client import UnifiedLLMClient
+
 logger = structlog.get_logger(__name__)
+
+DIFFERENTIAL_PROMPT = (
+    "You are a clinical psychologist generating differential diagnoses. "
+    "Given the symptoms below, provide DSM-5-TR aligned diagnostic hypotheses.\n\n"
+    "For each hypothesis, provide:\n"
+    "- name: Human-readable disorder name\n"
+    "- dsm5_code: ICD-10/DSM-5 code (e.g. F32, F41.1)\n"
+    "- confidence: 0.0-1.0\n"
+    "- criteria_met: list of symptom names that support this diagnosis\n"
+    "- reasoning: brief clinical rationale\n\n"
+    "Important: Never provide definitive diagnoses. These are clinical hypotheses only.\n\n"
+    'Respond with ONLY valid JSON: {"hypotheses": [{"name": "...", "dsm5_code": "...", '
+    '"confidence": 0.0, "criteria_met": ["..."], "reasoning": "..."}]}'
+)
 
 
 class DifferentialSettings(BaseSettings):
@@ -39,8 +57,13 @@ class DifferentialResult:
 class DifferentialGenerator:
     """Generates differential diagnoses using DSM-5-TR criteria and HiTOP dimensions."""
 
-    def __init__(self, settings: DifferentialSettings | None = None) -> None:
+    def __init__(
+        self,
+        settings: DifferentialSettings | None = None,
+        llm_client: UnifiedLLMClient | None = None,
+    ) -> None:
         self._settings = settings or DifferentialSettings()
+        self._llm_client = llm_client
         self._dsm5_criteria = self._build_dsm5_criteria()
         self._hitop_dimensions = self._build_hitop_dimensions()
         self._question_bank = self._build_question_bank()
@@ -240,6 +263,16 @@ class DifferentialGenerator:
                 hitop_dimensions=self._calculate_hitop_scores(symptoms),
             )
             result.hypotheses.append(hypothesis)
+
+        # Enhance with LLM differential when available
+        if self._llm_client is not None and self._llm_client.is_available:
+            llm_hypotheses = await self._llm_generate_differential(symptoms, result.hypotheses)
+            if llm_hypotheses:
+                existing_codes = {h.dsm5_code for h in result.hypotheses}
+                for h in llm_hypotheses:
+                    if h.dsm5_code not in existing_codes and len(result.hypotheses) < self._settings.max_hypotheses:
+                        result.hypotheses.append(h)
+
         self._stats["hypotheses_generated"] += len(result.hypotheses)
         if self._settings.enable_hitop_mapping:
             result.hitop_scores = self._calculate_hitop_scores(symptoms)
@@ -248,6 +281,63 @@ class DifferentialGenerator:
         logger.debug("differential_generated", hypotheses=len(result.hypotheses),
                     missing_info=len(result.missing_info))
         return result
+
+    async def _llm_generate_differential(
+        self,
+        symptoms: list[SymptomDTO],
+        existing_hypotheses: list[HypothesisDTO],
+    ) -> list[HypothesisDTO]:
+        """Use LLM to generate additional differential hypotheses."""
+        try:
+            symptom_summary = ", ".join(
+                f"{s.name} ({s.severity.value}, confidence={s.confidence})" for s in symptoms
+            )
+            user_msg = f"Symptoms: {symptom_summary}"
+            if existing_hypotheses:
+                existing_names = ", ".join(h.name for h in existing_hypotheses)
+                user_msg += f"\n\nRule-based hypotheses already identified: {existing_names}"
+                user_msg += "\nPlease suggest additional diagnoses not already listed."
+
+            response = await self._llm_client.generate(
+                system_prompt=DIFFERENTIAL_PROMPT,
+                user_message=user_msg,
+                service_name="diagnosis_differential",
+                task_type="diagnosis",
+                max_tokens=600,
+            )
+            if not response:
+                return []
+
+            parsed = json.loads(response.strip())
+            llm_hypotheses: list[HypothesisDTO] = []
+            for item in parsed.get("hypotheses", []):
+                confidence = float(item.get("confidence", 0.5))
+                if confidence < self._settings.min_confidence_threshold:
+                    continue
+                llm_hypotheses.append(HypothesisDTO(
+                    hypothesis_id=uuid4(),
+                    name=item.get("name", "Unknown"),
+                    dsm5_code=item.get("dsm5_code", ""),
+                    icd11_code="",
+                    confidence=Decimal(str(round(confidence, 2))),
+                    confidence_interval=(
+                        Decimal(str(max(0, confidence - 0.15))),
+                        Decimal(str(min(1, confidence + 0.15))),
+                    ),
+                    criteria_met=item.get("criteria_met", []),
+                    criteria_missing=[],
+                    supporting_evidence=[item.get("reasoning", "")],
+                    severity=SeverityLevel.MODERATE,
+                    hitop_dimensions=self._calculate_hitop_scores(symptoms),
+                ))
+            logger.info("llm_differential_generated", count=len(llm_hypotheses))
+            return llm_hypotheses
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
+            logger.debug("llm_differential_parse_failed", error=str(e))
+            return []
+        except Exception as e:
+            logger.warning("llm_differential_failed", error=str(e))
+            return []
 
     def _calculate_match_confidence(self, symptom_names: set[str], symptoms: list[SymptomDTO],
                                      criteria: dict[str, Any]) -> tuple[float, dict[str, Any]]:

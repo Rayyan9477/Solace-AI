@@ -104,6 +104,45 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             raise RuntimeError(f"PHI encryption is required in production: {e}") from e
         logger.warning("phi_encryption_not_configured", error=str(e))
 
+    # Initialize service-to-service authentication
+    service_token_manager = None
+    service_client_factory = None
+    try:
+        from solace_security.service_auth import ServiceTokenManager, ServiceAuthSettings
+        from .infrastructure.clients import ServiceClientFactory
+        service_auth_settings = ServiceAuthSettings(service_name="orchestrator-service")
+        service_token_manager = ServiceTokenManager(service_settings=service_auth_settings)
+        service_client_factory = ServiceClientFactory(token_manager=service_token_manager)
+        logger.info("service_auth_initialized", service_name="orchestrator-service")
+    except Exception as e:
+        if settings.environment == "production":
+            raise RuntimeError(f"Service authentication required in production: {e}") from e
+        logger.warning("service_auth_not_configured", error=str(e))
+        try:
+            from .infrastructure.clients import ServiceClientFactory
+            service_client_factory = ServiceClientFactory()
+            logger.info("service_client_factory_initialized", auth="disabled")
+        except Exception as e2:
+            logger.warning("service_client_factory_failed", error=str(e2))
+
+    # Initialize shared LLM client for agent nodes
+    llm_client = None
+    try:
+        from services.shared.infrastructure.llm_client import UnifiedLLMClient, LLMClientSettings
+        llm_client = UnifiedLLMClient(LLMClientSettings())
+        await llm_client.initialize()
+        logger.info("orchestrator_llm_client_initialized", available=llm_client.is_available)
+    except Exception as e:
+        if settings.environment == "production":
+            raise RuntimeError(f"LLM client required in production: {e}") from e
+        logger.warning("orchestrator_llm_client_not_configured", error=str(e))
+
+    # Configure agent nodes with LLM client
+    from .agents.chat_agent import configure_chat_agent_llm
+    from .langgraph.supervisor import configure_supervisor_llm
+    configure_chat_agent_llm(llm_client)
+    configure_supervisor_llm(llm_client)
+
     from .langgraph import OrchestratorGraphBuilder
     from .langgraph.graph_builder import GraphBuilderSettings
 
@@ -114,14 +153,46 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.settings = settings
     app.state.graph_builder = graph_builder
     app.state.compiled_graph = compiled_graph
+    app.state.service_token_manager = service_token_manager
+    app.state.service_client_factory = service_client_factory
+    app.state.llm_client = llm_client
     app.state.active_connections: dict[str, set] = {}
+
+    # Initialize Kafka event bridge for cross-service event publishing
+    event_bridge = None
+    try:
+        from .events import get_event_bus
+        from .infrastructure.event_bridge import initialize_event_bridge
+        # Get postgres pool for durable event outbox
+        _event_pool = None
+        try:
+            from solace_infrastructure.database.connection_manager import ConnectionPoolManager
+            _event_pool = await ConnectionPoolManager.get_pool()
+        except Exception:
+            logger.debug("event_outbox_pool_not_available", hint="Using in-memory outbox")
+        event_bridge = await initialize_event_bridge(postgres_pool=_event_pool)
+        event_bus = get_event_bus()
+        event_bus.subscribe_all(event_bridge.bridge_event)
+        app.state.event_bridge = event_bridge
+        logger.info("orchestrator_kafka_bridge_started")
+    except Exception as e:
+        logger.warning("orchestrator_kafka_bridge_not_configured", error=str(e))
+
     logger.info(
         "orchestrator_service_started",
         environment=settings.environment,
         checkpointing=settings.enable_checkpointing,
+        service_auth=service_token_manager is not None,
+        llm_available=llm_client is not None and llm_client.is_available,
     )
     yield
     logger.info("orchestrator_service_stopping")
+    if event_bridge:
+        await event_bridge.stop()
+    if llm_client:
+        await llm_client.shutdown()
+    if service_client_factory:
+        await service_client_factory.close_all()
     app.state.active_connections.clear()
     logger.info("orchestrator_service_stopped")
 

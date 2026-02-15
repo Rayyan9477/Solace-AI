@@ -3,11 +3,12 @@ Solace-AI Diagnosis Service - Symptom Extraction from Conversation.
 Extracts symptoms, temporal information, and contextual factors from user messages.
 """
 from __future__ import annotations
+import json
 import re
 import time
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -15,7 +16,25 @@ import structlog
 
 from ..schemas import SymptomDTO, SymptomType, SeverityLevel
 
+if TYPE_CHECKING:
+    from services.shared.infrastructure.llm_client import UnifiedLLMClient
+
 logger = structlog.get_logger(__name__)
+
+SYMPTOM_EXTRACTION_PROMPT = (
+    "You are a clinical symptom extractor. Analyze the user's message and extract "
+    "mental health symptoms. For each symptom found, provide:\n"
+    "- name: a snake_case identifier (e.g. depressed_mood, anxiety, sleep_disturbance)\n"
+    "- type: one of EMOTIONAL, COGNITIVE, SOMATIC, BEHAVIORAL\n"
+    "- severity: one of MINIMAL, MILD, MODERATE, MODERATELY_SEVERE, SEVERE\n"
+    "- confidence: 0.0-1.0\n"
+    "- evidence: the phrase from the text that indicates this symptom\n\n"
+    "Respond with ONLY valid JSON: {\"symptoms\": [{\"name\": \"...\", \"type\": \"...\", "
+    "\"severity\": \"...\", \"confidence\": 0.0, \"evidence\": \"...\"}]}"
+)
+
+_SYMPTOM_TYPE_MAP = {v.value: v for v in SymptomType}
+_SEVERITY_MAP = {v.value: v for v in SeverityLevel}
 
 
 class SymptomExtractorSettings(BaseSettings):
@@ -40,8 +59,13 @@ class ExtractionResult:
 class SymptomExtractor:
     """Extracts symptoms from conversation using pattern matching and NLP."""
 
-    def __init__(self, settings: SymptomExtractorSettings | None = None) -> None:
+    def __init__(
+        self,
+        settings: SymptomExtractorSettings | None = None,
+        llm_client: UnifiedLLMClient | None = None,
+    ) -> None:
         self._settings = settings or SymptomExtractorSettings()
+        self._llm_client = llm_client
         self._symptom_patterns = self._build_symptom_patterns()
         self._temporal_patterns = self._build_temporal_patterns()
         self._severity_indicators = self._build_severity_indicators()
@@ -188,6 +212,17 @@ class SymptomExtractor:
         result = ExtractionResult()
         combined_text = self._build_context(message, conversation_history)
         result.symptoms = self._extract_symptoms(message, existing_symptoms)
+
+        # Enhance with LLM when regex finds few symptoms
+        if (
+            len(result.symptoms) < 2
+            and self._llm_client is not None
+            and self._llm_client.is_available
+        ):
+            llm_symptoms = await self._llm_extract_symptoms(message, existing_symptoms)
+            if llm_symptoms:
+                result.symptoms = self.merge_symptoms(result.symptoms, llm_symptoms)
+
         if self._settings.enable_temporal_extraction:
             result.temporal_info = self._extract_temporal_info(combined_text)
         result.contextual_factors = self._extract_contextual_factors(combined_text)
@@ -198,6 +233,50 @@ class SymptomExtractor:
                     risks=len(result.risk_indicators),
                     time_ms=int((time.perf_counter() - start_time) * 1000))
         return result
+
+    async def _llm_extract_symptoms(
+        self, message: str, existing_symptoms: list[SymptomDTO],
+    ) -> list[SymptomDTO]:
+        """Use LLM to extract symptoms when regex finds few."""
+        try:
+            response = await self._llm_client.generate(
+                system_prompt=SYMPTOM_EXTRACTION_PROMPT,
+                user_message=message,
+                service_name="diagnosis_symptom_extractor",
+                task_type="diagnosis",
+                max_tokens=500,
+            )
+            if not response:
+                return []
+            parsed = json.loads(response.strip())
+            existing_names = {s.name for s in existing_symptoms}
+            symptoms: list[SymptomDTO] = []
+            for item in parsed.get("symptoms", []):
+                name = item.get("name", "")
+                if not name or name in existing_names:
+                    continue
+                sym_type = _SYMPTOM_TYPE_MAP.get(item.get("type", ""), SymptomType.EMOTIONAL)
+                severity = _SEVERITY_MAP.get(item.get("severity", ""), SeverityLevel.MODERATE)
+                confidence = float(item.get("confidence", 0.6))
+                if confidence < self._settings.min_symptom_confidence:
+                    continue
+                symptoms.append(SymptomDTO(
+                    symptom_id=uuid4(),
+                    name=name,
+                    description=item.get("evidence", f"LLM-extracted: {name}"),
+                    symptom_type=sym_type,
+                    severity=severity,
+                    extracted_from=message[:200],
+                    confidence=Decimal(str(round(confidence, 2))),
+                ))
+            logger.info("llm_symptom_extraction", count=len(symptoms))
+            return symptoms
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
+            logger.debug("llm_symptom_parse_failed", error=str(e))
+            return []
+        except Exception as e:
+            logger.warning("llm_symptom_extraction_failed", error=str(e))
+            return []
 
     def _build_context(self, message: str, history: list[dict[str, str]]) -> str:
         """Build context from message and history."""

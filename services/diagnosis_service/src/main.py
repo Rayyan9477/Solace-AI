@@ -97,11 +97,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             raise RuntimeError(f"PHI encryption is required in production: {e}") from e
         logger.warning("phi_encryption_not_configured", error=str(e))
 
+    # Initialize LLM client for enhanced symptom extraction and differential
+    llm_client = None
+    try:
+        from services.shared.infrastructure.llm_client import UnifiedLLMClient, LLMClientSettings
+        llm_client = UnifiedLLMClient(LLMClientSettings())
+        await llm_client.initialize()
+        logger.info("diagnosis_llm_client_initialized", available=llm_client.is_available)
+    except Exception as e:
+        if settings.environment == "production":
+            raise RuntimeError(f"LLM client required in production: {e}") from e
+        logger.warning("diagnosis_llm_client_not_configured", error=str(e))
+
     from .domain.service import DiagnosisService, DiagnosisServiceSettings
     from .domain.symptom_extractor import SymptomExtractor, SymptomExtractorSettings
     from .domain.differential import DifferentialGenerator, DifferentialSettings
-    symptom_extractor = SymptomExtractor(SymptomExtractorSettings())
-    differential_generator = DifferentialGenerator(DifferentialSettings())
+    symptom_extractor = SymptomExtractor(SymptomExtractorSettings(), llm_client=llm_client)
+    differential_generator = DifferentialGenerator(DifferentialSettings(), llm_client=llm_client)
     # Initialize persistent repository
     repository = None
     try:
@@ -123,11 +135,39 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.diagnosis_service = diagnosis_service
     app.state.symptom_extractor = symptom_extractor
     app.state.differential_generator = differential_generator
+    app.state.llm_client = llm_client
+
+    # Initialize Kafka event bridge for cross-service event publishing
+    event_bridge = None
+    try:
+        from .events import EventDispatcher
+        from .infrastructure.event_bridge import initialize_event_bridge
+        # Get postgres pool for durable event outbox
+        _event_pool = None
+        try:
+            from solace_infrastructure.database.connection_manager import ConnectionPoolManager
+            _event_pool = await ConnectionPoolManager.get_pool()
+        except Exception:
+            logger.debug("event_outbox_pool_not_available", hint="Using in-memory outbox")
+        event_dispatcher = EventDispatcher()
+        event_bridge = await initialize_event_bridge(postgres_pool=_event_pool)
+        event_dispatcher.subscribe_all(event_bridge.bridge_event)
+        app.state.event_dispatcher = event_dispatcher
+        app.state.event_bridge = event_bridge
+        logger.info("diagnosis_kafka_bridge_started")
+    except Exception as e:
+        logger.warning("diagnosis_kafka_bridge_not_configured", error=str(e))
+
     logger.info("diagnosis_service_started", environment=settings.environment,
-                anti_sycophancy=settings.enable_anti_sycophancy)
+                anti_sycophancy=settings.enable_anti_sycophancy,
+                llm_available=llm_client is not None and llm_client.is_available)
     yield
     logger.info("diagnosis_service_stopping")
+    if event_bridge:
+        await event_bridge.stop()
     await diagnosis_service.shutdown()
+    if llm_client:
+        await llm_client.shutdown()
     logger.info("diagnosis_service_stopped")
 
 

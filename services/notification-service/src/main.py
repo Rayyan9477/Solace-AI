@@ -201,6 +201,25 @@ async def lifespan(app: FastAPI):
     _notification_service = _create_notification_service(settings)
     logger.info("notification_service_ready")
 
+    # Initialize Kafka event bridge for publishing notification delivery events
+    event_bridge = None
+    try:
+        from .events import get_event_publisher
+        from .infrastructure.event_bridge import initialize_event_bridge
+        # Get postgres pool for durable event outbox
+        _event_pool = None
+        try:
+            from solace_infrastructure.database.connection_manager import ConnectionPoolManager
+            _event_pool = await ConnectionPoolManager.get_pool()
+        except Exception:
+            logger.debug("event_outbox_pool_not_available", hint="Using in-memory outbox")
+        event_bridge = await initialize_event_bridge(postgres_pool=_event_pool)
+        publisher = get_event_publisher()
+        publisher.register_callback(event_bridge.bridge_event)
+        logger.info("notification_kafka_bridge_started")
+    except Exception as e:
+        logger.warning("notification_kafka_bridge_not_configured", error=str(e))
+
     # Start Kafka safety event consumer if enabled
     safety_consumer = None
     if settings.kafka.enabled:
@@ -226,6 +245,11 @@ async def lifespan(app: FastAPI):
             logger.error("safety_consumer_start_failed", error=str(e))
 
     yield
+
+    # Stop Kafka event bridge
+    if event_bridge:
+        await event_bridge.stop()
+        logger.info("notification_kafka_bridge_stopped")
 
     # Stop Kafka consumer
     if safety_consumer:

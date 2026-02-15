@@ -65,6 +65,7 @@ class KafkaEventBridge(SafetyEventHandler):
         kafka_settings: KafkaSettings | None = None,
         producer_settings: ProducerSettings | None = None,
         use_mock: bool = False,
+        postgres_pool: Any = None,
     ) -> None:
         if not _KAFKA_AVAILABLE:
             logger.warning("kafka_not_available", reason="solace_events not installed")
@@ -76,6 +77,7 @@ class KafkaEventBridge(SafetyEventHandler):
             producer_settings=producer_settings,
             use_outbox=True,
             use_mock=use_mock,
+            postgres_pool=postgres_pool,
         )
         self._started = False
         logger.info("kafka_event_bridge_initialized", use_mock=use_mock)
@@ -135,11 +137,13 @@ class SafetyCrisisNotificationBridge:
         kafka_settings: KafkaSettings | None = None,
         producer_settings: ProducerSettings | None = None,
         use_mock: bool = False,
+        postgres_pool: Any = None,
     ) -> None:
         self._bridge = KafkaEventBridge(
             kafka_settings=kafka_settings,
             producer_settings=producer_settings,
             use_mock=use_mock,
+            postgres_pool=postgres_pool,
         )
         self._registered = False
 
@@ -177,12 +181,14 @@ def get_notification_bridge() -> SafetyCrisisNotificationBridge:
 async def initialize_notification_bridge(
     kafka_settings: KafkaSettings | None = None,
     use_mock: bool = False,
+    postgres_pool: Any = None,
 ) -> SafetyCrisisNotificationBridge:
     """Initialize and start the notification bridge."""
     global _notification_bridge
     _notification_bridge = SafetyCrisisNotificationBridge(
         kafka_settings=kafka_settings,
         use_mock=use_mock,
+        postgres_pool=postgres_pool,
     )
     await _notification_bridge.start()
     return _notification_bridge

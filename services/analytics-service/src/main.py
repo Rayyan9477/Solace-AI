@@ -9,6 +9,7 @@ Principles: 12-Factor App, Dependency Injection, Configuration Externalization
 """
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Literal
 
@@ -253,11 +254,83 @@ async def lifespan(app: FastAPI):
     set_dependencies(_analytics_aggregator, _report_service, _analytics_consumer)
 
     await _analytics_consumer.start()
+
+    # Wire Kafka consumer when enabled - feeds real Kafka events into analytics
+    kafka_event_consumer = None
+    kafka_consume_task = None
+    if settings.consumer.kafka_enabled:
+        try:
+            from src.solace_events.consumer import create_consumer as create_kafka_consumer
+            from src.solace_events.config import KafkaSettings as EventKafkaSettings
+
+            kafka_settings = EventKafkaSettings(
+                bootstrap_servers=settings.consumer.kafka_bootstrap_servers,
+            )
+            kafka_event_consumer = create_kafka_consumer(
+                group_id=settings.consumer.group_id,
+                kafka_settings=kafka_settings,
+            )
+
+            # Feed deserialized Kafka events into the analytics processor
+            async def _kafka_to_analytics(event):
+                await _analytics_consumer.process_event(event.model_dump())
+
+            kafka_event_consumer.register_default_handler(_kafka_to_analytics)
+
+            # Wire DLQ handler for failed event processing
+            try:
+                from src.solace_events.dead_letter import create_dead_letter_handler
+                from src.solace_events.schemas import get_topic_for_event
+                _dlq_pool = None
+                try:
+                    from solace_infrastructure.database.connection_manager import ConnectionPoolManager
+                    _dlq_pool = await ConnectionPoolManager.get_pool()
+                except Exception:
+                    pass
+                dlq_handler = create_dead_letter_handler(
+                    consumer_group=settings.consumer.group_id,
+                    postgres_pool=_dlq_pool,
+                )
+                if hasattr(dlq_handler.store, "ensure_table"):
+                    await dlq_handler.store.ensure_table()
+
+                async def _handle_dlq(event, error_msg):
+                    topic = get_topic_for_event(event) or event.event_type
+                    await dlq_handler.handle_failure(
+                        event=event, original_topic=topic, error=Exception(error_msg),
+                    )
+
+                kafka_event_consumer.set_dead_letter_handler(_handle_dlq)
+                logger.info("analytics_dlq_handler_configured", postgres=_dlq_pool is not None)
+            except Exception as dlq_err:
+                logger.warning("analytics_dlq_handler_failed", error=str(dlq_err))
+
+            try:
+                from .consumer import ConsumerConfig as DomainConsumerConfig
+            except ImportError:
+                from consumer import ConsumerConfig as DomainConsumerConfig
+            topics = DomainConsumerConfig().topics
+            await kafka_event_consumer.start(topics)
+            kafka_consume_task = asyncio.create_task(kafka_event_consumer.consume_loop())
+            logger.info("analytics_kafka_consumer_started", topics=topics)
+        except Exception as e:
+            logger.error("analytics_kafka_consumer_failed", error=str(e))
+            kafka_event_consumer = None
+
     logger.info("analytics_service_ready")
 
     yield
 
     logger.info("analytics_service_shutdown")
+    if kafka_consume_task:
+        kafka_consume_task.cancel()
+        try:
+            await kafka_consume_task
+        except asyncio.CancelledError:
+            pass
+    if kafka_event_consumer:
+        await kafka_event_consumer.stop()
+        logger.info("analytics_kafka_consumer_stopped")
     await _analytics_consumer.stop()
     _analytics_aggregator = None
     _report_service = None

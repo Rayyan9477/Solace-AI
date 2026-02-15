@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 import structlog
 from pydantic import Field
@@ -19,7 +19,34 @@ from ..langgraph.state_schema import (
     MessageEntry,
 )
 
+if TYPE_CHECKING:
+    from services.shared.infrastructure.llm_client import UnifiedLLMClient
+
 logger = structlog.get_logger(__name__)
+
+# Module-level LLM client reference, set during orchestrator startup
+_llm_client: UnifiedLLMClient | None = None
+
+
+def configure_chat_agent_llm(client: UnifiedLLMClient | None) -> None:
+    """Set the LLM client for the chat agent. Called during orchestrator startup."""
+    global _llm_client
+    _llm_client = client
+
+
+CHAT_SYSTEM_PROMPT = (
+    "You are Solace, a warm and compassionate AI mental health support companion. "
+    "You are having a general conversation (not a formal therapy session). "
+    "Your responses should:\n"
+    "- Be empathetic, warm, and naturally conversational\n"
+    "- Validate the person's feelings without being clinical\n"
+    "- Gently encourage them to share more when appropriate\n"
+    "- Keep responses concise (2-4 sentences typically)\n"
+    "- Never diagnose, prescribe medication, or provide clinical assessments\n"
+    "- If someone shares something concerning, gently encourage professional support\n"
+    "- Use the person's context and conversation history to make responses "
+    "feel personal and connected"
+)
 
 
 class ConversationTone(str, Enum):
@@ -337,10 +364,15 @@ class ChatAgent:
     Provides empathetic, supportive responses for non-clinical content.
     """
 
-    def __init__(self, settings: ChatAgentSettings | None = None) -> None:
+    def __init__(
+        self,
+        settings: ChatAgentSettings | None = None,
+        llm_client: UnifiedLLMClient | None = None,
+    ) -> None:
         self._settings = settings or ChatAgentSettings()
         self._topic_classifier = TopicClassifier()
         self._response_generator = ResponseGenerator(self._settings)
+        self._llm_client = llm_client
         self._message_count = 0
 
     async def process(self, state: OrchestratorState) -> dict[str, Any]:
@@ -359,14 +391,47 @@ class ChatAgent:
         personality_style = state.get("personality_style", {})
         conversation_context = state.get("conversation_context", "")
         memory_context = state.get("memory_context", {})
-        
+        assembled_context = state.get("assembled_context", "")
+
         logger.info(
             "chat_agent_processing",
             message_length=len(message),
             has_personality_style=bool(personality_style),
             has_memory_context=bool(memory_context),
+            has_llm=self._llm_client is not None,
         )
         topic = self._topic_classifier.classify(message)
+
+        # Use LLM for nuanced topics, templates for formulaic ones
+        _llm_topics = (
+            TopicCategory.GENERAL,
+            TopicCategory.SMALL_TALK,
+            TopicCategory.CHECK_IN,
+            TopicCategory.CLARIFICATION,
+        )
+        if (
+            self._llm_client is not None
+            and self._llm_client.is_available
+            and topic.category in _llm_topics
+        ):
+            llm_response = await self._generate_llm_response(
+                message, topic, assembled_context, conversation_context, personality_style,
+            )
+            if llm_response:
+                warmth = personality_style.get("warmth", self._settings.default_warmth)
+                return self._build_state_update(
+                    ChatResponse(
+                        content=llm_response,
+                        tone=self._response_generator._determine_tone(topic.category, warmth),
+                        topic=topic.category,
+                        includes_follow_up=False,
+                        empathy_applied=True,
+                        warmth_level=warmth,
+                    ),
+                    topic,
+                )
+
+        # Fallback to template responses
         response = self._response_generator.generate(
             message=message,
             topic=topic,
@@ -375,6 +440,45 @@ class ChatAgent:
             memory_context=memory_context,
         )
         return self._build_state_update(response, topic)
+
+    async def _generate_llm_response(
+        self,
+        message: str,
+        topic: TopicClassification,
+        assembled_context: str,
+        conversation_context: str,
+        personality_style: dict[str, Any],
+    ) -> str:
+        """Generate response using LLM with context. Returns empty string on failure."""
+        try:
+            warmth = personality_style.get("warmth", self._settings.default_warmth)
+            style_instruction = ""
+            if warmth > 0.7:
+                style_instruction = "\nUse a very warm, nurturing tone."
+            elif warmth < 0.4:
+                style_instruction = "\nUse a calm, professional tone."
+
+            system_prompt = CHAT_SYSTEM_PROMPT + style_instruction
+            context = assembled_context or conversation_context or None
+
+            response = await self._llm_client.generate(
+                system_prompt=system_prompt,
+                user_message=message,
+                context=context,
+                service_name="orchestrator_chat_agent",
+                task_type="therapy",
+                max_tokens=self._settings.max_response_length,
+            )
+            if response:
+                logger.info(
+                    "chat_agent_llm_response_generated",
+                    topic=topic.category.value,
+                    length=len(response),
+                )
+            return response
+        except Exception as e:
+            logger.warning("chat_agent_llm_failed", error=str(e), topic=topic.category.value)
+            return ""
 
     def _build_state_update(
         self,
@@ -423,5 +527,5 @@ async def chat_agent_node(state: OrchestratorState) -> dict[str, Any]:
     Returns:
         State updates dictionary
     """
-    agent = ChatAgent()
+    agent = ChatAgent(llm_client=_llm_client)
     return await agent.process(state)

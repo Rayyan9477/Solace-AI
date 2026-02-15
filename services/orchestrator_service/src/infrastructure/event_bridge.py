@@ -34,6 +34,7 @@ class KafkaEventBridge:
         self,
         kafka_settings: KafkaSettings | None = None,
         use_mock: bool = False,
+        postgres_pool: Any = None,
     ) -> None:
         if not _KAFKA_AVAILABLE:
             logger.info("kafka_bridge_disabled", reason="solace_events not installed")
@@ -41,6 +42,7 @@ class KafkaEventBridge:
             return
         self._publisher = create_publisher(
             kafka_settings=kafka_settings, use_outbox=True, use_mock=use_mock,
+            postgres_pool=postgres_pool,
         )
         self._started = False
         logger.info("orchestrator_kafka_bridge_initialized")
@@ -97,9 +99,10 @@ def get_event_bridge() -> KafkaEventBridge | None:
 async def initialize_event_bridge(
     kafka_settings: KafkaSettings | None = None,
     use_mock: bool = False,
+    postgres_pool: Any = None,
 ) -> KafkaEventBridge:
     """Initialize and start the Kafka event bridge."""
     global _bridge
-    _bridge = KafkaEventBridge(kafka_settings=kafka_settings, use_mock=use_mock)
+    _bridge = KafkaEventBridge(kafka_settings=kafka_settings, use_mock=use_mock, postgres_pool=postgres_pool)
     await _bridge.start()
     return _bridge

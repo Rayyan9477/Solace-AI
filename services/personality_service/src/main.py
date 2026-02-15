@@ -139,9 +139,33 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.trait_detector = trait_detector
     app.state.style_adapter = style_adapter
     app.state.llm_client = llm_client
+
+    # Initialize Kafka event bridge for cross-service event publishing
+    event_bridge = None
+    try:
+        from .events import EventBus
+        from .infrastructure.event_bridge import initialize_event_bridge, shutdown_event_bridge
+        # Get postgres pool for durable event outbox
+        _event_pool = None
+        try:
+            from solace_infrastructure.database.connection_manager import ConnectionPoolManager
+            _event_pool = await ConnectionPoolManager.get_pool()
+        except Exception:
+            logger.debug("event_outbox_pool_not_available", hint="Using in-memory outbox")
+        event_bus = EventBus()
+        event_bridge = await initialize_event_bridge(event_bus=event_bus, postgres_pool=_event_pool)
+        app.state.event_bus = event_bus
+        app.state.event_bridge = event_bridge
+        logger.info("personality_kafka_bridge_started")
+    except Exception as e:
+        logger.warning("personality_kafka_bridge_not_configured", error=str(e))
+
     logger.info("personality_service_started", environment=settings.environment, llm_enabled=llm_client is not None)
     yield
     logger.info("personality_service_stopping")
+    if event_bridge:
+        from .infrastructure.event_bridge import shutdown_event_bridge
+        await shutdown_event_bridge()
     await personality_orchestrator.shutdown()
     if llm_client:
         await llm_client.shutdown()

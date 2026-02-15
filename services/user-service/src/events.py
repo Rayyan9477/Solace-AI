@@ -193,3 +193,49 @@ class AccountLockedEvent(DomainEvent):
     event_type: EventType = Field(default=EventType.ACCOUNT_LOCKED)
     locked_until: datetime
     attempts: int
+
+
+def to_kafka_event(event: DomainEvent) -> Any:
+    """Convert local user event to canonical Kafka event for inter-service messaging.
+
+    Maps user lifecycle events to canonical schemas.
+    Returns None for internal-only events or if solace_events is not available.
+    """
+    try:
+        from src.solace_events.schemas import (
+            EventMetadata as KafkaMetadata,
+            UserCreatedKafkaEvent,
+            UserDeletedKafkaEvent,
+            ConsentChangedKafkaEvent,
+        )
+    except ImportError:
+        logger.debug("solace_events_not_available_for_bridge")
+        return None
+
+    meta = KafkaMetadata(
+        event_id=event.event_id, timestamp=event.occurred_at,
+        correlation_id=event.correlation_id or event.event_id,
+        source_service="user-service",
+    )
+    base: dict[str, Any] = {"user_id": event.aggregate_id, "session_id": None, "metadata": meta}
+
+    if isinstance(event, UserCreatedEvent):
+        return UserCreatedKafkaEvent(
+            **base, email=event.email,
+            display_name=event.display_name, role=event.role,
+        )
+
+    if isinstance(event, UserDeletedEvent):
+        return UserDeletedKafkaEvent(**base, reason=event.reason)
+
+    if isinstance(event, ConsentGrantedEvent):
+        return ConsentChangedKafkaEvent(
+            **base, consent_type=event.consent_type, action="granted",
+        )
+
+    if isinstance(event, ConsentRevokedEvent):
+        return ConsentChangedKafkaEvent(
+            **base, consent_type=event.consent_type, action="revoked",
+        )
+
+    return None

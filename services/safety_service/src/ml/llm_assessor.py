@@ -133,15 +133,22 @@ class LLMAssessor:
     Provides nuanced clinical assessment with structured outputs.
     """
 
-    def __init__(self, config: LLMAssessorConfig | None = None, anthropic_client: Any | None = None) -> None:
+    def __init__(
+        self,
+        config: LLMAssessorConfig | None = None,
+        anthropic_client: Any | None = None,
+        unified_llm_client: Any | None = None,
+    ) -> None:
         """
         Initialize LLM assessor.
 
         Args:
             config: Configuration settings
             anthropic_client: Optional Anthropic client instance (deprecated, use LangChain instead)
+            unified_llm_client: Optional UnifiedLLMClient instance (Portkey gateway)
         """
         self._config = config or LLMAssessorConfig()
+        self._unified_llm_client = unified_llm_client
         self._assessment_cache: dict[str, RiskAssessment] = {}
         self._cache_timestamps: dict[str, datetime] = {}
 
@@ -350,7 +357,26 @@ Be conservative: when uncertain, err on the side of caution and assess higher ri
                 )
                 return json.loads(response.content[0].text)
             except Exception as e:
-                logger.error("anthropic_call_failed", error=str(e), fallback="mock")
+                logger.error("anthropic_call_failed", error=str(e), fallback="unified_llm")
+
+        # UnifiedLLMClient fallback (Portkey gateway)
+        if self._unified_llm_client and getattr(self._unified_llm_client, "is_available", False):
+            try:
+                response_text = await self._unified_llm_client.generate(
+                    system_prompt=system_prompt,
+                    user_message=user_prompt,
+                    service_name="safety_llm_assessor",
+                    task_type="crisis",
+                    max_tokens=self._config.max_tokens,
+                )
+                if response_text:
+                    parsed = json.loads(response_text)
+                    logger.info("unified_llm_assessment_completed")
+                    return parsed
+            except json.JSONDecodeError as e:
+                logger.error("unified_llm_json_parse_failed", error=str(e), fallback="rules")
+            except Exception as e:
+                logger.error("unified_llm_call_failed", error=str(e), fallback="rules")
 
         # Rule-based fallback when LLM is unavailable
         logger.warning("llm_unavailable_using_rule_based_fallback")
