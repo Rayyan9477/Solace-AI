@@ -241,8 +241,10 @@ class EventPublisher:
         self._started = False
 
     async def start(self) -> None:
-        """Start the publisher."""
+        """Start the publisher and ensure outbox tables exist."""
         await self._producer.start()
+        if hasattr(self._outbox_store, "ensure_table"):
+            await self._outbox_store.ensure_table()
         self._started = True
         logger.info("Event publisher started", use_outbox=self._use_outbox)
 

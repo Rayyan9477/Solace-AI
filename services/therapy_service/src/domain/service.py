@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from services.shared.infrastructure import UnifiedLLMClient
     from ..events import EventBus
     from ..infrastructure.context_assembler import ContextAssembler
+    from ..infrastructure.repository import UnitOfWork
 
 logger = structlog.get_logger(__name__)
 
@@ -59,6 +60,7 @@ class TherapyOrchestrator(ServiceBase):
         llm_client: UnifiedLLMClient | None = None,
         event_bus: "EventBus | None" = None,
         context_assembler: "ContextAssembler | None" = None,
+        unit_of_work: "UnitOfWork | None" = None,
     ) -> None:
         self._settings = settings or TherapyOrchestratorSettings()
         self._technique_selector = technique_selector
@@ -66,6 +68,7 @@ class TherapyOrchestrator(ServiceBase):
         self._llm_client = llm_client
         self._event_bus = event_bus
         self._context_assembler = context_assembler
+        self._unit_of_work = unit_of_work
         self._treatment_plans: dict[UUID, TreatmentPlanDTO] = {}
         self._initialized = False
         self._stats = {
@@ -270,6 +273,25 @@ class TherapyOrchestrator(ServiceBase):
                 skills_practiced=skills_practiced,
             )
             await self._event_bus.publish(event)
+
+        # Persist session to repository before deleting from memory
+        if self._unit_of_work:
+            try:
+                from .entities import TherapySessionEntity
+                entity = TherapySessionEntity(
+                    session_id=session_id,
+                    user_id=user_id,
+                    treatment_plan_id=session.treatment_plan_id,
+                    session_number=session.session_number,
+                    current_phase=SessionPhase.POST_SESSION,
+                    started_at=session.started_at,
+                    ended_at=datetime.now(timezone.utc),
+                    skills_practiced=session.skills_practiced if hasattr(session, "skills_practiced") else [],
+                )
+                await self._unit_of_work.sessions.save(entity)
+                logger.info("session_persisted", session_id=str(session_id))
+            except Exception as e:
+                logger.warning("session_persist_failed", session_id=str(session_id), error=str(e))
 
         self._session_manager.delete_session(session_id)
         logger.info("session_end_completed", session_id=str(session_id), duration_minutes=duration_minutes)

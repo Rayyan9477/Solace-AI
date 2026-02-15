@@ -186,6 +186,46 @@ class IncidentResolvedEvent(BaseEvent):
     time_to_resolution_minutes: int | None = Field(default=None, ge=0)
 
 
+class SafetyPlanCreatedEvent(BaseEvent):
+    """Emitted when a safety plan is created for a user."""
+    event_type: Literal["safety.plan.created"] = "safety.plan.created"
+    plan_id: UUID
+    crisis_level: CrisisLevel
+    plan_components: list[str] = Field(default_factory=list)
+
+
+class SafetyPlanActivatedEvent(BaseEvent):
+    """Emitted when a safety plan is activated."""
+    event_type: Literal["safety.plan.activated"] = "safety.plan.activated"
+    plan_id: UUID
+    activation_reason: str
+
+
+class SafetyPlanUpdatedEvent(BaseEvent):
+    """Emitted when a safety plan is updated."""
+    event_type: Literal["safety.plan.updated"] = "safety.plan.updated"
+    plan_id: UUID
+    updated_components: list[str] = Field(default_factory=list)
+    update_reason: str = Field(default="")
+
+
+class OutputFilteredEvent(BaseEvent):
+    """Emitted when AI output is filtered for safety."""
+    event_type: Literal["safety.output.filtered"] = "safety.output.filtered"
+    modifications_count: int = Field(default=0, ge=0)
+    filter_reason: str = Field(default="")
+    resources_appended: bool = Field(default=False)
+
+
+class TrajectoryAlertEvent(BaseEvent):
+    """Emitted when risk trajectory analysis detects concerning patterns."""
+    event_type: Literal["safety.trajectory.alert"] = "safety.trajectory.alert"
+    alert_type: str
+    trend: Literal["improving", "stable", "worsening"] = "worsening"
+    message_count_analyzed: int = Field(default=0, ge=0)
+    risk_score_delta: Decimal = Field(default=Decimal("0.0"))
+
+
 # Diagnosis Events
 class Confidence(str, Enum):
     """Clinical confidence levels."""
@@ -399,6 +439,28 @@ class NotificationFailedKafkaEvent(BaseEvent):
     will_retry: bool = Field(default=False)
 
 
+# User Events
+class UserCreatedKafkaEvent(BaseEvent):
+    """Emitted when a new user account is created."""
+    event_type: Literal["user.created"] = "user.created"
+    email: str
+    display_name: str
+    role: str
+
+
+class UserDeletedKafkaEvent(BaseEvent):
+    """Emitted when a user account is deleted (GDPR)."""
+    event_type: Literal["user.deleted"] = "user.deleted"
+    reason: str | None = None
+
+
+class ConsentChangedKafkaEvent(BaseEvent):
+    """Emitted when user consent is granted or revoked."""
+    event_type: Literal["user.consent_changed"] = "user.consent_changed"
+    consent_type: str
+    action: Literal["granted", "revoked"]
+
+
 # System Events
 class SystemHealthEvent(BaseEvent):
     """Emitted for system health monitoring."""
@@ -432,6 +494,9 @@ EVENT_REGISTRY: dict[str, type[BaseEvent]] = {
     "safety.escalation.resolved": EscalationResolvedEvent,
     "safety.risk.level_changed": RiskLevelChangedEvent,
     "safety.incident.created": IncidentCreatedEvent, "safety.incident.resolved": IncidentResolvedEvent,
+    "safety.plan.created": SafetyPlanCreatedEvent, "safety.plan.activated": SafetyPlanActivatedEvent,
+    "safety.plan.updated": SafetyPlanUpdatedEvent, "safety.output.filtered": OutputFilteredEvent,
+    "safety.trajectory.alert": TrajectoryAlertEvent,
     # Diagnosis events
     "diagnosis.completed": DiagnosisCompletedEvent, "diagnosis.assessment.completed": AssessmentCompletedEvent,
     # Therapy events
@@ -449,6 +514,9 @@ EVENT_REGISTRY: dict[str, type[BaseEvent]] = {
     # Notification events
     "notification.sent": NotificationSentKafkaEvent, "notification.delivered": NotificationDeliveredKafkaEvent,
     "notification.failed": NotificationFailedKafkaEvent,
+    # User events
+    "user.created": UserCreatedKafkaEvent, "user.deleted": UserDeletedKafkaEvent,
+    "user.consent_changed": ConsentChangedKafkaEvent,
     # System events
     "system.health": SystemHealthEvent, "system.error": ErrorOccurredEvent,
 }
