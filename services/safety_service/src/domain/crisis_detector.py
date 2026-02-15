@@ -8,95 +8,34 @@ import re
 import time
 from dataclasses import dataclass, field
 from decimal import Decimal
-from enum import Enum
 from typing import Any
 from uuid import UUID
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
+from solace_common.enums import CrisisLevel
 
 logger = structlog.get_logger(__name__)
 
 
-class CrisisLevel(str, Enum):
-    """Crisis severity levels with clear escalation boundaries."""
+def _crisis_level_from_score(
+    score: Decimal, settings: CrisisDetectorSettings | None = None
+) -> CrisisLevel:
+    """Determine crisis level from risk score using configurable thresholds."""
+    critical_threshold = settings.critical_threshold if settings else Decimal("0.9")
+    high_threshold = settings.high_threshold if settings else Decimal("0.7")
+    elevated_threshold = settings.elevated_threshold if settings else Decimal("0.5")
+    low_threshold = settings.low_threshold if settings else Decimal("0.3")
 
-    NONE = "NONE"
-    LOW = "LOW"
-    ELEVATED = "ELEVATED"
-    HIGH = "HIGH"
-    CRITICAL = "CRITICAL"
-
-    @classmethod
-    def from_string(cls, value: str) -> CrisisLevel:
-        """Case-insensitive lookup with common alias mapping.
-
-        Maps common alternative names to canonical CrisisLevel values:
-        - "moderate", "medium" -> ELEVATED
-        - "severe", "extreme", "imminent" -> CRITICAL
-        - "minimal" -> NONE
-        - "none" -> NONE
-        """
-        _ALIASES: dict[str, CrisisLevel] = {
-            "none": cls.NONE,
-            "minimal": cls.NONE,
-            "low": cls.LOW,
-            "moderate": cls.ELEVATED,
-            "medium": cls.ELEVATED,
-            "elevated": cls.ELEVATED,
-            "high": cls.HIGH,
-            "severe": cls.CRITICAL,
-            "extreme": cls.CRITICAL,
-            "imminent": cls.CRITICAL,
-            "critical": cls.CRITICAL,
-        }
-        normalized = value.strip().lower()
-        if normalized in _ALIASES:
-            return _ALIASES[normalized]
-        raise ValueError(
-            f"Unknown crisis level: '{value}'. "
-            f"Valid values: {', '.join(_ALIASES.keys())}"
-        )
-
-    def to_risk_severity(self) -> str:
-        """Map CrisisLevel to RiskSeverity string values for backward compatibility.
-
-        Returns the corresponding RiskSeverity enum value name:
-        - NONE -> MINIMAL
-        - LOW -> LOW
-        - ELEVATED -> MODERATE
-        - HIGH -> HIGH
-        - CRITICAL -> SEVERE
-        """
-        _SEVERITY_MAP: dict[CrisisLevel, str] = {
-            CrisisLevel.NONE: "MINIMAL",
-            CrisisLevel.LOW: "LOW",
-            CrisisLevel.ELEVATED: "MODERATE",
-            CrisisLevel.HIGH: "HIGH",
-            CrisisLevel.CRITICAL: "SEVERE",
-        }
-        return _SEVERITY_MAP[self]
-
-    @classmethod
-    def from_score(
-        cls, score: Decimal, settings: CrisisDetectorSettings | None = None
-    ) -> CrisisLevel:
-        """Determine crisis level from risk score using configurable thresholds."""
-        # Use default thresholds if settings not provided (for backward compatibility)
-        critical_threshold = settings.critical_threshold if settings else Decimal("0.9")
-        high_threshold = settings.high_threshold if settings else Decimal("0.7")
-        elevated_threshold = settings.elevated_threshold if settings else Decimal("0.5")
-        low_threshold = settings.low_threshold if settings else Decimal("0.3")
-
-        if score >= critical_threshold:
-            return cls.CRITICAL
-        if score >= high_threshold:
-            return cls.HIGH
-        if score >= elevated_threshold:
-            return cls.ELEVATED
-        if score >= low_threshold:
-            return cls.LOW
-        return cls.NONE
+    if score >= critical_threshold:
+        return CrisisLevel.CRITICAL
+    if score >= high_threshold:
+        return CrisisLevel.HIGH
+    if score >= elevated_threshold:
+        return CrisisLevel.ELEVATED
+    if score >= low_threshold:
+        return CrisisLevel.LOW
+    return CrisisLevel.NONE
 
 
 class RiskFactor(BaseModel):
@@ -286,7 +225,7 @@ class Layer1InputGate:
         )
         total_score = min(boosted_score, Decimal("1.0"))
         detection_time_ms = int((time.perf_counter() - start_time) * 1000)
-        crisis_level = CrisisLevel.from_score(total_score, self._settings)
+        crisis_level = _crisis_level_from_score(total_score, self._settings)
         return DetectionResult(
             crisis_detected=crisis_level != CrisisLevel.NONE,
             crisis_level=crisis_level,
@@ -463,7 +402,7 @@ class Layer2ProcessingGuard:
         detection_time_ms = layer1_result.detection_time_ms + int(
             (time.perf_counter() - start_time) * 1000
         )
-        crisis_level = CrisisLevel.from_score(risk_score, self._settings)
+        crisis_level = _crisis_level_from_score(risk_score, self._settings)
         return DetectionResult(
             crisis_detected=crisis_level != CrisisLevel.NONE,
             crisis_level=crisis_level,
@@ -648,7 +587,7 @@ class CrisisDetector:
             trajectory = self._layer4.analyze_trajectory(conversation_history, result.crisis_level)
             if trajectory.get("deteriorating"):
                 result.risk_score = min(result.risk_score + Decimal("0.1"), Decimal("1.0"))
-                result.crisis_level = CrisisLevel.from_score(result.risk_score, self._settings)
+                result.crisis_level = _crisis_level_from_score(result.risk_score, self._settings)
                 result.trigger_indicators.append("TRAJECTORY:deteriorating")
                 if 4 not in result.detection_layers_triggered:
                     result.detection_layers_triggered.append(4)

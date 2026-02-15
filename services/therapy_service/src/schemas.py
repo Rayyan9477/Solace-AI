@@ -66,13 +66,7 @@ class TechniqueCategory(str, Enum):
     ACCEPTANCE = "acceptance"
 
 
-class SeverityLevel(str, Enum):
-    """Clinical severity levels."""
-    MINIMAL = "minimal"
-    MILD = "mild"
-    MODERATE = "moderate"
-    MODERATELY_SEVERE = "moderately_severe"
-    SEVERE = "severe"
+from solace_common.enums import SeverityLevel  # noqa: E402
 
 
 class ResponseStatus(str, Enum):
@@ -131,13 +125,7 @@ class DeliveryMode(str, Enum):
     PRACTICE = "practice"
 
 
-class RiskLevel(str, Enum):
-    """Risk assessment levels. Aligned with canonical CrisisLevel."""
-    NONE = "NONE"
-    LOW = "LOW"
-    ELEVATED = "ELEVATED"
-    HIGH = "HIGH"
-    CRITICAL = "CRITICAL"
+from solace_common.enums import CrisisLevel as RiskLevel  # noqa: E402
 
 
 class TechniqueDTO(BaseModel):

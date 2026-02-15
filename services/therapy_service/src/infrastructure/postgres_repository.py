@@ -301,7 +301,7 @@ class PostgresTreatmentPlanRepository(Repository[TreatmentPlanEntity]):
             user_id=row["user_id"],
             primary_diagnosis=row.get("primary_diagnosis", ""),
             secondary_diagnoses=secondary,
-            severity=SeverityLevel(row["severity"]) if row.get("severity") else SeverityLevel.MODERATE,
+            severity=SeverityLevel.from_string(row["severity"]) if row.get("severity") else SeverityLevel.MODERATE,
             stepped_care_level=SteppedCareLevel(row["stepped_care_level"]) if row.get("stepped_care_level") is not None else SteppedCareLevel.MEDIUM_INTENSITY,
             primary_modality=TherapyModality(row["primary_modality"]) if row.get("primary_modality") else TherapyModality.CBT,
             adjunct_modalities=[TherapyModality(m) for m in adjunct],

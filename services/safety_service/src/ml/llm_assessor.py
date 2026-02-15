@@ -36,38 +36,7 @@ except ImportError:
 logger = structlog.get_logger(__name__)
 
 
-class RiskLevel(str, Enum):
-    """LLM-assessed risk level. Aligned with canonical CrisisLevel (5 values)."""
-    NONE = "NONE"  # No significant risk
-    LOW = "LOW"  # Minimal concern
-    ELEVATED = "ELEVATED"  # Monitoring required
-    HIGH = "HIGH"  # Urgent attention needed
-    CRITICAL = "CRITICAL"  # Immediate intervention required
-
-    @classmethod
-    def from_llm_assessment(cls, value: str) -> RiskLevel:
-        """Map LLM output strings (which may use old 6-value names) to canonical 5-value enum.
-
-        Handles backward compatibility with old LLM outputs that may return
-        MODERATE or MINIMAL instead of the canonical ELEVATED and NONE.
-        """
-        _ALIASES: dict[str, RiskLevel] = {
-            "none": cls.NONE,
-            "minimal": cls.NONE,
-            "low": cls.LOW,
-            "moderate": cls.ELEVATED,
-            "medium": cls.ELEVATED,
-            "elevated": cls.ELEVATED,
-            "high": cls.HIGH,
-            "severe": cls.CRITICAL,
-            "extreme": cls.CRITICAL,
-            "imminent": cls.CRITICAL,
-            "critical": cls.CRITICAL,
-        }
-        normalized = value.strip().lower()
-        if normalized in _ALIASES:
-            return _ALIASES[normalized]
-        raise ValueError(f"Unknown risk level from LLM: '{value}'")
+from solace_common.enums import CrisisLevel as RiskLevel  # noqa: E402
 
 
 class RiskDimension(str, Enum):
@@ -440,7 +409,7 @@ Be conservative: when uncertain, err on the side of caution and assess higher ri
         ]
 
         return RiskAssessment(
-            risk_level=RiskLevel.from_llm_assessment(response["risk_level"]),
+            risk_level=RiskLevel.from_string(response["risk_level"]),
             risk_score=Decimal(str(response["risk_score"])),
             confidence=Decimal(str(response["confidence"])),
             risk_factors=risk_factors,

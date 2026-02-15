@@ -20,13 +20,7 @@ class DiagnosisPhase(str, Enum):
     CLOSURE = "closure"
 
 
-class SeverityLevel(str, Enum):
-    """Clinical severity levels."""
-    MINIMAL = "minimal"
-    MILD = "mild"
-    MODERATE = "moderate"
-    MODERATELY_SEVERE = "moderately_severe"
-    SEVERE = "severe"
+from solace_common.enums import SeverityLevel  # noqa: E402
 
 
 class ConfidenceLevel(str, Enum):

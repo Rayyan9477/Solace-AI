@@ -277,7 +277,7 @@ async def get_current_user(
 
     try:
         token = jwt_service.extract_token_from_header(authorization)
-        payload = jwt_service.verify_token(token, expected_type=TokenType.ACCESS)
+        payload = await jwt_service.verify_token(token, expected_type=TokenType.ACCESS)
         return payload
     except (TokenExpiredError, TokenInvalidError) as e:
         raise HTTPException(
@@ -476,7 +476,7 @@ async def refresh_token(
     """
     try:
         # Verify refresh token and get payload
-        payload = jwt_service.verify_token(
+        payload = await jwt_service.verify_token(
             request_data.refresh_token,
             expected_type=TokenType.REFRESH,
         )
@@ -535,6 +535,32 @@ async def logout(
     await session_manager.revoke_all_user_sessions(current_user.user_id)
     logger.info("user_logged_out", user_id=str(current_user.user_id))
     return None
+
+
+@router.post(
+    "/auth/revoke-token",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["Authentication"],
+)
+async def revoke_token(
+    request: Request,
+    authorization: str = Header(...),
+) -> None:
+    """
+    Revoke the current access token.
+
+    Adds the token's JTI to the blacklist so it will be rejected on subsequent
+    requests even before natural expiry. Useful for forced logout or token compromise.
+    """
+    jwt_service = get_jwt_service(request)
+    token = jwt_service.extract_token_from_header(authorization)
+    revoked = await jwt_service.revoke_token(token)
+    if not revoked:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Token revocation service unavailable",
+        )
+    logger.info("token_revoked_via_api")
 
 
 # --- User Profile Endpoints ---

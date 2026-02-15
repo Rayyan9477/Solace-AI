@@ -35,14 +35,7 @@ class SafetyCheckType(str, Enum):
     FULL_ASSESSMENT = "full_assessment"
 
 
-class CrisisLevel(str, Enum):
-    """Crisis severity levels from Safety Service."""
-
-    NONE = "NONE"
-    LOW = "LOW"
-    ELEVATED = "ELEVATED"
-    HIGH = "HIGH"
-    CRITICAL = "CRITICAL"
+from solace_common.enums import CrisisLevel  # noqa: E402
 
 
 class SafetyAgentSettings(BaseSettings):

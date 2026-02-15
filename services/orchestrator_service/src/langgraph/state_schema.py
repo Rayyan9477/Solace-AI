@@ -14,13 +14,7 @@ from typing_extensions import TypedDict
 from pydantic import BaseModel, Field
 
 
-class RiskLevel(str, Enum):
-    """Safety risk levels for crisis detection. Aligned with canonical CrisisLevel."""
-    NONE = "NONE"
-    LOW = "LOW"
-    ELEVATED = "ELEVATED"
-    HIGH = "HIGH"
-    CRITICAL = "CRITICAL"
+from solace_common.enums import CrisisLevel as RiskLevel  # noqa: E402
 
 
 class IntentType(str, Enum):

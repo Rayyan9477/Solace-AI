@@ -302,7 +302,7 @@ class DiagnosisService(ServiceBase):
                     primary_diagnosis=primary.name if primary else "",
                     dsm5_code=primary.dsm5_code if primary else None,
                     confidence=primary.confidence if primary else Decimal("0.5"),
-                    severity=SeverityLevel(primary.severity.value) if primary and primary.severity else SeverityLevel.MILD,
+                    severity=primary.severity if primary and primary.severity else SeverityLevel.MILD,
                     symptom_summary=[s.name for s in session.symptoms],
                     recommendations=self._generate_recommendations(session),
                 )
