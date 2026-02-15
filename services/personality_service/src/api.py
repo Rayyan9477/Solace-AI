@@ -144,7 +144,7 @@ async def get_profile(
 ) -> GetProfileResponse:
     """Get user personality profile."""
     logger.info("profile_request", user_id=str(user_id))
-    profile = orchestrator.get_profile(user_id)
+    profile = await orchestrator.get_profile(user_id)
     if profile is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -171,7 +171,7 @@ async def update_profile(
 ) -> UpdateProfileResponse:
     """Update user personality profile."""
     logger.info("profile_update_request", user_id=str(request.user_id), source=request.source.value)
-    current_profile = orchestrator.get_profile(request.user_id)
+    current_profile = await orchestrator.get_profile(request.user_id)
     previous_version = current_profile.version if current_profile else 0
     detect_request = DetectPersonalityRequest(
         user_id=request.user_id,
@@ -179,7 +179,7 @@ async def update_profile(
         sources=[request.source],
     )
     await orchestrator.detect_personality(detect_request)
-    updated_profile = orchestrator.get_profile(request.user_id)
+    updated_profile = await orchestrator.get_profile(request.user_id)
     changed_traits = []
     if current_profile and updated_profile:
         for trait in updated_profile.dominant_traits:

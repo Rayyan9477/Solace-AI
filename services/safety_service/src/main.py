@@ -52,6 +52,8 @@ def configure_logging(settings: SafetyServiceAppSettings) -> None:
         from solace_security.phi_protection import phi_sanitizer_processor
         _phi_processor = phi_sanitizer_processor
     except ImportError:
+        if settings.environment == "production":
+            raise RuntimeError("PHI log sanitizer required in production - install solace_security")
         _phi_processor = None
     processors = [
         structlog.contextvars.merge_contextvars,
@@ -84,6 +86,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("safety_service_starting", environment=settings.environment,
                 host=settings.host, port=settings.port, version=settings.version,
                 kafka_enabled=settings.kafka_enabled)
+    # Activate PHI encryption for ClinicalBase entities
+    try:
+        from solace_security.encryption import EncryptionSettings, Encryptor, FieldEncryptor
+        from solace_infrastructure.database.base_models import configure_phi_encryption
+        encryption_settings = EncryptionSettings()
+        encryptor = Encryptor(encryption_settings)
+        field_encryptor = FieldEncryptor(encryptor, encryption_settings)
+        configure_phi_encryption(field_encryptor)
+        logger.info("phi_encryption_activated")
+    except Exception as e:
+        if settings.environment == "production":
+            raise RuntimeError(f"PHI encryption is required in production: {e}") from e
+        logger.warning("phi_encryption_not_configured", error=str(e))
+
     from .domain.service import SafetyService, SafetyServiceSettings
     from .domain.crisis_detector import CrisisDetector, CrisisDetectorSettings
     from .domain.escalation import EscalationManager, EscalationSettings

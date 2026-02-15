@@ -50,6 +50,8 @@ def configure_logging(settings: PersonalityServiceAppSettings) -> None:
         from solace_security.phi_protection import phi_sanitizer_processor
         _phi_processor = phi_sanitizer_processor
     except ImportError:
+        if settings.environment == "production":
+            raise RuntimeError("PHI log sanitizer required in production - install solace_security")
         _phi_processor = None
     processors = [
         structlog.contextvars.merge_contextvars,
@@ -87,6 +89,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             liwc=config.detection.ensemble_weight_liwc,
             llm=config.detection.ensemble_weight_llm,
         )
+    # Activate PHI encryption for ClinicalBase entities
+    try:
+        from solace_security.encryption import EncryptionSettings, Encryptor, FieldEncryptor
+        from solace_infrastructure.database.base_models import configure_phi_encryption
+        encryption_settings = EncryptionSettings()
+        encryptor = Encryptor(encryption_settings)
+        field_encryptor = FieldEncryptor(encryptor, encryption_settings)
+        configure_phi_encryption(field_encryptor)
+        logger.info("phi_encryption_activated")
+    except Exception as e:
+        if settings.environment == "production":
+            raise RuntimeError(f"PHI encryption is required in production: {e}") from e
+        logger.warning("phi_encryption_not_configured", error=str(e))
+
     logger.info("personality_service_starting", environment=settings.environment, host=settings.host, port=settings.port, version=settings.version)
     from .domain.service import PersonalityOrchestrator, PersonalityServiceSettings
     from .domain.trait_detector import TraitDetector, TraitDetectorSettings
@@ -100,11 +116,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("shared_llm_client_not_available", fallback="using_text_only_detection")
     trait_detector = TraitDetector(TraitDetectorSettings(enable_llm_detection=settings.enable_llm_detection and llm_client is not None), llm_client)
     style_adapter = StyleAdapter()
+    # Initialize persistent repository
+    repository = None
+    try:
+        from .infrastructure.repository import RepositoryFactory
+        repository = RepositoryFactory.get_default()
+        logger.info("personality_repository_initialized", type="postgres")
+    except Exception as e:
+        if settings.environment == "production":
+            raise RuntimeError(f"PostgreSQL repository required in production: {e}") from e
+        logger.warning("personality_repository_fallback", error=str(e), fallback="in_memory")
     personality_orchestrator = PersonalityOrchestrator(
         settings=PersonalityServiceSettings(enable_llm_detection=settings.enable_llm_detection),
         trait_detector=trait_detector,
         style_adapter=style_adapter,
         llm_client=llm_client,
+        repository=repository,
     )
     await personality_orchestrator.initialize()
     app.state.settings = settings

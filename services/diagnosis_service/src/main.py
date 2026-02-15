@@ -50,6 +50,8 @@ def configure_logging(settings: DiagnosisServiceAppSettings) -> None:
         from solace_security.phi_protection import phi_sanitizer_processor
         _phi_processor = phi_sanitizer_processor
     except ImportError:
+        if settings.environment == "production":
+            raise RuntimeError("PHI log sanitizer required in production - install solace_security")
         _phi_processor = None
     processors = [
         structlog.contextvars.merge_contextvars,
@@ -81,15 +83,40 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging(settings)
     logger.info("diagnosis_service_starting", environment=settings.environment,
                 host=settings.host, port=settings.port, version=settings.version)
+    # Activate PHI encryption for ClinicalBase entities
+    try:
+        from solace_security.encryption import EncryptionSettings, Encryptor, FieldEncryptor
+        from solace_infrastructure.database.base_models import configure_phi_encryption
+        encryption_settings = EncryptionSettings()
+        encryptor = Encryptor(encryption_settings)
+        field_encryptor = FieldEncryptor(encryptor, encryption_settings)
+        configure_phi_encryption(field_encryptor)
+        logger.info("phi_encryption_activated")
+    except Exception as e:
+        if settings.environment == "production":
+            raise RuntimeError(f"PHI encryption is required in production: {e}") from e
+        logger.warning("phi_encryption_not_configured", error=str(e))
+
     from .domain.service import DiagnosisService, DiagnosisServiceSettings
     from .domain.symptom_extractor import SymptomExtractor, SymptomExtractorSettings
     from .domain.differential import DifferentialGenerator, DifferentialSettings
     symptom_extractor = SymptomExtractor(SymptomExtractorSettings())
     differential_generator = DifferentialGenerator(DifferentialSettings())
+    # Initialize persistent repository
+    repository = None
+    try:
+        from .infrastructure.repository import RepositoryFactory
+        repository = RepositoryFactory.get_default()
+        logger.info("diagnosis_repository_initialized", type="postgres")
+    except Exception as e:
+        if settings.environment == "production":
+            raise RuntimeError(f"PostgreSQL repository required in production: {e}") from e
+        logger.warning("diagnosis_repository_fallback", error=str(e), fallback="in_memory")
     diagnosis_service = DiagnosisService(
         settings=DiagnosisServiceSettings(),
         symptom_extractor=symptom_extractor,
         differential_generator=differential_generator,
+        repository=repository,
     )
     await diagnosis_service.initialize()
     app.state.settings = settings

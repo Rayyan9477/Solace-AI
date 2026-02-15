@@ -25,6 +25,7 @@ from services.shared import ServiceBase
 if TYPE_CHECKING:
     from .symptom_extractor import SymptomExtractor
     from .differential import DifferentialGenerator
+    from ..infrastructure.repository import DiagnosisRepositoryPort
 
 logger = structlog.get_logger(__name__)
 
@@ -46,10 +47,12 @@ class DiagnosisService(ServiceBase):
 
     def __init__(self, settings: DiagnosisServiceSettings | None = None,
                  symptom_extractor: SymptomExtractor | None = None,
-                 differential_generator: DifferentialGenerator | None = None) -> None:
+                 differential_generator: DifferentialGenerator | None = None,
+                 repository: DiagnosisRepositoryPort | None = None) -> None:
         self._settings = settings or DiagnosisServiceSettings()
         self._symptom_extractor = symptom_extractor
         self._differential_generator = differential_generator
+        self._repository = repository
         self._active_sessions: dict[UUID, SessionState] = {}
         self._user_session_counts: dict[UUID, int] = {}
         self._user_history: dict[UUID, list[dict[str, Any]]] = {}
@@ -288,6 +291,25 @@ class DiagnosisService(ServiceBase):
         duration = datetime.now(timezone.utc) - session.started_at
         summary = self._generate_session_summary(session) if generate_summary else None
         self._store_session_history(user_id, session)
+        # Persist completed session record to repository
+        if self._repository:
+            try:
+                from .entities import DiagnosisRecordEntity
+                primary = session.differential.primary if session.differential else None
+                record = DiagnosisRecordEntity(
+                    user_id=user_id,
+                    session_id=session_id,
+                    primary_diagnosis=primary.name if primary else "",
+                    dsm5_code=primary.dsm5_code if primary else None,
+                    confidence=primary.confidence if primary else Decimal("0.5"),
+                    severity=SeverityLevel(primary.severity.value) if primary and primary.severity else SeverityLevel.MILD,
+                    symptom_summary=[s.name for s in session.symptoms],
+                    recommendations=self._generate_recommendations(session),
+                )
+                await self._repository.save_record(record)
+                logger.info("session_record_persisted", session_id=str(session_id))
+            except Exception as e:
+                logger.warning("session_record_persist_failed", session_id=str(session_id), error=str(e))
         del self._active_sessions[session_id]
         logger.info("session_ended", user_id=str(user_id), session_id=str(session_id))
         return SessionEndResult(duration_minutes=int(duration.total_seconds() / 60),
@@ -315,7 +337,22 @@ class DiagnosisService(ServiceBase):
 
     async def get_history(self, user_id: UUID, limit: int, include_symptoms: bool, include_differentials: bool) -> HistoryResult:
         """Get user diagnosis history."""
-        return HistoryResult(sessions=self._user_history.get(user_id, [])[-limit:])
+        in_memory = self._user_history.get(user_id, [])
+        if in_memory:
+            return HistoryResult(sessions=in_memory[-limit:])
+        # Fall back to repository
+        if self._repository:
+            try:
+                records = await self._repository.list_user_records(user_id, limit=limit)
+                sessions = [{
+                    "session_id": str(r.session_id), "date": r.created_at.isoformat(),
+                    "primary_diagnosis": r.primary_diagnosis, "confidence": str(r.confidence),
+                    "symptom_count": len(r.symptom_summary),
+                } for r in records]
+                return HistoryResult(sessions=sessions)
+            except Exception as e:
+                logger.warning("history_repo_load_failed", user_id=str(user_id), error=str(e))
+        return HistoryResult(sessions=[])
 
     async def get_session_state(self, session_id: UUID) -> dict[str, Any] | None:
         """Get current session state."""

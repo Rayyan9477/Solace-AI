@@ -27,6 +27,7 @@ from .state_schema import (
     SafetyFlags,
 )
 from .supervisor import SupervisorAgent, SupervisorSettings
+from .memory_node import memory_retrieval_node
 
 logger = structlog.get_logger(__name__)
 
@@ -192,7 +193,7 @@ def safety_postcheck_node(state: OrchestratorState) -> dict[str, Any]:
     return {"processing_phase": ProcessingPhase.COMPLETED.value, "agent_results": [AgentResult(agent_type=AgentType.SAFETY, success=True, confidence=0.9, metadata={"phase": "postcheck", "filtered": needs_filtering}).to_dict()]}
 
 
-def route_after_safety(state: OrchestratorState) -> Literal["crisis_handler", "supervisor"]:
+def route_after_safety(state: OrchestratorState) -> Literal["crisis_handler", "memory_retrieval"]:
     """Route based on safety pre-check results."""
     safety_flags = state.get("safety_flags", {})
     crisis_detected = safety_flags.get("crisis_detected", False)
@@ -200,7 +201,7 @@ def route_after_safety(state: OrchestratorState) -> Literal["crisis_handler", "s
     requires_escalation = safety_flags.get("requires_escalation", False)
 
     route_to_crisis = crisis_detected or risk_level in ("HIGH", "CRITICAL") or requires_escalation
-    destination = "crisis_handler" if route_to_crisis else "supervisor"
+    destination = "crisis_handler" if route_to_crisis else "memory_retrieval"
 
     logger.info(
         "routing_decision",
@@ -218,7 +219,7 @@ def route_to_agents(state: OrchestratorState) -> list[str]:
     if not selected_agents:
         return ["chat_agent"]
     agent_node_map = {
-        "safety": "chat_agent",
+        "safety": "safety_agent",
         "chat": "chat_agent",
         "diagnosis": "diagnosis_agent",
         "therapy": "therapy_agent",
@@ -230,6 +231,30 @@ def route_to_agents(state: OrchestratorState) -> list[str]:
         if node_name not in nodes:
             nodes.append(node_name)
     return nodes if nodes else ["chat_agent"]
+
+
+def route_after_safety_agent(state: OrchestratorState) -> Literal["crisis_handler", "aggregator"]:
+    """Route based on safety agent assessment results.
+
+    If the safety agent detects HIGH or CRITICAL risk, route to crisis handler.
+    Otherwise, continue to aggregation.
+    """
+    safety_flags = state.get("safety_flags", {})
+    crisis_detected = safety_flags.get("crisis_detected", False)
+    risk_level = str(safety_flags.get("risk_level", "NONE")).upper()
+    requires_escalation = safety_flags.get("requires_escalation", False)
+
+    route_to_crisis = crisis_detected or risk_level in ("HIGH", "CRITICAL") or requires_escalation
+    destination = "crisis_handler" if route_to_crisis else "aggregator"
+
+    logger.info(
+        "safety_agent_routing_decision",
+        destination=destination,
+        crisis_detected=crisis_detected,
+        risk_level=risk_level,
+        requires_escalation=requires_escalation,
+    )
+    return destination
 
 
 class OrchestratorGraphBuilder:
@@ -284,6 +309,7 @@ class OrchestratorGraphBuilder:
             builder.add_node("safety_precheck", agent_nodes["safety"])
         else:
             builder.add_node("safety_precheck", safety_precheck_node)
+        builder.add_node("memory_retrieval", memory_retrieval_node)
         builder.add_node("supervisor", SupervisorAgent(self._supervisor_settings).process)
         builder.add_node("crisis_handler", crisis_handler_node)
         # Agent nodes: real service HTTP clients
@@ -291,21 +317,25 @@ class OrchestratorGraphBuilder:
         builder.add_node("diagnosis_agent", agent_nodes["diagnosis"])
         builder.add_node("therapy_agent", agent_nodes["therapy"])
         builder.add_node("personality_agent", agent_nodes["personality"])
+        builder.add_node("safety_agent", agent_nodes["safety"])
         builder.add_node("aggregator", aggregator_node)
         builder.add_node("safety_postcheck", safety_postcheck_node)
         # Edges
         builder.add_edge(START, "safety_precheck")
-        builder.add_conditional_edges("safety_precheck", route_after_safety, ["crisis_handler", "supervisor"])
+        builder.add_conditional_edges("safety_precheck", route_after_safety, ["crisis_handler", "memory_retrieval"])
+        builder.add_edge("memory_retrieval", "supervisor")
         builder.add_edge("crisis_handler", END)
-        builder.add_conditional_edges("supervisor", route_to_agents, ["chat_agent", "diagnosis_agent", "therapy_agent", "personality_agent"])
+        builder.add_conditional_edges("supervisor", route_to_agents, ["chat_agent", "diagnosis_agent", "therapy_agent", "personality_agent", "safety_agent"])
         builder.add_edge("chat_agent", "aggregator")
         builder.add_edge("diagnosis_agent", "aggregator")
         builder.add_edge("therapy_agent", "aggregator")
         builder.add_edge("personality_agent", "aggregator")
+        # Safety agent has conditional routing: crisis -> crisis_handler, otherwise -> aggregator
+        builder.add_conditional_edges("safety_agent", route_after_safety_agent, ["crisis_handler", "aggregator"])
         builder.add_edge("aggregator", "safety_postcheck")
         builder.add_edge("safety_postcheck", END)
         self._graph = builder
-        logger.info("orchestrator_graph_built", node_count=9)
+        logger.info("orchestrator_graph_built", node_count=11)
         return builder
 
     def compile(self) -> Any:

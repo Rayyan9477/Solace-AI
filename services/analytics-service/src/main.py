@@ -206,6 +206,37 @@ async def lifespan(app: FastAPI):
     global _analytics_aggregator, _report_service, _analytics_consumer
 
     settings = AnalyticsServiceSettings.load()
+
+    # Configure structured logging with PHI sanitizer
+    try:
+        from solace_security.phi_protection import phi_sanitizer_processor
+        _phi_processor = phi_sanitizer_processor
+    except ImportError:
+        if settings.service.env == "production":
+            raise RuntimeError("PHI log sanitizer required in production - install solace_security")
+        _phi_processor = None
+    processors = [
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.StackInfoRenderer(),
+    ]
+    if _phi_processor:
+        processors.append(_phi_processor)
+    if settings.service.env == "development":
+        processors.append(structlog.dev.ConsoleRenderer())
+    else:
+        processors.append(structlog.processors.JSONRenderer())
+    structlog.configure(
+        processors=processors,
+        wrapper_class=structlog.make_filtering_bound_logger(
+            getattr(__import__("logging"), settings.service.log_level.upper(), __import__("logging").INFO)
+        ),
+        context_class=dict,
+        logger_factory=structlog.PrintLoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+
     logger.info(
         "analytics_service_starting",
         service=settings.service.name,

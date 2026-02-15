@@ -13,10 +13,12 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
 
+from decimal import Decimal
 from services.shared import ServiceBase
 
 if TYPE_CHECKING:
     from services.shared.infrastructure import UnifiedLLMClient
+    from ..infrastructure.repository import PersonalityRepositoryPort
 
 from ..schemas import (
     PersonalityTrait, AssessmentSource, EmotionCategory, OceanScoresDTO, StyleParametersDTO,
@@ -115,6 +117,7 @@ class PersonalityOrchestrator(ServiceBase):
         trait_detector: TraitDetector | None = None,
         style_adapter: StyleAdapter | None = None,
         llm_client: UnifiedLLMClient | None = None,
+        repository: PersonalityRepositoryPort | None = None,
     ) -> None:
         self._settings = settings or PersonalityServiceSettings()
         self._trait_detector = trait_detector or TraitDetector(
@@ -123,6 +126,7 @@ class PersonalityOrchestrator(ServiceBase):
         )
         self._style_adapter = style_adapter or StyleAdapter()
         self._profile_store = ProfileStore()
+        self._repository = repository
         self._initialized = False
         self._request_count = 0
         self._detection_count = 0
@@ -132,7 +136,87 @@ class PersonalityOrchestrator(ServiceBase):
         await self._trait_detector.initialize()
         await self._style_adapter.initialize()
         self._initialized = True
-        logger.info("personality_orchestrator_initialized", enable_llm=self._settings.enable_llm_detection)
+        logger.info(
+            "personality_orchestrator_initialized",
+            enable_llm=self._settings.enable_llm_detection,
+            persistence=("postgres" if self._repository else "in_memory"),
+        )
+
+    async def _get_cached_profile(self, user_id: UUID) -> PersonalityProfile | None:
+        """Get profile from cache, falling back to repository if available."""
+        profile = self._profile_store.get(user_id)
+        if profile is not None:
+            return profile
+        if self._repository is None:
+            return None
+        try:
+            entity = await self._repository.get_profile_by_user(user_id)
+            if entity is None:
+                return None
+            profile = self._entity_to_profile(entity)
+            await self._profile_store.save(profile)
+            logger.info("profile_loaded_from_repo", user_id=str(user_id))
+            return profile
+        except Exception as e:
+            logger.warning("profile_repo_load_failed", user_id=str(user_id), error=str(e))
+            return None
+
+    async def _persist_profile(self, profile: PersonalityProfile) -> None:
+        """Persist profile to repository if available."""
+        if self._repository is None:
+            return
+        try:
+            entity = self._profile_to_entity(profile)
+            await self._repository.save_profile(entity)
+        except Exception as e:
+            logger.warning("profile_persist_failed", user_id=str(profile.user_id), error=str(e))
+
+    def _profile_to_entity(self, profile: PersonalityProfile) -> Any:
+        """Convert in-memory profile to domain entity for persistence."""
+        from .entities import PersonalityProfile as EntityProfile
+        from .value_objects import OceanScores
+        ocean_scores = None
+        if profile.ocean_scores:
+            ocean_scores = OceanScores.from_dict(profile.ocean_scores.model_dump())
+        comm_style = None
+        if ocean_scores:
+            from .value_objects import CommunicationStyle
+            comm_style = CommunicationStyle.from_ocean(ocean_scores)
+        return EntityProfile(
+            user_id=profile.user_id,
+            profile_id=profile.profile_id,
+            ocean_scores=ocean_scores,
+            communication_style=comm_style,
+            assessment_count=profile.assessment_count,
+            stability_score=Decimal(str(profile.stability_score)),
+            created_at=profile.created_at,
+            updated_at=profile.updated_at,
+            version=profile.version,
+        )
+
+    def _entity_to_profile(self, entity: Any) -> PersonalityProfile:
+        """Convert domain entity to in-memory profile."""
+        ocean_scores = None
+        if entity.ocean_scores:
+            scores_dict = entity.ocean_scores.to_dict()
+            ocean_scores = OceanScoresDTO(**{
+                k: v for k, v in scores_dict.items()
+                if k in OceanScoresDTO.model_fields
+            })
+        style_params = None
+        if ocean_scores:
+            style_params = self._style_adapter.get_style_parameters(ocean_scores)
+        return PersonalityProfile(
+            user_id=entity.user_id,
+            profile_id=entity.profile_id,
+            ocean_scores=ocean_scores,
+            style_parameters=style_params,
+            assessment_count=entity.assessment_count,
+            stability_score=float(entity.stability_score),
+            created_at=entity.created_at,
+            updated_at=entity.updated_at,
+            version=entity.version,
+        )
 
     async def detect_personality(self, request: DetectPersonalityRequest) -> DetectPersonalityResponse:
         """Detect personality traits from text."""
@@ -143,9 +227,10 @@ class PersonalityOrchestrator(ServiceBase):
         evidence = []
         if request.include_evidence:
             evidence = self._extract_evidence(ocean_scores)
-        profile = self._get_or_create_profile(request.user_id)
+        profile = await self._get_or_create_profile(request.user_id)
         profile = self._update_profile_with_assessment(profile, ocean_scores)
         await self._profile_store.save(profile)
+        await self._persist_profile(profile)
         processing_time_ms = (time.perf_counter() - start_time) * 1000
         logger.info("personality_detected", user_id=str(request.user_id), confidence=ocean_scores.overall_confidence, processing_time_ms=round(processing_time_ms, 2))
         return DetectPersonalityResponse(
@@ -160,7 +245,7 @@ class PersonalityOrchestrator(ServiceBase):
     async def get_style(self, request: GetStyleRequest) -> GetStyleResponse:
         """Get communication style parameters for user."""
         self._request_count += 1
-        profile = self._profile_store.get(request.user_id)
+        profile = await self._get_cached_profile(request.user_id)
         if not profile or not profile.ocean_scores:
             return GetStyleResponse(
                 user_id=request.user_id,
@@ -184,7 +269,7 @@ class PersonalityOrchestrator(ServiceBase):
     async def adapt_response(self, request: AdaptResponseRequest) -> AdaptResponseResponse:
         """Adapt response content to user personality."""
         self._request_count += 1
-        profile = self._profile_store.get(request.user_id)
+        profile = await self._get_cached_profile(request.user_id)
         style = request.style_parameters
         if style is None:
             if profile and profile.style_parameters:
@@ -208,9 +293,9 @@ class PersonalityOrchestrator(ServiceBase):
             adaptation_confidence=confidence,
         )
 
-    def get_profile(self, user_id: UUID) -> ProfileSummaryDTO | None:
+    async def get_profile(self, user_id: UUID) -> ProfileSummaryDTO | None:
         """Get user profile summary."""
-        profile = self._profile_store.get(user_id)
+        profile = await self._get_cached_profile(user_id)
         if not profile or not profile.ocean_scores:
             return None
         return ProfileSummaryDTO(
@@ -224,9 +309,9 @@ class PersonalityOrchestrator(ServiceBase):
             version=profile.version,
         )
 
-    def _get_or_create_profile(self, user_id: UUID) -> PersonalityProfile:
+    async def _get_or_create_profile(self, user_id: UUID) -> PersonalityProfile:
         """Get existing profile or create new one."""
-        profile = self._profile_store.get(user_id)
+        profile = await self._get_cached_profile(user_id)
         if profile is None:
             profile = PersonalityProfile(user_id=user_id)
             logger.info("profile_created", user_id=str(user_id))

@@ -295,25 +295,58 @@ NotificationService = NotificationServiceClient
 
 
 class ClinicianAssigner:
-    """Service for assigning clinicians to escalations."""
+    """Service for assigning clinicians to escalations.
 
-    def __init__(self, settings: EscalationSettings) -> None:
+    Uses ClinicianRegistry (HTTP lookup to User Service) when available,
+    falling back to the registry's configurable fallback email.
+    Tracks workload per clinician for load balancing.
+    """
+
+    def __init__(self, settings: EscalationSettings, clinician_registry: Any | None = None) -> None:
         self._settings = settings
-        self._on_call_clinicians: list[UUID] = [uuid4() for _ in range(settings.on_call_clinician_pool_size)]
-        self._clinician_workload: dict[UUID, int] = {c: 0 for c in self._on_call_clinicians}
+        self._registry = clinician_registry
+        self._clinician_workload: dict[UUID, int] = {}
 
     async def assign_clinician(self, escalation: EscalationRecord) -> UUID | None:
-        """Assign available clinician based on priority and workload."""
-        if not self._on_call_clinicians:
+        """Assign available clinician based on priority and workload.
+
+        Fetches on-call clinicians from the ClinicianRegistry (User Service HTTP lookup).
+        Falls back to the registry's configurable fallback email when unavailable.
+        """
+        if self._registry is None:
+            logger.warning(
+                "no_clinician_registry",
+                escalation_id=str(escalation.escalation_id),
+                hint="ClinicianRegistry not configured; cannot assign clinician",
+            )
+            return None
+
+        contacts = await self._registry.get_oncall_clinicians()
+        if not contacts:
             logger.warning("no_clinicians_available", escalation_id=str(escalation.escalation_id))
             return None
-        available = [(c, self._clinician_workload[c]) for c in self._on_call_clinicians]
+
+        # Track workload for load balancing
+        for contact in contacts:
+            if contact.clinician_id not in self._clinician_workload:
+                self._clinician_workload[contact.clinician_id] = 0
+
+        # Select clinician with lowest workload
+        available = [(c, self._clinician_workload.get(c.clinician_id, 0)) for c in contacts]
         available.sort(key=lambda x: x[1])
-        assigned = available[0][0]
-        self._clinician_workload[assigned] += 1
-        logger.info("clinician_assigned", clinician_id=str(assigned),
-            escalation_id=str(escalation.escalation_id), priority=escalation.priority.value)
-        return assigned
+        assigned_contact = available[0][0]
+        self._clinician_workload[assigned_contact.clinician_id] = (
+            self._clinician_workload.get(assigned_contact.clinician_id, 0) + 1
+        )
+        logger.info(
+            "clinician_assigned",
+            clinician_id=str(assigned_contact.clinician_id),
+            clinician_name=assigned_contact.name,
+            clinician_email=assigned_contact.email,
+            escalation_id=str(escalation.escalation_id),
+            priority=escalation.priority.value,
+        )
+        return assigned_contact.clinician_id
 
     def release_clinician(self, clinician_id: UUID) -> None:
         """Release clinician from assignment."""
@@ -412,13 +445,32 @@ class EscalationWorkflow:
 class EscalationManager:
     """Main escalation manager orchestrating all escalation components."""
 
-    def __init__(self, settings: EscalationSettings | None = None) -> None:
+    def __init__(
+        self,
+        settings: EscalationSettings | None = None,
+        clinician_registry: Any | None = None,
+    ) -> None:
         self._settings = settings or EscalationSettings()
         self._notification_service = NotificationServiceClient(
             self._settings,
             base_url=self._settings.notification_service_url
         )
-        self._clinician_assigner = ClinicianAssigner(self._settings)
+
+        # Use provided registry or attempt to create one from settings
+        if clinician_registry is None:
+            try:
+                from ..infrastructure.clinician_registry import ClinicianRegistry, ClinicianRegistrySettings
+                registry_settings = ClinicianRegistrySettings()
+                clinician_registry = ClinicianRegistry(registry_settings)
+                logger.info("clinician_registry_created_from_settings")
+            except Exception as e:
+                logger.warning(
+                    "clinician_registry_creation_failed",
+                    error=str(e),
+                    hint="ClinicianAssigner will not be able to assign real clinicians",
+                )
+
+        self._clinician_assigner = ClinicianAssigner(self._settings, clinician_registry=clinician_registry)
         self._resource_manager = CrisisResourceManager()
         self._workflow = EscalationWorkflow(self._settings, self._notification_service, self._clinician_assigner)
         self._active_escalations: dict[UUID, EscalationRecord] = {}
@@ -429,6 +481,7 @@ class EscalationManager:
             "escalation_manager_initialized",
             auto_escalate_critical=self._settings.auto_escalate_critical,
             notification_service_url=self._settings.notification_service_url,
+            clinician_registry_available=clinician_registry is not None,
             dedup_window_minutes=5,
         )
 
