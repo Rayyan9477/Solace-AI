@@ -5,8 +5,8 @@ import pytest
 from uuid import uuid4
 from unittest.mock import AsyncMock, Mock, patch
 
-from src.langgraph.memory_node import MemoryRetrievalNode, MemoryNodeSettings, memory_retrieval_node
-from src.langgraph.state_schema import create_initial_state, OrchestratorState, ProcessingPhase
+from services.orchestrator_service.src.langgraph.memory_node import MemoryRetrievalNode, MemoryNodeSettings, memory_retrieval_node
+from services.orchestrator_service.src.langgraph.state_schema import create_initial_state, OrchestratorState, ProcessingPhase
 
 
 @pytest.fixture

@@ -14,7 +14,7 @@ from uuid import UUID
 
 import structlog
 
-from .models import TableName, AnalyticsEvent, MetricRecord, AggregationRecord
+from models import TableName, AnalyticsEvent, MetricRecord, AggregationRecord
 
 logger = structlog.get_logger(__name__)
 

@@ -1,1 +1,0 @@
-"""Diagnosis Service tests."""

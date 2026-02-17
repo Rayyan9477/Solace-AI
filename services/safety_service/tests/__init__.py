@@ -1,1 +1,0 @@
-"""Safety Service tests package."""

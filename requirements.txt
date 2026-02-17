@@ -78,10 +78,12 @@ pytest-asyncio~=0.24.0
 pytest-cov~=6.0.0
 pytest-xdist~=3.6.0
 pytest-mock~=3.14.0
+pytest-benchmark~=5.1.0
 aioresponses~=0.7.7
 fakeredis~=2.26.0
 factory-boy~=3.3.1
 freezegun~=1.4.0
+hypothesis~=6.122.0
 
 # ==================== CODE QUALITY ====================
 ruff~=0.8.0

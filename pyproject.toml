@@ -133,6 +133,7 @@ testpaths = ["tests", "services"]
 python_files = ["test_*.py", "*_test.py"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
+import_mode = "importlib"
 filterwarnings = [
     "ignore::DeprecationWarning",
 ]
