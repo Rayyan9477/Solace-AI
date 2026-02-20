@@ -134,12 +134,12 @@ class SafetyAssessment(ClinicalBase):
         comment="Protective factors present"
     )
 
-    trigger_indicators: Mapped[dict[str, Any]] = mapped_column(
+    trigger_indicators: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
         comment="Trigger indicators detected"
     )
 
-    detection_layers_triggered: Mapped[dict[str, Any]] = mapped_column(
+    detection_layers_triggered: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
         comment="Which detection layers triggered"
     )
@@ -258,23 +258,23 @@ class SafetyPlan(ClinicalBase):
     )
 
     # Plan content (all JSONB, encrypted at application layer)
-    warning_signs: Mapped[dict[str, Any]] = mapped_column(
+    warning_signs: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
-    coping_strategies: Mapped[dict[str, Any]] = mapped_column(
+    coping_strategies: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
-    emergency_contacts: Mapped[dict[str, Any]] = mapped_column(
+    emergency_contacts: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
-    safe_environment_actions: Mapped[dict[str, Any]] = mapped_column(
+    safe_environment_actions: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
-    reasons_to_live: Mapped[dict[str, Any]] = mapped_column(
+    reasons_to_live: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
         comment="User's reasons to live (critical for safety plans)"
     )
-    professional_resources: Mapped[dict[str, Any]] = mapped_column(
+    professional_resources: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
 

@@ -107,10 +107,10 @@ class MemoryRecord(ClinicalBase):
     record_metadata: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, default=dict,
     )
-    tags: Mapped[dict[str, Any]] = mapped_column(
+    tags: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
-    related_records: Mapped[dict[str, Any]] = mapped_column(
+    related_records: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
         comment="UUIDs of related memory records"
     )
@@ -175,19 +175,19 @@ class MemoryUserProfile(ClinicalBase):
     )
 
     # Clinical context
-    diagnosed_conditions: Mapped[dict[str, Any]] = mapped_column(
+    diagnosed_conditions: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
-    current_treatments: Mapped[dict[str, Any]] = mapped_column(
+    current_treatments: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
-    support_network: Mapped[dict[str, Any]] = mapped_column(
+    support_network: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
-    triggers: Mapped[dict[str, Any]] = mapped_column(
+    triggers: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
-    coping_strategies: Mapped[dict[str, Any]] = mapped_column(
+    coping_strategies: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
     personality_traits: Mapped[dict[str, Any]] = mapped_column(
@@ -239,12 +239,12 @@ class SessionSummary(ClinicalBase):
     )
 
     # Session analysis
-    key_topics: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=list)
-    emotional_arc: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=list)
-    techniques_used: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=list)
-    key_insights: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=list)
-    homework_assigned: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=list)
-    homework_reviewed: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=list)
+    key_topics: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    emotional_arc: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    techniques_used: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    key_insights: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    homework_assigned: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    homework_reviewed: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
     progress_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Risk tracking
@@ -312,7 +312,7 @@ class TherapeuticEvent(ClinicalBase):
     )
 
     # Event data
-    related_events: Mapped[dict[str, Any]] = mapped_column(
+    related_events: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
     payload: Mapped[dict[str, Any]] = mapped_column(

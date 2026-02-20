@@ -3,6 +3,7 @@ Solace-AI Therapy Service - Therapeutic Intervention Orchestration.
 Evidence-based hybrid (rules+LLM) therapy with CBT/DBT/ACT/MI/Mindfulness modalities.
 """
 from __future__ import annotations
+import re
 import time
 from datetime import datetime, timezone, timedelta
 from typing import Any, TYPE_CHECKING
@@ -305,11 +306,11 @@ class TherapyOrchestrator(ServiceBase):
         alerts = []
         crisis_detected = False
         for keyword in self._settings.crisis_keywords:
-            if keyword in message_lower:
+            if re.search(rf'\b{re.escape(keyword)}\b', message_lower):
                 alerts.append(f"Crisis keyword detected: {keyword}")
                 crisis_detected = True
                 self._stats["crisis_interventions"] += 1
-        if "harm" in message_lower or "danger" in message_lower:
+        if re.search(r'\bharm\b', message_lower) or re.search(r'\bdanger\b', message_lower):
             alerts.append("Potential harm language detected")
             crisis_detected = True
         if crisis_detected:

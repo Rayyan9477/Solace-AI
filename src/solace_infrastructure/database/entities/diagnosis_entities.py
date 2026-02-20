@@ -92,11 +92,11 @@ class DiagnosisSession(ClinicalBase):
     )
 
     # Session content (encrypted)
-    messages: Mapped[dict[str, Any]] = mapped_column(
+    messages: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
         comment="Conversation history (encrypted as PHI)"
     )
-    safety_flags: Mapped[dict[str, Any]] = mapped_column(
+    safety_flags: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
 
@@ -114,7 +114,7 @@ class DiagnosisSession(ClinicalBase):
 
     # Summary and recommendations
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
-    recommendations: Mapped[dict[str, Any]] = mapped_column(
+    recommendations: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
     session_metadata: Mapped[dict[str, Any]] = mapped_column(
@@ -174,7 +174,7 @@ class Symptom(ClinicalBase):
     onset: Mapped[str | None] = mapped_column(String(200), nullable=True)
     duration: Mapped[str | None] = mapped_column(String(200), nullable=True)
     frequency: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    triggers: Mapped[dict[str, Any]] = mapped_column(
+    triggers: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
 
@@ -237,10 +237,10 @@ class Hypothesis(ClinicalBase):
     )
 
     # Evidence
-    criteria_met: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=list)
-    criteria_missing: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=list)
-    supporting_evidence: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=list)
-    contra_evidence: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=list)
+    criteria_met: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    criteria_missing: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    supporting_evidence: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    contra_evidence: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
 
     severity: Mapped[str] = mapped_column(
         String(30), nullable=False, default=DiagnosisSeverity.MODERATE.value,
@@ -252,7 +252,7 @@ class Hypothesis(ClinicalBase):
 
     # Devil's Advocate
     challenged: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    challenge_results: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=list)
+    challenge_results: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
     calibrated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     original_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
 
@@ -294,10 +294,10 @@ class DiagnosisRecord(ClinicalBase):
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     severity: Mapped[str] = mapped_column(String(30), nullable=False)
 
-    symptom_summary: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=list)
-    supporting_evidence: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=list)
-    differential_diagnoses: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=list)
-    recommendations: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=list)
+    symptom_summary: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    supporting_evidence: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    differential_diagnoses: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    recommendations: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
     assessment_scores: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
     # Clinical review

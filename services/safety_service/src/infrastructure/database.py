@@ -10,7 +10,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
 
@@ -30,7 +30,7 @@ class DatabaseConfig(BaseSettings):
     port: int = Field(default=5432, ge=1, le=65535, description="PostgreSQL port")
     database: str = Field(default="solace", description="Database name")
     user: str = Field(default="solace", description="Database user")
-    password: str = Field(default="", description="Database password")
+    password: SecretStr = Field(default="", description="Database password")
     min_pool_size: int = Field(default=2, ge=1, le=20, description="Minimum connection pool size")
     max_pool_size: int = Field(default=10, ge=1, le=100, description="Maximum connection pool size")
     connection_timeout: int = Field(default=30, ge=5, le=120, description="Connection timeout seconds")
@@ -97,7 +97,7 @@ class ContraindicationRepository:
                 port=self._config.port,
                 database=self._config.database,
                 user=self._config.user,
-                password=self._config.password,
+                password=self._config.password.get_secret_value(),
                 min_size=self._config.min_pool_size,
                 max_size=self._config.max_pool_size,
                 command_timeout=self._config.command_timeout,

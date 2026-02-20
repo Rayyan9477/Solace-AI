@@ -241,10 +241,10 @@ class Layer1InputGate:
     def _detect_keywords(
         self, content: str, risk_factors: list[RiskFactor], triggers: list[str]
     ) -> Decimal:
-        """Detect crisis keywords in content."""
+        """Detect crisis keywords in content using word-boundary matching."""
         score = Decimal("0")
         for kw in self._keywords.critical_keywords:
-            if kw in content:
+            if re.search(rf'\b{re.escape(kw)}\b', content, re.IGNORECASE):
                 score = max(score, Decimal("0.95"))
                 risk_factors.append(
                     RiskFactor(
@@ -257,7 +257,7 @@ class Layer1InputGate:
                 )
                 triggers.append(f"CRITICAL_KEYWORD:{kw}")
         for kw in self._keywords.high_keywords:
-            if kw in content:
+            if re.search(rf'\b{re.escape(kw)}\b', content, re.IGNORECASE):
                 score = max(score, Decimal("0.75"))
                 risk_factors.append(
                     RiskFactor(
@@ -270,7 +270,7 @@ class Layer1InputGate:
                 )
                 triggers.append(f"HIGH_KEYWORD:{kw}")
         for kw in self._keywords.elevated_keywords:
-            if kw in content:
+            if re.search(rf'\b{re.escape(kw)}\b', content, re.IGNORECASE):
                 score = max(score, Decimal("0.5"))
                 risk_factors.append(
                     RiskFactor(
@@ -282,7 +282,7 @@ class Layer1InputGate:
                     )
                 )
         for kw in self._keywords.low_keywords:
-            if kw in content:
+            if re.search(rf'\b{re.escape(kw)}\b', content, re.IGNORECASE):
                 score = max(score, Decimal("0.25"))
         return score
 

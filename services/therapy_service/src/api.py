@@ -60,6 +60,12 @@ async def start_session(
         user_id=str(request.user_id),
         treatment_plan_id=str(request.treatment_plan_id)
     )
+    # Enforce ownership: user can only start sessions for themselves
+    if str(request.user_id) != current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot start sessions for other users",
+        )
 
     try:
         result = await orchestrator.start_session(
@@ -112,6 +118,12 @@ async def process_message(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Session ID mismatch"
+        )
+    # Enforce ownership: user can only send messages as themselves
+    if str(request.user_id) != current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot send messages as another user",
         )
 
     logger.info(
@@ -185,6 +197,12 @@ async def end_session(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Session ID mismatch"
         )
+    # Enforce ownership: user can only end their own sessions
+    if str(request.user_id) != current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot end sessions for other users",
+        )
 
     logger.info(
         "session_end_requested",
@@ -249,6 +267,13 @@ async def get_session_state(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Session not found"
+            )
+
+        # Enforce ownership: user can only view their own session state
+        if str(state.user_id) != current_user.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot access another user's session",
             )
 
         return state
@@ -420,6 +445,12 @@ async def get_user_progress(
     Used by User Service to aggregate user progress data.
     """
     logger.info("user_progress_requested", user_id=str(user_id))
+    # Enforce ownership: user can only view their own progress
+    if str(user_id) != current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot access other user's progress",
+        )
 
     try:
         progress = await orchestrator.get_user_progress(user_id=user_id)

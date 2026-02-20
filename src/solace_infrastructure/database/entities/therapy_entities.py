@@ -124,7 +124,7 @@ class TreatmentPlan(ClinicalBase):
         String(200), nullable=False,
         comment="Primary diagnosis (encrypted as PHI)"
     )
-    secondary_diagnoses: Mapped[dict[str, Any]] = mapped_column(
+    secondary_diagnoses: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
         comment="Secondary diagnoses list (encrypted)"
     )
@@ -140,7 +140,7 @@ class TreatmentPlan(ClinicalBase):
         String(30), nullable=False, index=True,
         comment="Primary therapy modality: CBT, DBT, ACT, MI, etc."
     )
-    adjunct_modalities: Mapped[dict[str, Any]] = mapped_column(
+    adjunct_modalities: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
         comment="Adjunct therapy modalities"
     )
@@ -163,13 +163,13 @@ class TreatmentPlan(ClinicalBase):
     )
 
     # Skills tracking
-    skills_acquired: Mapped[dict[str, Any]] = mapped_column(
+    skills_acquired: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
-    skills_in_progress: Mapped[dict[str, Any]] = mapped_column(
+    skills_in_progress: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
-    contraindications: Mapped[dict[str, Any]] = mapped_column(
+    contraindications: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
 
@@ -194,7 +194,7 @@ class TreatmentPlan(ClinicalBase):
     )
 
     # Goals stored as JSONB array of goal objects
-    treatment_goals: Mapped[dict[str, Any]] = mapped_column(
+    treatment_goals: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
         comment="List of treatment goal objects"
     )
@@ -253,16 +253,16 @@ class TherapySession(ClinicalBase):
     mood_rating_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Session content (encrypted)
-    agenda_items: Mapped[dict[str, Any]] = mapped_column(
+    agenda_items: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
-    topics_covered: Mapped[dict[str, Any]] = mapped_column(
+    topics_covered: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
-    skills_practiced: Mapped[dict[str, Any]] = mapped_column(
+    skills_practiced: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
-    insights_gained: Mapped[dict[str, Any]] = mapped_column(
+    insights_gained: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
 
@@ -270,7 +270,7 @@ class TherapySession(ClinicalBase):
     current_risk: Mapped[str] = mapped_column(
         String(20), nullable=False, default=SessionRiskLevel.NONE.value, index=True,
     )
-    safety_flags: Mapped[dict[str, Any]] = mapped_column(
+    safety_flags: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
 
@@ -333,10 +333,10 @@ class TherapyIntervention(ClinicalBase):
     messages_exchanged: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     engagement_score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    skills_practiced: Mapped[dict[str, Any]] = mapped_column(
+    skills_practiced: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
-    insights_gained: Mapped[dict[str, Any]] = mapped_column(
+    insights_gained: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
 

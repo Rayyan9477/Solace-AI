@@ -255,7 +255,7 @@ class NotificationBatch(AuditableModel):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False,
     )
 
-    notification_ids: Mapped[dict[str, Any]] = mapped_column(
+    notification_ids: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
         comment="List of notification UUIDs in this batch"
     )

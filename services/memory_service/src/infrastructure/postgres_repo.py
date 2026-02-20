@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Any, AsyncIterator, Protocol
 from uuid import UUID, uuid4
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import MetaData, Table, Column, String, DateTime, Numeric, Text, Boolean, JSON
 from sqlalchemy import select, insert, update, delete, and_, or_, func
@@ -103,7 +103,7 @@ class PostgresSettings(BaseSettings):
     port: int = Field(default=5432, description="Database port")
     database: str = Field(default="solace_memory", description="Database name")
     user: str = Field(default="solace", description="Database user")
-    password: str = Field(default="", description="Database password")
+    password: SecretStr = Field(default="", description="Database password")
     pool_size: int = Field(default=10, description="Connection pool size")
     max_overflow: int = Field(default=5, description="Max pool overflow")
     pool_timeout: int = Field(default=30, description="Pool timeout seconds")
@@ -112,7 +112,7 @@ class PostgresSettings(BaseSettings):
 
     @property
     def connection_url(self) -> str:
-        return f"postgresql+asyncpg://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+        return f"postgresql+asyncpg://{self.user}:{self.password.get_secret_value()}@{self.host}:{self.port}/{self.database}"
 
 
 class MemoryRecordProtocol(Protocol):

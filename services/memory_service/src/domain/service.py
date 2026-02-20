@@ -413,16 +413,34 @@ class MemoryService(ServiceBase):
         )
 
     async def delete_user_data(self, user_id: UUID) -> None:
-        """Delete all user data (GDPR compliance)."""
-        # Delete from persistent storage first
+        """Delete all user data (GDPR compliance).
+
+        Raises on persistent-storage failure so that callers know the deletion
+        was incomplete.  In-memory caches are only cleared **after** all
+        persistent stores have been purged successfully.
+        """
+        # 1. Delete from persistent stores — propagate failures
         if self._postgres_repo:
+            counts = await self._postgres_repo.delete_user_data(user_id)
+            logger.info(
+                "user_data_deleted_postgres",
+                user_id=str(user_id),
+                records=counts[0],
+                summaries=counts[1],
+                facts=counts[2],
+                events=counts[3],
+            )
+
+        # 2. Delete vector data from Weaviate
+        if self._weaviate_repo:
             try:
-                counts = await self._postgres_repo.delete_user_data(user_id)
-                logger.info("user_data_deleted_postgres", user_id=str(user_id),
-                            records=counts[0], summaries=counts[1], facts=counts[2], events=counts[3])
+                await self._weaviate_repo.delete_user_data(user_id)
+                logger.info("user_data_deleted_weaviate", user_id=str(user_id))
             except Exception:
-                logger.exception("postgres_delete_user_data_failed", user_id=str(user_id))
-        # Clear in-memory caches
+                logger.exception("weaviate_delete_user_data_failed", user_id=str(user_id))
+                raise
+
+        # 3. Only clear in-memory caches after persistent deletes succeed
         self._tier_1_input.pop(user_id, None)
         self._tier_2_working.pop(user_id, None)
         self._tier_3_session.pop(user_id, None)
@@ -519,10 +537,10 @@ class MemoryService(ServiceBase):
         if self._search_engine is not None:
             try:
                 for record in records:
-                    self._search_engine.index_document(record.id, record.content)
+                    self._search_engine.index_document(record.record_id, record.content)
                 results = self._search_engine.search(query, limit=len(records))
                 ranked_ids = {r.doc_id for r in results if r.score > 0}
-                return [r for r in records if r.id in ranked_ids]
+                return [r for r in records if r.record_id in ranked_ids]
             except Exception as e:
                 logger.warning("hybrid_search_failed_using_fallback", error=str(e))
 

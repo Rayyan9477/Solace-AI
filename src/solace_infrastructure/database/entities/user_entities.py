@@ -142,7 +142,7 @@ class UserPreferences(AuditableModel):
     notification_email: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     notification_sms: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     notification_push: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    notification_channels: Mapped[dict[str, Any]] = mapped_column(
+    notification_channels: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
     )
     session_reminders: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

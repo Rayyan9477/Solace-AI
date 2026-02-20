@@ -381,6 +381,22 @@ class SessionManager:
             "homework_assigned_count": len(session.homework_assigned),
         }
 
+    def get_user_sessions(self, user_id: UUID) -> list[SessionState]:
+        """
+        Retrieve all active sessions for a given user.
+
+        Args:
+            user_id: User identifier
+
+        Returns:
+            List of SessionState objects belonging to the user
+        """
+        return [
+            session
+            for session in self._active_sessions.values()
+            if session.user_id == user_id
+        ]
+
     def get_active_session_count(self) -> int:
         """Get count of active sessions."""
         return len(self._active_sessions)

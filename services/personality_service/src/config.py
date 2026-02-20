@@ -5,7 +5,7 @@ Service configuration with environment-based settings using pydantic-settings.
 from __future__ import annotations
 from functools import lru_cache
 from typing import Any
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
 
@@ -18,7 +18,7 @@ class DatabaseSettings(BaseSettings):
     port: int = Field(default=5432)
     name: str = Field(default="solace")
     user: str = Field(default="solace")
-    password: str = Field(description="Database password - set via PERSONALITY_DB_PASSWORD env var")
+    password: SecretStr = Field(description="Database password - set via PERSONALITY_DB_PASSWORD env var")
     pool_size: int = Field(default=10, ge=1, le=100)
     max_overflow: int = Field(default=20, ge=0, le=100)
     echo: bool = Field(default=False)
@@ -27,7 +27,7 @@ class DatabaseSettings(BaseSettings):
     @property
     def connection_string(self) -> str:
         """Get database connection string."""
-        return f"postgresql+asyncpg://{self.user}:{self.password}@{self.host}:{self.port}/{self.name}"
+        return f"postgresql+asyncpg://{self.user}:{self.password.get_secret_value()}@{self.host}:{self.port}/{self.name}"
 
 
 class RedisSettings(BaseSettings):
@@ -35,14 +35,15 @@ class RedisSettings(BaseSettings):
     host: str = Field(default="localhost")
     port: int = Field(default=6379)
     db: int = Field(default=3, ge=0, le=15)
-    password: str = Field(description="Redis password - set via PERSONALITY_REDIS_PASSWORD env var")
+    password: SecretStr = Field(description="Redis password - set via PERSONALITY_REDIS_PASSWORD env var")
     ttl_seconds: int = Field(default=3600, ge=60)
     model_config = SettingsConfigDict(env_prefix="PERSONALITY_REDIS_", env_file=".env", extra="ignore")
 
     @property
     def url(self) -> str:
         """Get Redis connection URL."""
-        auth = f":{self.password}@" if self.password else ""
+        pwd = self.password.get_secret_value()
+        auth = f":{pwd}@" if pwd else ""
         return f"redis://{auth}{self.host}:{self.port}/{self.db}"
 
 

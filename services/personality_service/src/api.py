@@ -144,6 +144,12 @@ async def get_profile(
 ) -> GetProfileResponse:
     """Get user personality profile."""
     logger.info("profile_request", user_id=str(user_id))
+    # Enforce ownership: user can only view their own profile
+    if str(user_id) != str(current_user.user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot access another user's profile",
+        )
     profile = await orchestrator.get_profile(user_id)
     if profile is None:
         raise HTTPException(
@@ -171,6 +177,12 @@ async def update_profile(
 ) -> UpdateProfileResponse:
     """Update user personality profile."""
     logger.info("profile_update_request", user_id=str(request.user_id), source=request.source.value)
+    # Enforce ownership: user can only update their own profile
+    if str(request.user_id) != str(current_user.user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot update another user's profile",
+        )
     current_profile = await orchestrator.get_profile(request.user_id)
     previous_version = current_profile.version if current_profile else 0
     detect_request = DetectPersonalityRequest(

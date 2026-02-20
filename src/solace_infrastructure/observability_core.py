@@ -171,33 +171,37 @@ class MetricsRegistry:
     def counter(self, name: str, value: float = 1.0, labels: dict[str, str] | None = None) -> None:
         """Increment a counter metric."""
         key = self._make_key(name, labels)
-        self._counters[key] = self._counters.get(key, 0) + value
-        if labels:
-            self._labels[key] = labels
+        with self._lock:
+            self._counters[key] = self._counters.get(key, 0) + value
+            if labels:
+                self._labels[key] = labels
 
     def gauge(self, name: str, value: float, labels: dict[str, str] | None = None) -> None:
         """Set a gauge metric."""
         key = self._make_key(name, labels)
-        self._gauges[key] = value
-        if labels:
-            self._labels[key] = labels
+        with self._lock:
+            self._gauges[key] = value
+            if labels:
+                self._labels[key] = labels
 
     def histogram(self, name: str, value: float, labels: dict[str, str] | None = None) -> None:
         """Record a histogram observation."""
         key = self._make_key(name, labels)
-        if key not in self._histograms:
-            self._histograms[key] = []
-        self._histograms[key].append(value)
-        if labels:
-            self._labels[key] = labels
+        with self._lock:
+            if key not in self._histograms:
+                self._histograms[key] = []
+            self._histograms[key].append(value)
+            if labels:
+                self._labels[key] = labels
 
     def get_all(self) -> dict[str, Any]:
         """Get all metrics as a dictionary."""
-        return {
-            "counters": dict(self._counters),
-            "gauges": dict(self._gauges),
-            "histograms": {k: self._histogram_stats(v) for k, v in self._histograms.items()},
-        }
+        with self._lock:
+            return {
+                "counters": dict(self._counters),
+                "gauges": dict(self._gauges),
+                "histograms": {k: self._histogram_stats(v) for k, v in self._histograms.items()},
+            }
 
     def _histogram_stats(self, values: list[float]) -> dict[str, float]:
         """Calculate histogram statistics."""

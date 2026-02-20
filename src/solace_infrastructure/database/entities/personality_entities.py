@@ -83,7 +83,7 @@ class PersonalityProfile(ClinicalBase):
     )
 
     # Assessment history stored as JSONB array (capped at 100)
-    assessment_history: Mapped[dict[str, Any]] = mapped_column(
+    assessment_history: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
         comment="Recent assessment history (max 100 entries)"
     )
@@ -134,7 +134,7 @@ class TraitAssessment(ClinicalBase):
         JSONB, nullable=True, default=dict,
         comment="Assessment-specific metadata"
     )
-    evidence: Mapped[dict[str, Any]] = mapped_column(
+    evidence: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list,
         comment="Supporting evidence for scores"
     )

@@ -202,6 +202,18 @@ class TokenBlacklist(ABC):
     async def is_blacklisted(self, jti: str) -> bool:
         """Check if a token JTI has been revoked."""
 
+    def is_blacklisted_sync(self, jti: str) -> bool:
+        """Synchronous revocation check.
+
+        Default implementation logs a warning and returns False.
+        Subclasses with sync-compatible storage (e.g. in-memory) should override.
+        """
+        logger.warning(
+            "sync_revocation_check_unavailable",
+            detail="Blacklist implementation does not support sync check; token not verified against revocation list",
+        )
+        return False
+
 
 class InMemoryTokenBlacklist(TokenBlacklist):
     """In-memory token blacklist for testing/development."""
@@ -212,14 +224,21 @@ class InMemoryTokenBlacklist(TokenBlacklist):
     async def add(self, jti: str, expires_at: datetime) -> None:
         self._blacklist[jti] = expires_at
 
-    async def is_blacklisted(self, jti: str) -> bool:
+    def _check_blacklisted(self, jti: str) -> bool:
+        """Shared sync logic for blacklist check with auto-cleanup."""
         if jti in self._blacklist:
-            # Auto-clean expired entries
             if self._blacklist[jti] < datetime.now(timezone.utc):
                 del self._blacklist[jti]
                 return False
             return True
         return False
+
+    async def is_blacklisted(self, jti: str) -> bool:
+        return self._check_blacklisted(jti)
+
+    def is_blacklisted_sync(self, jti: str) -> bool:
+        """Synchronous revocation check for in-memory store."""
+        return self._check_blacklisted(jti)
 
 
 class LoginAttemptTracker(ABC):
@@ -449,7 +468,7 @@ class JWTManager:
     def decode_token_sync(
         self, token: str, expected_type: TokenType | None = None
     ) -> AuthenticationResult:
-        """Decode and validate a JWT token (synchronous, no revocation check)."""
+        """Decode and validate a JWT token synchronously, with best-effort revocation check."""
         try:
             decoded = jwt.decode(
                 token,
@@ -467,6 +486,10 @@ class JWTManager:
                 )
             if payload.is_expired:
                 return AuthenticationResult.fail("TOKEN_EXPIRED", "Token has expired")
+            # Best-effort sync revocation check
+            if self._blacklist and self._blacklist.is_blacklisted_sync(payload.jti):
+                logger.warning("revoked_token_used_sync", jti=payload.jti, user_id=payload.sub)
+                return AuthenticationResult.fail("TOKEN_REVOKED", "Token has been revoked")
             return AuthenticationResult.ok(payload.sub, payload)
         except jwt.ExpiredSignatureError:
             return AuthenticationResult.fail("TOKEN_EXPIRED", "Token has expired")
