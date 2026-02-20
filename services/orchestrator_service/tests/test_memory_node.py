@@ -12,7 +12,7 @@ from services.orchestrator_service.src.langgraph.state_schema import create_init
 @pytest.fixture
 def mock_memory_client():
     """Mock Memory Service Client."""
-    with patch("src.langgraph.memory_node.MemoryServiceClient") as mock:
+    with patch("services.orchestrator_service.src.langgraph.memory_node.MemoryServiceClient") as mock:
         client_instance = AsyncMock()
         mock.return_value = client_instance
         yield client_instance
@@ -58,18 +58,19 @@ class TestMemoryRetrievalNode:
         self, mock_memory_client, sample_state, sample_memory_response
     ):
         """Test successful memory retrieval."""
-        # Setup mock response
-        mock_memory_client.post.return_value = AsyncMock(
+        # Setup mock response - assemble_context is what the code calls
+        mock_response = Mock(
             success=True,
             data=sample_memory_response,
             status_code=200,
             response_time_ms=45.0,
         )
+        mock_memory_client.assemble_context.return_value = mock_response
 
         # Create node and process
         settings = MemoryNodeSettings(enable_retrieval=True)
         node = MemoryRetrievalNode(settings=settings)
-        
+
         result = await node.process(sample_state)
 
         # Verify state updates
@@ -100,7 +101,7 @@ class TestMemoryRetrievalNode:
         """Test memory retrieval when disabled."""
         settings = MemoryNodeSettings(enable_retrieval=False)
         node = MemoryRetrievalNode(settings=settings)
-        
+
         result = await node.process(sample_state)
 
         # Verify empty context
@@ -116,16 +117,17 @@ class TestMemoryRetrievalNode:
     ):
         """Test memory retrieval with service error and fallback enabled."""
         # Setup mock to return error
-        mock_memory_client.post.return_value = AsyncMock(
+        mock_response = Mock(
             success=False,
             data=None,
             error="Service unavailable",
             status_code=503,
         )
+        mock_memory_client.assemble_context.return_value = mock_response
 
         settings = MemoryNodeSettings(enable_retrieval=True, fallback_on_error=True)
         node = MemoryRetrievalNode(settings=settings)
-        
+
         result = await node.process(sample_state)
 
         # Verify fallback behavior
@@ -140,16 +142,17 @@ class TestMemoryRetrievalNode:
     ):
         """Test memory retrieval with service error and fallback disabled."""
         # Setup mock to return error
-        mock_memory_client.post.return_value = AsyncMock(
+        mock_response = Mock(
             success=False,
             data=None,
             error="Service unavailable",
             status_code=503,
         )
+        mock_memory_client.assemble_context.return_value = mock_response
 
         settings = MemoryNodeSettings(enable_retrieval=True, fallback_on_error=False)
         node = MemoryRetrievalNode(settings=settings)
-        
+
         # Verify exception is raised
         with pytest.raises(RuntimeError, match="Memory service request failed"):
             await node.process(sample_state)
@@ -158,11 +161,12 @@ class TestMemoryRetrievalNode:
     async def test_memory_node_function(self, mock_memory_client, sample_state, sample_memory_response):
         """Test the standalone memory_retrieval_node function."""
         # Setup mock response
-        mock_memory_client.post.return_value = AsyncMock(
+        mock_response = Mock(
             success=True,
             data=sample_memory_response,
             status_code=200,
         )
+        mock_memory_client.assemble_context.return_value = mock_response
 
         result = await memory_retrieval_node(sample_state)
 

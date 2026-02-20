@@ -250,62 +250,70 @@ class TestSupervisorAgent:
         """Create supervisor agent for tests."""
         return SupervisorAgent()
 
-    def test_make_decision_crisis(self, supervisor: SupervisorAgent) -> None:
+    @pytest.mark.asyncio
+    async def test_make_decision_crisis(self, supervisor: SupervisorAgent) -> None:
         """Test making decision for crisis message."""
-        decision = supervisor.make_decision("I want to end my life")
+        decision = await supervisor.make_decision("I want to end my life")
         assert decision.intent == IntentType.CRISIS_DISCLOSURE
         assert decision.requires_safety_override is True
         assert decision.processing_priority == "critical"
         assert AgentType.SAFETY in decision.selected_agents
 
-    def test_make_decision_emotional(self, supervisor: SupervisorAgent) -> None:
+    @pytest.mark.asyncio
+    async def test_make_decision_emotional(self, supervisor: SupervisorAgent) -> None:
         """Test making decision for emotional message."""
-        decision = supervisor.make_decision("I've been feeling so depressed and hopeless")
+        decision = await supervisor.make_decision("I've been feeling so depressed and hopeless")
         assert decision.intent == IntentType.EMOTIONAL_SUPPORT
         assert decision.processing_priority in ("high", "normal")
 
-    def test_make_decision_general(self, supervisor: SupervisorAgent) -> None:
+    @pytest.mark.asyncio
+    async def test_make_decision_general(self, supervisor: SupervisorAgent) -> None:
         """Test making decision for general message."""
-        decision = supervisor.make_decision("Hello, nice to meet you!")
+        decision = await supervisor.make_decision("Hello, nice to meet you!")
         assert decision.intent == IntentType.GENERAL_CHAT
         assert decision.processing_priority == "normal"
 
-    def test_make_decision_with_safety_flags(self, supervisor: SupervisorAgent) -> None:
+    @pytest.mark.asyncio
+    async def test_make_decision_with_safety_flags(self, supervisor: SupervisorAgent) -> None:
         """Test making decision with existing safety flags."""
-        decision = supervisor.make_decision(
+        decision = await supervisor.make_decision(
             "Can we continue our conversation?",
             safety_flags={"crisis_detected": True, "risk_level": "HIGH"},
         )
         assert decision.requires_safety_override is True
 
-    def test_make_decision_tracks_keywords(self, supervisor: SupervisorAgent) -> None:
+    @pytest.mark.asyncio
+    async def test_make_decision_tracks_keywords(self, supervisor: SupervisorAgent) -> None:
         """Test that matched keywords are tracked."""
-        decision = supervisor.make_decision("I've been very anxious about my symptoms")
+        decision = await supervisor.make_decision("I've been very anxious about my symptoms")
         assert "matched_keywords" in decision.metadata
 
-    def test_process_state(self, supervisor: SupervisorAgent) -> None:
+    @pytest.mark.asyncio
+    async def test_process_state(self, supervisor: SupervisorAgent) -> None:
         """Test processing state updates."""
         state = create_initial_state("user-1", "session-1", "I feel anxious")
-        updates = supervisor.process(state)
+        updates = await supervisor.process(state)
         assert "intent" in updates
         assert "intent_confidence" in updates
         assert "selected_agents" in updates
         assert "processing_phase" in updates
         assert "agent_results" in updates
 
-    def test_process_state_crisis_detection(self, supervisor: SupervisorAgent) -> None:
+    @pytest.mark.asyncio
+    async def test_process_state_crisis_detection(self, supervisor: SupervisorAgent) -> None:
         """Test state processing detects crisis."""
         state = create_initial_state("user-1", "session-1", "I want to hurt myself")
-        updates = supervisor.process(state)
+        updates = await supervisor.process(state)
         assert updates["intent"] == IntentType.CRISIS_DISCLOSURE.value
         assert AgentType.SAFETY.value in updates["selected_agents"]
 
-    def test_get_statistics(self, supervisor: SupervisorAgent) -> None:
+    @pytest.mark.asyncio
+    async def test_get_statistics(self, supervisor: SupervisorAgent) -> None:
         """Test getting supervisor statistics."""
         state1 = create_initial_state("user-1", "session-1", "Test message")
         state2 = create_initial_state("user-1", "session-1", "Another message")
-        supervisor.process(state1)
-        supervisor.process(state2)
+        await supervisor.process(state1)
+        await supervisor.process(state2)
         stats = supervisor.get_statistics()
         assert stats["total_decisions"] == 2
         assert "settings" in stats
@@ -314,18 +322,20 @@ class TestSupervisorAgent:
 class TestSupervisorNode:
     """Tests for supervisor_node function."""
 
-    def test_supervisor_node_function(self) -> None:
+    @pytest.mark.asyncio
+    async def test_supervisor_node_function(self) -> None:
         """Test supervisor node function creates agent and processes."""
         state = create_initial_state("user-1", "session-1", "Hello there")
-        updates = supervisor_node(state)
+        updates = await supervisor_node(state)
         assert "intent" in updates
         assert "selected_agents" in updates
         assert updates["processing_phase"] == "agent_routing"
 
-    def test_supervisor_node_handles_empty_message(self) -> None:
+    @pytest.mark.asyncio
+    async def test_supervisor_node_handles_empty_message(self) -> None:
         """Test supervisor node handles edge case of minimal message."""
         state = create_initial_state("user-1", "session-1", "hi")
-        updates = supervisor_node(state)
+        updates = await supervisor_node(state)
         assert updates["intent"] == IntentType.GENERAL_CHAT.value
 
 

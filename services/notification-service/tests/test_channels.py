@@ -236,6 +236,7 @@ class TestPushChannel:
         return PushConfig(
             server_key="TEST_SERVER_KEY",
             project_id="test-project",
+            use_v1_api=False,
         )
 
     @pytest.fixture

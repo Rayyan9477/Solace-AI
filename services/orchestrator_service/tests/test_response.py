@@ -645,6 +645,17 @@ class TestSafetyWrapperNode:
 class TestResponsePipelineIntegration:
     """Integration tests for the response pipeline."""
 
+    def _classify_intent(self, state):
+        """Simple intent classification for integration tests using the supervisor's IntentClassifier."""
+        from services.orchestrator_service.src.langgraph.supervisor import IntentClassifier, SupervisorSettings
+        classifier = IntentClassifier(SupervisorSettings())
+        message = state.get("current_message", "")
+        intent, confidence, keywords = classifier.classify(message)
+        return {
+            "intent": intent.value,
+            "intent_confidence": confidence,
+        }
+
     def test_full_pipeline_general_chat(self):
         """Test full pipeline for general chat."""
         state = create_initial_state(
@@ -652,8 +663,7 @@ class TestResponsePipelineIntegration:
             session_id="session-456",
             message="Hello, how are you?",
         )
-        router = Router()
-        route_result = router.route(state)
+        route_result = self._classify_intent(state)
         state.update(route_result)
         state["agent_results"] = [
             {"agent_type": "chat", "response_content": "Hello! I'm doing well.", "confidence": 0.8},
@@ -679,8 +689,7 @@ class TestResponsePipelineIntegration:
             session_id="session-456",
             message="I want to end my life",
         )
-        router = Router()
-        route_result = router.route(state)
+        route_result = self._classify_intent(state)
         assert route_result["intent"] == IntentType.CRISIS_DISCLOSURE.value
         state.update(route_result)
         state["safety_flags"] = {

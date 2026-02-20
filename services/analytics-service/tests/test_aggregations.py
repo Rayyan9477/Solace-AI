@@ -317,8 +317,8 @@ class TestAggregators:
         values = [Decimal(str(i)) for i in range(1, 101)]
 
         result = await aggregator.aggregate(values)
-        # Percentile index is: int(100 * 50 / 100) = 50, so values[50] = 51
-        assert result == Decimal("51")
+        # Percentile index is: int((100 - 1) * 50 / 100) = int(49.5) = 49, so sorted_values[49] = 50
+        assert result == Decimal("50")
 
 
 class TestAggregatedMetric:

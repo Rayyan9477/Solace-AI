@@ -234,11 +234,11 @@ class TestRoutingFunctions:
         assert route == "crisis_handler"
 
     def test_route_after_safety_safe(self) -> None:
-        """Test routing to supervisor after safe check."""
+        """Test routing to memory_retrieval after safe check."""
         state = create_initial_state("user-1", "session-1", "Hello")
         state["safety_flags"] = {"crisis_detected": False, "risk_level": "NONE"}
         route = route_after_safety(state)
-        assert route == "supervisor"
+        assert route == "memory_retrieval"
 
     def test_route_to_agents_default(self) -> None:
         """Test routing to agents with no selection defaults to chat."""
@@ -305,17 +305,18 @@ class TestOrchestratorGraphBuilder:
         compiled = builder.get_compiled_graph()
         assert compiled is not None
 
-    def test_invoke_sync(self) -> None:
-        """Test synchronous graph invocation."""
+    @pytest.mark.asyncio
+    async def test_invoke_sync(self) -> None:
+        """Test graph invocation via async invoke."""
         builder = OrchestratorGraphBuilder()
         builder.compile()
         state = create_initial_state("user-1", "session-1", "Hello, how are you?")
-        result = builder.invoke_sync(state)
+        result = await builder.invoke(state)
         assert result["final_response"] != ""
         assert result["processing_phase"] in ("completed", "crisis_handling")
 
     def test_invoke_sync_crisis(self) -> None:
-        """Test synchronous invocation with crisis message."""
+        """Test synchronous invocation with crisis message (crisis path has no async nodes)."""
         builder = OrchestratorGraphBuilder()
         builder.compile()
         state = create_initial_state("user-1", "session-1", "I want to kill myself")
@@ -323,13 +324,14 @@ class TestOrchestratorGraphBuilder:
         assert result["processing_phase"] == "crisis_handling"
         assert "988" in result["final_response"]
 
-    def test_invoke_with_thread_id(self) -> None:
+    @pytest.mark.asyncio
+    async def test_invoke_with_thread_id(self) -> None:
         """Test invocation with explicit thread ID."""
         builder = OrchestratorGraphBuilder()
         builder.compile()
         thread_id = "test-thread-123"
         state = create_initial_state("user-1", "session-1", "Hello")
-        result = builder.invoke_sync(state, thread_id=thread_id)
+        result = await builder.invoke(state, thread_id=thread_id)
         assert result["final_response"] != ""
 
 
@@ -343,39 +345,44 @@ class TestGraphBuilderIntegration:
         builder.compile()
         return builder
 
-    def test_full_flow_general_chat(self, builder: OrchestratorGraphBuilder) -> None:
+    @pytest.mark.asyncio
+    async def test_full_flow_general_chat(self, builder: OrchestratorGraphBuilder) -> None:
         """Test full flow for general chat message."""
         state = create_initial_state("user-1", "session-1", "Hello, nice to meet you!")
-        result = builder.invoke_sync(state)
+        result = await builder.invoke(state)
         assert result["processing_phase"] == "completed"
         assert result["intent"] == "general_chat"
         assert result["final_response"] != ""
 
-    def test_full_flow_emotional_support(self, builder: OrchestratorGraphBuilder) -> None:
+    @pytest.mark.asyncio
+    async def test_full_flow_emotional_support(self, builder: OrchestratorGraphBuilder) -> None:
         """Test full flow for emotional support message."""
         state = create_initial_state("user-1", "session-1", "I've been feeling really depressed and anxious")
-        result = builder.invoke_sync(state)
+        result = await builder.invoke(state)
         assert result["processing_phase"] == "completed"
         assert result["intent"] == "emotional_support"
 
-    def test_full_flow_treatment_inquiry(self, builder: OrchestratorGraphBuilder) -> None:
+    @pytest.mark.asyncio
+    async def test_full_flow_treatment_inquiry(self, builder: OrchestratorGraphBuilder) -> None:
         """Test full flow for treatment inquiry."""
         state = create_initial_state("user-1", "session-1", "What therapy techniques help with anxiety?")
-        result = builder.invoke_sync(state)
+        result = await builder.invoke(state)
         assert result["processing_phase"] == "completed"
         assert result["intent"] == "treatment_inquiry"
 
-    def test_full_flow_maintains_safety_flags(self, builder: OrchestratorGraphBuilder) -> None:
+    @pytest.mark.asyncio
+    async def test_full_flow_maintains_safety_flags(self, builder: OrchestratorGraphBuilder) -> None:
         """Test that safety flags are maintained through flow."""
         state = create_initial_state("user-1", "session-1", "I feel depressed")
-        result = builder.invoke_sync(state)
+        result = await builder.invoke(state)
         assert "safety_flags" in result
         assert "risk_level" in result["safety_flags"]
 
-    def test_full_flow_records_agent_results(self, builder: OrchestratorGraphBuilder) -> None:
+    @pytest.mark.asyncio
+    async def test_full_flow_records_agent_results(self, builder: OrchestratorGraphBuilder) -> None:
         """Test that agent results are recorded through flow."""
         state = create_initial_state("user-1", "session-1", "Hello there")
-        result = builder.invoke_sync(state)
+        result = await builder.invoke(state)
         assert len(result["agent_results"]) > 0
         agent_types = [r["agent_type"] for r in result["agent_results"]]
         assert "safety" in agent_types

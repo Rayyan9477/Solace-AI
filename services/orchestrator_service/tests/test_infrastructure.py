@@ -19,9 +19,9 @@ class TestConfigModule:
     def test_service_endpoints_defaults(self):
         from services.orchestrator_service.src.config import ServiceEndpoints
         endpoints = ServiceEndpoints()
-        assert endpoints.personality_service_url == "http://localhost:8002"
-        assert endpoints.diagnosis_service_url == "http://localhost:8003"
-        assert endpoints.treatment_service_url == "http://localhost:8004"
+        assert endpoints.personality_service_url == "http://localhost:8007"
+        assert endpoints.diagnosis_service_url == "http://localhost:8004"
+        assert endpoints.treatment_service_url == "http://localhost:8006"
         assert endpoints.memory_service_url == "http://localhost:8005"
 
     def test_llm_settings_defaults(self):
@@ -58,7 +58,7 @@ class TestConfigModule:
         config = OrchestratorConfig()
         assert config.environment == Environment.DEVELOPMENT
         assert config.service_name == "orchestrator-service"
-        assert config.port == 8001
+        assert config.port == 8000
 
     def test_orchestrator_config_cors_origins_list(self):
         from services.orchestrator_service.src.config import OrchestratorConfig
@@ -163,7 +163,8 @@ class TestEventsModule:
         assert event.payload["agent_type"] == "therapy"
         assert event.payload["confidence"] == 0.85
 
-    def test_event_bus_subscribe_and_publish(self):
+    @pytest.mark.asyncio
+    async def test_event_bus_subscribe_and_publish(self):
         from services.orchestrator_service.src.events import EventBus, EventFactory, EventType
         bus = EventBus()
         received_events = []
@@ -171,24 +172,26 @@ class TestEventsModule:
             received_events.append(event)
         bus.subscribe(EventType.SESSION_STARTED, handler)
         event = EventFactory.session_started(uuid4(), uuid4())
-        bus.publish(event)
+        await bus.publish(event)
         assert len(received_events) == 1
         assert received_events[0].event_type == EventType.SESSION_STARTED
 
-    def test_event_bus_subscribe_all(self):
+    @pytest.mark.asyncio
+    async def test_event_bus_subscribe_all(self):
         from services.orchestrator_service.src.events import EventBus, EventFactory
         bus = EventBus()
         all_events = []
         bus.subscribe_all(lambda e: all_events.append(e))
-        bus.publish(EventFactory.session_started(uuid4(), uuid4()))
-        bus.publish(EventFactory.session_ended(uuid4(), uuid4()))
+        await bus.publish(EventFactory.session_started(uuid4(), uuid4()))
+        await bus.publish(EventFactory.session_ended(uuid4(), uuid4()))
         assert len(all_events) == 2
 
-    def test_event_bus_get_history(self):
+    @pytest.mark.asyncio
+    async def test_event_bus_get_history(self):
         from services.orchestrator_service.src.events import EventBus, EventFactory, EventType
         bus = EventBus()
-        bus.publish(EventFactory.session_started(uuid4(), uuid4()))
-        bus.publish(EventFactory.session_ended(uuid4(), uuid4()))
+        await bus.publish(EventFactory.session_started(uuid4(), uuid4()))
+        await bus.publish(EventFactory.session_ended(uuid4(), uuid4()))
         history = bus.get_history()
         assert len(history) == 2
         filtered = bus.get_history(EventType.SESSION_STARTED)

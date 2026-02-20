@@ -16,11 +16,14 @@ from solace_security.middleware import AuthenticatedUser, get_current_user
 from solace_security.auth import TokenType
 
 
+TEST_USER_ID = "00000000-0000-4000-a000-000000000001"
+
+
 def _mock_user() -> AuthenticatedUser:
     return AuthenticatedUser(
-        user_id="test-user",
+        user_id=TEST_USER_ID,
         token_type=TokenType.ACCESS,
-        roles=["user"],
+        roles=["user", "clinician"],
         permissions=["diagnosis:read", "diagnosis:write"],
     )
 

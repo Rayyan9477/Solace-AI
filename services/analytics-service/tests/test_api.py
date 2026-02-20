@@ -25,6 +25,9 @@ from aggregations import AnalyticsAggregator, MetricsStore
 from reports import ReportService, ReportType
 from consumer import AnalyticsConsumer, ConsumerConfig
 
+from solace_security.middleware import get_current_user, get_current_service, AuthenticatedUser, AuthenticatedService
+from solace_security.auth import TokenType
+
 
 @pytest.fixture
 def app(analytics_aggregator, report_service, analytics_consumer):
@@ -32,6 +35,16 @@ def app(analytics_aggregator, report_service, analytics_consumer):
     app = FastAPI()
     app.include_router(router)
     set_dependencies(analytics_aggregator, report_service, analytics_consumer)
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        user_id="test-user",
+        token_type=TokenType.ACCESS,
+        roles=["user", "admin"],
+        permissions=["analytics:read", "analytics:write"],
+    )
+    app.dependency_overrides[get_current_service] = lambda: AuthenticatedService(
+        service_name="test-service",
+        permissions=["analytics:read", "analytics:write", "events:ingest"],
+    )
     return app
 
 

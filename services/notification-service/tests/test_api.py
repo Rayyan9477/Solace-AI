@@ -21,6 +21,9 @@ from domain.service import (
 from domain.templates import TemplateType, TemplateRegistry
 from domain.channels import ChannelType
 
+from solace_security.middleware import get_current_user, get_current_service, AuthenticatedUser, AuthenticatedService
+from solace_security.auth import TokenType
+
 
 @pytest.mark.integration
 class TestTemplateEndpoints:
@@ -32,6 +35,16 @@ class TestTemplateEndpoints:
         from api import router
         app = FastAPI()
         app.include_router(router)
+        app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+            user_id="test-user",
+            token_type=TokenType.ACCESS,
+            roles=["user", "admin"],
+            permissions=["notifications:read", "notifications:write"],
+        )
+        app.dependency_overrides[get_current_service] = lambda: AuthenticatedService(
+            service_name="test-service",
+            permissions=["notifications:read", "notifications:write"],
+        )
         return app
 
     @pytest.fixture
@@ -80,6 +93,16 @@ class TestValidationEndpoints:
         from api import router
         app = FastAPI()
         app.include_router(router)
+        app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+            user_id="test-user",
+            token_type=TokenType.ACCESS,
+            roles=["user", "admin"],
+            permissions=["notifications:read", "notifications:write"],
+        )
+        app.dependency_overrides[get_current_service] = lambda: AuthenticatedService(
+            service_name="test-service",
+            permissions=["notifications:read", "notifications:write"],
+        )
         return app
 
     @pytest.fixture
@@ -155,6 +178,16 @@ class TestChannelEndpoints:
         from api import router
         app = FastAPI()
         app.include_router(router)
+        app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+            user_id="test-user",
+            token_type=TokenType.ACCESS,
+            roles=["user", "admin"],
+            permissions=["notifications:read", "notifications:write"],
+        )
+        app.dependency_overrides[get_current_service] = lambda: AuthenticatedService(
+            service_name="test-service",
+            permissions=["notifications:read", "notifications:write"],
+        )
         return app
 
     @pytest.fixture
@@ -182,6 +215,16 @@ class TestHealthEndpoint:
         from api import router
         app = FastAPI()
         app.include_router(router)
+        app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+            user_id="test-user",
+            token_type=TokenType.ACCESS,
+            roles=["user", "admin"],
+            permissions=["notifications:read", "notifications:write"],
+        )
+        app.dependency_overrides[get_current_service] = lambda: AuthenticatedService(
+            service_name="test-service",
+            permissions=["notifications:read", "notifications:write"],
+        )
         return app
 
     @pytest.fixture

@@ -51,7 +51,8 @@
       "Bash(pytest:*)",
       "Bash(do grep -c \"def \" \"$f\")",
       "Read(//r/Solace-AI/**)",
-      "Bash(pushd:*)"
+      "Bash(pushd:*)",
+      "Bash(set)"
     ],
     "deny": [],
     "additionalDirectories": [

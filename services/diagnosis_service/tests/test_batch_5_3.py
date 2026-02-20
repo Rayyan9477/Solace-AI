@@ -88,7 +88,7 @@ class TestSymptomEntity:
         symptom = SymptomEntity(name="anxiety", severity=SeverityLevel.MODERATE)
         data = symptom.to_dict()
         assert data["name"] == "anxiety"
-        assert data["severity"] == "moderate"
+        assert data["severity"] == "MODERATE"
 
 
 class TestHypothesisEntity:

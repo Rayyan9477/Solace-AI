@@ -80,7 +80,7 @@ class TestSafetyAgentSettings:
     def test_default_settings(self):
         """Test default settings values."""
         settings = SafetyAgentSettings()
-        assert settings.service_url == "http://localhost:8001"
+        assert settings.service_url == "http://localhost:8002"
         assert settings.timeout_seconds == 10.0
         assert settings.enable_escalation is True
         assert settings.fallback_on_service_error is True
@@ -112,7 +112,7 @@ class TestSafetyCheckRequest:
         )
         data = request.to_dict()
         assert data["user_id"] == "user-1"
-        assert data["check_type"] == "PRE_CHECK"
+        assert data["check_type"] == "pre_check"
         assert data["include_resources"] is True
 
 
@@ -179,7 +179,7 @@ class TestSafetyAgent:
         """Test agent initialization."""
         agent = SafetyAgent()
         assert agent._check_count == 0
-        assert agent._settings.service_url == "http://localhost:8001"
+        assert agent._settings.service_url == "http://localhost:8002"
 
     def test_build_fallback_response_crisis(self):
         """Test fallback response for crisis message."""
@@ -685,38 +685,42 @@ class TestChatAgent:
         agent = ChatAgent()
         assert agent._message_count == 0
 
-    def test_process_greeting(self):
+    @pytest.mark.asyncio
+    async def test_process_greeting(self):
         """Test processing greeting message."""
         agent = ChatAgent()
         state = create_initial_state("user-1", "session-1", "Hello!")
-        result = agent.process(state)
+        result = await agent.process(state)
         assert "agent_results" in result
         agent_result = result["agent_results"][0]
         assert agent_result["agent_type"] == AgentType.CHAT.value
         assert agent_result["success"] is True
         assert "response_content" in agent_result
 
-    def test_process_farewell(self):
+    @pytest.mark.asyncio
+    async def test_process_farewell(self):
         """Test processing farewell message."""
         agent = ChatAgent()
         state = create_initial_state("user-1", "session-1", "Goodbye!")
-        result = agent.process(state)
+        result = await agent.process(state)
         agent_result = result["agent_results"][0]
         assert "take care" in agent_result["response_content"].lower()
 
-    def test_process_with_personality_style(self):
+    @pytest.mark.asyncio
+    async def test_process_with_personality_style(self):
         """Test processing with personality style."""
         agent = ChatAgent()
         state = create_initial_state("user-1", "session-1", "Hello!")
         state["personality_style"] = {"warmth": 0.9, "validation_level": 0.8}
-        result = agent.process(state)
+        result = await agent.process(state)
         agent_result = result["agent_results"][0]
         assert agent_result["success"] is True
 
-    def test_get_statistics(self):
+    @pytest.mark.asyncio
+    async def test_get_statistics(self):
         """Test statistics retrieval."""
         agent = ChatAgent()
-        agent.process(create_initial_state("user-1", "session-1", "Hi"))
+        await agent.process(create_initial_state("user-1", "session-1", "Hi"))
         stats = agent.get_statistics()
         assert stats["total_messages"] == 1
 
@@ -728,10 +732,11 @@ class TestChatAgent:
 class TestNodeFunctions:
     """Tests for LangGraph node functions."""
 
-    def test_chat_agent_node(self):
+    @pytest.mark.asyncio
+    async def test_chat_agent_node(self):
         """Test chat_agent_node function."""
         state = create_initial_state("user-1", "session-1", "Hello!")
-        result = chat_agent_node(state)
+        result = await chat_agent_node(state)
         assert "agent_results" in result
         assert result["agent_results"][0]["agent_type"] == AgentType.CHAT.value
 
@@ -779,7 +784,8 @@ class TestNodeFunctions:
 class TestAgentIntegration:
     """Integration tests for agent coordination."""
 
-    def test_chat_agent_with_initial_state(self):
+    @pytest.mark.asyncio
+    async def test_chat_agent_with_initial_state(self):
         """Test chat agent with properly initialized state."""
         state = create_initial_state(
             user_id="user-123",
@@ -787,15 +793,16 @@ class TestAgentIntegration:
             message="How are you today?",
         )
         agent = ChatAgent()
-        result = agent.process(state)
+        result = await agent.process(state)
         assert result["agent_results"][0]["success"] is True
         assert "metadata" in result["agent_results"][0]
 
-    def test_multiple_agents_state_updates(self):
+    @pytest.mark.asyncio
+    async def test_multiple_agents_state_updates(self):
         """Test that agent state updates are compatible."""
         state = create_initial_state("user-1", "session-1", "Hello!")
         chat_agent = ChatAgent()
-        chat_result = chat_agent.process(state)
+        chat_result = await chat_agent.process(state)
         assert "agent_results" in chat_result
         assert isinstance(chat_result["agent_results"], list)
 

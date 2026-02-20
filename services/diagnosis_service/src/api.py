@@ -52,7 +52,7 @@ async def perform_assessment(
 ) -> AssessmentResponse:
     """Perform full 4-step Chain-of-Reasoning diagnostic assessment."""
     # Verify user can only access their own data (unless clinician/admin)
-    if request.user_id != current_user.user_id and Role.CLINICIAN not in current_user.roles and Role.ADMIN not in current_user.roles:
+    if str(request.user_id) != current_user.user_id and Role.CLINICIAN not in current_user.roles and Role.ADMIN not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot access other user's assessments")
     logger.info("assessment_requested", user_id=str(request.user_id),
                 session_id=str(request.session_id), phase=request.current_phase.value,
@@ -91,7 +91,7 @@ async def extract_symptoms(
 ) -> SymptomExtractionResponse:
     """Extract symptoms from conversation without full assessment."""
     # Verify user can only access their own data (unless clinician/admin)
-    if request.user_id != current_user.user_id and Role.CLINICIAN not in current_user.roles and Role.ADMIN not in current_user.roles:
+    if str(request.user_id) != current_user.user_id and Role.CLINICIAN not in current_user.roles and Role.ADMIN not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot access other user's symptoms")
     logger.info("symptom_extraction_requested", user_id=str(request.user_id),
                 session_id=str(request.session_id), authenticated_user=str(current_user.user_id))
@@ -122,7 +122,7 @@ async def generate_differential(
 ) -> DifferentialResponse:
     """Generate differential diagnosis from symptoms."""
     # Verify user can only access their own data (unless clinician/admin)
-    if request.user_id != current_user.user_id and Role.CLINICIAN not in current_user.roles and Role.ADMIN not in current_user.roles:
+    if str(request.user_id) != current_user.user_id and Role.CLINICIAN not in current_user.roles and Role.ADMIN not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot access other user's differential")
     logger.info("differential_requested", user_id=str(request.user_id),
                 session_id=str(request.session_id), symptom_count=len(request.symptoms),
@@ -152,7 +152,7 @@ async def start_session(
 ) -> SessionStartResponse:
     """Start a new diagnosis session."""
     # Verify user can only start sessions for themselves (unless clinician/admin)
-    if request.user_id != current_user.user_id and Role.CLINICIAN not in current_user.roles and Role.ADMIN not in current_user.roles:
+    if str(request.user_id) != current_user.user_id and Role.CLINICIAN not in current_user.roles and Role.ADMIN not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot start sessions for other users")
     logger.info("session_start_requested", user_id=str(request.user_id),
                 session_type=request.session_type, authenticated_user=str(current_user.user_id))
@@ -180,7 +180,7 @@ async def end_session(
 ) -> SessionEndResponse:
     """End a diagnosis session and optionally generate summary."""
     # Verify user can only end their own sessions (unless clinician/admin)
-    if request.user_id != current_user.user_id and Role.CLINICIAN not in current_user.roles and Role.ADMIN not in current_user.roles:
+    if str(request.user_id) != current_user.user_id and Role.CLINICIAN not in current_user.roles and Role.ADMIN not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot end other user's sessions")
     logger.info("session_end_requested", user_id=str(request.user_id),
                 session_id=str(request.session_id), authenticated_user=str(current_user.user_id))
@@ -208,7 +208,7 @@ async def get_diagnosis_history(
 ) -> DiagnosisHistoryResponse:
     """Get diagnosis history for longitudinal tracking."""
     # Verify user can only access their own history (unless clinician/admin)
-    if request.user_id != current_user.user_id and Role.CLINICIAN not in current_user.roles and Role.ADMIN not in current_user.roles:
+    if str(request.user_id) != current_user.user_id and Role.CLINICIAN not in current_user.roles and Role.ADMIN not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot access other user's history")
     logger.info("history_requested", user_id=str(request.user_id), limit=request.limit,
                 authenticated_user=str(current_user.user_id))
@@ -285,7 +285,7 @@ async def delete_user_data(
 ) -> Response:
     """Delete all diagnosis data for a user (GDPR compliance)."""
     # Only allow self-deletion or admin deletion
-    if user_id != current_user.user_id and Role.ADMIN not in current_user.roles:
+    if str(user_id) != current_user.user_id and Role.ADMIN not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot delete other user's data without admin role")
     logger.info("user_data_deletion_requested", user_id=str(user_id),
                 authenticated_user=str(current_user.user_id))
