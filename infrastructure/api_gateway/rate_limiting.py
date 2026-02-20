@@ -186,6 +186,8 @@ class RedisRateLimitStore:
     def __init__(self, redis_client: Any) -> None:
         self._redis = redis_client
         self._prefix = "rate_limit:"
+        # In-memory fallback for sync calls (single-instance approximation)
+        self._sync_fallback = RateLimitStore()
 
     def _generate_key(self, policy: RateLimitPolicy, identifier: str) -> str:
         components = [policy.name, identifier, policy.window.value]
@@ -215,22 +217,18 @@ class RedisRateLimitStore:
 
     # Sync compatibility wrapper (uses in-memory fallback)
     def increment(self, policy: RateLimitPolicy, identifier: str) -> RateLimitResult:
-        """Sync fallback — use async_increment in async contexts."""
+        """Sync fallback — delegates to in-memory store for actual enforcement."""
         logger.warning("redis_rate_limit_sync_call", msg="Use async_increment for Redis-backed rate limiting")
-        # Fall through to basic check
-        return RateLimitResult(
-            allowed=True, remaining=policy.limit, limit=policy.limit,
-            reset_at=datetime.now(timezone.utc), retry_after=None, policy_name=policy.name,
-        )
+        return self._sync_fallback.increment(policy, identifier)
 
     def get_count(self, policy: RateLimitPolicy, identifier: str) -> int:
-        return 0  # Use async version
+        return self._sync_fallback.get_count(policy, identifier)
 
     def reset(self, policy: RateLimitPolicy, identifier: str) -> None:
-        pass  # Use async version
+        self._sync_fallback.reset(policy, identifier)
 
     def cleanup_expired(self) -> int:
-        return 0  # Redis TTL handles this
+        return self._sync_fallback.cleanup_expired()
 
 
 class RateLimiter:

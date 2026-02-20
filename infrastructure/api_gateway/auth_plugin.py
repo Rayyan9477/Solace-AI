@@ -11,6 +11,7 @@ import base64
 import hashlib
 import hmac
 import json
+import secrets
 import structlog
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -169,7 +170,7 @@ class JWTAuthPlugin:
             exp = now + timedelta(days=self._config.refresh_token_expire_days)
         else:
             exp = now + timedelta(days=365)
-        jti = hashlib.sha256(f"{subject}:{now.timestamp()}:{token_type.value}".encode()).hexdigest()[:32]
+        jti = secrets.token_hex(16)
         claims = TokenClaims(sub=subject, exp=exp, iat=now, iss=self._config.issuer, aud=self._config.audience, jti=jti, token_type=token_type, roles=roles or [UserRole.USER], email=email, name=name, session_id=session_id, custom_claims=custom_claims or {})
         return self._encode(claims)
 

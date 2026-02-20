@@ -20,7 +20,7 @@ class PostgresConfig(BaseSettings):
     port: int = Field(default=5432, ge=1, le=65535)
     database: str = Field(default="solace")
     user: str = Field(default="solace")
-    password: str = Field(default="")
+    password: SecretStr = Field(default="")
     pool_size: int = Field(default=10, ge=1, le=100)
     max_overflow: int = Field(default=5, ge=0, le=50)
     pool_timeout: int = Field(default=30, ge=1, le=300)
@@ -29,14 +29,14 @@ class PostgresConfig(BaseSettings):
 
     @property
     def connection_url(self) -> str:
-        return f"postgresql+asyncpg://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+        return f"postgresql+asyncpg://{self.user}:{self.password.get_secret_value()}@{self.host}:{self.port}/{self.database}"
 
 
 class RedisConfig(BaseSettings):
     """Redis cache configuration."""
     host: str = Field(default="localhost")
     port: int = Field(default=6379, ge=1, le=65535)
-    password: str = Field(default="")
+    password: SecretStr = Field(default="")
     db: int = Field(default=0, ge=0, le=15)
     working_memory_ttl: int = Field(default=3600, ge=60)
     session_ttl: int = Field(default=86400, ge=300)
@@ -48,7 +48,8 @@ class RedisConfig(BaseSettings):
 
     @property
     def connection_url(self) -> str:
-        auth = f":{self.password}@" if self.password else ""
+        pwd = self.password.get_secret_value()
+        auth = f":{pwd}@" if pwd else ""
         return f"redis://{auth}{self.host}:{self.port}/{self.db}"
 
 

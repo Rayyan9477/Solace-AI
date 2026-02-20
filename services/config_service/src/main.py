@@ -4,6 +4,7 @@ Centralized configuration, secrets, and feature flag management service.
 """
 from __future__ import annotations
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 from fastapi import FastAPI, Request, status
@@ -40,7 +41,7 @@ def configure_logging(log_level: str) -> None:
     structlog.configure(
         processors=processors,
         wrapper_class=structlog.make_filtering_bound_logger(
-            getattr(structlog.stdlib, log_level, structlog.stdlib.INFO)
+            getattr(logging, log_level, logging.INFO)
         ),
         context_class=dict,
         logger_factory=structlog.PrintLoggerFactory(),

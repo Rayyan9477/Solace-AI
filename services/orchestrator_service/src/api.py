@@ -111,6 +111,12 @@ async def process_chat_message(
     """
     start_time = time.perf_counter()
     request_id = str(uuid4())
+    # Enforce ownership: user can only send messages as themselves
+    if request_data.user_id != current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot send messages as another user",
+        )
     logger.info(
         "chat_request_received",
         request_id=request_id,
@@ -172,6 +178,12 @@ async def create_session(
     session_id = str(uuid4())
     thread_id = str(uuid4())
     created_at = datetime.now(timezone.utc)
+    # Enforce ownership: user can only create sessions for themselves
+    if request_data.user_id != current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot create sessions for other users",
+        )
     logger.info("session_created", session_id=session_id, user_id=request_data.user_id)
     return SessionCreateResponse(
         session_id=session_id,
@@ -235,13 +247,24 @@ async def detailed_health_check(request: Request) -> HealthResponse:
 async def websocket_chat_endpoint(
     websocket: WebSocket,
     session_id: str,
-    user_id: str = Query(..., description="User identifier"),
+    token: str = Query(..., description="Bearer JWT access token"),
 ) -> None:
     """
     WebSocket endpoint for real-time chat interaction.
 
+    Requires a valid JWT access token passed as a query parameter.
     Provides streaming responses and maintains persistent connection.
     """
+    # Authenticate before accepting the WebSocket connection
+    from solace_security.middleware import _get_jwt_manager
+
+    jwt_manager = _get_jwt_manager()
+    auth_result = jwt_manager.validate_access_token(token)
+    if not auth_result.success or not auth_result.payload:
+        await websocket.close(code=4001, reason="Authentication failed")
+        return
+    user_id = auth_result.user_id
+
     await websocket.accept()
     thread_id = str(uuid4())
     connection_id = str(uuid4())
@@ -333,6 +356,13 @@ async def process_batch_messages(
     """
     if len(messages) > 50:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Maximum 50 messages per batch")
+    # Enforce ownership: all messages must belong to the authenticated user
+    for msg in messages:
+        if msg.user_id != current_user.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot send messages as another user",
+            )
     async def process_single(msg: ChatMessageRequest) -> ChatMessageResponse:
         start_time = time.perf_counter()
         thread_id = msg.thread_id or str(uuid4())

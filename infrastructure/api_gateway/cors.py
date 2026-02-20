@@ -62,12 +62,22 @@ class CORSPolicy:
     headers: list[str] = field(default_factory=lambda: ["Content-Type", "Authorization"])
     expose_headers: list[str] = field(default_factory=list)
     max_age: int = 86400
-    credentials: bool = True
+    credentials: bool = False  # Default False — wildcard origins + credentials is a CORS violation
     preflight_continue: bool = False
     private_network: bool = False
     origin_patterns: list[str] = field(default_factory=list)
     enabled: bool = True
     tags: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        """Validate that wildcard origins are not combined with credentials."""
+        if "*" in self.origins and self.credentials:
+            logger.warning(
+                "cors_insecure_config",
+                policy=self.name,
+                detail="Wildcard origin with credentials is a CORS violation; disabling credentials",
+            )
+            object.__setattr__(self, "credentials", False)
 
     def allows_origin(self, origin: str) -> bool:
         if "*" in self.origins:

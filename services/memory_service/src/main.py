@@ -3,6 +3,7 @@ Solace-AI Memory Service - FastAPI Application Entry Point.
 5-tier memory hierarchy service for therapeutic context management.
 """
 from __future__ import annotations
+import logging
 import time
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
@@ -68,7 +69,7 @@ def configure_logging(settings: MemoryServiceAppSettings) -> None:
     structlog.configure(
         processors=processors,
         wrapper_class=structlog.make_filtering_bound_logger(
-            getattr(structlog.stdlib, settings.log_level, structlog.stdlib.INFO)
+            getattr(logging, settings.log_level, logging.INFO)
         ),
         context_class=dict,
         logger_factory=structlog.PrintLoggerFactory(),

@@ -101,6 +101,8 @@ class DiagnosisService(ServiceBase):
         ))
         step3_start = time.perf_counter()
         step3_result = await self._step3_challenge(step2_result["hypotheses"], step1_result["symptoms"])
+        # Forward missing_info from step 2 so step 4 can use it
+        step3_result["missing_info"] = step2_result.get("missing_info", [])
         reasoning_chain.append(ReasoningStepResultDTO(
             step=ReasoningStep.CHALLENGE, input_summary=f"{len(step2_result['hypotheses'])} hypotheses",
             output_summary=f"Identified {len(step3_result['challenges'])} challenges",

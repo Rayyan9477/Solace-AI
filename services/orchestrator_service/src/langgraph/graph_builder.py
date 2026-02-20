@@ -26,8 +26,9 @@ from .state_schema import (
     MessageEntry,
     SafetyFlags,
 )
-from .supervisor import SupervisorAgent, SupervisorSettings
+from .supervisor import SupervisorAgent, SupervisorSettings, _supervisor_llm_client
 from .memory_node import memory_retrieval_node
+from .aggregator import Aggregator, aggregator_node as _real_aggregator_node
 
 logger = structlog.get_logger(__name__)
 
@@ -99,6 +100,16 @@ class GraphBuilderSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="ORCHESTRATOR_GRAPH_", env_file=".env", extra="ignore")
 
 
+def _word_boundary_match(keyword: str, text: str) -> bool:
+    """Check if keyword appears in text with word boundaries to avoid false positives.
+
+    Uses regex word boundaries so that e.g. 'harm' does not match 'pharmacy'
+    and 'kill' does not match 'skill'.
+    """
+    import re
+    return bool(re.search(rf'\b{re.escape(keyword)}\b', text, re.IGNORECASE))
+
+
 def safety_precheck_node(state: OrchestratorState) -> dict[str, Any]:
     """Safety pre-check node - analyzes input for crisis indicators."""
     message = state.get("current_message", "")
@@ -106,8 +117,8 @@ def safety_precheck_node(state: OrchestratorState) -> dict[str, Any]:
     crisis_keywords = ["suicide", "kill myself", "end my life", "want to die", "self-harm", "hurt myself", "cutting", "overdose", "no reason to live", "end it all"]
     high_risk_keywords = ["plan to", "going to", "tonight", "method", "goodbye", "final"]
     message_lower = message.lower()
-    triggered = [kw for kw in crisis_keywords if kw in message_lower]
-    high_risk_matches = [kw for kw in high_risk_keywords if kw in message_lower]
+    triggered = [kw for kw in crisis_keywords if _word_boundary_match(kw, message_lower)]
+    high_risk_matches = [kw for kw in high_risk_keywords if _word_boundary_match(kw, message_lower)]
     crisis_detected = len(triggered) > 0
     risk_level = RiskLevel.CRITICAL if (crisis_detected and high_risk_matches) else (RiskLevel.HIGH if crisis_detected else (RiskLevel.LOW if any(kw in message_lower for kw in ["depressed", "anxious", "hopeless"]) else RiskLevel.NONE))
     safety_flags = SafetyFlags(risk_level=risk_level, crisis_detected=crisis_detected, crisis_type="suicidal_ideation" if crisis_detected else None, requires_escalation=risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL), monitoring_level="intensive" if crisis_detected else "standard", triggered_keywords=triggered, last_assessment_at=datetime.now(timezone.utc))
@@ -170,27 +181,65 @@ def crisis_handler_node(state: OrchestratorState) -> dict[str, Any]:
 
 
 def aggregator_node(state: OrchestratorState) -> dict[str, Any]:
-    """Aggregator node - combines results from multiple agents."""
-    agent_results = state.get("agent_results", [])
-    personality_style = state.get("personality_style", {})
-    logger.info("aggregator_processing", result_count=len(agent_results))
-    responses = [r["response_content"] for r in agent_results if r.get("response_content")]
-    final_response = responses[-1] if responses else "I'm here to support you. How can I help you today?"
-    if personality_style.get("warmth", 0.6) > 0.8:
-        final_response = f"I really appreciate you sharing this with me. {final_response}"
-    response_msg = MessageEntry.assistant_message(content=final_response, metadata={"aggregated": True, "source_count": len(responses)})
-    return {"final_response": final_response, "messages": [response_msg.to_dict()], "processing_phase": ProcessingPhase.AGGREGATION.value, "agent_results": [AgentResult(agent_type=AgentType.AGGREGATOR, success=True, response_content=final_response, confidence=0.85, metadata={"source_count": len(responses)}).to_dict()]}
+    """Aggregator node — delegates to the real Aggregator with priority-based ranking.
+
+    Uses the full ``Aggregator`` class from ``aggregator.py`` which provides
+    ``ResponseRanker`` (priority + confidence scoring) and ``ResponseMerger``
+    (strategy-based content merging) instead of naively picking the last
+    response in the list.
+    """
+    return _real_aggregator_node(state)
+
+
+# Replacement phrases for harmful content detected in safety post-check.
+_HARMFUL_REPLACEMENTS: dict[str, str] = {
+    "you should": "you might consider",
+    "just do it": "take it one step at a time",
+    "give up": "take a break and revisit this later",
+    "no point": "it may not feel like it right now, but there is hope",
+}
 
 
 def safety_postcheck_node(state: OrchestratorState) -> dict[str, Any]:
-    """Safety post-check node - validates final response."""
+    """Safety post-check node - validates and *filters* the final response.
+
+    If harmful patterns are detected, the response text is rewritten using
+    safe replacement phrases before being returned to the user.
+    """
+    import re
+
     final_response = state.get("final_response", "")
     logger.info("safety_postcheck_processing", response_length=len(final_response))
-    harmful_patterns = ["you should", "just do it", "give up", "no point"]
-    needs_filtering = any(p in final_response.lower() for p in harmful_patterns)
+
+    filtered_response = final_response
+    needs_filtering = False
+
+    for harmful, safe_replacement in _HARMFUL_REPLACEMENTS.items():
+        # Case-insensitive replacement using word boundaries
+        pattern = re.compile(rf'\b{re.escape(harmful)}\b', re.IGNORECASE)
+        if pattern.search(filtered_response):
+            needs_filtering = True
+            filtered_response = pattern.sub(safe_replacement, filtered_response)
+
     if needs_filtering:
-        logger.warning("safety_postcheck_filtering_applied")
-    return {"processing_phase": ProcessingPhase.COMPLETED.value, "agent_results": [AgentResult(agent_type=AgentType.SAFETY, success=True, confidence=0.9, metadata={"phase": "postcheck", "filtered": needs_filtering}).to_dict()]}
+        logger.warning(
+            "safety_postcheck_filtering_applied",
+            original_length=len(final_response),
+            filtered_length=len(filtered_response),
+        )
+
+    return {
+        "final_response": filtered_response,
+        "processing_phase": ProcessingPhase.COMPLETED.value,
+        "agent_results": [
+            AgentResult(
+                agent_type=AgentType.SAFETY,
+                success=True,
+                confidence=0.9,
+                metadata={"phase": "postcheck", "filtered": needs_filtering},
+            ).to_dict()
+        ],
+    }
 
 
 def route_after_safety(state: OrchestratorState) -> Literal["crisis_handler", "memory_retrieval"]:
@@ -310,7 +359,13 @@ class OrchestratorGraphBuilder:
         else:
             builder.add_node("safety_precheck", safety_precheck_node)
         builder.add_node("memory_retrieval", memory_retrieval_node)
-        builder.add_node("supervisor", SupervisorAgent(self._supervisor_settings).process)
+        builder.add_node(
+            "supervisor",
+            SupervisorAgent(
+                self._supervisor_settings,
+                llm_client=_supervisor_llm_client,
+            ).process,
+        )
         builder.add_node("crisis_handler", crisis_handler_node)
         # Agent nodes: real service HTTP clients
         builder.add_node("chat_agent", agent_nodes["chat"])

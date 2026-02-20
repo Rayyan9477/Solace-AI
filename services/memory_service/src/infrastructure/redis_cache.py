@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
 
@@ -21,7 +21,7 @@ class RedisSettings(BaseSettings):
     host: str = Field(default="localhost")
     port: int = Field(default=6379)
     db: int = Field(default=0)
-    password: str = Field(default="")
+    password: SecretStr = Field(default="")
     ssl: bool = Field(default=False)
     socket_timeout: int = Field(default=5)
     connection_pool_size: int = Field(default=10)
@@ -105,7 +105,7 @@ class RedisCache:
             try:
                 self._client = redis.Redis(
                     host=self._settings.host, port=self._settings.port, db=self._settings.db,
-                    password=self._settings.password if self._settings.password else None,
+                    password=self._settings.password.get_secret_value() or None,
                     ssl=self._settings.ssl, socket_timeout=self._settings.socket_timeout,
                     decode_responses=True,
                 )

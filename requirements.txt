@@ -25,7 +25,7 @@ openai~=1.58.1
 portkey-ai~=1.9.0
 
 # ==================== DATABASE & ORM ====================
-sqlalchemy[asyncio]~=2.1.0
+sqlalchemy[asyncio]~=2.0.0
 asyncpg~=0.30.0
 alembic~=1.14.0
 
