@@ -88,7 +88,8 @@ class TestUserRegistrationFlow:
         assert verified_user_id == user_id
         assert verified_email == email
 
-    def test_login_with_jwt_generation(self, password_service, jwt_service):
+    @pytest.mark.asyncio
+    async def test_login_with_jwt_generation(self, password_service, jwt_service):
         """Test login flow with JWT token generation."""
         # Setup: Create user with password
         password_hash = password_service.hash_password("LoginTest123!")
@@ -113,7 +114,7 @@ class TestUserRegistrationFlow:
         )
 
         # Verify access token
-        payload = jwt_service.verify_token(token_pair.access_token, TokenType.ACCESS)
+        payload = await jwt_service.verify_token(token_pair.access_token, TokenType.ACCESS)
         assert payload.user_id == user.user_id
         assert payload.email == user.email
         assert payload.role == user.role.value
@@ -202,7 +203,8 @@ class TestTokenRefreshFlow:
     def jwt_service(self):
         return create_jwt_service(secret_key="refresh-test-secret-key")
 
-    def test_refresh_token_flow(self, jwt_service):
+    @pytest.mark.asyncio
+    async def test_refresh_token_flow(self, jwt_service):
         """Test refreshing access token from refresh token."""
         user_id = uuid4()
 
@@ -214,17 +216,17 @@ class TestTokenRefreshFlow:
         )
 
         # Verify refresh token is valid
-        refresh_payload = jwt_service.verify_token(
+        refresh_payload = await jwt_service.verify_token(
             token_pair.refresh_token,
             TokenType.REFRESH,
         )
         assert refresh_payload.user_id == user_id
 
         # Refresh access token
-        new_access_token = jwt_service.refresh_access_token(token_pair.refresh_token)
+        new_access_token = await jwt_service.refresh_access_token(token_pair.refresh_token)
 
         # Verify new access token
-        new_payload = jwt_service.verify_token(new_access_token, TokenType.ACCESS)
+        new_payload = await jwt_service.verify_token(new_access_token, TokenType.ACCESS)
         assert new_payload.user_id == user_id
         assert new_payload.email == "refresh@example.com"
 
@@ -310,7 +312,8 @@ class TestFullUserLifecycle:
             "encryption": create_encryption_service(),
         }
 
-    def test_complete_user_lifecycle(self, services):
+    @pytest.mark.asyncio
+    async def test_complete_user_lifecycle(self, services):
         """Test user registration -> verification -> login -> data encryption."""
         # 1. Registration - validate email with value object, create user
         email_vo = EmailAddress(value="Lifecycle@Example.com")
@@ -362,5 +365,5 @@ class TestFullUserLifecycle:
         assert encrypted_data["ssn"] != "123-45-6789"
 
         # 6. Verify JWT
-        payload = services["jwt"].verify_token(token_pair.access_token, TokenType.ACCESS)
+        payload = await services["jwt"].verify_token(token_pair.access_token, TokenType.ACCESS)
         assert payload.user_id == user.user_id

@@ -416,13 +416,29 @@ class TestRepositoryFactorySingleton:
         reset_repositories()
 
     def test_get_repository_factory_raises_without_postgres(self) -> None:
-        """Test singleton raises RepositoryError when no PostgreSQL is configured."""
-        with pytest.raises(RepositoryError, match="PostgreSQL is required in production"):
-            get_repository_factory()
+        """Test singleton raises RepositoryError when no PostgreSQL is configured.
+
+        Must disable the use_connection_pool_manager feature flag so the code
+        reaches the 'no database configured' branch instead of creating a
+        PostgresSafetyRepositoryFactory via ConnectionPoolManager.
+        """
+        from solace_infrastructure.feature_flags import FeatureFlags
+        FeatureFlags.disable_flag("use_connection_pool_manager")
+        try:
+            with pytest.raises(RepositoryError, match="PostgreSQL is required in production"):
+                get_repository_factory()
+        finally:
+            FeatureFlags.enable_flag("use_connection_pool_manager")
 
     def test_reset_repositories(self) -> None:
         """Test resetting repositories clears state."""
         reset_repositories()
         # After reset, calling get_repository_factory should raise again
-        with pytest.raises(RepositoryError, match="PostgreSQL is required in production"):
-            get_repository_factory()
+        # (with feature flag disabled so no ConnectionPoolManager path)
+        from solace_infrastructure.feature_flags import FeatureFlags
+        FeatureFlags.disable_flag("use_connection_pool_manager")
+        try:
+            with pytest.raises(RepositoryError, match="PostgreSQL is required in production"):
+                get_repository_factory()
+        finally:
+            FeatureFlags.enable_flag("use_connection_pool_manager")

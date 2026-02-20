@@ -36,11 +36,11 @@ class TestEnums:
 
     def test_severity_level_values(self) -> None:
         """Test SeverityLevel enum values."""
-        assert SeverityLevel.MINIMAL == "minimal"
-        assert SeverityLevel.MILD == "mild"
-        assert SeverityLevel.MODERATE == "moderate"
-        assert SeverityLevel.MODERATELY_SEVERE == "moderately_severe"
-        assert SeverityLevel.SEVERE == "severe"
+        assert SeverityLevel.MINIMAL == "MINIMAL"
+        assert SeverityLevel.MILD == "MILD"
+        assert SeverityLevel.MODERATE == "MODERATE"
+        assert SeverityLevel.MODERATELY_SEVERE == "MODERATELY_SEVERE"
+        assert SeverityLevel.SEVERE == "SEVERE"
 
     def test_risk_level_values(self) -> None:
         """Test RiskLevel enum values."""

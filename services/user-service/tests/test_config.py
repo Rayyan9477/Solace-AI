@@ -22,34 +22,34 @@ class TestDatabaseConfig:
 
     def test_database_config_defaults(self):
         """Test database config with default values."""
-        with patch.dict(os.environ, {"DB_PASSWORD": "test_password"}, clear=True):
+        with patch.dict(os.environ, {"USER_DB_PASSWORD": "test_password"}, clear=True):
             config = DatabaseConfig()
 
             assert config.host == "localhost"
             assert config.port == 5432
-            assert config.name == "solace_users"
+            assert config.name == "solace"
             assert config.user == "postgres"
             assert config.pool_size == 10
 
     def test_database_url_generation(self):
         """Test database URL generation."""
-        with patch.dict(os.environ, {"DB_PASSWORD": "test_password"}, clear=True):
+        with patch.dict(os.environ, {"USER_DB_PASSWORD": "test_password"}, clear=True):
             config = DatabaseConfig()
 
             url = config.url
 
             assert "postgresql+asyncpg://" in url
             assert "test_password" in url
-            assert "solace_users" in url
+            assert "solace" in url
 
     def test_database_config_from_env(self):
         """Test database config loaded from environment variables."""
         with patch.dict(os.environ, {
-            "DB_HOST": "db.example.com",
-            "DB_PORT": "5433",
-            "DB_NAME": "custom_db",
-            "DB_USER": "custom_user",
-            "DB_PASSWORD": "custom_password",
+            "USER_DB_HOST": "db.example.com",
+            "USER_DB_PORT": "5433",
+            "USER_DB_NAME": "custom_db",
+            "USER_DB_USER": "custom_user",
+            "USER_DB_PASSWORD": "custom_password",
         }, clear=True):
             config = DatabaseConfig()
 
@@ -64,24 +64,26 @@ class TestRedisConfig:
 
     def test_redis_config_defaults(self):
         """Test redis config with default values."""
-        config = RedisConfig()
+        with patch.dict(os.environ, {}, clear=True):
+            config = RedisConfig()
 
-        assert config.host == "localhost"
-        assert config.port == 6379
-        assert config.db == 0
-        assert config.password is None
+            assert config.host == "localhost"
+            assert config.port == 6379
+            assert config.db == 0
+            assert config.password is None
 
     def test_redis_url_generation(self):
         """Test redis URL generation."""
-        config = RedisConfig()
+        with patch.dict(os.environ, {}, clear=True):
+            config = RedisConfig()
 
-        url = config.url
+            url = config.url
 
-        assert url == "redis://localhost:6379/0"
+            assert url == "redis://localhost:6379/0"
 
     def test_redis_url_with_password(self):
         """Test redis URL generation with password."""
-        with patch.dict(os.environ, {"REDIS_PASSWORD": "secret"}, clear=True):
+        with patch.dict(os.environ, {"USER_REDIS_PASSWORD": "secret"}, clear=True):
             config = RedisConfig()
 
             url = config.url
@@ -94,8 +96,9 @@ class TestSecurityConfig:
 
     def test_security_config_requires_jwt_secret(self):
         """Test that security config requires JWT secret."""
-        with pytest.raises(Exception):
-            SecurityConfig()
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(Exception):
+                SecurityConfig()
 
     def test_security_config_with_valid_jwt_secret(self):
         """Test security config with valid JWT secret."""
@@ -169,9 +172,9 @@ class TestKafkaConfig:
     def test_kafka_config_from_env(self):
         """Test kafka config loaded from environment variables."""
         with patch.dict(os.environ, {
-            "KAFKA_BOOTSTRAP_SERVERS": "kafka:9092",
-            "KAFKA_TOPIC_USERS": "custom.topic",
-            "KAFKA_ENABLE": "false",
+            "USER_KAFKA_BOOTSTRAP_SERVERS": "kafka:9092",
+            "USER_KAFKA_TOPIC_USERS": "custom.topic",
+            "USER_KAFKA_ENABLE": "false",
         }, clear=True):
             config = KafkaConfig()
 
@@ -186,8 +189,10 @@ class TestUserServiceSettings:
     def test_user_service_settings_loads_all_configs(self):
         """Test that user service settings loads all nested configs."""
         with patch.dict(os.environ, {
-            "DB_PASSWORD": "test_password",
-            "SECURITY_JWT_SECRET": "a" * 32,
+            "USER_DB_PASSWORD": "test_db_credential_1234",
+            "SECURITY_JWT_SECRET": "b" * 32,
+            "USER_SERVICE_JWT_SECRET_KEY": "c" * 32,
+            "USER_SERVICE_FIELD_ENCRYPTION_KEY": "d" * 32,
         }, clear=True):
             settings = UserServiceSettings()
 
@@ -200,8 +205,10 @@ class TestUserServiceSettings:
     def test_user_service_settings_load_method(self):
         """Test user service settings load method."""
         with patch.dict(os.environ, {
-            "DB_PASSWORD": "test_password",
-            "SECURITY_JWT_SECRET": "a" * 32,
+            "USER_DB_PASSWORD": "test_db_credential_1234",
+            "SECURITY_JWT_SECRET": "b" * 32,
+            "USER_SERVICE_JWT_SECRET_KEY": "c" * 32,
+            "USER_SERVICE_FIELD_ENCRYPTION_KEY": "d" * 32,
         }, clear=True):
             settings = UserServiceSettings.load()
 

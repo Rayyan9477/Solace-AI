@@ -274,7 +274,7 @@ class TestOutcomeMeasure:
         data = measure.to_dict()
         assert data["measure_id"] == str(measure_id)
         assert data["raw_score"] == 14
-        assert data["severity_category"] == "moderate"
+        assert data["severity_category"] == "MODERATE"
         assert data["is_clinical"] is True
 
     def test_from_dict(self) -> None:

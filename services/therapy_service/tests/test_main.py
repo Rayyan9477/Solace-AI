@@ -136,7 +136,8 @@ class TestExceptionHandlers:
         )
         # Without lifespan, service returns 503 (service unavailable)
         # With lifespan, it would return 422 (validation error)
-        assert response.status_code in [422, 500, 503]
+        # Auth middleware may return 401 when no credentials are provided
+        assert response.status_code in [401, 422, 500, 503]
         data = response.json()
         assert "error" in data or "detail" in data or "message" in data
 

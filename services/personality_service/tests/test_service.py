@@ -122,7 +122,7 @@ class TestPersonalityOrchestrator:
             text="I work hard to achieve my goals. Organization and planning are important to me.",
         )
         await orchestrator.detect_personality(request)
-        profile = orchestrator.get_profile(user_id)
+        profile = await orchestrator.get_profile(user_id)
         assert profile is not None
         assert profile.user_id == user_id
         assert profile.assessment_count == 1
@@ -142,7 +142,7 @@ class TestPersonalityOrchestrator:
         )
         await orchestrator.detect_personality(request1)
         await orchestrator.detect_personality(request2)
-        profile = orchestrator.get_profile(user_id)
+        profile = await orchestrator.get_profile(user_id)
         assert profile is not None
         assert profile.assessment_count == 2
         assert profile.version >= 2
@@ -215,17 +215,17 @@ class TestPersonalityOrchestrator:
     async def test_get_profile_nonexistent(self, orchestrator: PersonalityOrchestrator) -> None:
         """Test getting nonexistent profile."""
         await orchestrator.initialize()
-        profile = orchestrator.get_profile(uuid4())
+        profile = await orchestrator.get_profile(uuid4())
         assert profile is None
 
     @pytest.mark.asyncio
     async def test_get_statistics(self, orchestrator: PersonalityOrchestrator) -> None:
         """Test getting service statistics."""
         await orchestrator.initialize()
-        stats = orchestrator.get_statistics()
-        assert stats["initialized"] is True
-        assert stats["total_requests"] == 0
-        assert stats["profiles_count"] == 0
+        status = await orchestrator.get_status()
+        assert status["initialized"] is True
+        assert status["statistics"]["total_requests"] == 0
+        assert status["profiles_count"] == 0
 
     @pytest.mark.asyncio
     async def test_statistics_update(self, orchestrator: PersonalityOrchestrator) -> None:
@@ -237,10 +237,10 @@ class TestPersonalityOrchestrator:
             text="I enjoy creative activities and exploring new ideas. Art and music inspire me.",
         )
         await orchestrator.detect_personality(request)
-        stats = orchestrator.get_statistics()
-        assert stats["total_requests"] == 1
-        assert stats["total_detections"] == 1
-        assert stats["profiles_count"] == 1
+        status = await orchestrator.get_status()
+        assert status["statistics"]["total_requests"] == 1
+        assert status["statistics"]["total_detections"] == 1
+        assert status["profiles_count"] == 1
 
     @pytest.mark.asyncio
     async def test_shutdown(self, orchestrator: PersonalityOrchestrator) -> None:

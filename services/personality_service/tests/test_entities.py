@@ -54,7 +54,7 @@ class TestTraitAssessment:
             agreeableness=Decimal("0.7"),
             neuroticism=Decimal("0.3"),
         )
-        assessment = TraitAssessment(ocean_scores=scores)
+        assessment = TraitAssessment(user_id=uuid4(), ocean_scores=scores)
         assert assessment.get_trait_value(PersonalityTrait.OPENNESS) == Decimal("0.8")
         assert assessment.get_trait_value(PersonalityTrait.NEUROTICISM) == Decimal("0.3")
 
@@ -68,12 +68,13 @@ class TestTraitAssessment:
             neuroticism=Decimal("0.5"),
             overall_confidence=Decimal("0.75"),
         )
-        assessment = TraitAssessment(ocean_scores=scores)
+        assessment = TraitAssessment(user_id=uuid4(), ocean_scores=scores)
         assert assessment.confidence == Decimal("0.75")
 
     def test_is_reliable(self) -> None:
         """Test reliability check."""
         reliable = TraitAssessment(
+            user_id=uuid4(),
             ocean_scores=OceanScores(
                 openness=Decimal("0.5"), conscientiousness=Decimal("0.5"),
                 extraversion=Decimal("0.5"), agreeableness=Decimal("0.5"),
@@ -81,6 +82,7 @@ class TestTraitAssessment:
             )
         )
         unreliable = TraitAssessment(
+            user_id=uuid4(),
             ocean_scores=OceanScores(
                 openness=Decimal("0.5"), conscientiousness=Decimal("0.5"),
                 extraversion=Decimal("0.5"), agreeableness=Decimal("0.5"),
@@ -127,7 +129,7 @@ class TestPersonalityProfile:
             agreeableness=Decimal("0.8"),
             neuroticism=Decimal("0.3"),
         )
-        assessment = TraitAssessment(ocean_scores=scores)
+        assessment = TraitAssessment(user_id=uuid4(), ocean_scores=scores)
         profile.add_assessment(assessment)
         assert profile.ocean_scores is not None
         assert profile.assessment_count == 1
@@ -145,8 +147,8 @@ class TestPersonalityProfile:
             agreeableness=Decimal("0.8"),
             neuroticism=Decimal("0.8"),
         )
-        profile.add_assessment(TraitAssessment(ocean_scores=scores1))
-        profile.add_assessment(TraitAssessment(ocean_scores=scores2))
+        profile.add_assessment(TraitAssessment(user_id=uuid4(), ocean_scores=scores1))
+        profile.add_assessment(TraitAssessment(user_id=uuid4(), ocean_scores=scores2))
         assert profile.assessment_count == 2
         assert profile.ocean_scores.openness > Decimal("0.5")
 
@@ -156,7 +158,7 @@ class TestPersonalityProfile:
         assert profile.stability_score == Decimal("0.0")
         scores = OceanScores.neutral()
         for _ in range(5):
-            profile.add_assessment(TraitAssessment(ocean_scores=scores))
+            profile.add_assessment(TraitAssessment(user_id=uuid4(), ocean_scores=scores))
         assert profile.stability_score > Decimal("0.5")
 
     def test_is_stable(self) -> None:
@@ -164,7 +166,7 @@ class TestPersonalityProfile:
         profile = PersonalityProfile(user_id=uuid4())
         scores = OceanScores.neutral()
         for _ in range(5):
-            profile.add_assessment(TraitAssessment(ocean_scores=scores))
+            profile.add_assessment(TraitAssessment(user_id=uuid4(), ocean_scores=scores))
         assert profile.is_stable is True
 
     def test_has_sufficient_data(self) -> None:
@@ -172,7 +174,7 @@ class TestPersonalityProfile:
         profile = PersonalityProfile(user_id=uuid4())
         assert profile.has_sufficient_data is False
         for _ in range(3):
-            profile.add_assessment(TraitAssessment(ocean_scores=OceanScores.neutral()))
+            profile.add_assessment(TraitAssessment(user_id=uuid4(), ocean_scores=OceanScores.neutral()))
         assert profile.has_sufficient_data is True
 
     def test_dominant_traits(self) -> None:
@@ -185,7 +187,7 @@ class TestPersonalityProfile:
             agreeableness=Decimal("0.60"),
             neuroticism=Decimal("0.30"),
         )
-        profile.add_assessment(TraitAssessment(ocean_scores=scores))
+        profile.add_assessment(TraitAssessment(user_id=uuid4(), ocean_scores=scores))
         dominant = profile.dominant_traits
         assert PersonalityTrait.OPENNESS in dominant
         assert PersonalityTrait.EXTRAVERSION in dominant
@@ -201,14 +203,14 @@ class TestPersonalityProfile:
             agreeableness=Decimal("0.6"),
             neuroticism=Decimal("0.4"),
         )
-        profile.add_assessment(TraitAssessment(ocean_scores=scores))
+        profile.add_assessment(TraitAssessment(user_id=uuid4(), ocean_scores=scores))
         assert profile.style_type == CommunicationStyleType.ANALYTICAL
 
     def test_get_recent_assessments(self) -> None:
         """Test getting recent assessments."""
         profile = PersonalityProfile(user_id=uuid4())
         for i in range(10):
-            profile.add_assessment(TraitAssessment(ocean_scores=OceanScores.neutral()))
+            profile.add_assessment(TraitAssessment(user_id=uuid4(), ocean_scores=OceanScores.neutral()))
         recent = profile.get_recent_assessments(5)
         assert len(recent) == 5
 
@@ -223,7 +225,7 @@ class TestPersonalityProfile:
                 agreeableness=Decimal("0.5"),
                 neuroticism=Decimal("0.5"),
             )
-            profile.add_assessment(TraitAssessment(ocean_scores=scores))
+            profile.add_assessment(TraitAssessment(user_id=uuid4(), ocean_scores=scores))
         history = profile.get_trait_history(PersonalityTrait.OPENNESS)
         assert len(history) == 5
 
@@ -238,14 +240,14 @@ class TestPersonalityProfile:
                 agreeableness=Decimal("0.5"),
                 neuroticism=Decimal("0.5"),
             )
-            profile.add_assessment(TraitAssessment(ocean_scores=scores))
+            profile.add_assessment(TraitAssessment(user_id=uuid4(), ocean_scores=scores))
         trend = profile.calculate_trait_trend(PersonalityTrait.OPENNESS)
         assert trend == "increasing"
 
     def test_reset_scores(self) -> None:
         """Test resetting profile scores."""
         profile = PersonalityProfile(user_id=uuid4())
-        profile.add_assessment(TraitAssessment(ocean_scores=OceanScores.neutral()))
+        profile.add_assessment(TraitAssessment(user_id=uuid4(), ocean_scores=OceanScores.neutral()))
         profile.reset_scores()
         assert profile.ocean_scores is None
         assert profile.assessment_count == 0
@@ -253,15 +255,15 @@ class TestPersonalityProfile:
 
     def test_max_history_size(self) -> None:
         """Test history size limit."""
-        profile = PersonalityProfile(_max_history_size=5)
+        profile = PersonalityProfile(user_id=uuid4(), _max_history_size=5)
         for _ in range(10):
-            profile.add_assessment(TraitAssessment(ocean_scores=OceanScores.neutral()))
+            profile.add_assessment(TraitAssessment(user_id=uuid4(), ocean_scores=OceanScores.neutral()))
         assert len(profile.assessment_history) == 5
 
     def test_to_dict_and_from_dict(self) -> None:
         """Test serialization round-trip."""
         profile = PersonalityProfile.create_for_user(uuid4())
-        profile.add_assessment(TraitAssessment(ocean_scores=OceanScores.neutral()))
+        profile.add_assessment(TraitAssessment(user_id=uuid4(), ocean_scores=OceanScores.neutral()))
         data = profile.to_dict()
         restored = PersonalityProfile.from_dict(data)
         assert restored.user_id == profile.user_id
@@ -274,7 +276,7 @@ class TestProfileSnapshot:
     def test_create_snapshot_from_profile(self) -> None:
         """Test creating snapshot from profile."""
         profile = PersonalityProfile.create_for_user(uuid4())
-        profile.add_assessment(TraitAssessment(ocean_scores=OceanScores.neutral()))
+        profile.add_assessment(TraitAssessment(user_id=uuid4(), ocean_scores=OceanScores.neutral()))
         snapshot = ProfileSnapshot.from_profile(profile, reason="checkpoint")
         assert snapshot.profile_id == profile.profile_id
         assert snapshot.user_id == profile.user_id
@@ -284,7 +286,7 @@ class TestProfileSnapshot:
     def test_snapshot_to_dict(self) -> None:
         """Test snapshot serialization."""
         profile = PersonalityProfile.create_for_user(uuid4())
-        profile.add_assessment(TraitAssessment(ocean_scores=OceanScores.neutral()))
+        profile.add_assessment(TraitAssessment(user_id=uuid4(), ocean_scores=OceanScores.neutral()))
         snapshot = ProfileSnapshot.from_profile(profile)
         data = snapshot.to_dict()
         assert "snapshot_id" in data
@@ -297,7 +299,7 @@ class TestProfileComparison:
     def test_create_comparison(self) -> None:
         """Test creating profile comparison."""
         profile = PersonalityProfile.create_for_user(uuid4())
-        profile.add_assessment(TraitAssessment(ocean_scores=OceanScores.neutral()))
+        profile.add_assessment(TraitAssessment(user_id=uuid4(), ocean_scores=OceanScores.neutral()))
         baseline = ProfileSnapshot.from_profile(profile)
         scores_new = OceanScores(
             openness=Decimal("1.0"),
@@ -307,7 +309,7 @@ class TestProfileComparison:
             neuroticism=Decimal("0.5"),
         )
         for _ in range(3):
-            profile.add_assessment(TraitAssessment(ocean_scores=scores_new))
+            profile.add_assessment(TraitAssessment(user_id=uuid4(), ocean_scores=scores_new))
         current = ProfileSnapshot.from_profile(profile)
         comparison = ProfileComparison(
             profile_id=profile.profile_id,
@@ -319,7 +321,7 @@ class TestProfileComparison:
     def test_has_significant_changes(self) -> None:
         """Test significant changes detection."""
         profile = PersonalityProfile.create_for_user(uuid4())
-        profile.add_assessment(TraitAssessment(ocean_scores=OceanScores.neutral()))
+        profile.add_assessment(TraitAssessment(user_id=uuid4(), ocean_scores=OceanScores.neutral()))
         baseline = ProfileSnapshot.from_profile(profile)
         current = ProfileSnapshot.from_profile(profile)
         comparison = ProfileComparison(
@@ -332,7 +334,7 @@ class TestProfileComparison:
     def test_comparison_to_dict(self) -> None:
         """Test comparison serialization."""
         profile = PersonalityProfile.create_for_user(uuid4())
-        profile.add_assessment(TraitAssessment(ocean_scores=OceanScores.neutral()))
+        profile.add_assessment(TraitAssessment(user_id=uuid4(), ocean_scores=OceanScores.neutral()))
         snapshot = ProfileSnapshot.from_profile(profile)
         comparison = ProfileComparison(
             profile_id=profile.profile_id,

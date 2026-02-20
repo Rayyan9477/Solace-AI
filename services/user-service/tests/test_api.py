@@ -5,41 +5,114 @@ Tests authentication, user management, preferences, and consent endpoints.
 """
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.main import create_app, _state
-from src.infrastructure.repository import reset_repositories
+from src.main import ServiceState
+from src.api import router as api_router
+from src.infrastructure.jwt_service import (
+    JWTService, JWTConfig, TokenExpiredError, TokenInvalidError, InMemoryTokenBlacklist,
+)
+from src.infrastructure.password_service import PasswordService, PasswordConfig
+from src.infrastructure.token_service import create_token_service
+from src.infrastructure.encryption_service import create_encryption_service
+from src.domain.service import UserService
+from src.auth import SessionManager, SessionConfig, AuthenticationService
+
+from .fixtures import (
+    InMemoryUserRepository,
+    InMemoryUserPreferencesRepository,
+    InMemoryConsentRepository,
+)
+
+
+def _build_test_app() -> FastAPI:
+    """Build a test FastAPI app with in-memory repositories and services."""
+
+    @asynccontextmanager
+    async def test_lifespan(app: FastAPI):
+        state = ServiceState()
+
+        # Infrastructure
+        jwt_config = JWTConfig(
+            secret_key="test_secret_key_for_pytest_only_not_for_production_use_minimum_32_chars",
+        )
+        blacklist = InMemoryTokenBlacklist()
+        state.jwt_service = JWTService(jwt_config, blacklist=blacklist)
+        state.password_service = PasswordService(PasswordConfig())
+
+        from cryptography.fernet import Fernet
+        _key = Fernet.generate_key()
+        state.token_service = create_token_service(encryption_key=_key)
+        state.encryption_service = create_encryption_service(encryption_key=_key)
+
+        # Repositories (in-memory)
+        state.user_repository = InMemoryUserRepository()
+        state.preferences_repository = InMemoryUserPreferencesRepository()
+        state.consent_repository = InMemoryConsentRepository()
+
+        # Domain
+        state.user_service = UserService(
+            user_repository=state.user_repository,
+            preferences_repository=state.preferences_repository,
+            consent_repository=state.consent_repository,
+            password_service=state.password_service,
+        )
+
+        # Application
+        session_config = SessionConfig(
+            secret_key="test_secret_key_for_pytest_only_not_for_production_use_minimum_32_chars",
+        )
+        state.session_manager = SessionManager(session_config)
+        state.auth_service = AuthenticationService(
+            session_manager=state.session_manager,
+            jwt_service=state.jwt_service,
+            password_service=state.password_service,
+        )
+
+        state.initialized = True
+        app.state.service = state
+        yield
+        state.initialized = False
+
+    app = FastAPI(lifespan=test_lifespan)
+
+    # Health endpoints (replicate from main.py)
+    @app.get("/health")
+    async def health_check():
+        return {"status": "healthy", "service": "user-service"}
+
+    @app.get("/ready")
+    async def readiness_check():
+        svc_state: ServiceState = app.state.service
+        return {"status": "ready", "service": "user-service", "initialized": svc_state.initialized}
+
+    @app.get("/status")
+    async def service_status():
+        svc_state: ServiceState = app.state.service
+        return {
+            "status": "operational" if svc_state.initialized else "initializing",
+            "service": "user-service",
+            "version": "1.0.0",
+            "statistics": svc_state.stats,
+        }
+
+    app.include_router(api_router, prefix="/api/v1")
+    return app
 
 
 @pytest.fixture
 def client():
-    """Create test client."""
-    app = create_app()
+    """Create test client with in-memory services."""
+    app = _build_test_app()
     with TestClient(app) as c:
         yield c
-
-
-@pytest.fixture(autouse=True)
-def clear_storage():
-    """Clear in-memory storage before each test."""
-    # Reset global repository state
-    reset_repositories()
-
-    # Reset service state if initialized
-    if _state is not None:
-        _state.reset()
-
-    yield
-
-    # Cleanup after test
-    reset_repositories()
-    if _state is not None:
-        _state.reset()
 
 
 class TestHealthEndpoints:

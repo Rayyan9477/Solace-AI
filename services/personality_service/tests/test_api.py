@@ -29,9 +29,23 @@ def mock_orchestrator() -> MagicMock:
 def app(mock_orchestrator: MagicMock):
     """Create test app with mock orchestrator."""
     from fastapi import FastAPI
+    from solace_security.middleware import (
+        get_current_user, get_current_service,
+        AuthenticatedUser, AuthenticatedService,
+    )
+    from solace_security.auth import TokenType
+
     test_app = FastAPI()
     test_app.include_router(router, prefix="/api/v1/personality")
     test_app.state.personality_orchestrator = mock_orchestrator
+
+    # Override auth dependencies for testing
+    test_app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        user_id="test-user", token_type=TokenType.ACCESS, roles=["user"],
+    )
+    test_app.dependency_overrides[get_current_service] = lambda: AuthenticatedService(
+        service_name="test-service", permissions=["personality:read", "personality:write"],
+    )
     return test_app
 
 

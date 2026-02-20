@@ -53,7 +53,8 @@ class TestJWTService:
         assert token_pair.token_type == "Bearer"
         assert token_pair.expires_in == 900  # 15 minutes
 
-    def test_verify_access_token_success(self, jwt_service):
+    @pytest.mark.asyncio
+    async def test_verify_access_token_success(self, jwt_service):
         """Test successfully verifying access token."""
         user_id = uuid4()
         email = "test@example.com"
@@ -61,14 +62,15 @@ class TestJWTService:
 
         token_pair = jwt_service.generate_token_pair(user_id, email, role)
 
-        payload = jwt_service.verify_token(token_pair.access_token, TokenType.ACCESS)
+        payload = await jwt_service.verify_token(token_pair.access_token, TokenType.ACCESS)
 
         assert payload.user_id == user_id
         assert payload.email == email
         assert payload.role == role
         assert payload.token_type == TokenType.ACCESS
 
-    def test_verify_refresh_token_success(self, jwt_service):
+    @pytest.mark.asyncio
+    async def test_verify_refresh_token_success(self, jwt_service):
         """Test successfully verifying refresh token."""
         user_id = uuid4()
         email = "test@example.com"
@@ -76,14 +78,15 @@ class TestJWTService:
 
         token_pair = jwt_service.generate_token_pair(user_id, email, role)
 
-        payload = jwt_service.verify_token(token_pair.refresh_token, TokenType.REFRESH)
+        payload = await jwt_service.verify_token(token_pair.refresh_token, TokenType.REFRESH)
 
         assert payload.user_id == user_id
         assert payload.email == email
         assert payload.role == role
         assert payload.token_type == TokenType.REFRESH
 
-    def test_verify_token_wrong_type_fails(self, jwt_service):
+    @pytest.mark.asyncio
+    async def test_verify_token_wrong_type_fails(self, jwt_service):
         """Test that using access token as refresh token fails."""
         user_id = uuid4()
         email = "test@example.com"
@@ -92,9 +95,10 @@ class TestJWTService:
         token_pair = jwt_service.generate_token_pair(user_id, email, role)
 
         with pytest.raises(TokenInvalidError, match="Expected refresh token"):
-            jwt_service.verify_token(token_pair.access_token, TokenType.REFRESH)
+            await jwt_service.verify_token(token_pair.access_token, TokenType.REFRESH)
 
-    def test_verify_expired_token_fails(self, jwt_service):
+    @pytest.mark.asyncio
+    async def test_verify_expired_token_fails(self, jwt_service):
         """Test that expired token verification fails."""
         # Create config with very short expiry
         short_config = JWTConfig(
@@ -107,14 +111,16 @@ class TestJWTService:
         token_pair = short_service.generate_token_pair(user_id, "test@example.com", "user")
 
         with pytest.raises(TokenExpiredError, match="Token has expired"):
-            short_service.verify_token(token_pair.access_token)
+            await short_service.verify_token(token_pair.access_token)
 
-    def test_verify_invalid_token_fails(self, jwt_service):
+    @pytest.mark.asyncio
+    async def test_verify_invalid_token_fails(self, jwt_service):
         """Test that invalid token fails verification."""
         with pytest.raises(TokenInvalidError, match="Invalid token"):
-            jwt_service.verify_token("invalid.token.here")
+            await jwt_service.verify_token("invalid.token.here")
 
-    def test_verify_tampered_token_fails(self, jwt_service):
+    @pytest.mark.asyncio
+    async def test_verify_tampered_token_fails(self, jwt_service):
         """Test that tampered token fails verification."""
         user_id = uuid4()
         token_pair = jwt_service.generate_token_pair(user_id, "test@example.com", "user")
@@ -123,9 +129,10 @@ class TestJWTService:
         tampered = token_pair.access_token + "tampered"
 
         with pytest.raises(TokenInvalidError):
-            jwt_service.verify_token(tampered)
+            await jwt_service.verify_token(tampered)
 
-    def test_refresh_access_token(self, jwt_service):
+    @pytest.mark.asyncio
+    async def test_refresh_access_token(self, jwt_service):
         """Test refreshing access token from refresh token."""
         user_id = uuid4()
         email = "test@example.com"
@@ -133,14 +140,14 @@ class TestJWTService:
 
         token_pair = jwt_service.generate_token_pair(user_id, email, role)
 
-        new_access_token = jwt_service.refresh_access_token(token_pair.refresh_token)
+        new_access_token = await jwt_service.refresh_access_token(token_pair.refresh_token)
 
         assert new_access_token
         # Note: Tokens may be identical if generated in same second (JWT uses second precision)
         # What matters is that the refreshed token is valid
 
         # Verify new token is valid and contains correct payload
-        payload = jwt_service.verify_token(new_access_token, TokenType.ACCESS)
+        payload = await jwt_service.verify_token(new_access_token, TokenType.ACCESS)
         assert payload.user_id == user_id
         assert payload.email == email
 

@@ -3,14 +3,41 @@ Unit tests for Solace-AI Escalation Manager.
 Tests escalation workflows, clinician assignment, and notifications.
 """
 from __future__ import annotations
+from dataclasses import dataclass
+from unittest.mock import AsyncMock
 import pytest
-from uuid import uuid4
+from uuid import UUID, uuid4
 from services.safety_service.src.domain.escalation import (
     EscalationManager, EscalationSettings, EscalationResult,
     EscalationPriority, EscalationStatus, NotificationType,
     EscalationRecord, NotificationService, ClinicianAssigner,
     CrisisResourceManager, EscalationWorkflow,
 )
+
+
+@dataclass
+class _MockClinicianContact:
+    """Mock clinician contact for testing."""
+    clinician_id: UUID
+    email: str
+    name: str
+    phone: str | None = None
+    is_on_call: bool = True
+
+
+def _make_mock_registry(pool_size: int = 3) -> AsyncMock:
+    """Create a mock clinician registry that returns pool_size clinicians."""
+    contacts = [
+        _MockClinicianContact(
+            clinician_id=uuid4(),
+            email=f"clinician{i}@test.com",
+            name=f"Dr. Test {i}",
+        )
+        for i in range(pool_size)
+    ]
+    registry = AsyncMock()
+    registry.get_oncall_clinicians = AsyncMock(return_value=contacts)
+    return registry
 
 
 class TestEscalationPriority:
@@ -68,8 +95,12 @@ class TestClinicianAssigner:
 
     @pytest.fixture
     def assigner(self) -> ClinicianAssigner:
-        """Create clinician assigner."""
-        return ClinicianAssigner(EscalationSettings(on_call_clinician_pool_size=3))
+        """Create clinician assigner with mock registry."""
+        registry = _make_mock_registry(pool_size=3)
+        return ClinicianAssigner(
+            EscalationSettings(on_call_clinician_pool_size=3),
+            clinician_registry=registry,
+        )
 
     @pytest.mark.asyncio
     async def test_assign_clinician(self, assigner: ClinicianAssigner) -> None:
@@ -88,9 +119,14 @@ class TestClinicianAssigner:
             clinicians.append(clinician)
         assert len(set(clinicians)) == 3
 
-    def test_release_clinician(self, assigner: ClinicianAssigner) -> None:
+    @pytest.mark.asyncio
+    async def test_release_clinician(self, assigner: ClinicianAssigner) -> None:
         """Test releasing clinician."""
-        clinician_id = list(assigner._clinician_workload.keys())[0]
+        # First assign a clinician so workload dict gets populated
+        escalation = EscalationRecord(user_id=uuid4(), crisis_level="HIGH")
+        clinician_id = await assigner.assign_clinician(escalation)
+        assert clinician_id is not None
+        # Bump workload to 2 then release
         assigner._clinician_workload[clinician_id] = 2
         assigner.release_clinician(clinician_id)
         assert assigner._clinician_workload[clinician_id] == 1
@@ -127,10 +163,11 @@ class TestEscalationWorkflow:
 
     @pytest.fixture
     def workflow(self) -> EscalationWorkflow:
-        """Create escalation workflow."""
+        """Create escalation workflow with mock registry."""
         settings = EscalationSettings()
         notification_service = NotificationService(settings)
-        clinician_assigner = ClinicianAssigner(settings)
+        registry = _make_mock_registry(pool_size=3)
+        clinician_assigner = ClinicianAssigner(settings, clinician_registry=registry)
         return EscalationWorkflow(settings, notification_service, clinician_assigner)
 
     @pytest.mark.asyncio
@@ -187,8 +224,9 @@ class TestEscalationManager:
 
     @pytest.fixture
     def manager(self) -> EscalationManager:
-        """Create escalation manager."""
-        return EscalationManager(EscalationSettings())
+        """Create escalation manager with mock clinician registry."""
+        registry = _make_mock_registry(pool_size=3)
+        return EscalationManager(EscalationSettings(), clinician_registry=registry)
 
     @pytest.mark.asyncio
     async def test_escalate_critical(self, manager: EscalationManager) -> None:
