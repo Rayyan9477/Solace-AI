@@ -4,6 +4,7 @@ from __future__ import annotations
 import time
 from datetime import datetime, timezone
 import pytest
+from pydantic import ValidationError
 from solace_security.auth import (
     TokenType,
     AuthSettings,
@@ -44,9 +45,7 @@ class TestAuthSettings:
 
     def test_secret_key_required(self):
         """Test that secret_key is required and validates length."""
-        import pytest
-
-        with pytest.raises(Exception):  # ValidationError for missing required field
+        with pytest.raises((ValidationError, ValueError)):  # ValidationError for missing required field
             AuthSettings()
 
     def test_secret_key_minimum_length(self):

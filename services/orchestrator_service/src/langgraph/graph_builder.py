@@ -115,7 +115,7 @@ def safety_precheck_node(state: OrchestratorState) -> dict[str, Any]:
     message = state.get("current_message", "")
     logger.info("safety_precheck_processing", message_length=len(message))
     crisis_keywords = ["suicide", "kill myself", "end my life", "want to die", "self-harm", "hurt myself", "cutting", "overdose", "no reason to live", "end it all"]
-    high_risk_keywords = ["plan to", "going to", "tonight", "method", "goodbye", "final"]
+    high_risk_keywords = ["plan to", "going to", "tonight", "method", "final"]
     message_lower = message.lower()
     triggered = [kw for kw in crisis_keywords if _word_boundary_match(kw, message_lower)]
     high_risk_matches = [kw for kw in high_risk_keywords if _word_boundary_match(kw, message_lower)]

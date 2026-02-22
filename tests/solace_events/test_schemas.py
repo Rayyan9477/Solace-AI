@@ -4,6 +4,7 @@ import pytest
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
+from pydantic import ValidationError
 
 from solace_events.schemas import (
     AssessmentCompletedEvent,
@@ -66,7 +67,7 @@ class TestEventMetadata:
     def test_immutability(self) -> None:
         """Test metadata is frozen."""
         metadata = EventMetadata()
-        with pytest.raises(Exception):
+        with pytest.raises((ValidationError, TypeError, AttributeError)):
             metadata.version = 5  # type: ignore[misc]
 
 

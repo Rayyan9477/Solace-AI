@@ -9,6 +9,8 @@ from __future__ import annotations
 import pytest
 from uuid import uuid4
 from datetime import datetime, timezone
+from cryptography.exceptions import InvalidTag
+from pydantic import ValidationError
 
 from solace_common.utils import ValidationUtils, ValidationPatterns
 from solace_infrastructure.postgres import PostgresRepository, _is_valid_identifier
@@ -93,13 +95,13 @@ class TestAuthenticationSecurity:
     def test_jwt_requires_secret_key(self):
         """JWTManager must not work with empty/missing secret."""
         from solace_security.auth import AuthSettings
-        with pytest.raises(Exception):
+        with pytest.raises((ValidationError, ValueError)):
             AuthSettings(secret_key="")
 
     def test_jwt_secret_minimum_length(self):
         """Secret key must meet minimum length requirement."""
         from solace_security.auth import AuthSettings
-        with pytest.raises(Exception):
+        with pytest.raises((ValidationError, ValueError)):
             AuthSettings(secret_key="short")
 
     def test_password_hasher_rejects_empty(self):
@@ -185,7 +187,7 @@ class TestEncryptionSecurity:
         settings2 = settings2.model_copy(update={"search_hash_salt": SecretStr("test-salt-for-search-hashing!!")})
         enc2 = Encryptor(settings2)
         field_enc2 = FieldEncryptor(enc2, settings=settings2)
-        with pytest.raises(Exception):
+        with pytest.raises((ValueError, TypeError, InvalidTag)):
             field_enc2.decrypt_field(encrypted, "test_field")
 
     def test_encrypted_data_not_plaintext(self):

@@ -292,28 +292,25 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
         """Delete all data for a user (GDPR) from PostgreSQL."""
         deleted_count = 0
 
-        # Get profile ID first
-        query = f"SELECT profile_id FROM {self._profiles_table} WHERE user_id = $1"
         async with self._acquire() as conn:
+            # Get profile ID first
+            query = f"SELECT profile_id FROM {self._profiles_table} WHERE user_id = $1"
             row = await conn.fetchrow(query, user_id)
             profile_id = row["profile_id"] if row else None
 
-        # Delete snapshots
-        if profile_id:
-            snapshots_query = f"DELETE FROM {self._snapshots_table} WHERE profile_id = $1"
-            async with self._acquire() as conn:
+            # Delete snapshots
+            if profile_id:
+                snapshots_query = f"DELETE FROM {self._snapshots_table} WHERE profile_id = $1"
                 result = await conn.execute(snapshots_query, profile_id)
                 deleted_count += int(result.split()[-1])
 
-        # Delete assessments
-        assessments_query = f"DELETE FROM {self._assessments_table} WHERE user_id = $1"
-        async with self._acquire() as conn:
+            # Delete assessments
+            assessments_query = f"DELETE FROM {self._assessments_table} WHERE user_id = $1"
             result = await conn.execute(assessments_query, user_id)
             deleted_count += int(result.split()[-1])
 
-        # Delete profile
-        profiles_query = f"DELETE FROM {self._profiles_table} WHERE user_id = $1"
-        async with self._acquire() as conn:
+            # Delete profile
+            profiles_query = f"DELETE FROM {self._profiles_table} WHERE user_id = $1"
             result = await conn.execute(profiles_query, user_id)
             deleted_count += int(result.split()[-1])
 

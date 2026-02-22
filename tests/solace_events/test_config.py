@@ -1,6 +1,7 @@
 """Unit tests for Solace-AI Events Configuration."""
 
 import pytest
+from pydantic import ValidationError
 
 from solace_events.config import (
     CompressionType,
@@ -57,7 +58,7 @@ class TestTopicConfig:
     def test_immutability(self) -> None:
         """Test config is frozen."""
         config = TopicConfig(name="test.topic")
-        with pytest.raises(Exception):
+        with pytest.raises((ValidationError, TypeError, AttributeError)):
             config.partitions = 10  # type: ignore[misc]
 
 

@@ -4,6 +4,7 @@ Unit tests for Solace-AI Exception Hierarchy.
 
 import pytest
 from datetime import datetime, timezone
+from pydantic import ValidationError as PydanticValidationError
 
 from solace_common.exceptions import (
     ApplicationError,
@@ -65,7 +66,7 @@ class TestErrorContext:
     def test_immutability(self) -> None:
         """Test context is immutable."""
         ctx = ErrorContext()
-        with pytest.raises(Exception):
+        with pytest.raises((PydanticValidationError, TypeError, AttributeError)):
             ctx.operation = "test"  # type: ignore[misc]
 
 

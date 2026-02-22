@@ -10,6 +10,7 @@ Principles: Single Responsibility, Separation of Concerns
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import Any
@@ -466,14 +467,13 @@ class RedisSessionManager:
         # Track session IDs per user
         user_key = self._user_key(user.user_id)
         existing = await self._redis.get(user_key)
-        import json as _json
-        session_ids: list[str] = _json.loads(existing) if existing else []
+        session_ids: list[str] = json.loads(existing) if existing else []
         # Enforce max sessions
         while len(session_ids) >= self._config.max_sessions_per_user:
             oldest_id = session_ids.pop(0)
             await self._redis.delete(f"{self._prefix}{oldest_id}")
         session_ids.append(str(session.session_id))
-        await self._redis.set(user_key, _json.dumps(session_ids), ttl=ttl_seconds)
+        await self._redis.set(user_key, json.dumps(session_ids), ttl=ttl_seconds)
         self._stats["sessions_created"] += 1
         logger.info("session_created", session_id=str(session.session_id), user_id=str(user.user_id))
         return session
@@ -503,12 +503,11 @@ class RedisSessionManager:
             )
 
     async def get_user_sessions(self, user_id: UUID, active_only: bool = True) -> list[UserSession]:
-        import json as _json
         user_key = self._user_key(user_id)
         existing = await self._redis.get(user_key)
         if not existing:
             return []
-        session_ids = _json.loads(existing)
+        session_ids = json.loads(existing)
         sessions = []
         for sid in session_ids:
             session = await self.get_session(UUID(sid))
@@ -524,26 +523,24 @@ class RedisSessionManager:
             return False
         await self._redis.delete(self._session_key(session_id))
         # Remove from user's session list
-        import json as _json
         user_key = self._user_key(session.user_id)
         existing = await self._redis.get(user_key)
         if existing:
-            session_ids = _json.loads(existing)
+            session_ids = json.loads(existing)
             session_ids = [s for s in session_ids if s != str(session_id)]
             if session_ids:
-                await self._redis.set(user_key, _json.dumps(session_ids))
+                await self._redis.set(user_key, json.dumps(session_ids))
             else:
                 await self._redis.delete(user_key)
         self._stats["sessions_revoked"] += 1
         return True
 
     async def revoke_all_user_sessions(self, user_id: UUID) -> int:
-        import json as _json
         user_key = self._user_key(user_id)
         existing = await self._redis.get(user_key)
         if not existing:
             return 0
-        session_ids = _json.loads(existing)
+        session_ids = json.loads(existing)
         revoked = 0
         for sid in session_ids:
             await self._redis.delete(f"{self._prefix}{sid}")

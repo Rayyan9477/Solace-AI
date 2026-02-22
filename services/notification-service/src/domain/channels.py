@@ -339,6 +339,12 @@ class SMSChannel(NotificationChannel):
     def __init__(self, config: SMSConfig) -> None:
         super().__init__(config)
         self._sms_config = config
+        self._client: httpx.AsyncClient | None = None
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(timeout=self._sms_config.timeout_seconds)
+        return self._client
 
     @property
     def channel_type(self) -> ChannelType:
@@ -393,31 +399,31 @@ class SMSChannel(NotificationChannel):
 
         url = f"{self._sms_config.provider_url}/Accounts/{self._sms_config.account_sid}/Messages.json"
 
-        async with httpx.AsyncClient(timeout=self._sms_config.timeout_seconds) as client:
-            try:
-                response = await client.post(
-                    url,
-                    auth=(self._sms_config.account_sid, self._sms_config.auth_token),
-                    data={
-                        "From": self._sms_config.from_number,
-                        "To": recipient,
-                        "Body": sms_body,
-                    },
-                )
-                response.raise_for_status()
-                data = response.json()
+        client = await self._get_client()
+        try:
+            response = await client.post(
+                url,
+                auth=(self._sms_config.account_sid, self._sms_config.auth_token),
+                data={
+                    "From": self._sms_config.from_number,
+                    "To": recipient,
+                    "Body": sms_body,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
 
-                return DeliveryResult(
-                    channel_type=self.channel_type,
-                    recipient=recipient,
-                    success=True,
-                    message_id=data.get("sid"),
-                    metadata={**metadata, "segments": data.get("num_segments", 1)},
-                )
-            except httpx.HTTPStatusError as e:
-                raise DeliveryError(self.channel_type, recipient, f"HTTP {e.response.status_code}") from e
-            except Exception as e:
-                raise DeliveryError(self.channel_type, recipient, str(e)) from e
+            return DeliveryResult(
+                channel_type=self.channel_type,
+                recipient=recipient,
+                success=True,
+                message_id=data.get("sid"),
+                metadata={**metadata, "segments": data.get("num_segments", 1)},
+            )
+        except httpx.HTTPStatusError as e:
+            raise DeliveryError(self.channel_type, recipient, f"HTTP {e.response.status_code}") from e
+        except Exception as e:
+            raise DeliveryError(self.channel_type, recipient, str(e)) from e
 
 
 class PushChannel(NotificationChannel):
@@ -432,6 +438,13 @@ class PushChannel(NotificationChannel):
         self._push_config = config
         self._access_token: str | None = None
         self._token_expiry: datetime | None = None
+        self._client: httpx.AsyncClient | None = None
+        self._token_lock = asyncio.Lock()
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(timeout=self._push_config.timeout_seconds)
+        return self._client
 
     @property
     def channel_type(self) -> ChannelType:
@@ -444,51 +457,57 @@ class PushChannel(NotificationChannel):
         Uses Google service account credentials to obtain an access token.
         Tokens are cached until near expiry.
         """
-        # Check if we have a valid cached token
+        # Check if we have a valid cached token (fast path, no lock)
         if self._access_token and self._token_expiry:
             if datetime.now(timezone.utc) < self._token_expiry:
                 return self._access_token
 
-        if not self._push_config.service_account_file:
-            raise DeliveryError(
-                self.channel_type,
-                "service_account",
-                "service_account_file is required for HTTP v1 API"
-            )
+        async with self._token_lock:
+            # Double-check after acquiring lock
+            if self._access_token and self._token_expiry:
+                if datetime.now(timezone.utc) < self._token_expiry:
+                    return self._access_token
 
-        try:
-            # Try to use google-auth library for OAuth2
-            from google.oauth2 import service_account
-            from google.auth.transport.requests import Request
+            if not self._push_config.service_account_file:
+                raise DeliveryError(
+                    self.channel_type,
+                    "service_account",
+                    "service_account_file is required for HTTP v1 API"
+                )
 
-            credentials = service_account.Credentials.from_service_account_file(
-                self._push_config.service_account_file,
-                scopes=['https://www.googleapis.com/auth/firebase.messaging']
-            )
-            credentials.refresh(Request())
+            try:
+                # Try to use google-auth library for OAuth2
+                from google.oauth2 import service_account
+                from google.auth.transport.requests import Request
 
-            self._access_token = credentials.token
-            # Set expiry to 5 minutes before actual expiry for safety margin
-            if credentials.expiry:
-                self._token_expiry = credentials.expiry.replace(tzinfo=timezone.utc) - timedelta(minutes=5)
-            else:
-                # Default 55 minute expiry (FCM tokens last 1 hour)
-                self._token_expiry = datetime.now(timezone.utc) + timedelta(minutes=55)
+                credentials = service_account.Credentials.from_service_account_file(
+                    self._push_config.service_account_file,
+                    scopes=['https://www.googleapis.com/auth/firebase.messaging']
+                )
+                credentials.refresh(Request())
 
-            return self._access_token
+                self._access_token = credentials.token
+                # Set expiry to 5 minutes before actual expiry for safety margin
+                if credentials.expiry:
+                    self._token_expiry = credentials.expiry.replace(tzinfo=timezone.utc) - timedelta(minutes=5)
+                else:
+                    # Default 55 minute expiry (FCM tokens last 1 hour)
+                    self._token_expiry = datetime.now(timezone.utc) + timedelta(minutes=55)
 
-        except ImportError:
-            logger.warning(
-                "google_auth_not_installed",
-                message="google-auth library not installed. Install with: pip install google-auth"
-            )
-            raise DeliveryError(
-                self.channel_type,
-                "google_auth",
-                "google-auth library required for HTTP v1 API. Install with: pip install google-auth"
-            )
-        except Exception as e:
-            raise DeliveryError(self.channel_type, "auth", f"Failed to get access token: {e}") from e
+                return self._access_token
+
+            except ImportError:
+                logger.warning(
+                    "google_auth_not_installed",
+                    message="google-auth library not installed. Install with: pip install google-auth"
+                )
+                raise DeliveryError(
+                    self.channel_type,
+                    "google_auth",
+                    "google-auth library required for HTTP v1 API. Install with: pip install google-auth"
+                )
+            except Exception as e:
+                raise DeliveryError(self.channel_type, "auth", f"Failed to get access token: {e}") from e
 
     async def _deliver(
         self,
@@ -541,35 +560,35 @@ class PushChannel(NotificationChannel):
             "Content-Type": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=self._push_config.timeout_seconds) as client:
-            try:
-                response = await client.post(url, json=payload, headers=headers)
-                response.raise_for_status()
-                data = response.json()
+        client = await self._get_client()
+        try:
+            response = await client.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            data = response.json()
 
-                # v1 API returns message name on success
-                message_name = data.get("name", "")
-                return DeliveryResult(
-                    channel_type=self.channel_type,
-                    recipient=recipient,
-                    success=True,
-                    message_id=message_name.split("/")[-1] if message_name else None,
-                    metadata=metadata,
-                )
-            except httpx.HTTPStatusError as e:
-                error_detail = ""
-                try:
-                    error_data = e.response.json()
-                    error_detail = error_data.get("error", {}).get("message", str(e))
-                except Exception:
-                    error_detail = e.response.text[:200] if e.response.text else str(e)
-                raise DeliveryError(
-                    self.channel_type,
-                    recipient,
-                    f"HTTP {e.response.status_code}: {error_detail}"
-                ) from e
-            except Exception as e:
-                raise DeliveryError(self.channel_type, recipient, str(e)) from e
+            # v1 API returns message name on success
+            message_name = data.get("name", "")
+            return DeliveryResult(
+                channel_type=self.channel_type,
+                recipient=recipient,
+                success=True,
+                message_id=message_name.split("/")[-1] if message_name else None,
+                metadata=metadata,
+            )
+        except httpx.HTTPStatusError as e:
+            error_detail = ""
+            try:
+                error_data = e.response.json()
+                error_detail = error_data.get("error", {}).get("message", str(e))
+            except Exception:
+                error_detail = e.response.text[:200] if e.response.text else str(e)
+            raise DeliveryError(
+                self.channel_type,
+                recipient,
+                f"HTTP {e.response.status_code}: {error_detail}"
+            ) from e
+        except Exception as e:
+            raise DeliveryError(self.channel_type, recipient, str(e)) from e
 
     async def _deliver_legacy(
         self,
@@ -610,29 +629,29 @@ class PushChannel(NotificationChannel):
             "Content-Type": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=self._push_config.timeout_seconds) as client:
-            try:
-                response = await client.post(
-                    self._push_config.firebase_url,
-                    json=payload,
-                    headers=headers,
-                )
-                response.raise_for_status()
-                data = response.json()
+        client = await self._get_client()
+        try:
+            response = await client.post(
+                self._push_config.firebase_url,
+                json=payload,
+                headers=headers,
+            )
+            response.raise_for_status()
+            data = response.json()
 
-                success = data.get("success", 0) > 0
-                return DeliveryResult(
-                    channel_type=self.channel_type,
-                    recipient=recipient,
-                    success=success,
-                    message_id=data.get("message_id"),
-                    error_message=None if success else data.get("results", [{}])[0].get("error"),
-                    metadata=metadata,
-                )
-            except httpx.HTTPStatusError as e:
-                raise DeliveryError(self.channel_type, recipient, f"HTTP {e.response.status_code}") from e
-            except Exception as e:
-                raise DeliveryError(self.channel_type, recipient, str(e)) from e
+            success = data.get("success", 0) > 0
+            return DeliveryResult(
+                channel_type=self.channel_type,
+                recipient=recipient,
+                success=success,
+                message_id=data.get("message_id"),
+                error_message=None if success else data.get("results", [{}])[0].get("error"),
+                metadata=metadata,
+            )
+        except httpx.HTTPStatusError as e:
+            raise DeliveryError(self.channel_type, recipient, f"HTTP {e.response.status_code}") from e
+        except Exception as e:
+            raise DeliveryError(self.channel_type, recipient, str(e)) from e
 
 
 class ChannelRegistry:

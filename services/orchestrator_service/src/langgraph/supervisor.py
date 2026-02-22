@@ -4,6 +4,7 @@ Supervisor node for intent classification, agent selection, and routing decision
 """
 from __future__ import annotations
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -173,15 +174,15 @@ class IntentClassifier:
         return IntentType.GENERAL_CHAT, 0.50, []
 
     def _check_crisis_indicators(self, message: str) -> bool:
-        """Check for crisis-related content."""
+        """Check for crisis-related content using word-boundary matching."""
         for keyword in self._crisis_keywords:
-            if keyword in message:
+            if re.search(rf'\b{re.escape(keyword)}\b', message, re.IGNORECASE):
                 return True
         return False
 
     def _count_keyword_matches(self, message: str, keywords: set[str]) -> int:
-        """Count keyword matches in message."""
-        return sum(1 for kw in keywords if kw in message)
+        """Count keyword matches in message using word-boundary matching."""
+        return sum(1 for kw in keywords if re.search(rf'\b{re.escape(kw)}\b', message, re.IGNORECASE))
 
     def _is_progress_related(self, message: str) -> bool:
         """Check if message is about progress tracking."""

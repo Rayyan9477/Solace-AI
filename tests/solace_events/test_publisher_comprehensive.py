@@ -519,7 +519,10 @@ class TestOutboxPoller:
         await publisher.publish(event)
         poller = OutboxPoller(publisher, poll_interval_ms=50, batch_size=10)
         await poller.start()
-        await asyncio.sleep(0.15)  # Wait for at least one poll
+        for _ in range(30):  # Poll up to 30 times (50ms interval → 1.5s max)
+            await asyncio.sleep(0.05)
+            if mock_producer.get_messages():
+                break
         await poller.stop()
         await publisher.stop()
         messages = mock_producer.get_messages()

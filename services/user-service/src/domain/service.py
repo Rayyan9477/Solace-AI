@@ -23,6 +23,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from .entities import User, UserPreferences
 from .value_objects import AccountStatus, ConsentRecord, ConsentType, UserRole
 
+try:
+    from solace_security.service_auth import ServiceTokenManager, ServiceIdentity
+    _SERVICE_AUTH_AVAILABLE = True
+except ImportError:
+    _SERVICE_AUTH_AVAILABLE = False
+
 if TYPE_CHECKING:
     from ..infrastructure.repository import (
         ConsentRepository,
@@ -197,6 +203,14 @@ class UserService:
         self._lockout_duration_minutes = lockout_duration_minutes
         self._verification_token_expiry_hours = verification_token_expiry_hours
 
+        # Service auth for inter-service calls
+        self._token_manager: ServiceTokenManager | None = None
+        if _SERVICE_AUTH_AVAILABLE:
+            try:
+                self._token_manager = ServiceTokenManager()
+            except Exception:
+                logger.warning("service_token_manager_init_failed", hint="inter-service calls will be unauthenticated")
+
         # Statistics tracking
         self._stats = {
             "users_created": 0,
@@ -205,6 +219,22 @@ class UserService:
             "password_changes": 0,
             "email_verifications": 0,
         }
+
+    def _get_service_auth_headers(self, target_service: str) -> dict[str, str]:
+        """Get auth headers for inter-service HTTP calls."""
+        if self._token_manager is None:
+            return {}
+        try:
+            creds = self._token_manager.get_or_create_token(
+                ServiceIdentity.USER.value, target_service,
+            )
+            return {
+                "Authorization": f"Bearer {creds.token}",
+                "X-Service-Name": ServiceIdentity.USER.value,
+            }
+        except Exception:
+            logger.warning("service_auth_header_failed", target=target_service)
+            return {}
 
     # --- User CRUD Operations ---
 
@@ -680,8 +710,9 @@ class UserService:
         }
 
         try:
+            headers = self._get_service_auth_headers(ServiceIdentity.NOTIFICATION.value)
             async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(url, json=payload)
+                response = await client.post(url, json=payload, headers=headers)
                 response.raise_for_status()
 
                 logger.info(
@@ -1086,8 +1117,9 @@ class UserService:
         timeout = httpx.Timeout(self._integration_settings.request_timeout)
 
         try:
+            headers = self._get_service_auth_headers(ServiceIdentity.THERAPY.value)
             async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.get(url)
+                response = await client.get(url, headers=headers)
 
                 if response.status_code == 404:
                     logger.debug(

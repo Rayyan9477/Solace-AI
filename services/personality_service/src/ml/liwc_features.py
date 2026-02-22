@@ -147,7 +147,7 @@ class FeatureExtractor:
             reward=cc['reward'] / wc * 100, risk=cc['risk'] / wc * 100, work=cc['work'] / wc * 100, leisure=cc['leisure'] / wc * 100,
             home=cc['home'] / wc * 100, money=cc['money'] / wc * 100, religion=cc['religion'] / wc * 100, death=cc['death'] / wc * 100,
             question_marks=text.count('?') / wc * 100, exclamation_marks=text.count('!') / wc * 100,
-            quotes=(text.count('"') + text.count("'")) / wc * 100)
+            quotes=text.count('"') / wc * 100)
 
 
 class PersonalityMapper:

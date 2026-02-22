@@ -212,7 +212,7 @@ async def get_conversation_history(
     if checkpointer:
         try:
             config = {"configurable": {"thread_id": thread_id}}
-            checkpoint = checkpointer.get(config)
+            checkpoint = await asyncio.to_thread(checkpointer.get, config)
             if checkpoint:
                 channel_values = checkpoint.get("channel_values", {})
                 messages = channel_values.get("messages", [])[-limit:]

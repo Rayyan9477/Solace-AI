@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 import pytest
+from cryptography.exceptions import InvalidTag
+from pydantic import ValidationError
 from solace_security.encryption import (
     EncryptionAlgorithm,
     KeyDerivationFunction,
@@ -37,7 +39,7 @@ class TestEncryptionSettings:
 
     def test_master_key_required(self):
         """Test that master_key is required."""
-        with pytest.raises(Exception):  # ValidationError for missing required field
+        with pytest.raises((ValidationError, ValueError)):  # ValidationError for missing required field
             EncryptionSettings()
 
     def test_master_key_exact_length(self):
@@ -153,7 +155,7 @@ class TestAESGCMCipher:
         plaintext = b"Secret data"
         aad = b"correct aad"
         ciphertext, nonce = cipher.encrypt(plaintext, aad)
-        with pytest.raises(Exception):
+        with pytest.raises((ValueError, TypeError, InvalidTag)):
             cipher.decrypt(ciphertext, nonce, b"wrong aad")
 
     def test_invalid_key_size(self):

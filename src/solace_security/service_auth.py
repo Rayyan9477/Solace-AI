@@ -7,7 +7,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 
@@ -231,9 +231,7 @@ class ServiceTokenManager:
             if self._service_settings
             else 60
         )
-        expires_at = datetime.now(UTC) + __import__("datetime").timedelta(
-            minutes=expire_mins
-        )
+        expires_at = datetime.now(UTC) + timedelta(minutes=expire_mins)
 
         # Create the token
         token = jwt_manager.create_service_token(

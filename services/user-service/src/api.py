@@ -37,6 +37,18 @@ logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 
+def _mask_email(email: str) -> str:
+    """Mask email for logging: u***r@domain.com."""
+    if "@" not in email:
+        return "***"
+    local, domain = email.rsplit("@", 1)
+    if len(local) <= 2:
+        masked = local[0] + "***"
+    else:
+        masked = local[0] + "***" + local[-1]
+    return f"{masked}@{domain}"
+
+
 # --- Request/Response Models ---
 
 
@@ -370,7 +382,7 @@ async def register(
     # Increment stats
     request.app.state.service.increment_stat("registrations")
 
-    logger.info("user_registered", user_id=str(result.user.user_id), email=result.user.email)
+    logger.info("user_registered", user_id=str(result.user.user_id), email=_mask_email(result.user.email))
 
     return user_to_response(result.user)
 
@@ -405,11 +417,16 @@ async def login(
     # Check if user can login
     can_login, error = user.can_login()
     if not can_login:
-        # For demo purposes, allow login even if not verified
-        if error != "Email verification required":
+        import os
+        is_production = os.getenv("ENVIRONMENT", "").lower() == "production"
+        if error == "Email verification required" and not is_production:
+            logger.warning("login_without_verification", user_id=str(user.user_id),
+                           hint="Allowed in non-production only")
+        else:
+            logger.warning("login_blocked", user_id=str(user.user_id), reason=error)
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=error,
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password",
             )
 
     # Verify password
@@ -447,7 +464,7 @@ async def login(
     # Increment stats
     request.app.state.service.increment_stat("logins")
 
-    logger.info("user_logged_in", user_id=str(user.user_id), email=user.email)
+    logger.info("user_logged_in", user_id=str(user.user_id), email=_mask_email(user.email))
 
     return TokenResponse(
         access_token=token_pair.access_token,

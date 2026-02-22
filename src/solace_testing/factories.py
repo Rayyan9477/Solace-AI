@@ -49,7 +49,9 @@ class BaseFactory(ABC, Generic[T]):
         if config:
             self._config = config
         if self._config.seed is not None:
-            random.seed(self._config.seed)
+            self._rng = random.Random(self._config.seed)
+        else:
+            self._rng = random.Random()
 
     @abstractmethod
     def create(self, **overrides: Any) -> T:

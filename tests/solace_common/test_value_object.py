@@ -5,6 +5,7 @@ Unit tests for Solace-AI Value Object Module.
 import pytest
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
+from pydantic import ValidationError
 
 from solace_common.domain.value_object import (
     CorrelationId,
@@ -60,7 +61,7 @@ class TestValueObject:
             value: str
 
         vo = SimpleVO(value="original")
-        with pytest.raises(Exception):
+        with pytest.raises((ValidationError, TypeError, AttributeError)):
             vo.value = "modified"  # type: ignore[misc]
 
 

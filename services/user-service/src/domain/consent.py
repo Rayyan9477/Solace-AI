@@ -154,6 +154,7 @@ class ConsentService:
                 user_id=str(user_id),
                 consent_type=consent_type.value,
             )
+            return ConsentRevokeResult(error=f"Cannot revoke required consent: {consent_type.value}")
 
         active_consent = await self._repository.get_active_consent(user_id, consent_type)
         if not active_consent:

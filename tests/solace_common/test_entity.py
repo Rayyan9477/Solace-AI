@@ -5,6 +5,7 @@ Unit tests for Solace-AI Entity Module.
 import pytest
 import uuid
 from datetime import datetime, timezone, timedelta
+from pydantic import ValidationError
 
 from solace_common.domain.entity import (
     AuditableMixin,
@@ -66,7 +67,7 @@ class TestEntityId:
     def test_immutability(self) -> None:
         """Test EntityId is immutable."""
         entity_id = EntityId.generate()
-        with pytest.raises(Exception):
+        with pytest.raises((ValidationError, TypeError, AttributeError)):
             entity_id.value = "new-value"  # type: ignore[misc]
 
     def test_validation_empty_string(self) -> None:
@@ -114,7 +115,7 @@ class TestEntityMetadata:
     def test_immutability(self) -> None:
         """Test metadata is immutable."""
         metadata = EntityMetadata()
-        with pytest.raises(Exception):
+        with pytest.raises((ValidationError, TypeError, AttributeError)):
             metadata.version = 5  # type: ignore[misc]
 
 
@@ -253,7 +254,7 @@ class TestTimestampedMixin:
             value: str
 
         model = TimestampedModel(value="test")
-        with pytest.raises(Exception):
+        with pytest.raises((ValidationError, TypeError, AttributeError)):
             model.created_at = datetime.now(timezone.utc)  # type: ignore[misc]
 
 

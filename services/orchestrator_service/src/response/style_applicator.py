@@ -195,7 +195,6 @@ class ComplexityAdjuster:
     ]
 
     COMPLEXITY_REPLACEMENTS: list[tuple[str, str]] = [
-        ("use", "utilize"),
         ("help", "facilitate"),
         ("think about", "conceptualize"),
         ("then", "subsequently"),

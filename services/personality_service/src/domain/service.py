@@ -342,7 +342,7 @@ class PersonalityOrchestrator(ServiceBase):
             extraversion=current.extraversion * (1 - alpha) + new.extraversion * alpha,
             agreeableness=current.agreeableness * (1 - alpha) + new.agreeableness * alpha,
             neuroticism=current.neuroticism * (1 - alpha) + new.neuroticism * alpha,
-            overall_confidence=min(0.9, current.overall_confidence * 0.8 + new.overall_confidence * 0.3),
+            overall_confidence=min(0.9, current.overall_confidence * 0.7 + new.overall_confidence * 0.3),
         )
 
     def _compute_stability(self, profile: PersonalityProfile) -> float:

@@ -5,6 +5,7 @@ Unit tests for Solace-AI Aggregate Module.
 import pytest
 from datetime import datetime, timezone
 from typing import Any
+from pydantic import ValidationError
 
 from solace_common.domain.aggregate import (
     AggregateEvent,
@@ -112,7 +113,7 @@ class TestDomainEvent:
             aggregate_type="TestAggregate",
         )
 
-        with pytest.raises(Exception):
+        with pytest.raises((ValidationError, TypeError, AttributeError)):
             event.event_type = "Modified"  # type: ignore[misc]
 
 
