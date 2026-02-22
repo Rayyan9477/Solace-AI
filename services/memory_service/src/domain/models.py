@@ -21,6 +21,7 @@ class MemoryServiceSettings(BaseSettings):
     max_history_per_user: int = Field(default=100, description="Max sessions per user")
     context_assembly_timeout_ms: int = Field(default=100, description="Context assembly timeout")
     retrieval_result_limit: int = Field(default=50, description="Max retrieval results")
+    max_tier_records_per_user: int = Field(default=1000, description="Max in-memory tier records per user")
     model_config = SettingsConfigDict(env_prefix="MEMORY_SERVICE_", env_file=".env", extra="ignore")
 
 

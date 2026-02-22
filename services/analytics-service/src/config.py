@@ -12,7 +12,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
 
@@ -51,7 +51,7 @@ class ClickHouseConfig(BaseSettings):
     port: int = Field(default=8123, ge=1, le=65535)
     database: str = Field(default="solace_analytics")
     username: str = Field(default="default")
-    password: str = Field(default="")
+    password: SecretStr = Field(default=SecretStr(""))
     secure: bool = Field(default=False)
     verify: bool = Field(default=True)
     connect_timeout: float = Field(default=10.0, ge=1.0, le=60.0)

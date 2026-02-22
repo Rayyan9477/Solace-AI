@@ -152,7 +152,7 @@ class AddMessageRequest(BaseModel):
     """Request to add a message to session."""
     user_id: UUID = Field(..., description="User identifier")
     session_id: UUID = Field(..., description="Session identifier")
-    role: str = Field(..., description="Message role (user/assistant)")
+    role: str = Field(..., pattern="^(user|assistant|system)$", description="Message role (user/assistant/system)")
     content: str = Field(..., min_length=1, max_length=10000)
     emotion_detected: str | None = Field(default=None)
     importance_override: Decimal | None = Field(default=None, ge=0, le=1)

@@ -3,13 +3,14 @@ Solace-AI API Gateway - Route Definitions.
 Manages Kong route configuration for service routing and path matching.
 """
 from __future__ import annotations
+import os
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 import re
 import httpx
 import structlog
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = structlog.get_logger(__name__)
@@ -43,6 +44,13 @@ class RouteSettings(BaseSettings):
     default_preserve_host: bool = Field(default=False)
     regex_priority: int = Field(default=0)
     model_config = SettingsConfigDict(env_prefix="KONG_ROUTE_", env_file=".env", extra="ignore")
+
+    @field_validator("admin_url")
+    @classmethod
+    def enforce_https_in_production(cls, v: str) -> str:
+        if os.getenv("ENVIRONMENT", "").lower() == "production" and v.startswith("http://"):
+            return v.replace("http://", "https://", 1)
+        return v
 
 
 @dataclass

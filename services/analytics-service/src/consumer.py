@@ -185,7 +185,7 @@ class EventFilter:
     ) -> None:
         self._include_categories = set(include_categories) if include_categories else None
         self._exclude_event_types = set(exclude_event_types) if exclude_event_types else set()
-        self._sample_rate = sample_rate
+        self._sample_rate = max(0.001, min(1.0, sample_rate))
         self._sample_counter = 0
 
     def should_process(self, event: AnalyticsEvent) -> bool:
@@ -357,6 +357,7 @@ class AnalyticsConsumer:
         self._event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._batch: list[AnalyticsEvent] = []
         self._last_batch_time = datetime.now(timezone.utc)
+        self._consume_task: asyncio.Task[None] | None = None
         logger.info("analytics_consumer_initialized", group_id=self._config.group_id)
 
     @property

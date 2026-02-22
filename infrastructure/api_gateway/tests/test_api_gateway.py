@@ -316,7 +316,8 @@ class TestJWTAuth:
         assert plugin.authorize(claims, [UserRole.USER]) is True
         assert plugin.authorize(claims, [UserRole.ADMIN]) is False
         admin_claims = TokenClaims(sub="admin", exp=datetime.now(timezone.utc) + timedelta(hours=1), iat=datetime.now(timezone.utc), iss="test", aud="test", jti="456", roles=[UserRole.ADMIN])
-        assert plugin.authorize(admin_claims, [UserRole.USER]) is True
+        assert plugin.authorize(admin_claims, [UserRole.USER]) is False
+        assert plugin.authorize(admin_claims, [UserRole.ADMIN]) is True
 
     def test_create_solace_auth_plugin(self):
         plugin = create_solace_auth_plugin()

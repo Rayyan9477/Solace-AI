@@ -179,34 +179,51 @@ class KongAdminClient:
         self._headers = {"Content-Type": "application/json"}
         if settings.admin_token:
             self._headers["Kong-Admin-Token"] = settings.admin_token
+        self._client: httpx.AsyncClient | None = None
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Get or create shared httpx client."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=self._settings.timeout_seconds,
+                verify=self._settings.enable_ssl_verify,
+            )
+        return self._client
+
+    async def close(self) -> None:
+        """Close the shared HTTP client."""
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
 
     async def _request(self, method: str, endpoint: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
         url = f"{self._settings.admin_url}{endpoint}"
-        async with httpx.AsyncClient(timeout=self._settings.timeout_seconds, verify=self._settings.enable_ssl_verify) as client:
-            for attempt in range(self._settings.max_retries + 1):
-                try:
-                    if method == "GET":
-                        response = await client.get(url, headers=self._headers)
-                    elif method == "POST":
-                        response = await client.post(url, headers=self._headers, json=data)
-                    elif method == "PUT":
-                        response = await client.put(url, headers=self._headers, json=data)
-                    elif method == "PATCH":
-                        response = await client.patch(url, headers=self._headers, json=data)
-                    elif method == "DELETE":
-                        response = await client.delete(url, headers=self._headers)
-                    else:
-                        raise ValueError(f"Unsupported HTTP method: {method}")
-                    response.raise_for_status()
-                    return response.json() if response.content else {}
-                except httpx.HTTPStatusError as e:
-                    logger.warning("kong_admin_http_error", status_code=e.response.status_code, endpoint=endpoint, attempt=attempt + 1)
-                    if attempt == self._settings.max_retries:
-                        raise
-                except httpx.RequestError as e:
-                    logger.warning("kong_admin_request_error", error=str(e), endpoint=endpoint, attempt=attempt + 1)
-                    if attempt == self._settings.max_retries:
-                        raise
+        client = await self._get_client()
+        for attempt in range(self._settings.max_retries + 1):
+            try:
+                if method == "GET":
+                    response = await client.get(url, headers=self._headers)
+                elif method == "POST":
+                    response = await client.post(url, headers=self._headers, json=data)
+                elif method == "PUT":
+                    response = await client.put(url, headers=self._headers, json=data)
+                elif method == "PATCH":
+                    response = await client.patch(url, headers=self._headers, json=data)
+                elif method == "DELETE":
+                    response = await client.delete(url, headers=self._headers)
+                else:
+                    raise ValueError(f"Unsupported HTTP method: {method}")
+                response.raise_for_status()
+                return response.json() if response.content else {}
+            except httpx.HTTPStatusError as e:
+                # Only retry on 5xx server errors, not 4xx client errors
+                if e.response.status_code < 500 or attempt == self._settings.max_retries:
+                    raise
+                logger.warning("kong_admin_http_error", status_code=e.response.status_code, endpoint=endpoint, attempt=attempt + 1)
+            except httpx.RequestError as e:
+                logger.warning("kong_admin_request_error", error=str(e), endpoint=endpoint, attempt=attempt + 1)
+                if attempt == self._settings.max_retries:
+                    raise
         raise RuntimeError(f"Kong Admin API request failed: {method} {endpoint}")
 
     async def create_service(self, config: ServiceConfig) -> dict[str, Any]:

@@ -280,15 +280,14 @@ class PostgresDiagnosisRepository(DiagnosisRepositoryPort):
         """Delete all data for a user (GDPR) from PostgreSQL."""
         deleted_count = 0
 
-        # Delete sessions
-        sessions_query = f"DELETE FROM {self._sessions_table} WHERE user_id = $1"
         async with self._acquire() as conn:
+            # Delete sessions
+            sessions_query = f"DELETE FROM {self._sessions_table} WHERE user_id = $1"
             result = await conn.execute(sessions_query, user_id)
             deleted_count += int(result.split()[-1])
 
-        # Delete records
-        records_query = f"DELETE FROM {self._records_table} WHERE user_id = $1"
-        async with self._acquire() as conn:
+            # Delete records
+            records_query = f"DELETE FROM {self._records_table} WHERE user_id = $1"
             result = await conn.execute(records_query, user_id)
             deleted_count += int(result.split()[-1])
 

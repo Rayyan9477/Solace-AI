@@ -3,6 +3,7 @@ Solace-AI Memory Service - Weaviate Vector Repository.
 Vector database repository for semantic memory storage and retrieval.
 """
 from __future__ import annotations
+import asyncio
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -89,7 +90,7 @@ class WeaviateRepository:
             api_key_value = self._settings.api_key.get_secret_value()
             if api_key_value:
                 connect_kwargs["auth_credentials"] = wvc.init.Auth.api_key(api_key_value)
-            self._client = weaviate.connect_to_local(**connect_kwargs)
+            self._client = await asyncio.to_thread(weaviate.connect_to_local, **connect_kwargs)
             await self._ensure_collections()
             self._initialized = True
             logger.info("weaviate_initialized", host=self._settings.host,
@@ -136,18 +137,19 @@ class WeaviateRepository:
                 ],
             }
             for name, properties in schemas.items():
-                if not self._client.collections.exists(name):
-                    self._client.collections.create(name=name, properties=properties,
+                if not await asyncio.to_thread(self._client.collections.exists, name):
+                    await asyncio.to_thread(
+                        self._client.collections.create, name=name, properties=properties,
                         vector_config=Configure.Vectors.none(name="default"),
                         vector_index_config=Configure.VectorIndex.hnsw(distance_metric=VectorDistances.COSINE))
-                self._collections[name] = self._client.collections.get(name)
+                self._collections[name] = await asyncio.to_thread(self._client.collections.get, name)
         except Exception as e:
             logger.error("collection_creation_failed", error=str(e))
 
     async def close(self) -> None:
         """Close Weaviate client connection."""
         if self._client:
-            self._client.close()
+            await asyncio.to_thread(self._client.close)
             self._client = None
             self._initialized = False
 
@@ -157,13 +159,13 @@ class WeaviateRepository:
             return record.record_id
         self._stats["inserts"] += 1
         try:
-            coll = self._collections.get(record.collection) or self._client.collections.get(record.collection)
+            coll = self._collections.get(record.collection) or await asyncio.to_thread(self._client.collections.get, record.collection)
             self._collections[record.collection] = coll
             props = {"user_id": str(record.user_id), "content": record.content,
                      "importance": record.importance, "timestamp": record.timestamp.isoformat()}
             if record.session_id:
                 props["session_id"] = str(record.session_id)
-            coll.data.insert(properties=props, uuid=record.record_id, vector=record.embedding or None)
+            await asyncio.to_thread(coll.data.insert, properties=props, uuid=record.record_id, vector=record.embedding or None)
         except Exception as e:
             logger.error("vector_store_failed", error=str(e))
         return record.record_id
@@ -177,17 +179,21 @@ class WeaviateRepository:
         for i in range(0, len(records), self._settings.batch_size):
             batch = records[i:i + self._settings.batch_size]
             coll_name = batch[0].collection
-            coll = self._collections.get(coll_name) or self._client.collections.get(coll_name)
+            coll = self._collections.get(coll_name) or await asyncio.to_thread(self._client.collections.get, coll_name)
             self._collections[coll_name] = coll
             try:
-                with coll.batch.dynamic() as batch_obj:
-                    for rec in batch:
-                        props = {"user_id": str(rec.user_id), "content": rec.content,
-                                 "importance": rec.importance, "timestamp": rec.timestamp.isoformat()}
-                        if rec.session_id:
-                            props["session_id"] = str(rec.session_id)
-                        batch_obj.add_object(properties=props, uuid=rec.record_id, vector=rec.embedding or None)
-                        stored += 1
+                def _do_batch(coll, batch):
+                    count = 0
+                    with coll.batch.dynamic() as batch_obj:
+                        for rec in batch:
+                            props = {"user_id": str(rec.user_id), "content": rec.content,
+                                     "importance": rec.importance, "timestamp": rec.timestamp.isoformat()}
+                            if rec.session_id:
+                                props["session_id"] = str(rec.session_id)
+                            batch_obj.add_object(properties=props, uuid=rec.record_id, vector=rec.embedding or None)
+                            count += 1
+                    return count
+                stored += await asyncio.to_thread(_do_batch, coll, batch)
             except Exception as e:
                 logger.error("batch_store_failed", error=str(e))
         return stored
@@ -202,9 +208,10 @@ class WeaviateRepository:
         results: list[SearchResult] = []
         try:
             from weaviate.classes.query import Filter, MetadataQuery
-            coll = self._collections.get(collection) or self._client.collections.get(collection)
+            coll = self._collections.get(collection) or await asyncio.to_thread(self._client.collections.get, collection)
             self._collections[collection] = coll
-            response = coll.query.near_vector(
+            response = await asyncio.to_thread(
+                coll.query.near_vector,
                 near_vector=query_vector, limit=limit, certainty=min_certainty,
                 filters=Filter.by_property("user_id").equal(str(user_id)),
                 return_metadata=MetadataQuery(certainty=True, distance=True),
@@ -226,9 +233,10 @@ class WeaviateRepository:
         results: list[SearchResult] = []
         try:
             from weaviate.classes.query import Filter, MetadataQuery
-            coll = self._collections.get(collection) or self._client.collections.get(collection)
+            coll = self._collections.get(collection) or await asyncio.to_thread(self._client.collections.get, collection)
             self._collections[collection] = coll
-            response = coll.query.bm25(query=keyword, limit=limit,
+            response = await asyncio.to_thread(
+                coll.query.bm25, query=keyword, limit=limit,
                 filters=Filter.by_property("user_id").equal(str(user_id)), return_metadata=MetadataQuery(score=True))
             for obj in response.objects:
                 results.append(SearchResult(record_id=obj.uuid, content=obj.properties.get("content", ""),
@@ -247,9 +255,10 @@ class WeaviateRepository:
         results: list[SearchResult] = []
         try:
             from weaviate.classes.query import Filter, MetadataQuery, HybridFusion
-            coll = self._collections.get(collection) or self._client.collections.get(collection)
+            coll = self._collections.get(collection) or await asyncio.to_thread(self._client.collections.get, collection)
             self._collections[collection] = coll
-            response = coll.query.hybrid(query=query, vector=query_vector, alpha=alpha, limit=limit,
+            response = await asyncio.to_thread(
+                coll.query.hybrid, query=query, vector=query_vector, alpha=alpha, limit=limit,
                 filters=Filter.by_property("user_id").equal(str(user_id)),
                 fusion_type=HybridFusion.RELATIVE_SCORE, return_metadata=MetadataQuery(score=True))
             for obj in response.objects:
@@ -269,8 +278,9 @@ class WeaviateRepository:
         results: list[SearchResult] = []
         try:
             from weaviate.classes.query import Filter
-            coll = self._collections.get(collection) or self._client.collections.get(collection)
-            response = coll.query.fetch_objects(limit=limit,
+            coll = self._collections.get(collection) or await asyncio.to_thread(self._client.collections.get, collection)
+            response = await asyncio.to_thread(
+                coll.query.fetch_objects, limit=limit,
                 filters=Filter.by_property("session_id").equal(str(session_id)) & Filter.by_property("user_id").equal(str(user_id)))
             for obj in response.objects:
                 results.append(SearchResult(record_id=obj.uuid, content=obj.properties.get("content", ""),
@@ -285,8 +295,8 @@ class WeaviateRepository:
             return False
         self._stats["deletes"] += 1
         try:
-            coll = self._collections.get(collection) or self._client.collections.get(collection)
-            coll.data.delete_by_id(record_id)
+            coll = self._collections.get(collection) or await asyncio.to_thread(self._client.collections.get, collection)
+            await asyncio.to_thread(coll.data.delete_by_id, record_id)
             return True
         except Exception as e:
             logger.error("vector_delete_failed", error=str(e))
@@ -300,8 +310,8 @@ class WeaviateRepository:
         try:
             from weaviate.classes.query import Filter
             for coll_name in CollectionName:
-                coll = self._client.collections.get(coll_name.value)
-                coll.data.delete_many(where=Filter.by_property("user_id").equal(str(user_id)))
+                coll = await asyncio.to_thread(self._client.collections.get, coll_name.value)
+                await asyncio.to_thread(coll.data.delete_many, where=Filter.by_property("user_id").equal(str(user_id)))
                 deleted += 1
         except Exception as e:
             logger.error("user_delete_failed", error=str(e))
@@ -312,12 +322,12 @@ class WeaviateRepository:
         if not self._initialized:
             return 0
         try:
-            coll = self._collections.get(collection) or self._client.collections.get(collection)
+            coll = self._collections.get(collection) or await asyncio.to_thread(self._client.collections.get, collection)
             if user_id:
                 from weaviate.classes.query import Filter
-                agg = coll.aggregate.over_all(filters=Filter.by_property("user_id").equal(str(user_id)), total_count=True)
+                agg = await asyncio.to_thread(coll.aggregate.over_all, filters=Filter.by_property("user_id").equal(str(user_id)), total_count=True)
             else:
-                agg = coll.aggregate.over_all(total_count=True)
+                agg = await asyncio.to_thread(coll.aggregate.over_all, total_count=True)
             return agg.total_count or 0
         except Exception as e:
             logger.error("count_failed", error=str(e))

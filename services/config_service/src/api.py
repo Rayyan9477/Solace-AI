@@ -121,9 +121,15 @@ def _get_feature_flags() -> FeatureFlagManager:
     return get_feature_flag_manager()
 
 
+_secrets_manager: SecretsManager | None = None
+
+
 def _get_secrets_manager() -> SecretsManager:
-    """Dependency for secrets manager."""
-    return create_secrets_manager()
+    """Dependency for secrets manager (singleton)."""
+    global _secrets_manager
+    if _secrets_manager is None:
+        _secrets_manager = create_secrets_manager()
+    return _secrets_manager
 
 
 async def _verify_api_key(x_api_key: str | None = Header(default=None)) -> str:
@@ -174,12 +180,14 @@ async def get_config_value(
         return ConfigResponse(
             key=key, value=value, environment=config.environment.value, cached=True
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("config_get_error", key=key, error=str(e))
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.get("/config/section/{section}", response_model=ConfigSectionResponse)
+@router.get("/config/sections/{section}", response_model=ConfigSectionResponse)
 async def get_config_section(
     section: str,
     config: ConfigurationManager = Depends(_get_config_manager),

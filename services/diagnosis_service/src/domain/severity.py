@@ -199,7 +199,7 @@ class SeverityAssessor:
                 mean_score = sum(item_scores.values()) / result.items_answered
                 for item_id in self._phq9_items:
                     if item_id not in item_scores:
-                        item_scores[item_id] = round(mean_score)
+                        item_scores[item_id] = int(Decimal(str(mean_score)).quantize(Decimal("1"), rounding="ROUND_HALF_UP"))
                         result.items_imputed += 1
         result.item_scores = item_scores
         result.total_score = sum(item_scores.values())
@@ -223,7 +223,7 @@ class SeverityAssessor:
                 mean_score = sum(item_scores.values()) / result.items_answered
                 for item_id in self._gad7_items:
                     if item_id not in item_scores:
-                        item_scores[item_id] = round(mean_score)
+                        item_scores[item_id] = int(Decimal(str(mean_score)).quantize(Decimal("1"), rounding="ROUND_HALF_UP"))
                         result.items_imputed += 1
         result.item_scores = item_scores
         result.total_score = sum(item_scores.values())

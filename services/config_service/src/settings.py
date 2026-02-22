@@ -239,6 +239,8 @@ class ConfigurationManager:
             env_config = self._load_from_environment()
             config_data = self._merge_config(config_data, env_config)
             self._config = ApplicationConfig(**config_data)
+            if self.is_production:
+                self._validate_production_secrets()
             self._checksum = self._compute_checksum(config_data)
             self._initialized = True
             logger.info("configuration_loaded", environment=self._settings.environment.value,
@@ -313,6 +315,24 @@ class ConfigurationManager:
                 pass
         self._cache.clear()
         logger.info("configuration_manager_shutdown")
+
+    _INSECURE_DEFAULTS = {"changeme", "change-in-production", "password", "secret", "admin", ""}
+
+    def _validate_production_secrets(self) -> None:
+        """Reject known-insecure default passwords in production."""
+        if self._config is None:
+            return
+        violations: list[str] = []
+        db_pwd = self._config.database.password.get_secret_value()
+        if db_pwd in self._INSECURE_DEFAULTS:
+            violations.append("database.password")
+        jwt_key = self._config.security.jwt_secret_key.get_secret_value()
+        if jwt_key in self._INSECURE_DEFAULTS:
+            violations.append("security.jwt_secret_key")
+        if violations:
+            msg = f"Insecure default secrets in production: {', '.join(violations)}"
+            logger.critical("insecure_production_secrets", fields=violations)
+            raise RuntimeError(msg)
 
     def _get_config_files(self, config_path: Path) -> list[Path]:
         """Get ordered list of config files to load."""

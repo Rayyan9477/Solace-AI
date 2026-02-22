@@ -3,6 +3,7 @@ Solace-AI API Gateway - JWT Authentication Plugin.
 Implements JWT validation, token verification, and role-based access control.
 """
 from __future__ import annotations
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
@@ -15,6 +16,8 @@ import secrets
 import structlog
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from jose import jwt as jose_jwt, JWTError, ExpiredSignatureError
 
 logger = structlog.get_logger(__name__)
 
@@ -175,52 +178,29 @@ class JWTAuthPlugin:
         return self._encode(claims)
 
     def _encode(self, claims: TokenClaims) -> str:
-        header = {"alg": self._config.algorithm, "typ": "JWT"}
-        header_b64 = JWTCodec.base64url_encode(json.dumps(header, separators=(",", ":")).encode())
-        payload_b64 = JWTCodec.base64url_encode(json.dumps(claims.to_dict(), separators=(",", ":")).encode())
-        message = f"{header_b64}.{payload_b64}"
-        if self._config.algorithm.startswith("HS"):
-            hash_func = JWTCodec.get_hash_algorithm(self._config.algorithm)
-            signature = hmac.new(self._config.secret_key.encode(), message.encode(), hash_func).digest()
-            signature_b64 = JWTCodec.base64url_encode(signature)
-        else:
-            raise ValueError(f"RS algorithms require cryptography library: {self._config.algorithm}")
-        return f"{message}.{signature_b64}"
+        return jose_jwt.encode(claims.to_dict(), self._config.secret_key, algorithm=self._config.algorithm)
 
     def verify_token(self, token: str) -> AuthResult:
         try:
             parts = token.split(".")
             if len(parts) != 3:
                 return AuthResult.failure("INVALID_TOKEN", "Invalid token format")
-            header_b64, payload_b64, signature_b64 = parts
-            header = json.loads(JWTCodec.base64url_decode(header_b64))
-            if header.get("alg") != self._config.algorithm:
-                return AuthResult.failure("INVALID_ALGORITHM", f"Invalid algorithm: {header.get('alg')}")
-            message = f"{header_b64}.{payload_b64}"
-            if self._config.algorithm.startswith("HS"):
-                hash_func = JWTCodec.get_hash_algorithm(self._config.algorithm)
-                expected_sig = hmac.new(self._config.secret_key.encode(), message.encode(), hash_func).digest()
-                actual_sig = JWTCodec.base64url_decode(signature_b64)
-                if not hmac.compare_digest(expected_sig, actual_sig):
-                    return AuthResult.failure("INVALID_SIGNATURE", "Token signature verification failed")
-            else:
-                return AuthResult.failure("UNSUPPORTED_ALGORITHM", "RS algorithms not implemented")
-            payload = json.loads(JWTCodec.base64url_decode(payload_b64))
+            payload = jose_jwt.decode(
+                token, self._config.secret_key, algorithms=[self._config.algorithm],
+                options={"verify_exp": self._config.require_expiry, "verify_sub": self._config.require_subject, "leeway": self._config.leeway_seconds},
+                issuer=self._config.issuer, audience=self._config.audience,
+            )
             claims = TokenClaims.from_dict(payload)
             if claims.jti in self._revoked_tokens:
                 return AuthResult.failure("TOKEN_REVOKED", "Token has been revoked")
-            if self._config.require_expiry and claims.is_expired(self._config.leeway_seconds):
-                return AuthResult.failure("TOKEN_EXPIRED", "Token has expired")
-            if self._config.require_subject and not claims.sub:
-                return AuthResult.failure("MISSING_SUBJECT", "Token missing subject claim")
-            if claims.iss != self._config.issuer:
-                return AuthResult.failure("INVALID_ISSUER", f"Invalid issuer: {claims.iss}")
-            if claims.aud != self._config.audience:
-                return AuthResult.failure("INVALID_AUDIENCE", f"Invalid audience: {claims.aud}")
+            if self._token_blacklist is not None and self._token_blacklist.is_revoked(claims.jti):
+                return AuthResult.failure("TOKEN_REVOKED", "Token has been revoked")
             logger.info("token_verified", subject=claims.sub, roles=[r.value for r in claims.roles])
             return AuthResult.success(claims)
-        except json.JSONDecodeError as e:
-            return AuthResult.failure("INVALID_JSON", f"Invalid token payload: {e}")
+        except ExpiredSignatureError:
+            return AuthResult.failure("TOKEN_EXPIRED", "Token has expired")
+        except JWTError as e:
+            return AuthResult.failure("VERIFICATION_FAILED", str(e))
         except Exception as e:
             logger.error("token_verification_failed", error=str(e))
             return AuthResult.failure("VERIFICATION_FAILED", str(e))
@@ -244,8 +224,11 @@ class JWTAuthPlugin:
             return True
         return claims.has_any_role(required_roles)
 
-    def revoke_token(self, jti: str) -> None:
+    def revoke_token(self, jti: str, expires_in: int | None = None) -> None:
         self._revoked_tokens.add(jti)
+        if self._token_blacklist is not None:
+            ttl = expires_in or (self._config.access_token_expire_minutes * 60)
+            self._token_blacklist.revoke(jti, ttl)
         logger.info("token_revoked", jti=jti)
 
     def refresh_access_token(self, refresh_token: str) -> tuple[str | None, AuthResult]:
@@ -260,6 +243,50 @@ class JWTAuthPlugin:
 
     def to_kong_plugin_config(self) -> dict[str, Any]:
         return {"name": "jwt", "config": {"secret_is_base64": False, "claims_to_verify": ["exp"], "key_claim_name": "iss", "header_names": [self._config.header_name], "cookie_names": [self._config.cookie_name], "maximum_expiration": self._config.access_token_expire_minutes * 60}}
+
+
+class TokenBlacklistBase(ABC):
+    """Abstract base for token blacklist backends."""
+
+    @abstractmethod
+    def revoke(self, jti: str, ttl_seconds: int) -> None:
+        """Mark a token as revoked."""
+
+    @abstractmethod
+    def is_revoked(self, jti: str) -> bool:
+        """Check if a token is revoked."""
+
+
+class InMemoryGatewayTokenBlacklist(TokenBlacklistBase):
+    """In-memory token blacklist for testing/development."""
+
+    def __init__(self) -> None:
+        self._revoked: dict[str, datetime] = {}
+
+    def revoke(self, jti: str, ttl_seconds: int) -> None:
+        self._revoked[jti] = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+
+    def is_revoked(self, jti: str) -> bool:
+        expires = self._revoked.get(jti)
+        if expires is None:
+            return False
+        if datetime.now(timezone.utc) > expires:
+            del self._revoked[jti]
+            return False
+        return True
+
+
+class RedisTokenBlacklist(TokenBlacklistBase):
+    """Redis-backed token blacklist for production use."""
+
+    def __init__(self, redis_client: Any) -> None:
+        self._redis = redis_client
+
+    def revoke(self, jti: str, ttl_seconds: int) -> None:
+        self._redis.setex(f"revoked:{jti}", ttl_seconds, "1")
+
+    def is_revoked(self, jti: str) -> bool:
+        return self._redis.exists(f"revoked:{jti}") > 0
 
 
 def create_solace_auth_plugin(config: JWTConfig | None = None) -> JWTAuthPlugin:

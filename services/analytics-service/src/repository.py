@@ -107,7 +107,8 @@ class ClickHouseRepository(AnalyticsRepository):
                 return
             try:
                 import clickhouse_connect
-                self._client = clickhouse_connect.get_client(
+                self._client = await asyncio.to_thread(
+                    clickhouse_connect.get_client,
                     host=self._config.host, port=self._config.port,
                     database=self._config.database, username=self._config.username,
                     password=self._config.password, secure=self._config.secure,
@@ -125,7 +126,7 @@ class ClickHouseRepository(AnalyticsRepository):
     async def disconnect(self) -> None:
         async with self._lock:
             if self._client:
-                self._client.close()
+                await asyncio.to_thread(self._client.close)
                 self._client = None
                 self._connected = False
                 logger.info("clickhouse_disconnected")
@@ -134,7 +135,7 @@ class ClickHouseRepository(AnalyticsRepository):
         if not self._connected or not self._client:
             return False
         try:
-            return self._client.command("SELECT 1") == 1
+            return await asyncio.to_thread(self._client.command, "SELECT 1") == 1
         except Exception as e:
             logger.warning("clickhouse_health_check_failed", error=str(e))
             return False
@@ -152,7 +153,7 @@ class ClickHouseRepository(AnalyticsRepository):
                      str(e.session_id) if e.session_id else None, e.timestamp,
                      str(e.correlation_id), e.source_service, e.payload, e.created_at]
                     for e in events]
-            self._client.insert(TableName.EVENTS.value, data, column_names=[
+            await asyncio.to_thread(self._client.insert, TableName.EVENTS.value, data, column_names=[
                 "event_id", "event_type", "category", "user_id", "session_id",
                 "timestamp", "correlation_id", "source_service", "payload", "created_at"])
             logger.debug("events_inserted", count=len(events))
@@ -173,7 +174,7 @@ class ClickHouseRepository(AnalyticsRepository):
             data = [[str(m.metric_id), m.metric_name, float(m.value), m.labels,
                      m.timestamp, m.window_start, m.window_end, m.window_type, m.created_at]
                     for m in metrics]
-            self._client.insert(TableName.METRICS.value, data, column_names=[
+            await asyncio.to_thread(self._client.insert, TableName.METRICS.value, data, column_names=[
                 "metric_id", "metric_name", "value", "labels", "timestamp",
                 "window_start", "window_end", "window_type", "created_at"])
             logger.debug("metrics_inserted", count=len(metrics))
@@ -202,7 +203,7 @@ class ClickHouseRepository(AnalyticsRepository):
                 params["user_id"] = str(user_id)
             query += " ORDER BY timestamp DESC LIMIT %(limit)s"
             params["limit"] = int(limit)
-            result = self._client.query(query, parameters=params)
+            result = await asyncio.to_thread(self._client.query, query, parameters=params)
             return [AnalyticsEvent(
                 event_id=_safe_uuid(row[0], "event_id"), event_type=row[1], category=row[2],
                 user_id=_safe_uuid(row[3], "user_id"),
@@ -230,7 +231,7 @@ class ClickHouseRepository(AnalyticsRepository):
             params: dict[str, Any] = {
                 "metric_name": metric_name, "start_time": start_time, "end_time": end_time,
                 "limit": int(limit)}
-            result = self._client.query(query, parameters=params)
+            result = await asyncio.to_thread(self._client.query, query, parameters=params)
             return [MetricRecord(
                 metric_id=_safe_uuid(row[0], "metric_id"), metric_name=row[1],
                 value=Decimal(str(row[2])),
@@ -255,7 +256,7 @@ class ClickHouseRepository(AnalyticsRepository):
                 ORDER BY window_start"""
             params = {"metric_name": metric_name, "window_type": window_type,
                       "start_time": start_time, "end_time": end_time}
-            result = self._client.query(query, parameters=params)
+            result = await asyncio.to_thread(self._client.query, query, parameters=params)
             return [AggregationRecord(
                 aggregation_id=_safe_uuid(row[0], "aggregation_id"), metric_name=row[1], window_type=row[2],
                 window_start=row[3], window_end=row[4], count=row[5],
@@ -280,7 +281,7 @@ class ClickHouseRepository(AnalyticsRepository):
                 float(aggregation.max_value) if aggregation.max_value else None,
                 float(aggregation.avg_value) if aggregation.avg_value else None,
                 aggregation.labels, aggregation.computed_at]]
-            self._client.insert(TableName.AGGREGATIONS.value, data, column_names=[
+            await asyncio.to_thread(self._client.insert, TableName.AGGREGATIONS.value, data, column_names=[
                 "aggregation_id", "metric_name", "window_type", "window_start",
                 "window_end", "count", "sum_value", "min_value", "max_value",
                 "avg_value", "labels", "computed_at"])

@@ -3,6 +3,7 @@ Solace-AI Memory Service - Main memory orchestration service.
 Coordinates 5-tier memory hierarchy, context assembly, and consolidation.
 """
 from __future__ import annotations
+import asyncio
 import time
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
@@ -52,6 +53,7 @@ class MemoryService(ServiceBase):
         self._active_sessions: dict[UUID, SessionState] = {}
         self._user_session_counts: dict[UUID, int] = {}
         self._user_profiles: dict[UUID, dict[str, Any]] = {}
+        self._tier_lock = asyncio.Lock()
         self._initialized = False
         self._stats = {"total_stores": 0, "total_retrieves": 0, "total_assemblies": 0,
                       "sessions_started": 0, "sessions_ended": 0, "consolidations": 0}
@@ -218,15 +220,16 @@ class MemoryService(ServiceBase):
                             initial_context: dict[str, Any]) -> SessionStartResult:
         """Start a new session for user."""
         self._stats["sessions_started"] += 1
-        session_number = self._user_session_counts.get(user_id, 0) + 1
-        self._user_session_counts[user_id] = session_number
-        session = SessionState(
-            user_id=user_id, session_number=session_number,
-            session_type=session_type, metadata=initial_context,
-        )
-        self._active_sessions[session.session_id] = session
-        self._tier_2_working[user_id] = []
-        self._tier_3_session.setdefault(user_id, [])
+        async with self._tier_lock:
+            session_number = self._user_session_counts.get(user_id, 0) + 1
+            self._user_session_counts[user_id] = session_number
+            session = SessionState(
+                user_id=user_id, session_number=session_number,
+                session_type=session_type, metadata=initial_context,
+            )
+            self._active_sessions[session.session_id] = session
+            self._tier_2_working[user_id] = []
+            self._tier_3_session.setdefault(user_id, [])
         previous_summary = await self._get_previous_session_summary(user_id)
         self._load_user_profile(user_id)
         logger.info("session_started", user_id=str(user_id), session_id=str(session.session_id),
@@ -256,8 +259,21 @@ class MemoryService(ServiceBase):
         if trigger_consolidation and self._settings.enable_auto_consolidation:
             await self.consolidate(user_id, session_id, True, True, True, self._settings.enable_decay)
             consolidation_triggered = True
-        del self._active_sessions[session_id]
-        self._tier_2_working.pop(user_id, None)
+        async with self._tier_lock:
+            del self._active_sessions[session_id]
+            # Only remove records belonging to this session, not all user records
+            if user_id in self._tier_2_working:
+                self._tier_2_working[user_id] = [
+                    r for r in self._tier_2_working[user_id] if r.session_id != session_id
+                ]
+                if not self._tier_2_working[user_id]:
+                    del self._tier_2_working[user_id]
+            if user_id in self._tier_3_session:
+                self._tier_3_session[user_id] = [
+                    r for r in self._tier_3_session[user_id] if r.session_id != session_id
+                ]
+                if not self._tier_3_session[user_id]:
+                    del self._tier_3_session[user_id]
         logger.info("session_ended", user_id=str(user_id), session_id=str(session_id),
                     message_count=message_count, duration_minutes=duration_minutes)
         return SessionEndResult(
@@ -276,7 +292,12 @@ class MemoryService(ServiceBase):
             content=content, content_type="message", importance_score=importance,
             metadata={"role": role, "emotion": emotion_detected, **metadata},
         )
-        self._tier_3_session.setdefault(user_id, []).append(record)
+        tier_list = self._tier_3_session.setdefault(user_id, [])
+        tier_list.append(record)
+        # Evict oldest records if over limit
+        max_records = self._settings.max_tier_records_per_user
+        if len(tier_list) > max_records:
+            self._tier_3_session[user_id] = tier_list[-max_records:]
         self._update_working_memory(user_id, record)
         session = self._active_sessions.get(session_id)
         if session:

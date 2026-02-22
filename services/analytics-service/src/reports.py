@@ -395,7 +395,7 @@ class OperationalHealthReportGenerator(ReportGenerator):
         total_responses = sum(m.count for m in response_times)
         total_time_ms = sum(m.sum_value for m in response_times)
         avg_response_time = total_time_ms / Decimal(max(1, total_responses)) if response_times else Decimal("0")
-        p95_response_time = max((m.max_value or Decimal("0")) for m in response_times) if response_times else Decimal("0")
+        max_response_time = max((m.max_value or Decimal("0")) for m in response_times) if response_times else Decimal("0")
 
         performance_section = ReportSection(
             title="System Performance",
@@ -403,7 +403,7 @@ class OperationalHealthReportGenerator(ReportGenerator):
             data={
                 "total_responses_generated": total_responses,
                 "average_response_time_ms": float(avg_response_time),
-                "p95_response_time_ms": float(p95_response_time),
+                "max_response_time_ms": float(max_response_time),
             },
         )
 
@@ -425,7 +425,7 @@ class OperationalHealthReportGenerator(ReportGenerator):
             summary={
                 "total_responses": total_responses,
                 "avg_response_time_ms": float(avg_response_time),
-                "p95_response_time_ms": float(p95_response_time),
+                "max_response_time_ms": float(max_response_time),
             },
         )
 
@@ -639,6 +639,9 @@ class ReportService:
         logger.info("generating_report", report_type=report_type.value, period=time_range.period.value)
         report = await generator.generate(self._aggregator, time_range)
         self._report_cache[cache_key] = report
+        if len(self._report_cache) > 128:
+            oldest_key = next(iter(self._report_cache))
+            del self._report_cache[oldest_key]
         self._stats["reports_generated"] += 1
 
         logger.info("report_generated", report_id=str(report.report_id), sections=len(report.sections))

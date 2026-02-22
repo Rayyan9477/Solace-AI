@@ -77,12 +77,27 @@ class TargetingRule(BaseModel):
         if self.operator == TargetingOperator.NOT_IN_LIST:
             return actual not in (self.value if isinstance(self.value, list) else [self.value])
         if self.operator == TargetingOperator.GREATER_THAN:
-            return float(actual) > float(self.value)
+            try:
+                return float(actual) > float(self.value)
+            except (ValueError, TypeError):
+                return False
         if self.operator == TargetingOperator.LESS_THAN:
-            return float(actual) < float(self.value)
+            try:
+                return float(actual) < float(self.value)
+            except (ValueError, TypeError):
+                return False
         if self.operator == TargetingOperator.MATCHES_REGEX:
             import re
-            return bool(re.match(str(self.value), str(actual)))
+            pattern = str(self.value)
+            target = str(actual)
+            if len(pattern) > 1000 or len(target) > 10000:
+                logger.warning("regex_input_too_long", pattern_len=len(pattern), target_len=len(target))
+                return False
+            try:
+                return bool(re.match(pattern, target))
+            except re.error:
+                logger.warning("invalid_regex_pattern", pattern=pattern[:100])
+                return False
         return False
 
 

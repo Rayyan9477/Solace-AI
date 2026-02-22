@@ -500,7 +500,7 @@ class SymptomExtractor:
         if not self._settings.enable_severity_detection:
             return base_severity
         for indicator, severity in self._severity_indicators.items():
-            if indicator in text:
+            if re.search(r'\b' + re.escape(indicator) + r'\b', text, re.IGNORECASE):
                 return severity
         return base_severity
 

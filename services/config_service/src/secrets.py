@@ -126,13 +126,14 @@ class VaultProvider(SecretProviderBase):
             return
         try:
             import hvac
-            self._client = hvac.Client(
+            self._client = await asyncio.to_thread(
+                hvac.Client,
                 url=self._settings.vault_url,
                 token=self._settings.vault_token.get_secret_value() if self._settings.vault_token else None,
                 verify=self._settings.vault_tls_verify,
                 namespace=self._settings.vault_namespace,
             )
-            if not self._client.is_authenticated():
+            if not await asyncio.to_thread(self._client.is_authenticated):
                 raise RuntimeError("Vault authentication failed")
             self._initialized = True
             logger.info("vault_client_initialized", url=self._settings.vault_url)
@@ -142,7 +143,8 @@ class VaultProvider(SecretProviderBase):
     async def get_secret(self, name: str, version: str | None = None) -> tuple[SecretStr, SecretMetadata]:
         await self._ensure_client()
         path = f"{self._settings.vault_mount_path}/data/{name}"
-        response = self._client.secrets.kv.v2.read_secret_version(
+        response = await asyncio.to_thread(
+            self._client.secrets.kv.v2.read_secret_version,
             path=name, mount_point=self._settings.vault_mount_path, version=int(version) if version else None
         )
         data = response["data"]["data"]
@@ -160,7 +162,8 @@ class VaultProvider(SecretProviderBase):
         data = {"value": value.get_secret_value()}
         if metadata:
             data.update(metadata)
-        response = self._client.secrets.kv.v2.create_or_update_secret(
+        response = await asyncio.to_thread(
+            self._client.secrets.kv.v2.create_or_update_secret,
             path=name, secret=data, mount_point=self._settings.vault_mount_path
         )
         return SecretMetadata(
@@ -171,7 +174,8 @@ class VaultProvider(SecretProviderBase):
 
     async def delete_secret(self, name: str) -> bool:
         await self._ensure_client()
-        self._client.secrets.kv.v2.delete_metadata_and_all_versions(
+        await asyncio.to_thread(
+            self._client.secrets.kv.v2.delete_metadata_and_all_versions,
             path=name, mount_point=self._settings.vault_mount_path
         )
         return True
@@ -179,7 +183,8 @@ class VaultProvider(SecretProviderBase):
     async def list_secrets(self, prefix: str | None = None) -> list[SecretMetadata]:
         await self._ensure_client()
         path = prefix or ""
-        response = self._client.secrets.kv.v2.list_secrets(path=path, mount_point=self._settings.vault_mount_path)
+        response = await asyncio.to_thread(
+            self._client.secrets.kv.v2.list_secrets, path=path, mount_point=self._settings.vault_mount_path)
         secrets: list[SecretMetadata] = []
         for key in response.get("data", {}).get("keys", []):
             secrets.append(SecretMetadata(name=f"{path}/{key}".strip("/"), provider=SecretProvider.VAULT))
@@ -188,7 +193,7 @@ class VaultProvider(SecretProviderBase):
     async def check_health(self) -> dict[str, Any]:
         try:
             await self._ensure_client()
-            health = self._client.sys.read_health_status(method="GET")
+            health = await asyncio.to_thread(self._client.sys.read_health_status, method="GET")
             return {"status": "healthy", "provider": "vault", "sealed": health.get("sealed", False)}
         except Exception as e:
             return {"status": "unhealthy", "provider": "vault", "error": str(e)}
@@ -212,7 +217,7 @@ class AWSSecretsManagerProvider(SecretProviderBase):
             if self._settings.aws_access_key_id and self._settings.aws_secret_access_key:
                 kwargs["aws_access_key_id"] = self._settings.aws_access_key_id.get_secret_value()
                 kwargs["aws_secret_access_key"] = self._settings.aws_secret_access_key.get_secret_value()
-            self._client = boto3.client("secretsmanager", **kwargs)
+            self._client = await asyncio.to_thread(boto3.client, "secretsmanager", **kwargs)
             self._initialized = True
             logger.info("aws_secrets_manager_initialized", region=self._settings.aws_region)
         except ImportError:
@@ -227,7 +232,7 @@ class AWSSecretsManagerProvider(SecretProviderBase):
         kwargs: dict[str, Any] = {"SecretId": self._make_name(name)}
         if version:
             kwargs["VersionId"] = version
-        response = self._client.get_secret_value(**kwargs)
+        response = await asyncio.to_thread(self._client.get_secret_value, **kwargs)
         secret_value = response.get("SecretString", "")
         if not secret_value and "SecretBinary" in response:
             secret_value = base64.b64decode(response["SecretBinary"]).decode("utf-8")
@@ -242,15 +247,15 @@ class AWSSecretsManagerProvider(SecretProviderBase):
         await self._ensure_client()
         full_name = self._make_name(name)
         try:
-            self._client.describe_secret(SecretId=full_name)
-            response = self._client.put_secret_value(SecretId=full_name, SecretString=value.get_secret_value())
+            await asyncio.to_thread(self._client.describe_secret, SecretId=full_name)
+            response = await asyncio.to_thread(self._client.put_secret_value, SecretId=full_name, SecretString=value.get_secret_value())
         except self._client.exceptions.ResourceNotFoundException:
             kwargs: dict[str, Any] = {"Name": full_name, "SecretString": value.get_secret_value()}
             if metadata and "description" in metadata:
                 kwargs["Description"] = metadata["description"]
             if metadata and "tags" in metadata:
                 kwargs["Tags"] = [{"Key": k, "Value": v} for k, v in metadata["tags"].items()]
-            response = self._client.create_secret(**kwargs)
+            response = await asyncio.to_thread(self._client.create_secret, **kwargs)
         return SecretMetadata(
             name=name, provider=SecretProvider.AWS_SECRETS_MANAGER,
             version=response.get("VersionId", "AWSCURRENT"), updated_at=datetime.now(timezone.utc),
@@ -258,7 +263,7 @@ class AWSSecretsManagerProvider(SecretProviderBase):
 
     async def delete_secret(self, name: str) -> bool:
         await self._ensure_client()
-        self._client.delete_secret(SecretId=self._make_name(name), ForceDeleteWithoutRecovery=False)
+        await asyncio.to_thread(self._client.delete_secret, SecretId=self._make_name(name), ForceDeleteWithoutRecovery=False)
         return True
 
     async def list_secrets(self, prefix: str | None = None) -> list[SecretMetadata]:
@@ -266,22 +271,25 @@ class AWSSecretsManagerProvider(SecretProviderBase):
         full_prefix = self._settings.aws_secrets_prefix + (prefix or "")
         paginator = self._client.get_paginator("list_secrets")
         secrets: list[SecretMetadata] = []
-        for page in paginator.paginate(Filters=[{"Key": "name", "Values": [full_prefix]}]):
-            for secret in page.get("SecretList", []):
-                name = secret["Name"].replace(self._settings.aws_secrets_prefix, "", 1)
-                secrets.append(SecretMetadata(
-                    name=name, provider=SecretProvider.AWS_SECRETS_MANAGER,
-                    created_at=secret.get("CreatedDate", datetime.now(timezone.utc)),
-                    updated_at=secret.get("LastChangedDate"),
-                    rotation_enabled=secret.get("RotationEnabled", False),
-                    tags={t["Key"]: t["Value"] for t in secret.get("Tags", [])},
-                ))
-        return secrets
+        def _paginate():
+            results = []
+            for page in paginator.paginate(Filters=[{"Key": "name", "Values": [full_prefix]}]):
+                for secret in page.get("SecretList", []):
+                    sname = secret["Name"].replace(self._settings.aws_secrets_prefix, "", 1)
+                    results.append(SecretMetadata(
+                        name=sname, provider=SecretProvider.AWS_SECRETS_MANAGER,
+                        created_at=secret.get("CreatedDate", datetime.now(timezone.utc)),
+                        updated_at=secret.get("LastChangedDate"),
+                        rotation_enabled=secret.get("RotationEnabled", False),
+                        tags={t["Key"]: t["Value"] for t in secret.get("Tags", [])},
+                    ))
+            return results
+        return await asyncio.to_thread(_paginate)
 
     async def check_health(self) -> dict[str, Any]:
         try:
             await self._ensure_client()
-            self._client.list_secrets(MaxResults=1)
+            await asyncio.to_thread(self._client.list_secrets, MaxResults=1)
             return {"status": "healthy", "provider": "aws_secrets_manager", "region": self._settings.aws_region}
         except Exception as e:
             return {"status": "unhealthy", "provider": "aws_secrets_manager", "error": str(e)}

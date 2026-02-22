@@ -58,6 +58,32 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/notifications", tags=["notifications"])
 
+# Singleton registries to avoid per-request instantiation
+_template_registry = None
+_channel_registry = None
+
+
+def _get_template_registry():
+    global _template_registry
+    if _template_registry is None:
+        try:
+            from .domain import TemplateRegistry
+        except ImportError:
+            from domain import TemplateRegistry
+        _template_registry = TemplateRegistry()
+    return _template_registry
+
+
+def _get_channel_registry():
+    global _channel_registry
+    if _channel_registry is None:
+        try:
+            from .domain import ChannelRegistry
+        except ImportError:
+            from domain import ChannelRegistry
+        _channel_registry = ChannelRegistry()
+    return _channel_registry
+
 
 class SendNotificationRequest(BaseModel):
     """API request to send a notification."""
@@ -320,11 +346,7 @@ async def list_templates(
     service: NotificationService = Depends(_get_notification_service),
 ) -> list[TemplateInfo]:
     """List all available notification templates. Requires authentication."""
-    try:
-        from .domain import TemplateRegistry
-    except ImportError:
-        from domain import TemplateRegistry
-    registry = TemplateRegistry()
+    registry = _get_template_registry()
     templates = registry.list_templates()
 
     return [
@@ -345,11 +367,7 @@ async def get_template(
     current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> TemplateInfo:
     """Get details of a specific template. Requires authentication."""
-    try:
-        from .domain import TemplateRegistry
-    except ImportError:
-        from domain import TemplateRegistry
-    registry = TemplateRegistry()
+    registry = _get_template_registry()
 
     parsed_type = _parse_template_type(template_type)
     try:
@@ -375,10 +393,10 @@ async def list_channels(
     if Role.ADMIN not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required to view channel configuration")
     try:
-        from .domain import ChannelRegistry, ChannelStatus
+        from .domain import ChannelStatus
     except ImportError:
-        from domain import ChannelRegistry, ChannelStatus
-    registry = ChannelRegistry()
+        from domain import ChannelStatus
+    registry = _get_channel_registry()
     channels = registry.list_channels()
 
     return [
@@ -396,11 +414,7 @@ async def health_check(
     service: NotificationService = Depends(_get_notification_service),
 ) -> HealthResponse:
     """Check health of notification service and channels."""
-    try:
-        from .domain import ChannelRegistry
-    except ImportError:
-        from domain import ChannelRegistry
-    registry = ChannelRegistry()
+    registry = _get_channel_registry()
     channel_health = await registry.health_check_all()
 
     overall_status = "healthy" if any(channel_health.values()) else "unhealthy"

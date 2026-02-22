@@ -3,6 +3,7 @@ Solace-AI Memory Service - PostgreSQL Repository.
 Async repository for structured memory storage using SQLAlchemy and asyncpg.
 """
 from __future__ import annotations
+import asyncio
 import time
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -195,12 +196,21 @@ class PostgresRepository:
             result = await session.execute(stmt)
             row = result.fetchone()
             if row:
+                # Fire-and-forget access time update to decouple read from write
+                asyncio.create_task(self._update_access_time(record_id))
+                return dict(row._mapping)
+        return None
+
+    async def _update_access_time(self, record_id: UUID) -> None:
+        """Update accessed_at timestamp in a separate transaction."""
+        try:
+            async with self.session() as session:
                 await session.execute(
                     update(memory_records).where(memory_records.c.record_id == record_id)
                     .values(accessed_at=datetime.now(timezone.utc))
                 )
-                return dict(row._mapping)
-        return None
+        except Exception:
+            logger.debug("access_time_update_failed", record_id=str(record_id))
 
     async def get_user_records(self, user_id: UUID, tier: str | None = None,
                                 limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
