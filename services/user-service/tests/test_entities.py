@@ -163,8 +163,13 @@ class TestUserEntity:
         assert user.deleted_at is not None
         assert user.status == AccountStatus.INACTIVE
         assert user.email == f"deleted_{original_user_id}@deleted.solace-ai.com"
+        assert user.display_name == "Deleted User"
+        assert user.password_hash == "DELETED"
+        assert user.phone_number is None
         assert user.email_verified is False
         assert user.avatar_url is None
+        assert user.bio is None
+        assert user.is_on_call is False
 
     def test_record_successful_login(self):
         """Test recording successful login attempt."""

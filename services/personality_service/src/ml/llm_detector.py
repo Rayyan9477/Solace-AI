@@ -3,6 +3,7 @@ Solace-AI Personality Service - Zero-Shot LLM Personality Detector.
 Uses large language models for personality trait detection via zero-shot analysis.
 """
 from __future__ import annotations
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
@@ -201,7 +202,7 @@ class LLMPersonalityDetector:
             logger.warning("text_too_short_for_llm", length=len(text))
             return self._neutral_scores(confidence=0.2)
         truncated_text = text[:self._settings.max_input_length]
-        cache_key = truncated_text[:256]
+        cache_key = hashlib.sha256(truncated_text.encode()).hexdigest()
         if self._settings.cache_responses and cache_key in self._response_cache:
             cached = self._response_cache[cache_key]
             logger.debug("llm_cache_hit", cache_key_prefix=cache_key[:50])

@@ -213,8 +213,12 @@ class UnifiedLLMClient:
             Generated response text
         """
         if not self._initialized or self._client is None:
-            logger.warning("llm_client_not_initialized", service=service_name)
-            return ""
+            logger.warning(
+                "llm_client_not_initialized",
+                service=service_name,
+                hint="portkey-ai may not be installed; LLM calls will return empty responses",
+            )
+            return "(LLM unavailable)"
 
         # Apply task-type preset if specified (explicit params override)
         effective_temperature = temperature

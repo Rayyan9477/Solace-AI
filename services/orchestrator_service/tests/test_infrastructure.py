@@ -311,22 +311,24 @@ class TestServiceClients:
         assert breaker.state == CircuitState.CLOSED
         assert breaker.allow_request() is True
 
-    def test_circuit_breaker_opens_on_failures(self):
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_opens_on_failures(self):
         from services.orchestrator_service.src.infrastructure.clients import CircuitBreaker, CircuitState
         breaker = CircuitBreaker(failure_threshold=3, recovery_timeout=30)
-        breaker.record_failure()
-        breaker.record_failure()
+        await breaker.record_failure()
+        await breaker.record_failure()
         assert breaker.state == CircuitState.CLOSED
-        breaker.record_failure()
+        await breaker.record_failure()
         assert breaker.state == CircuitState.OPEN
         assert breaker.allow_request() is False
 
-    def test_circuit_breaker_resets_on_success(self):
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_resets_on_success(self):
         from services.orchestrator_service.src.infrastructure.clients import CircuitBreaker, CircuitState
         breaker = CircuitBreaker(failure_threshold=3, recovery_timeout=30)
-        breaker.record_failure()
-        breaker.record_failure()
-        breaker.record_success()
+        await breaker.record_failure()
+        await breaker.record_failure()
+        await breaker.record_success()
         assert breaker.state == CircuitState.CLOSED
 
     def test_service_client_factory_creates_clients(self):

@@ -223,6 +223,21 @@ class MemoryRetrievalNode:
         }
 
 
+_shared_memory_node: MemoryRetrievalNode | None = None
+
+
+def _get_memory_node() -> MemoryRetrievalNode:
+    """Get or create a shared MemoryRetrievalNode singleton.
+
+    Reuses the same httpx connection pool across invocations instead of
+    creating (and leaking) a new HTTP client per LangGraph call.
+    """
+    global _shared_memory_node
+    if _shared_memory_node is None:
+        _shared_memory_node = MemoryRetrievalNode()
+    return _shared_memory_node
+
+
 async def memory_retrieval_node(state: OrchestratorState) -> dict[str, Any]:
     """
     LangGraph node function for memory retrieval processing.
@@ -233,5 +248,5 @@ async def memory_retrieval_node(state: OrchestratorState) -> dict[str, Any]:
     Returns:
         State updates dictionary
     """
-    node = MemoryRetrievalNode()
+    node = _get_memory_node()
     return await node.process(state)

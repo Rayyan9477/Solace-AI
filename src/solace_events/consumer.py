@@ -340,7 +340,11 @@ class EventConsumer:
                     result = await self._process_message(
                         topic, partition, offset, value
                     )
-                    if result.status == ProcessingStatus.SUCCESS:
+                    # Advance offset for all terminal statuses (SUCCESS, FAILED,
+                    # SKIP). Only RETRY keeps the offset pending for reprocessing.
+                    # Without this, a single failed message blocks the entire
+                    # partition indefinitely (S-C1).
+                    if result.status != ProcessingStatus.RETRY:
                         committable = await self._offset_tracker.mark_processed(
                             topic, partition, offset
                         )

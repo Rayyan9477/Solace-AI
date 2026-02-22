@@ -220,9 +220,21 @@ class InMemoryTokenBlacklist(TokenBlacklist):
 
     def __init__(self) -> None:
         self._blacklist: dict[str, datetime] = {}
+        self._cleanup_counter: int = 0
 
     async def add(self, jti: str, expires_at: datetime) -> None:
         self._blacklist[jti] = expires_at
+        self._cleanup_counter += 1
+        if self._cleanup_counter >= 100:
+            self._evict_expired()
+            self._cleanup_counter = 0
+
+    def _evict_expired(self) -> None:
+        """Remove all expired tokens to prevent unbounded memory growth."""
+        now = datetime.now(timezone.utc)
+        expired = [jti for jti, exp in self._blacklist.items() if exp < now]
+        for jti in expired:
+            del self._blacklist[jti]
 
     def _check_blacklisted(self, jti: str) -> bool:
         """Shared sync logic for blacklist check with auto-cleanup."""
@@ -264,6 +276,7 @@ class InMemoryLoginAttemptTracker(LoginAttemptTracker):
         self._max_attempts = max_attempts
         self._lockout_minutes = lockout_minutes
         self._attempts: dict[str, list[datetime]] = {}
+        self._cleanup_counter: int = 0
 
     async def record_failure(self, user_id: str) -> int:
         now = datetime.now(timezone.utc)
@@ -273,7 +286,20 @@ class InMemoryLoginAttemptTracker(LoginAttemptTracker):
         # Only count recent attempts within lockout window
         cutoff = now - timedelta(minutes=self._lockout_minutes)
         self._attempts[user_id] = [t for t in self._attempts[user_id] if t > cutoff]
+        # Periodically evict stale users to prevent unbounded growth
+        self._cleanup_counter += 1
+        if self._cleanup_counter >= 50:
+            self._evict_stale(now)
+            self._cleanup_counter = 0
         return len(self._attempts[user_id])
+
+    def _evict_stale(self, now: datetime) -> None:
+        """Remove users with no recent attempts."""
+        cutoff = now - timedelta(minutes=self._lockout_minutes * 2)
+        stale = [uid for uid, attempts in self._attempts.items()
+                 if not attempts or attempts[-1] < cutoff]
+        for uid in stale:
+            del self._attempts[uid]
 
     async def is_locked_out(self, user_id: str) -> bool:
         if user_id not in self._attempts:

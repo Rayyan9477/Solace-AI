@@ -150,15 +150,20 @@ class User(BaseModel):
         """
         Soft delete user account (GDPR compliance).
 
-        Business Rule: Preserves audit trail while marking as deleted.
+        Business Rule: Preserves audit trail (user_id, created_at) while
+        scrubbing ALL personally identifiable information (PII).
         """
         self.deleted_at = datetime.now(timezone.utc)
         self.status = AccountStatus.INACTIVE
         self.email = f"deleted_{self.user_id}@deleted.solace-ai.com"
+        self.display_name = "Deleted User"
+        self.password_hash = "DELETED"
+        self.phone_number = None
         self.email_verified = False
         self.email_verification_token = None
         self.avatar_url = None
         self.bio = None
+        self.is_on_call = False
         self.updated_at = datetime.now(timezone.utc)
         logger.info("user_soft_deleted", user_id=str(self.user_id))
 

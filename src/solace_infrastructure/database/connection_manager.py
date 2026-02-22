@@ -238,15 +238,18 @@ class ConnectionPoolManager:
                 if hasattr(config.settings, "get_ssl_context"):
                     ssl_context = config.settings.get_ssl_context()
 
-                pool = await asyncpg.create_pool(
-                    dsn=config.settings.get_dsn(),
-                    min_size=config.min_size,
-                    max_size=config.max_size,
-                    command_timeout=config.settings.command_timeout,
-                    statement_cache_size=config.settings.statement_cache_size,
-                    max_cached_statement_lifetime=config.settings.max_cached_statement_lifetime,
-                    init=cls._init_connection,
-                    ssl=ssl_context,
+                pool = await asyncio.wait_for(
+                    asyncpg.create_pool(
+                        dsn=config.settings.get_dsn(),
+                        min_size=config.min_size,
+                        max_size=config.max_size,
+                        command_timeout=config.settings.command_timeout,
+                        statement_cache_size=config.settings.statement_cache_size,
+                        max_cached_statement_lifetime=config.settings.max_cached_statement_lifetime,
+                        init=cls._init_connection,
+                        ssl=ssl_context,
+                    ),
+                    timeout=30.0,
                 )
 
                 cls._pools[name] = pool

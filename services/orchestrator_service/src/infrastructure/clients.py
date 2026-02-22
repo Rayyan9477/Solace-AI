@@ -65,7 +65,7 @@ class ServiceResponse(Generic[T]):
 
 
 class CircuitBreaker:
-    """Circuit breaker for fault tolerance."""
+    """Circuit breaker for fault tolerance. Thread-safe via asyncio.Lock."""
 
     def __init__(self, failure_threshold: int = 5, recovery_timeout: int = 30) -> None:
         self._failure_threshold = failure_threshold
@@ -73,6 +73,7 @@ class CircuitBreaker:
         self._state = CircuitState.CLOSED
         self._failure_count = 0
         self._last_failure_time: datetime | None = None
+        self._lock = asyncio.Lock()
 
     @property
     def state(self) -> CircuitState:
@@ -83,18 +84,20 @@ class CircuitBreaker:
                 self._state = CircuitState.HALF_OPEN
         return self._state
 
-    def record_success(self) -> None:
+    async def record_success(self) -> None:
         """Record successful call."""
-        self._failure_count = 0
-        self._state = CircuitState.CLOSED
+        async with self._lock:
+            self._failure_count = 0
+            self._state = CircuitState.CLOSED
 
-    def record_failure(self) -> None:
+    async def record_failure(self) -> None:
         """Record failed call."""
-        self._failure_count += 1
-        self._last_failure_time = datetime.now(timezone.utc)
-        if self._failure_count >= self._failure_threshold:
-            self._state = CircuitState.OPEN
-            logger.warning("circuit_breaker_opened", failures=self._failure_count)
+        async with self._lock:
+            self._failure_count += 1
+            self._last_failure_time = datetime.now(timezone.utc)
+            if self._failure_count >= self._failure_threshold:
+                self._state = CircuitState.OPEN
+                logger.warning("circuit_breaker_opened", failures=self._failure_count)
 
     def allow_request(self) -> bool:
         """Check if request should be allowed."""
@@ -177,7 +180,7 @@ class BaseServiceClient:
                 )
                 elapsed_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
                 if response.status_code >= 200 and response.status_code < 300:
-                    self._circuit.record_success()
+                    await self._circuit.record_success()
                     try:
                         response_data = response.json() if response.content else None
                     except (ValueError, UnicodeDecodeError):
@@ -190,7 +193,7 @@ class BaseServiceClient:
                     )
                 if response.status_code >= 500:
                     last_error = f"Server error: {response.status_code}"
-                    self._circuit.record_failure()
+                    await self._circuit.record_failure()
                 else:
                     return ServiceResponse(
                         success=False,
@@ -200,10 +203,10 @@ class BaseServiceClient:
                     )
             except httpx.TimeoutException:
                 last_error = "Request timeout"
-                self._circuit.record_failure()
+                await self._circuit.record_failure()
             except httpx.RequestError as e:
                 last_error = str(e)
-                self._circuit.record_failure()
+                await self._circuit.record_failure()
             if attempt < self._config.max_retries:
                 base_delay = self._config.retry_delay_seconds * (2 ** attempt)
                 jitter = random.uniform(0, base_delay * 0.1)

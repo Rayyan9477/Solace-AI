@@ -158,6 +158,15 @@ class KeywordSet:
 class Layer1InputGate:
     """Layer 1: Fast keyword and pattern-based input screening."""
 
+    # Negation phrases that suppress keyword matches when they immediately
+    # precede a crisis keyword (e.g., "I'm not suicidal", "I don't want to
+    # hurt myself", "no thoughts of suicide").
+    _NEGATION_PATTERN = re.compile(
+        r"(?:not|no longer|never|don'?t|doesn'?t|didn'?t|isn'?t|aren'?t|wasn'?t|won'?t"
+        r"|no\s+thoughts?\s+of|denies?)\s+",
+        re.IGNORECASE,
+    )
+
     def __init__(self, settings: CrisisDetectorSettings) -> None:
         self._settings = settings
         self._keywords = KeywordSet()
@@ -238,13 +247,35 @@ class Layer1InputGate:
             recommended_action=self._get_recommended_action(crisis_level),
         )
 
+    def _is_negated(self, content: str, keyword: str) -> bool:
+        """Check if a keyword match is preceded by a negation phrase.
+
+        E.g. "I'm not suicidal" or "no thoughts of suicide" should return True,
+        suppressing the keyword match. Looks up to 30 characters before the
+        keyword for a negation phrase.
+        """
+        pattern = re.compile(rf'\b{re.escape(keyword)}\b', re.IGNORECASE)
+        match = pattern.search(content)
+        if not match:
+            return False
+        # Check preceding context (up to 30 chars before the match)
+        start = max(0, match.start() - 30)
+        preceding = content[start:match.start()]
+        return bool(self._NEGATION_PATTERN.search(preceding))
+
     def _detect_keywords(
         self, content: str, risk_factors: list[RiskFactor], triggers: list[str]
     ) -> Decimal:
-        """Detect crisis keywords in content using word-boundary matching."""
+        """Detect crisis keywords in content using word-boundary matching.
+
+        Applies negation handling: phrases like "I'm not suicidal" or
+        "no thoughts of self-harm" will not trigger crisis alerts.
+        """
         score = Decimal("0")
         for kw in self._keywords.critical_keywords:
             if re.search(rf'\b{re.escape(kw)}\b', content, re.IGNORECASE):
+                if self._is_negated(content, kw):
+                    continue
                 score = max(score, Decimal("0.95"))
                 risk_factors.append(
                     RiskFactor(
@@ -258,6 +289,8 @@ class Layer1InputGate:
                 triggers.append(f"CRITICAL_KEYWORD:{kw}")
         for kw in self._keywords.high_keywords:
             if re.search(rf'\b{re.escape(kw)}\b', content, re.IGNORECASE):
+                if self._is_negated(content, kw):
+                    continue
                 score = max(score, Decimal("0.75"))
                 risk_factors.append(
                     RiskFactor(
@@ -271,6 +304,8 @@ class Layer1InputGate:
                 triggers.append(f"HIGH_KEYWORD:{kw}")
         for kw in self._keywords.elevated_keywords:
             if re.search(rf'\b{re.escape(kw)}\b', content, re.IGNORECASE):
+                if self._is_negated(content, kw):
+                    continue
                 score = max(score, Decimal("0.5"))
                 risk_factors.append(
                     RiskFactor(
@@ -283,6 +318,8 @@ class Layer1InputGate:
                 )
         for kw in self._keywords.low_keywords:
             if re.search(rf'\b{re.escape(kw)}\b', content, re.IGNORECASE):
+                if self._is_negated(content, kw):
+                    continue
                 score = max(score, Decimal("0.25"))
         return score
 

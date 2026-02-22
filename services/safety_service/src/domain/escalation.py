@@ -69,6 +69,10 @@ class EscalationSettings(BaseSettings):
         default="http://localhost:8003",
         description="URL of the notification microservice"
     )
+    dashboard_base_url: str = Field(
+        default="https://dashboard.solace-ai.com",
+        description="Base URL for the clinician dashboard"
+    )
     model_config = SettingsConfigDict(env_prefix="ESCALATION_", env_file=".env", extra="ignore")
 
 
@@ -128,6 +132,7 @@ class NotificationServiceClient:
     def __init__(self, settings: EscalationSettings, base_url: str = "http://localhost:8003") -> None:
         self._settings = settings
         self._base_url = base_url.rstrip("/")
+        self._dashboard_base_url = settings.dashboard_base_url.rstrip("/")
         self._client: Any = None  # httpx.AsyncClient, lazily initialized
         self._max_retries = settings.max_retries
         self._timeout_seconds = settings.notification_timeout_seconds
@@ -193,7 +198,7 @@ class NotificationServiceClient:
                 "patient_name": "Patient",  # Should lookup from user service
                 "risk_level": escalation.crisis_level,
                 "assessment_summary": escalation.reason,
-                "dashboard_link": f"https://dashboard.solace-ai.com/escalations/{escalation.escalation_id}",
+                "dashboard_link": f"{self._dashboard_base_url}/escalations/{escalation.escalation_id}",
                 "escalation_id": str(escalation.escalation_id),
                 "priority": escalation.priority.value,
             },

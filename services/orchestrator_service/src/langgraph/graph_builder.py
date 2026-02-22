@@ -379,7 +379,7 @@ class OrchestratorGraphBuilder:
         builder.add_edge(START, "safety_precheck")
         builder.add_conditional_edges("safety_precheck", route_after_safety, ["crisis_handler", "memory_retrieval"])
         builder.add_edge("memory_retrieval", "supervisor")
-        builder.add_edge("crisis_handler", END)
+        builder.add_edge("crisis_handler", "safety_postcheck")
         builder.add_conditional_edges("supervisor", route_to_agents, ["chat_agent", "diagnosis_agent", "therapy_agent", "personality_agent", "safety_agent"])
         builder.add_edge("chat_agent", "aggregator")
         builder.add_edge("diagnosis_agent", "aggregator")

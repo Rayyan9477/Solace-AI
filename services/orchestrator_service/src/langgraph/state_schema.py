@@ -222,6 +222,28 @@ def update_safety_flags(left: dict[str, Any], right: dict[str, Any]) -> dict[str
     return merged
 
 
+def merge_metadata(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+    """Reducer for metadata - deep merges to preserve data from all agents."""
+    if not left:
+        return right
+    if not right:
+        return left
+    merged = dict(left)
+    merged.update(right)
+    return merged
+
+
+def merge_personality_style(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+    """Reducer for personality_style - merges to prevent parallel agents overwriting."""
+    if not left:
+        return right
+    if not right:
+        return left
+    merged = dict(left)
+    merged.update(right)
+    return merged
+
+
 class OrchestratorState(TypedDict, total=False):
     """
     LangGraph state schema for multi-agent orchestration.
@@ -241,8 +263,8 @@ class OrchestratorState(TypedDict, total=False):
     processing_phase: str
     final_response: str
     error_message: str | None
-    metadata: dict[str, Any]
-    personality_style: dict[str, Any]
+    metadata: Annotated[dict[str, Any], merge_metadata]
+    personality_style: Annotated[dict[str, Any], merge_personality_style]
     active_treatment: dict[str, Any] | None
     memory_context: dict[str, Any]
     retrieved_memories: list[dict[str, Any]]

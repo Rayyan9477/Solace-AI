@@ -4,6 +4,7 @@ Fine-tuned RoBERTa model for OCEAN personality trait detection from text.
 """
 from __future__ import annotations
 import collections
+import hashlib
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -241,7 +242,7 @@ class RoBERTaPersonalityDetector:
 
     async def _get_embeddings(self, processed_text: str) -> list[float]:
         """Get embeddings with caching support."""
-        cache_key = processed_text[:256]
+        cache_key = hashlib.sha256(processed_text.encode()).hexdigest()
         if self._settings.cache_embeddings and cache_key in self._embedding_cache:
             return self._embedding_cache[cache_key]
         if self._model is not None and self._tokenizer is not None:
@@ -255,7 +256,12 @@ class RoBERTaPersonalityDetector:
         return embeddings
 
     async def _run_model(self, text: str) -> list[float]:
-        """Run actual model inference."""
+        """Run actual model inference in a thread to avoid blocking the event loop."""
+        import asyncio
+        return await asyncio.to_thread(self._run_model_sync, text)
+
+    def _run_model_sync(self, text: str) -> list[float]:
+        """Synchronous model inference (CPU-bound)."""
         inputs = self._tokenizer(
             text,
             max_length=self._settings.max_sequence_length,

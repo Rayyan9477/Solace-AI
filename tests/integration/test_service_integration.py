@@ -214,28 +214,31 @@ class TestCircuitBreaker:
         assert cb.state == CircuitState.CLOSED
         assert cb.allow_request() is True
 
-    def test_opens_after_threshold_failures(self):
+    @pytest.mark.asyncio
+    async def test_opens_after_threshold_failures(self):
         """Circuit opens after reaching failure threshold."""
         cb = CircuitBreaker(failure_threshold=3, recovery_timeout=30)
         for _ in range(3):
-            cb.record_failure()
+            await cb.record_failure()
         assert cb.state == CircuitState.OPEN
         assert cb.allow_request() is False
 
-    def test_resets_on_success(self):
+    @pytest.mark.asyncio
+    async def test_resets_on_success(self):
         """Success resets the failure counter and closes the circuit."""
         cb = CircuitBreaker(failure_threshold=3, recovery_timeout=30)
-        cb.record_failure()
-        cb.record_failure()
-        cb.record_success()
+        await cb.record_failure()
+        await cb.record_failure()
+        await cb.record_success()
         assert cb.state == CircuitState.CLOSED
         assert cb.allow_request() is True
 
-    def test_half_open_after_recovery_timeout(self):
+    @pytest.mark.asyncio
+    async def test_half_open_after_recovery_timeout(self):
         """Circuit transitions to HALF_OPEN after recovery timeout."""
         cb = CircuitBreaker(failure_threshold=2, recovery_timeout=0)
-        cb.record_failure()
-        cb.record_failure()
+        await cb.record_failure()
+        await cb.record_failure()
         # With recovery_timeout=0, the state property immediately returns HALF_OPEN
         # because elapsed time >= 0
         assert cb.state == CircuitState.HALF_OPEN

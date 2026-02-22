@@ -107,9 +107,18 @@ class ResponseRanker:
         self._settings = settings
 
     def rank(self, results: list[dict[str, Any]]) -> list[AgentContribution]:
-        """Rank agent results by priority."""
+        """Rank agent results by priority.
+
+        Filters out failed results and non-response metadata (e.g. personality
+        style data that has no ``response_content``).  Sort uses a composite key
+        of ``(priority_score, agent_type)`` so ordering is deterministic when
+        two agents produce the same priority score.
+        """
         contributions: list[AgentContribution] = []
         for result in results:
+            # Skip results without content or that explicitly failed
+            if not result.get("success", True):
+                continue
             content = result.get("response_content")
             if not content:
                 continue
@@ -126,7 +135,11 @@ class ResponseRanker:
                 priority_score=priority_score,
                 metadata=result.get("metadata", {}),
             ))
-        contributions.sort(key=lambda c: c.priority_score, reverse=True)
+        # Stable sort: tiebreak by agent_type name for deterministic ordering
+        contributions.sort(
+            key=lambda c: (c.priority_score, c.agent_type.value),
+            reverse=True,
+        )
         return contributions
 
     def _calculate_priority(
@@ -407,6 +420,17 @@ class Aggregator:
         }
 
 
+_shared_aggregator: Aggregator | None = None
+
+
+def _get_aggregator() -> Aggregator:
+    """Get or create a shared Aggregator singleton."""
+    global _shared_aggregator
+    if _shared_aggregator is None:
+        _shared_aggregator = Aggregator()
+    return _shared_aggregator
+
+
 def aggregator_node(state: OrchestratorState) -> dict[str, Any]:
     """
     LangGraph node function for aggregation.
@@ -417,5 +441,4 @@ def aggregator_node(state: OrchestratorState) -> dict[str, Any]:
     Returns:
         State updates dictionary
     """
-    aggregator = Aggregator()
-    return aggregator.aggregate(state)
+    return _get_aggregator().aggregate(state)

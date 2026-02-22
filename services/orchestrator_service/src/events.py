@@ -274,11 +274,17 @@ class EventBus:
                 )
 
     async def _safe_invoke(self, handler: EventHandler, event: OrchestratorEvent) -> None:
-        """Invoke handler with error isolation. Supports sync and async."""
+        """Invoke handler with error isolation. Supports sync and async.
+
+        Sync handlers are run in an executor thread to avoid blocking the
+        event loop (T4.5).
+        """
         try:
-            result = handler(event)
-            if inspect.isawaitable(result):
-                await result
+            if inspect.iscoroutinefunction(handler):
+                await handler(event)
+            else:
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, handler, event)
         except Exception as e:
             logger.error(
                 "event_handler_error",

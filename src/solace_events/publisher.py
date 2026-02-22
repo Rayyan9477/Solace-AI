@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from enum import Enum
@@ -406,6 +407,11 @@ def create_publisher(
             outbox_store = PostgresOutboxStore(postgres_pool)
             logger.info("publisher_using_postgres_outbox")
         else:
+            if os.environ.get("ENVIRONMENT", "").lower() == "production":
+                raise RuntimeError(
+                    "postgres_pool is required for event outbox in production. "
+                    "In-memory outbox loses events on restart."
+                )
             outbox_store = InMemoryOutboxStore()
             logger.warning(
                 "publisher_using_in_memory_outbox",

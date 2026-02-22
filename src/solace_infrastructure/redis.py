@@ -288,21 +288,43 @@ class RedisClient:
             self._pubsub_task = asyncio.create_task(self._pubsub_listener())
 
     async def _pubsub_listener(self) -> None:
-        """Background task to listen for pub/sub messages."""
-        client = self._ensure_connected()
-        pubsub: PubSub = client.pubsub()
-        try:
-            await pubsub.subscribe(*self._pubsub_handlers.keys())
-            async for message in pubsub.listen():
-                if message["type"] == "message":
-                    channel = message["channel"]
-                    data = self._deserialize(message["data"])
-                    for handler in self._pubsub_handlers.get(channel, []):
-                        await handler(channel, data)
-        except asyncio.CancelledError:
-            await pubsub.unsubscribe()
-        finally:
-            await pubsub.aclose()
+        """Background task to listen for pub/sub messages.
+
+        Reconnects with exponential backoff on network errors to prevent
+        a single disconnect from permanently killing the listener.
+        """
+        backoff = 1.0
+        max_backoff = 60.0
+        while True:
+            pubsub: PubSub | None = None
+            try:
+                client = self._ensure_connected()
+                pubsub = client.pubsub()
+                await pubsub.subscribe(*self._pubsub_handlers.keys())
+                backoff = 1.0  # reset on successful subscribe
+                async for message in pubsub.listen():
+                    if message["type"] == "message":
+                        channel = message["channel"]
+                        data = self._deserialize(message["data"])
+                        for handler in self._pubsub_handlers.get(channel, []):
+                            try:
+                                await handler(channel, data)
+                            except Exception as handler_err:
+                                logger.error("pubsub_handler_error", channel=channel, error=str(handler_err))
+            except asyncio.CancelledError:
+                if pubsub:
+                    await pubsub.unsubscribe()
+                    await pubsub.aclose()
+                return
+            except Exception as e:
+                logger.error("pubsub_listener_error", error=str(e), reconnect_in=backoff)
+                if pubsub:
+                    try:
+                        await pubsub.aclose()
+                    except Exception:
+                        pass
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, max_backoff)
 
     @asynccontextmanager
     async def lock(self, name: str, timeout: int = 10, blocking: bool = True

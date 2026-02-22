@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Awaitable, Callable, Protocol
@@ -343,6 +344,11 @@ def create_dead_letter_handler(
             store = PostgresDLQStore(postgres_pool)
             logger.info("dlq_using_postgres_store", consumer_group=consumer_group)
         else:
+            if os.environ.get("ENVIRONMENT", "").lower() == "production":
+                raise RuntimeError(
+                    "postgres_pool is required for DLQ in production. "
+                    "In-memory DLQ loses failed events on restart."
+                )
             store = DeadLetterStore()
             logger.warning(
                 "dlq_using_in_memory_store",
