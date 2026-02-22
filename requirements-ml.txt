@@ -1,0 +1,13 @@
+# Solace-AI: Machine Learning Dependencies
+# These are heavy packages (~2GB) only needed by personality_service ML models.
+# Install with: pip install -r requirements-ml.txt
+#
+# The base requirements.txt is a prerequisite:
+#   pip install -r requirements.txt -r requirements-ml.txt
+
+-r requirements.txt
+
+torch~=2.5.0
+transformers~=4.47.0
+huggingface-hub~=0.27.0
+spacy~=3.8.0

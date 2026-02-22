@@ -488,6 +488,9 @@ class MemoryService(ServiceBase):
 
     def _get_tier_records(self, user_id: UUID, tier: str) -> list[MemoryRecord]:
         """Get records from a tier for user."""
+        if tier == "tier_1_input":
+            record = self._tier_1_input.get(user_id)
+            return [record] if record is not None else []
         tier_map = {"tier_2_working": self._tier_2_working, "tier_3_session": self._tier_3_session,
                     "tier_4_episodic": self._tier_4_episodic, "tier_5_semantic": self._tier_5_semantic}
         return tier_map.get(tier, {}).get(user_id, [])

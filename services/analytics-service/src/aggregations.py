@@ -10,6 +10,7 @@ Principles: Strategy Pattern, Immutable Data, Thread-Safe Aggregations
 from __future__ import annotations
 
 import asyncio
+import math
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -187,8 +188,9 @@ class PercentileAggregator(MetricAggregator[Decimal]):
         if not values:
             return Decimal("0")
         sorted_values = sorted(values)
-        index = int((len(sorted_values) - 1) * self.percentile / 100)
-        return sorted_values[index]
+        # Nearest-rank percentile: ceil(P/100 * N) clamped to valid range
+        index = min(math.ceil(self.percentile / 100 * len(sorted_values)), len(sorted_values)) - 1
+        return sorted_values[max(index, 0)]
 
 
 class MetricsStore:

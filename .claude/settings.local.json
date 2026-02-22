@@ -52,7 +52,8 @@
       "Bash(do grep -c \"def \" \"$f\")",
       "Read(//r/Solace-AI/**)",
       "Bash(pushd:*)",
-      "Bash(set)"
+      "Bash(set)",
+      "Bash(test:*)"
     ],
     "deny": [],
     "additionalDirectories": [

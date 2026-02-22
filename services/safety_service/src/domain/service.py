@@ -355,9 +355,33 @@ class SafetyService(ServiceBase):
         await self.escalate(user_id, session_id, detection.crisis_level.value, reason)
 
     def _cache_assessment(self, user_id: UUID, result: SafetyCheckResult) -> None:
-        """Cache assessment result."""
+        """Cache assessment result with TTL enforcement."""
         if self._settings.cache_assessments:
             self._assessment_cache[user_id] = AssessmentCache(user_id=user_id, assessment=result)
+            # Evict expired entries to prevent unbounded growth
+            self._evict_expired_cache()
+
+    def _get_cached_assessment(self, user_id: UUID) -> SafetyCheckResult | None:
+        """Get cached assessment if not expired."""
+        entry = self._assessment_cache.get(user_id)
+        if entry is None:
+            return None
+        elapsed = (datetime.now(timezone.utc) - entry.timestamp).total_seconds()
+        if elapsed > self._settings.assessment_cache_ttl_seconds:
+            del self._assessment_cache[user_id]
+            return None
+        return entry.assessment
+
+    def _evict_expired_cache(self) -> None:
+        """Remove expired assessment cache entries."""
+        now = datetime.now(timezone.utc)
+        ttl = self._settings.assessment_cache_ttl_seconds
+        expired = [
+            uid for uid, entry in self._assessment_cache.items()
+            if (now - entry.timestamp).total_seconds() > ttl
+        ]
+        for uid in expired:
+            del self._assessment_cache[uid]
 
     def _predict_risk_trajectory(self, messages: list[str], current_level: CrisisLevel) -> dict[str, Any]:
         """Predict risk trajectory based on message patterns."""

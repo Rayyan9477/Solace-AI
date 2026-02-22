@@ -65,16 +65,9 @@ class ExtractedFact:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass
-class KnowledgeTriple:
-    """A knowledge graph triple (subject, predicate, object)."""
-    triple_id: UUID = field(default_factory=uuid4)
-    subject: str = ""
-    predicate: str = ""
-    object_value: str = ""
-    confidence: Decimal = Decimal("0.7")
-    source_fact_id: UUID | None = None
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+# KnowledgeTriple imported from semantic_memory to avoid duplicate definitions (M37).
+# The semantic_memory version is a superset (adds user_id, metadata with defaults).
+from .semantic_memory import KnowledgeTriple  # noqa: E402
 
 
 class SummaryResult(BaseModel):

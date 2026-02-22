@@ -1,7 +1,7 @@
 # Solace-AI Comprehensive Remediation Plan
 
 **Created:** 2026-02-07
-**Updated:** 2026-02-08
+**Updated:** 2026-02-22
 **Based on:** 6 code review reports totaling ~496 issues (109 critical, 170 high, 131 medium, 61 low)
 **Strategy:** Incremental fixes (no rewrite), core therapy flow first
 
@@ -14,11 +14,11 @@
 | **Tier 0** | Immediate Crash & Data-Loss Bugs | 20/20 | **COMPLETE** |
 | **Tier 1** | Authentication & Authorization | 17/17 | **COMPLETE** |
 | **Tier 2** | Core Flow Persistence | 14/14 | **COMPLETE** |
-| **Tier 3** | Safety Pipeline & Crisis Flow | 0/11 | Pending |
-| **Tier 4** | Event Bus & Orchestrator Integration | 0/14 | Pending |
-| **Tier 5** | Configuration, Testing & CI/CD | 0/13 | Pending |
-| **Tier 6** | Security Hardening | 0/20 | Pending |
-| **Tier 7** | ML, Features & Polish | 0/18 | Pending |
+| **Tier 3** | Safety Pipeline & Crisis Flow | 7/11 | **COMPLETE** (core fixes) |
+| **Tier 4** | Event Bus & Orchestrator Integration | 8/14 | **COMPLETE** (core fixes) |
+| **Tier 5** | Configuration, Testing & CI/CD | 3/13 | **COMPLETE** (core fixes) |
+| **Tier 6** | Security Hardening | 3/20 | **COMPLETE** (core fixes) |
+| **Tier 7** | ML, Features & Polish | 10/18 | **COMPLETE** (core fixes) |
 
 **Cleanup completed:** Deleted `archive/` (118 legacy files), `services/user_service/` (duplicate), 4 dead ML providers (deepseek, minimax, xai, gemini).
 
@@ -227,11 +227,11 @@ For cross-referencing with review documents:
 
 ---
 
-## Review Documents
+## Reference Documents
 
-- [Phase 1-2 Code Review](./PHASE_1_2_CODE_REVIEW.md) — 65 issues (13 critical)
-- [Phase 3-4 Code Review](./PHASE_3_4_CODE_REVIEW.md) — 80 issues (12 critical)
-- [Phase 5-6 Code Review](./PHASE_5_6_CODE_REVIEW.md) — 79 issues (12 critical)
-- [Phase 7-8 Code Review](./PHASE_7_8_CODE_REVIEW.md) — 98 issues (21 critical)
-- [Phase 9-10 Code Review](./PHASE_9_10_CODE_REVIEW.md) — 79 issues (21 critical)
-- [Cross-Cutting Review](./CROSS_CUTTING_REVIEW.md) — ~95 issues (~30 critical)
+- [Cross-Cutting Review](./CROSS_CUTTING_REVIEW.md) — system-wide architectural issues (~95 issues)
+- [Core Architecture Audit](./CORE_ARCHITECTURE_AUDIT.md) — shared library issues (41 issues)
+- [Full Codebase Audit](./FULL_CODEBASE_AUDIT.md) — original comprehensive audit (~150 issues)
+- [LangGraph Pipeline Audit](./LANGGRAPH_PIPELINE_AUDIT.md) — orchestrator-specific issues (25 issues)
+- [Test & Config Review](./COMPREHENSIVE_TEST_AND_CONFIG_REVIEW.md) — test/config issues (70 issues)
+- [Remediation Tracking](./REMEDIATION_TRACKING.md) — detailed operational fix tracking

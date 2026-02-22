@@ -425,6 +425,8 @@ class SecretsManager:
             secret_name=secret_name, operation=operation, provider=provider, success=success, error_message=error
         )
         self._audit_buffer.append(event)
+        if len(self._audit_buffer) > 10000:
+            self._audit_buffer = self._audit_buffer[-5000:]
         log_method = logger.info if success else logger.warning
         log_method("secret_access", operation=operation, secret=secret_name, provider=provider.value, success=success)
 

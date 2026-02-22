@@ -348,24 +348,26 @@ class SMSChannel(NotificationChannel):
     def _format_crisis_sms(metadata: dict[str, Any]) -> str:
         """Format crisis SMS to fit within 160 chars.
 
-        Prioritizes: risk level, patient ID, first trigger, dashboard link.
+        Prioritizes safety resources (988 hotline) FIRST, then risk level and
+        patient ID. Crisis resources must NEVER be truncated.
         """
         risk_level = metadata.get("risk_level", metadata.get("variables", {}).get("risk_level", ""))
         patient_id = metadata.get("patient_id", metadata.get("variables", {}).get("patient_id", ""))
-        triggers = metadata.get("trigger_indicators", metadata.get("variables", {}).get("trigger_indicators", ""))
-        first_trigger = triggers.split(",")[0].strip() if triggers else ""
-        dashboard = metadata.get("dashboard_link", metadata.get("variables", {}).get("dashboard_link", ""))
 
-        parts = [f"CRISIS {risk_level}"]
+        # Crisis resources are mandatory and placed first — never truncated
+        crisis_resource = "988 Lifeline: call/text 988"
+        header = f"CRISIS {risk_level}"
         if patient_id:
-            parts.append(f"PT:{patient_id[:8]}")
-        if first_trigger:
-            parts.append(first_trigger[:30])
-        msg = " | ".join(parts)
-        if dashboard:
-            # Reserve space for link
-            max_text = 160 - len(dashboard) - 2  # " " + link
-            msg = msg[:max_text] + " " + dashboard
+            header += f" PT:{patient_id[:8]}"
+
+        # Build message with crisis resource always first
+        msg = f"{header} | {crisis_resource}"
+
+        # Only add dashboard link if space remains
+        dashboard = metadata.get("dashboard_link", metadata.get("variables", {}).get("dashboard_link", ""))
+        if dashboard and len(msg) + len(dashboard) + 1 <= 160:
+            msg += " " + dashboard
+
         return msg[:160]
 
     async def _deliver(

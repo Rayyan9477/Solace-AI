@@ -18,11 +18,24 @@ from models import TableName, AnalyticsEvent, MetricRecord, AggregationRecord
 
 logger = structlog.get_logger(__name__)
 
+_NIL_UUID = UUID(int=0)
+
+
+def _safe_uuid(value: Any, field_name: str = "unknown") -> UUID:
+    """Parse UUID safely, returning nil UUID on failure."""
+    if isinstance(value, UUID):
+        return value
+    try:
+        return UUID(str(value))
+    except (ValueError, AttributeError, TypeError):
+        logger.warning("invalid_uuid_in_row", field=field_name, value=str(value)[:50])
+        return _NIL_UUID
+
 
 class RepositoryError(Exception):
     """Base exception for repository errors."""
 
-class ConnectionError(RepositoryError):
+class RepositoryConnectionError(RepositoryError):
     """Raised when connection to storage fails."""
 
 class QueryError(RepositoryError):
@@ -104,10 +117,10 @@ class ClickHouseRepository(AnalyticsRepository):
                 self._connected = True
                 logger.info("clickhouse_connected", host=self._config.host)
             except ImportError:
-                raise ConnectionError("clickhouse-connect package not installed")
+                raise RepositoryConnectionError("clickhouse-connect package not installed")
             except Exception as e:
                 logger.error("clickhouse_connection_failed", error=str(e))
-                raise ConnectionError(f"Failed to connect to ClickHouse: {e}")
+                raise RepositoryConnectionError(f"Failed to connect to ClickHouse: {e}")
 
     async def disconnect(self) -> None:
         async with self._lock:
@@ -131,7 +144,7 @@ class ClickHouseRepository(AnalyticsRepository):
 
     async def insert_events_batch(self, events: list[AnalyticsEvent]) -> int:
         if not self._connected:
-            raise ConnectionError("Not connected to ClickHouse")
+            raise RepositoryConnectionError("Not connected to ClickHouse")
         if not events:
             return 0
         try:
@@ -153,7 +166,7 @@ class ClickHouseRepository(AnalyticsRepository):
 
     async def insert_metrics_batch(self, metrics: list[MetricRecord]) -> int:
         if not self._connected:
-            raise ConnectionError("Not connected to ClickHouse")
+            raise RepositoryConnectionError("Not connected to ClickHouse")
         if not metrics:
             return 0
         try:
@@ -174,7 +187,7 @@ class ClickHouseRepository(AnalyticsRepository):
         event_type: str | None = None, user_id: UUID | None = None, limit: int = 1000,
     ) -> list[AnalyticsEvent]:
         if not self._connected:
-            raise ConnectionError("Not connected to ClickHouse")
+            raise RepositoryConnectionError("Not connected to ClickHouse")
         try:
             query = f"""SELECT event_id, event_type, category, user_id, session_id,
                 timestamp, correlation_id, source_service, payload, created_at
@@ -191,9 +204,10 @@ class ClickHouseRepository(AnalyticsRepository):
             params["limit"] = int(limit)
             result = self._client.query(query, parameters=params)
             return [AnalyticsEvent(
-                event_id=UUID(row[0]), event_type=row[1], category=row[2],
-                user_id=UUID(row[3]), session_id=UUID(row[4]) if row[4] else None,
-                timestamp=row[5], correlation_id=UUID(row[6]),
+                event_id=_safe_uuid(row[0], "event_id"), event_type=row[1], category=row[2],
+                user_id=_safe_uuid(row[3], "user_id"),
+                session_id=_safe_uuid(row[4], "session_id") if row[4] else None,
+                timestamp=row[5], correlation_id=_safe_uuid(row[6], "correlation_id"),
                 source_service=row[7], payload=row[8] or {}, created_at=row[9],
             ) for row in result.result_rows]
         except Exception as e:
@@ -205,7 +219,7 @@ class ClickHouseRepository(AnalyticsRepository):
         labels: dict[str, str] | None = None, limit: int = 1000,
     ) -> list[MetricRecord]:
         if not self._connected:
-            raise ConnectionError("Not connected to ClickHouse")
+            raise RepositoryConnectionError("Not connected to ClickHouse")
         try:
             query = f"""SELECT metric_id, metric_name, value, labels, timestamp,
                 window_start, window_end, window_type, created_at
@@ -218,7 +232,8 @@ class ClickHouseRepository(AnalyticsRepository):
                 "limit": int(limit)}
             result = self._client.query(query, parameters=params)
             return [MetricRecord(
-                metric_id=UUID(row[0]), metric_name=row[1], value=Decimal(str(row[2])),
+                metric_id=_safe_uuid(row[0], "metric_id"), metric_name=row[1],
+                value=Decimal(str(row[2])),
                 labels=row[3] or {}, timestamp=row[4], window_start=row[5],
                 window_end=row[6], window_type=row[7], created_at=row[8],
             ) for row in result.result_rows]
@@ -230,7 +245,7 @@ class ClickHouseRepository(AnalyticsRepository):
         self, metric_name: str, window_type: str, start_time: datetime, end_time: datetime,
     ) -> list[AggregationRecord]:
         if not self._connected:
-            raise ConnectionError("Not connected to ClickHouse")
+            raise RepositoryConnectionError("Not connected to ClickHouse")
         try:
             query = f"""SELECT aggregation_id, metric_name, window_type, window_start,
                 window_end, count, sum_value, min_value, max_value, avg_value, labels, computed_at
@@ -242,7 +257,7 @@ class ClickHouseRepository(AnalyticsRepository):
                       "start_time": start_time, "end_time": end_time}
             result = self._client.query(query, parameters=params)
             return [AggregationRecord(
-                aggregation_id=UUID(row[0]), metric_name=row[1], window_type=row[2],
+                aggregation_id=_safe_uuid(row[0], "aggregation_id"), metric_name=row[1], window_type=row[2],
                 window_start=row[3], window_end=row[4], count=row[5],
                 sum_value=Decimal(str(row[6])),
                 min_value=Decimal(str(row[7])) if row[7] else None,
@@ -256,7 +271,7 @@ class ClickHouseRepository(AnalyticsRepository):
 
     async def store_aggregation(self, aggregation: AggregationRecord) -> None:
         if not self._connected:
-            raise ConnectionError("Not connected to ClickHouse")
+            raise RepositoryConnectionError("Not connected to ClickHouse")
         try:
             data = [[str(aggregation.aggregation_id), aggregation.metric_name,
                 aggregation.window_type, aggregation.window_start, aggregation.window_end,

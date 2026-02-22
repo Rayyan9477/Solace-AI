@@ -60,11 +60,9 @@ opentelemetry-instrumentation-sqlalchemy~=0.50b0
 opentelemetry-instrumentation-redis~=0.50b0
 opentelemetry-instrumentation-httpx~=0.50b0
 
-# ==================== MACHINE LEARNING (optional, conditional imports) ====================
-torch~=2.5.0
-transformers~=4.47.0
-huggingface-hub~=0.27.0
-spacy~=3.8.0
+# ==================== MACHINE LEARNING ====================
+# Heavy ML packages moved to requirements-ml.txt (~2GB)
+# Install with: pip install -r requirements-ml.txt
 numpy~=2.2.0
 
 # ==================== UTILITIES ====================

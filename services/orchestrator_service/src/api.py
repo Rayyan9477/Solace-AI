@@ -284,6 +284,8 @@ async def websocket_chat_endpoint(
         await websocket.send_json({"type": "error", "message": "Service not ready"})
         await websocket.close(code=1011)
         return
+    # Timeout for receiving messages — close zombie connections after 5 min idle
+    ws_receive_timeout = 300.0  # seconds
     try:
         await websocket.send_json({
             "type": "connected",
@@ -292,7 +294,19 @@ async def websocket_chat_endpoint(
             "connection_id": connection_id,
         })
         while True:
-            raw_data = await websocket.receive_text()
+            try:
+                raw_data = await asyncio.wait_for(
+                    websocket.receive_text(), timeout=ws_receive_timeout
+                )
+            except asyncio.TimeoutError:
+                logger.info(
+                    "websocket_idle_timeout",
+                    session_id=session_id,
+                    connection_id=connection_id,
+                    timeout_seconds=ws_receive_timeout,
+                )
+                await websocket.close(code=1000, reason="Idle timeout")
+                break
             try:
                 data = json.loads(raw_data)
             except json.JSONDecodeError:
