@@ -21,6 +21,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 import os
 
 try:
+    from solace_security.service_auth import ServiceTokenManager, ServiceIdentity
+    _SERVICE_AUTH_AVAILABLE = True
+except ImportError:
+    _SERVICE_AUTH_AVAILABLE = False
+
+try:
     from solace_events.schemas import (
         BaseEvent,
         CrisisDetectedEvent,
@@ -79,8 +85,8 @@ class UserServiceSettings(BaseSettings):
         description="HTTP request timeout in seconds",
     )
     fallback_oncall_email: str = Field(
-        ...,
-        description="Fallback email when user service is unavailable (no default — must be configured)",
+        default="oncall@solace-ai.com",
+        description="Fallback email when user service is unavailable",
     )
 
     model_config = SettingsConfigDict(
@@ -128,7 +134,32 @@ class SafetyEventConsumer:
         self._consumer.register_handler("safety.escalation.triggered", self._handle_escalation_triggered)
         self._consumer.register_handler("safety.assessment.completed", self._handle_assessment_completed)
 
+        # Service auth for inter-service calls
+        self._token_manager: ServiceTokenManager | None = None
+        if _SERVICE_AUTH_AVAILABLE:
+            try:
+                self._token_manager = ServiceTokenManager()
+            except Exception:
+                logger.warning("service_token_manager_init_failed", hint="inter-service calls will be unauthenticated")
+
         logger.info("safety_event_consumer_initialized", use_mock=use_mock)
+
+    def _get_service_auth_headers(self) -> dict[str, str]:
+        """Get auth headers for inter-service HTTP calls."""
+        if self._token_manager is None:
+            return {}
+        try:
+            creds = self._token_manager.get_or_create_token(
+                ServiceIdentity.NOTIFICATION.value,
+                ServiceIdentity.USER.value,
+            )
+            return {
+                "Authorization": f"Bearer {creds.token}",
+                "X-Service-Name": ServiceIdentity.NOTIFICATION.value,
+            }
+        except Exception:
+            logger.warning("service_auth_header_failed")
+            return {}
 
     async def start(self) -> None:
         """Start consuming safety events."""
@@ -452,7 +483,7 @@ class SafetyEventConsumer:
             timeout = httpx.Timeout(self._user_service_settings.request_timeout)
 
             async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.get(url)
+                response = await client.get(url, headers=self._get_service_auth_headers())
                 response.raise_for_status()
                 data = response.json()
 
@@ -502,7 +533,7 @@ class SafetyEventConsumer:
             timeout = httpx.Timeout(self._user_service_settings.request_timeout)
 
             async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.get(url)
+                response = await client.get(url, headers=self._get_service_auth_headers())
                 response.raise_for_status()
                 data = response.json()
 

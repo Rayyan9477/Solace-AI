@@ -3,6 +3,7 @@ Solace-AI Diagnosis Service - 4-Step Chain-of-Reasoning Orchestration.
 AMIE-inspired diagnostic reasoning with anti-sycophancy mechanisms.
 """
 from __future__ import annotations
+import asyncio
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -56,6 +57,7 @@ class DiagnosisService(ServiceBase):
         self._active_sessions: dict[UUID, SessionState] = {}
         self._user_session_counts: dict[UUID, int] = {}
         self._user_history: dict[UUID, list[dict[str, Any]]] = {}
+        self._session_lock = asyncio.Lock()
         self._initialized = False
         self._stats = {"assessments": 0, "extractions": 0, "differentials": 0,
                       "sessions_started": 0, "sessions_ended": 0, "challenges": 0}
@@ -266,10 +268,11 @@ class DiagnosisService(ServiceBase):
                             previous_session_id: UUID | None) -> SessionStartResult:
         """Start a new diagnosis session."""
         self._stats["sessions_started"] += 1
-        session_number = self._user_session_counts.get(user_id, 0) + 1
-        self._user_session_counts[user_id] = session_number
-        session = SessionState(user_id=user_id, session_number=session_number)
-        self._active_sessions[session.session_id] = session
+        async with self._session_lock:
+            session_number = self._user_session_counts.get(user_id, 0) + 1
+            self._user_session_counts[user_id] = session_number
+            session = SessionState(user_id=user_id, session_number=session_number)
+            self._active_sessions[session.session_id] = session
         greeting = self._generate_greeting(session_number, previous_session_id is not None)
         logger.info("session_started", user_id=str(user_id), session_id=str(session.session_id))
         return SessionStartResult(session_id=session.session_id, session_number=session_number,
@@ -312,7 +315,8 @@ class DiagnosisService(ServiceBase):
                 logger.info("session_record_persisted", session_id=str(session_id))
             except Exception as e:
                 logger.warning("session_record_persist_failed", session_id=str(session_id), error=str(e))
-        del self._active_sessions[session_id]
+        async with self._session_lock:
+            del self._active_sessions[session_id]
         logger.info("session_ended", user_id=str(user_id), session_id=str(session_id))
         return SessionEndResult(duration_minutes=int(duration.total_seconds() / 60),
                                messages_exchanged=len(session.messages), final_differential=session.differential,

@@ -101,7 +101,7 @@ class AssessmentRequest(BaseModel):
     """Request for diagnostic assessment."""
     user_id: UUID
     session_id: UUID
-    message: str
+    message: str = Field(..., max_length=50000)
     conversation_history: list[dict[str, str]] = Field(default_factory=list)
     existing_symptoms: list[SymptomDTO] = Field(default_factory=list)
     current_phase: DiagnosisPhase = DiagnosisPhase.RAPPORT
@@ -129,7 +129,7 @@ class SymptomExtractionRequest(BaseModel):
     """Request for symptom extraction only."""
     user_id: UUID
     session_id: UUID
-    message: str
+    message: str = Field(..., max_length=50000)
     conversation_history: list[dict[str, str]] = Field(default_factory=list)
     existing_symptoms: list[SymptomDTO] = Field(default_factory=list)
 
