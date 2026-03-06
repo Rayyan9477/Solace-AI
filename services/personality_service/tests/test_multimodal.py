@@ -55,9 +55,9 @@ class TestMultimodalFusionSettings:
     def test_default_settings(self) -> None:
         settings = MultimodalFusionSettings()
         assert settings.fusion_strategy == FusionStrategy.CONFIDENCE_WEIGHTED
-        assert settings.roberta_weight == 0.35
-        assert settings.llm_weight == 0.35
-        assert settings.liwc_weight == 0.30
+        assert settings.roberta_weight == 0.5
+        assert settings.llm_weight == 0.3
+        assert settings.liwc_weight == 0.2
         assert settings.min_modalities == 1
 
     def test_custom_settings(self) -> None:

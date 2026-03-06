@@ -21,7 +21,7 @@ logger = structlog.get_logger(__name__)
 
 class RoBERTaSettings(BaseSettings):
     """RoBERTa personality detector configuration."""
-    model_name: str = Field(default="roberta-base")
+    model_name: str = Field(default="roberta-large")
     model_path: str | None = Field(default=None)
     max_sequence_length: int = Field(default=512, ge=64, le=2048)
     batch_size: int = Field(default=8, ge=1, le=64)
@@ -30,7 +30,7 @@ class RoBERTaSettings(BaseSettings):
     confidence_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
     output_hidden_states: bool = Field(default=False)
     cache_embeddings: bool = Field(default=True)
-    embedding_dim: int = Field(default=768)
+    embedding_dim: int = Field(default=1024)
     dropout_rate: float = Field(default=0.1, ge=0.0, le=0.5)
     model_config = SettingsConfigDict(env_prefix="PERSONALITY_ROBERTA_", env_file=".env", extra="ignore")
 

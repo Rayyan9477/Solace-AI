@@ -133,6 +133,98 @@ class ListenerBank:
             ["I hear what you're sharing.", "Thank you for telling me about this.", "I'm listening to what you're describing."],
             ["Thank you for sharing that.", "I appreciate you telling me.", "I'm here with you."],
             ["How can I best support you?", "What would be most helpful right now?", "Where would you like to go from here?"]),
+        EmotionCategory.PROUD: (
+            ["I can sense {intensity} pride in what you've accomplished.", "It sounds like you feel {intensity} proud of yourself.", "I hear {intensity} satisfaction in your achievement."],
+            ["That's something to be really proud of!", "You deserve to feel good about this.", "What an accomplishment!"],
+            ["How would you like to build on this success?", "What does this achievement mean to you?", "How can we celebrate this?"]),
+        EmotionCategory.GRATEFUL: (
+            ["I can sense {intensity} gratitude in what you're sharing.", "It sounds like you feel {intensity} thankful for this.", "I hear {intensity} appreciation in your words."],
+            ["That's a beautiful feeling to have.", "Gratitude can be so powerful.", "It's wonderful that you recognize this."],
+            ["How can we nurture this feeling?", "What else are you grateful for?", "How does this gratitude affect you?"]),
+        EmotionCategory.HOPEFUL: (
+            ["I can sense {intensity} hope about what's ahead.", "It sounds like you're feeling {intensity} optimistic.", "I hear {intensity} hopefulness in what you're describing."],
+            ["That's a wonderful outlook!", "Hope can be incredibly sustaining.", "It's great to hear that optimism."],
+            ["What would help strengthen that hope?", "How can we build on this feeling?", "What steps feel right to you?"]),
+        EmotionCategory.CONTENT: (
+            ["I can sense {intensity} contentment in how you're feeling.", "It sounds like you're in a {intensity} peaceful place.", "I hear {intensity} satisfaction in your words."],
+            ["That sounds like a really good place to be.", "Contentment is a gift.", "I'm glad you're feeling at peace."],
+            ["What helps maintain this feeling?", "How can we preserve this sense of calm?", "What matters most to you right now?"]),
+        EmotionCategory.CONFIDENT: (
+            ["I can sense {intensity} confidence in how you're approaching this.", "It sounds like you feel {intensity} sure of yourself.", "I hear {intensity} self-assurance in your words."],
+            ["That confidence is well-earned!", "It's great to see you believe in yourself.", "Your conviction really shows."],
+            ["How can we channel this confidence?", "What's your next move?", "How can I support your plans?"]),
+        EmotionCategory.CARING: (
+            ["I can sense {intensity} care and concern for others.", "It sounds like you feel {intensity} connected to those around you.", "I hear {intensity} compassion in what you're sharing."],
+            ["Your caring nature really shows.", "It's beautiful how much you care.", "That kind of compassion matters so much."],
+            ["How can you take care of yourself too?", "What would support you in caring for others?", "How can I help you with this?"]),
+        EmotionCategory.FAITHFUL: (
+            ["I can sense {intensity} devotion in what you're describing.", "It sounds like your faith gives you {intensity} strength.", "I hear {intensity} commitment in your words."],
+            ["That kind of devotion is admirable.", "Your faith is clearly important to you.", "Commitment like that is powerful."],
+            ["How does this faith sustain you?", "What role does this play in your life?", "How can I support you in this?"]),
+        EmotionCategory.IMPRESSED: (
+            ["I can sense you're {intensity} struck by this.", "It sounds like this has made a {intensity} impression on you.", "I hear {intensity} admiration in your words."],
+            ["That does sound impressive!", "I can see why that stood out to you.", "What an inspiring thing to witness."],
+            ["What does this inspire in you?", "How has this changed your perspective?", "What would you like to do with this feeling?"]),
+        EmotionCategory.EXCITED: (
+            ["I can sense {intensity} excitement about this!", "It sounds like you're {intensity} energized by what's happening.", "I hear {intensity} enthusiasm in everything you're saying."],
+            ["That's so exciting!", "Your energy is contagious!", "How thrilling!"],
+            ["How can we channel this excitement?", "What's the first thing you want to do?", "How can I help you make the most of this?"]),
+        EmotionCategory.NOSTALGIC: (
+            ["I can sense {intensity} nostalgia in what you're remembering.", "It sounds like these memories carry {intensity} meaning for you.", "I hear {intensity} longing for the past in your words."],
+            ["Those memories sound really meaningful.", "The past can hold such treasures.", "It's natural to miss those times."],
+            ["What do these memories mean to you now?", "How can we honor those feelings?", "What from the past would you like to carry forward?"]),
+        EmotionCategory.LONELY: (
+            ["I can sense {intensity} loneliness in what you're sharing.", "It sounds like you're feeling {intensity} isolated right now.", "I hear {intensity} disconnection in your words."],
+            ["Loneliness can be so painful.", "I'm sorry you're feeling so alone.", "You don't have to go through this by yourself."],
+            ["What would help you feel more connected?", "How can I be here for you right now?", "What kind of connection do you need?"]),
+        EmotionCategory.EMBARRASSED: (
+            ["I can sense {intensity} embarrassment about this situation.", "It sounds like this has been {intensity} uncomfortable for you.", "I hear {intensity} self-consciousness in what you're sharing."],
+            ["That sounds really uncomfortable.", "It's okay to feel embarrassed sometimes.", "Everyone goes through moments like this."],
+            ["How can we work through this feeling?", "What would help you feel more at ease?", "Would it help to talk about what happened?"]),
+        EmotionCategory.GUILTY: (
+            ["I can sense {intensity} guilt weighing on you.", "It sounds like you're carrying {intensity} responsibility for this.", "I hear {intensity} remorse in what you're sharing."],
+            ["Carrying guilt can be so heavy.", "It takes courage to acknowledge these feelings.", "I hear how much this is affecting you."],
+            ["What would help you process this guilt?", "How can we work through this together?", "What do you need to move forward?"]),
+        EmotionCategory.ASHAMED: (
+            ["I can sense {intensity} shame around this experience.", "It sounds like this has been {intensity} painful for your sense of self.", "I hear {intensity} distress about who you feel you are."],
+            ["Shame can be incredibly painful.", "You are more than this moment.", "I'm here without judgment."],
+            ["What would help you be gentler with yourself?", "How can we work through this together?", "What do you need to feel safe right now?"]),
+        EmotionCategory.JEALOUS: (
+            ["I can sense {intensity} jealousy about this situation.", "It sounds like you're feeling {intensity} envious of what others have.", "I hear {intensity} comparison in what you're describing."],
+            ["Jealousy is a really human feeling.", "It's okay to want what others have.", "Those feelings can be really uncomfortable."],
+            ["What does this jealousy tell you about what you want?", "How can we explore these feelings?", "What matters most to you here?"]),
+        EmotionCategory.DEVASTATED: (
+            ["I can sense {intensity} devastation from what happened.", "It sounds like this has been {intensity} crushing for you.", "I hear {intensity} heartbreak in your words."],
+            ["I'm so sorry you're going through this.", "That sounds absolutely devastating.", "My heart goes out to you."],
+            ["What do you need most right now?", "How can I support you through this?", "What would feel most comforting?"]),
+        EmotionCategory.FURIOUS: (
+            ["I can sense {intensity} fury about this situation.", "It sounds like you're feeling {intensity} outraged.", "I hear {intensity} intense anger in what you're describing."],
+            ["That level of anger is completely understandable.", "Anyone would be furious about that.", "Your rage makes sense given what happened."],
+            ["What do you need right now?", "How can we work with this anger safely?", "What would help you feel heard?"]),
+        EmotionCategory.TERRIFIED: (
+            ["I can sense {intensity} terror about this.", "It sounds like you're feeling {intensity} overwhelmed by fear.", "I hear {intensity} dread in what you're sharing."],
+            ["That sounds absolutely terrifying.", "Fear like that can be paralyzing.", "I'm here with you through this."],
+            ["What would help you feel safer right now?", "How can we address this fear together?", "What do you need to feel more grounded?"]),
+        EmotionCategory.ANXIOUS: (
+            ["I can sense {intensity} anxiety about what's happening.", "It sounds like you're feeling {intensity} worried and on edge.", "I hear {intensity} unease in your words."],
+            ["Anxiety can be so overwhelming.", "It's exhausting to feel this way.", "I understand how consuming worry can be."],
+            ["What would help ease your anxiety right now?", "How can we break this down together?", "What grounding strategies work for you?"]),
+        EmotionCategory.SENTIMENTAL: (
+            ["I can sense {intensity} sentimentality in what you're sharing.", "It sounds like this has {intensity} emotional significance for you.", "I hear {intensity} tenderness in your words."],
+            ["Those feelings are really touching.", "It's beautiful to feel so deeply.", "Sentimentality shows how much things matter to you."],
+            ["What makes this so meaningful to you?", "How would you like to honor these feelings?", "What would feel right to do with this emotion?"]),
+        EmotionCategory.ANNOYED: (
+            ["I can sense {intensity} annoyance about this.", "It sounds like this is {intensity} irritating for you.", "I hear {intensity} frustration building."],
+            ["That does sound really annoying.", "I can see why that would get under your skin.", "It's okay to be bothered by that."],
+            ["What would help resolve this annoyance?", "How can we address what's bothering you?", "What do you need right now?"]),
+        EmotionCategory.DISAPPOINTED: (
+            ["I can sense {intensity} disappointment about how things turned out.", "It sounds like this wasn't what you {intensity} expected.", "I hear {intensity} letdown in your words."],
+            ["Disappointment can be really hard.", "It's tough when things don't go as hoped.", "I'm sorry things didn't work out."],
+            ["How can we process this disappointment?", "What would help you move forward?", "What did you learn from this experience?"]),
+        EmotionCategory.APPREHENSIVE: (
+            ["I can sense {intensity} apprehension about what's ahead.", "It sounds like you're feeling {intensity} uneasy about the future.", "I hear {intensity} wariness in what you're describing."],
+            ["It's natural to feel cautious.", "Apprehension shows you're taking this seriously.", "Uncertainty can be really uncomfortable."],
+            ["What would help you feel more prepared?", "How can we address your concerns?", "What information would help ease your mind?"]),
     }
 
     def __init__(self) -> None:

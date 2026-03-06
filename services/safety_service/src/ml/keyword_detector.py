@@ -91,6 +91,16 @@ class KeywordDetector:
     Implements O(n) multi-pattern matching for real-time crisis detection.
     """
 
+    _NEGATION_WORDS: frozenset[str] = frozenset([
+        "not", "no", "never", "don't", "dont", "doesn't", "doesnt",
+        "didn't", "didnt", "isn't", "isnt", "wasn't", "wasnt",
+        "aren't", "arent", "weren't", "werent", "won't", "wont",
+        "wouldn't", "wouldnt", "couldn't", "couldnt", "shouldn't",
+        "shouldnt", "no longer", "stopped", "denies", "denied",
+        "without", "absence",
+    ])
+    _NEGATION_WINDOW: int = 4  # Words to look back for negation
+
     def __init__(self, config: KeywordDetectorConfig | None = None) -> None:
         """Initialize keyword detector with configuration."""
         self._config = config or KeywordDetectorConfig()
@@ -117,6 +127,24 @@ class KeywordDetector:
                    keywords_loaded=len(self._keyword_database),
                    case_insensitive=self._config.enable_case_insensitive,
                    engine=self._engine)
+
+    def _has_negation_prefix(self, text: str, keyword_start: int) -> bool:
+        """Check if keyword at position is preceded by a negation word within N words."""
+        prefix_text = text[:keyword_start].strip()
+        if not prefix_text:
+            return False
+        words = prefix_text.split()
+        window = words[-self._NEGATION_WINDOW:] if len(words) >= self._NEGATION_WINDOW else words
+        window_text = " ".join(w.lower() for w in window)
+        # Check multi-word negations first (e.g. "no longer")
+        for neg in self._NEGATION_WORDS:
+            if " " in neg and neg in window_text:
+                return True
+        # Check single-word negations
+        for word in window:
+            if word.lower().rstrip(".,!?;:'\"") in self._NEGATION_WORDS:
+                return True
+        return False
 
     def _load_keyword_database(self) -> dict[str, tuple[KeywordSeverity, KeywordCategory]]:
         """
@@ -200,13 +228,20 @@ class KeywordDetector:
                     # Shouldn't happen, but handle gracefully
                     continue
 
+                # Check for negation context (e.g. "I am NOT suicidal")
+                if self._has_negation_prefix(text, start_pos):
+                    if severity in (KeywordSeverity.CRITICAL, KeywordSeverity.HIGH):
+                        logger.info("keyword_negated", keyword=keyword, position=start_pos)
+                        continue
+                    # Downgrade lower severities
+                    weight = self._get_severity_weight(severity) * Decimal("0.3")
+                else:
+                    weight = self._get_severity_weight(severity)
+
                 # Extract context
                 context_start = max(0, start_pos - self._config.context_window_chars)
                 context_end = min(len(text), end_pos + self._config.context_window_chars)
                 context = text[context_start:context_end].strip()
-
-                # Get severity weight
-                weight = self._get_severity_weight(severity)
 
                 match = KeywordMatch(
                     keyword=keyword,
@@ -248,13 +283,21 @@ class KeywordDetector:
                             pos += 1
                             continue
 
+                    # Check for negation context
+                    if self._has_negation_prefix(text, pos):
+                        if severity in (KeywordSeverity.CRITICAL, KeywordSeverity.HIGH):
+                            logger.info("keyword_negated", keyword=keyword, position=pos)
+                            pos += 1
+                            continue
+                        weight = self._get_severity_weight(severity) * Decimal("0.3")
+                    else:
+                        weight = self._get_severity_weight(severity)
+
                     # Extract context
                     end_pos = pos + len(search_keyword)
                     context_start = max(0, pos - self._config.context_window_chars)
                     context_end = min(len(text), end_pos + self._config.context_window_chars)
                     context = text[context_start:context_end].strip()
-
-                    weight = self._get_severity_weight(severity)
 
                     match = KeywordMatch(
                         keyword=keyword,

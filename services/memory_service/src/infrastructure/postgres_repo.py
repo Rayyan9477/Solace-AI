@@ -146,6 +146,7 @@ class PostgresRepository:
             engine_kwargs["pool_timeout"] = self._settings.pool_timeout
         self._engine = create_async_engine(self._settings.connection_url, **engine_kwargs)
         self._session_factory = async_sessionmaker(self._engine, class_=AsyncSession, expire_on_commit=False)
+        self._background_tasks: set[asyncio.Task] = set()
         self._stats = {"inserts": 0, "updates": 0, "deletes": 0, "queries": 0}
 
     @asynccontextmanager
@@ -196,8 +197,10 @@ class PostgresRepository:
             result = await session.execute(stmt)
             row = result.fetchone()
             if row:
-                # Fire-and-forget access time update to decouple read from write
-                asyncio.create_task(self._update_access_time(record_id))
+                # Tracked background task for access time update
+                task = asyncio.create_task(self._update_access_time(record_id))
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
                 return dict(row._mapping)
         return None
 

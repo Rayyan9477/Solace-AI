@@ -15,6 +15,30 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
 from solace_common.enums import CrisisLevel
 
+try:
+    from ..ml.keyword_detector import KeywordDetector, KeywordDetectorConfig
+    ML_KEYWORD_AVAILABLE = True
+except ImportError:
+    ML_KEYWORD_AVAILABLE = False
+
+try:
+    from ..ml.sentiment_analyzer import SentimentAnalyzer, SentimentAnalyzerConfig
+    ML_SENTIMENT_AVAILABLE = True
+except ImportError:
+    ML_SENTIMENT_AVAILABLE = False
+
+try:
+    from ..ml.pattern_matcher import PatternMatcher, PatternMatcherConfig
+    ML_PATTERN_AVAILABLE = True
+except ImportError:
+    ML_PATTERN_AVAILABLE = False
+
+try:
+    from ..ml.llm_assessor import LLMAssessor, LLMAssessorConfig
+    ML_LLM_AVAILABLE = True
+except ImportError:
+    ML_LLM_AVAILABLE = False
+
 logger = structlog.get_logger(__name__)
 
 
@@ -588,12 +612,43 @@ class Layer4ContinuousMonitor:
 class CrisisDetector:
     """Main crisis detector orchestrating all detection layers."""
 
-    def __init__(self, settings: CrisisDetectorSettings | None = None) -> None:
+    def __init__(
+        self,
+        settings: CrisisDetectorSettings | None = None,
+        keyword_detector: Any | None = None,
+        sentiment_analyzer: Any | None = None,
+        pattern_matcher: Any | None = None,
+        llm_assessor: Any | None = None,
+    ) -> None:
         self._settings = settings or CrisisDetectorSettings()
         self._layer1 = Layer1InputGate(self._settings)
         self._layer2 = Layer2ProcessingGuard(self._settings)
         self._layer3 = Layer3OutputFilter(self._settings)
         self._layer4 = Layer4ContinuousMonitor(self._settings)
+        self._keyword_detector = keyword_detector
+        self._sentiment_analyzer = sentiment_analyzer
+        self._pattern_matcher = pattern_matcher
+        self._llm_assessor = llm_assessor
+        if self._keyword_detector is None and ML_KEYWORD_AVAILABLE:
+            try:
+                self._keyword_detector = KeywordDetector()
+            except Exception as e:
+                logger.warning("keyword_detector_init_failed", error=str(e))
+        if self._sentiment_analyzer is None and ML_SENTIMENT_AVAILABLE:
+            try:
+                self._sentiment_analyzer = SentimentAnalyzer()
+            except Exception as e:
+                logger.warning("sentiment_analyzer_init_failed", error=str(e))
+        if self._pattern_matcher is None and ML_PATTERN_AVAILABLE:
+            try:
+                self._pattern_matcher = PatternMatcher()
+            except Exception as e:
+                logger.warning("pattern_matcher_init_failed", error=str(e))
+        if self._llm_assessor is None and ML_LLM_AVAILABLE:
+            try:
+                self._llm_assessor = LLMAssessor()
+            except Exception as e:
+                logger.warning("llm_assessor_init_failed", error=str(e))
         logger.info(
             "crisis_detector_initialized",
             layers_enabled={
@@ -601,6 +656,12 @@ class CrisisDetector:
                 "layer2": self._settings.enable_layer_2,
                 "layer3": self._settings.enable_layer_3,
                 "layer4": self._settings.enable_layer_4,
+            },
+            ml_detectors={
+                "keyword": self._keyword_detector is not None,
+                "sentiment": self._sentiment_analyzer is not None,
+                "pattern": self._pattern_matcher is not None,
+                "llm": self._llm_assessor is not None,
             },
         )
 
@@ -610,29 +671,171 @@ class CrisisDetector:
         context: dict[str, Any] | None = None,
         conversation_history: list[str] | None = None,
         user_risk_history: dict[str, Any] | None = None,
+        user_id: UUID | None = None,
     ) -> DetectionResult:
-        """Perform multi-layer crisis detection."""
+        """Perform multi-layer crisis detection with ML enhancement."""
         context = context or {}
-        result = (
-            self._layer1.detect(content, user_risk_history)
-            if self._settings.enable_layer_1
-            else DetectionResult()
+
+        if self._settings.enable_layer_1:
+            if self._keyword_detector:
+                keyword_matches = self._keyword_detector.detect(content, user_id)
+                keyword_score = self._keyword_detector.calculate_risk_score(keyword_matches)
+            else:
+                layer1_result = self._layer1.detect(content, user_risk_history)
+                keyword_score = layer1_result.risk_score
+        else:
+            keyword_score = Decimal("0.0")
+
+        sentiment_score = Decimal("0.0")
+        if self._sentiment_analyzer:
+            try:
+                sentiment_result = self._sentiment_analyzer.analyze(content, user_id)
+                sentiment_score = sentiment_result.risk_score
+            except Exception as e:
+                logger.warning("sentiment_analysis_failed", error=str(e))
+
+        if self._settings.enable_layer_3:
+            if self._pattern_matcher:
+                pattern_matches = self._pattern_matcher.detect(content, user_id)
+                pattern_score = self._pattern_matcher.calculate_risk_score(pattern_matches)
+            else:
+                pattern_score = Decimal("0.0")
+        else:
+            pattern_score = Decimal("0.0")
+
+        history_score = Decimal("0.0")
+        if user_risk_history:
+            history_score = self._layer1._check_risk_history(user_risk_history, [])
+
+        base_score = (
+            keyword_score * self._settings.keyword_weight
+            + sentiment_score * self._settings.sentiment_weight
+            + pattern_score * self._settings.pattern_weight
+            + history_score * self._settings.history_weight
         )
+        total_weight = (
+            self._settings.keyword_weight
+            + self._settings.sentiment_weight
+            + self._settings.pattern_weight
+            + self._settings.history_weight
+        )
+        normalized_score = base_score / total_weight if total_weight > 0 else base_score
+
+        active_signals = sum(
+            1 for s in [keyword_score, sentiment_score, pattern_score] if s > Decimal("0")
+        )
+        if active_signals >= 2:
+            normalized_score += Decimal("0.05") * (active_signals - 1)
+        total_score = min(normalized_score, Decimal("1.0"))
+
+        risk_factors: list[RiskFactor] = []
+        trigger_indicators: list[str] = []
+        detection_layers: list[int] = []
+
+        if keyword_score > Decimal("0"):
+            risk_factors.append(RiskFactor(
+                factor_type="keyword_detection",
+                severity=keyword_score,
+                evidence="ML keyword detection triggered" if self._keyword_detector else "Layer1 keyword detection triggered",
+                confidence=Decimal("0.9"),
+                detection_layer=1,
+            ))
+            detection_layers.append(1)
+            trigger_indicators.append(f"KEYWORD_SCORE:{keyword_score}")
+        if sentiment_score > Decimal("0.3"):
+            risk_factors.append(RiskFactor(
+                factor_type="sentiment_analysis",
+                severity=sentiment_score,
+                evidence="Negative sentiment detected",
+                confidence=Decimal("0.8"),
+                detection_layer=2,
+            ))
+            if 2 not in detection_layers:
+                detection_layers.append(2)
+            trigger_indicators.append(f"SENTIMENT_SCORE:{sentiment_score}")
+        if pattern_score > Decimal("0"):
+            risk_factors.append(RiskFactor(
+                factor_type="pattern_matching",
+                severity=pattern_score,
+                evidence="Crisis patterns detected",
+                confidence=Decimal("0.85"),
+                detection_layer=3,
+            ))
+            if 3 not in detection_layers:
+                detection_layers.append(3)
+            trigger_indicators.append(f"PATTERN_SCORE:{pattern_score}")
+
+        if self._llm_assessor and total_score > Decimal("0.5"):
+            try:
+                llm_result = await self._llm_assessor.assess(content, user_id, context)
+                llm_score = llm_result.risk_score
+                total_score = (total_score + llm_score) / Decimal("2")
+                total_score = min(total_score, Decimal("1.0"))
+                risk_factors.append(RiskFactor(
+                    factor_type="llm_assessment",
+                    severity=llm_score,
+                    evidence=llm_result.clinical_summary,
+                    confidence=llm_result.confidence,
+                    detection_layer=4,
+                ))
+                if 4 not in detection_layers:
+                    detection_layers.append(4)
+                trigger_indicators.append(f"LLM_SCORE:{llm_score}")
+            except Exception as e:
+                logger.warning("llm_assessment_skipped", error=str(e))
+
         if self._settings.enable_layer_2 and context:
-            result = self._layer2.validate_context(content, context, result)
+            preliminary = DetectionResult(
+                crisis_detected=total_score > Decimal("0.3"),
+                crisis_level=_crisis_level_from_score(total_score, self._settings),
+                risk_score=total_score,
+                risk_factors=risk_factors,
+                trigger_indicators=trigger_indicators,
+            )
+            validated = self._layer2.validate_context(content, context, preliminary)
+            total_score = validated.risk_score
+            risk_factors = list(validated.risk_factors)
+            trigger_indicators = list(validated.trigger_indicators)
+            detection_layers = list(validated.detection_layers_triggered)
+
         if self._settings.enable_layer_4 and conversation_history:
-            trajectory = self._layer4.analyze_trajectory(conversation_history, result.crisis_level)
+            crisis_level = _crisis_level_from_score(total_score, self._settings)
+            trajectory = self._layer4.analyze_trajectory(conversation_history, crisis_level)
             if trajectory.get("deteriorating"):
-                result.risk_score = min(result.risk_score + Decimal("0.1"), Decimal("1.0"))
-                result.crisis_level = _crisis_level_from_score(result.risk_score, self._settings)
-                result.trigger_indicators.append("TRAJECTORY:deteriorating")
-                if 4 not in result.detection_layers_triggered:
-                    result.detection_layers_triggered.append(4)
+                total_score = min(total_score + Decimal("0.1"), Decimal("1.0"))
+                trigger_indicators.append("TRAJECTORY:deteriorating")
+                if 4 not in detection_layers:
+                    detection_layers.append(4)
+
+        crisis_level = _crisis_level_from_score(total_score, self._settings)
+        confidence = (
+            min(sum(rf.confidence for rf in risk_factors) / len(risk_factors), Decimal("1.0"))
+            if risk_factors
+            else Decimal("0.0")
+        )
+
+        result = DetectionResult(
+            crisis_detected=crisis_level != CrisisLevel.NONE,
+            crisis_level=crisis_level,
+            risk_score=total_score,
+            risk_factors=risk_factors,
+            trigger_indicators=trigger_indicators,
+            confidence=confidence,
+            detection_layers_triggered=detection_layers,
+            recommended_action=self._layer1._get_recommended_action(crisis_level),
+        )
+
         logger.info(
             "crisis_detection_complete",
             crisis_level=result.crisis_level.value,
             risk_score=float(result.risk_score),
             layers_triggered=result.detection_layers_triggered,
+            ml_enhanced={
+                "keyword": self._keyword_detector is not None,
+                "sentiment": self._sentiment_analyzer is not None,
+                "pattern": self._pattern_matcher is not None,
+                "llm": self._llm_assessor is not None,
+            },
         )
         return result
 

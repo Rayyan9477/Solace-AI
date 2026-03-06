@@ -130,7 +130,7 @@ class ContraindicationDatabase:
                 )
 
                 # Verify pool is accessible (lazy creation)
-                pool = await ConnectionPoolManager.get_pool(self.POOL_NAME)
+                await ConnectionPoolManager.get_pool(self.POOL_NAME)
 
                 self._initialized = True
                 logger.info(

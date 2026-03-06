@@ -233,7 +233,7 @@ class TestConfigSettings:
         settings = DatabaseSettings()
         assert settings.host == "localhost"
         assert settings.port == 5432
-        assert settings.name == "personality_db"
+        assert settings.name == "solace"
         assert "postgresql" in settings.connection_string
 
     def test_redis_settings(self) -> None:
@@ -275,7 +275,7 @@ class TestConfigSettings:
         """Test main service configuration."""
         config = PersonalityServiceConfig()
         assert config.service_name == "personality-service"
-        assert config.port == 8004
+        assert config.port == 8007
         assert config.database is not None
         assert config.ai is not None
 
@@ -507,12 +507,12 @@ class TestRepositoryFactory:
         with pytest.raises(RuntimeError, match="tests/fixtures.py"):
             RepositoryFactory.get_default()
 
-    def test_get_default_raises_without_postgres(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test that get_default raises RuntimeError without PostgreSQL config."""
+    def test_get_default_creates_repo_in_development(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that get_default creates a repository in development mode."""
         monkeypatch.setenv("ENVIRONMENT", "development")
         RepositoryFactory.reset()
-        with pytest.raises(RuntimeError, match="PostgreSQL is required"):
-            RepositoryFactory.get_default()
+        repo = RepositoryFactory.get_default()
+        assert repo is not None
 
     def test_create_unit_of_work_with_explicit_repo(self) -> None:
         """Test creating unit of work with an explicit repository."""

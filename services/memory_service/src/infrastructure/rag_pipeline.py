@@ -23,7 +23,7 @@ class RAGSettings(BaseSettings):
     max_documents: int = Field(default=10)
     enable_grading: bool = Field(default=True)
     enable_rephrasing: bool = Field(default=True)
-    grade_threshold: float = Field(default=0.5)
+    grade_threshold: float = Field(default=0.7)
     rerank_top_k: int = Field(default=5)
     context_token_limit: int = Field(default=4000)
     embedding_dimension: int = Field(default=1536)
@@ -107,6 +107,56 @@ class SimpleGrader:
         elif score >= self.threshold:
             return DocumentGrade.PARTIALLY_RELEVANT, score
         return DocumentGrade.NOT_RELEVANT, score
+
+
+class LLMGrader:
+    """LLM-based document relevance grader.
+
+    Calls the UnifiedLLMClient to assess document relevance.
+    Falls back to SimpleGrader when LLM is unavailable.
+    """
+
+    GRADING_PROMPT = (
+        "You are a relevance grader for a mental health support platform's memory retrieval system.\n"
+        "Given a user query and a retrieved document, assess how relevant the document is to the query.\n"
+        "Respond with ONLY valid JSON: {\"score\": <0.0-1.0>, \"reason\": \"<brief reason>\"}\n"
+        "Score guidelines:\n"
+        "- 0.8-1.0: Directly answers or is highly relevant to the query\n"
+        "- 0.5-0.7: Partially relevant, contains useful context\n"
+        "- 0.0-0.4: Not relevant to the query"
+    )
+
+    def __init__(self, llm_client: Any, threshold: float = 0.7) -> None:
+        self._llm_client = llm_client
+        self._threshold = threshold
+        self._fallback = SimpleGrader(threshold=threshold)
+
+    async def grade(self, query: str, document: str) -> tuple[DocumentGrade, float]:
+        if self._llm_client is None or not getattr(self._llm_client, "is_available", False):
+            return await self._fallback.grade(query, document)
+        try:
+            import json as _json
+            user_message = f"Query: {query}\n\nDocument: {document[:1500]}"
+            response = await self._llm_client.generate(
+                system_prompt=self.GRADING_PROMPT,
+                user_message=user_message,
+                service_name="memory_rag_grader",
+                task_type="structured",
+                max_tokens=100,
+            )
+            if not response:
+                return await self._fallback.grade(query, document)
+            parsed = _json.loads(response.strip())
+            score = float(parsed.get("score", 0.0))
+            score = max(0.0, min(1.0, score))
+            if score >= self._threshold:
+                return DocumentGrade.RELEVANT, score
+            elif score >= self._threshold * 0.6:
+                return DocumentGrade.PARTIALLY_RELEVANT, score
+            return DocumentGrade.NOT_RELEVANT, score
+        except Exception as e:
+            logger.debug("llm_grader_fallback", error=str(e))
+            return await self._fallback.grade(query, document)
 
 
 class QueryRephraser:

@@ -37,9 +37,9 @@ class ModalityType(str, Enum):
 class MultimodalFusionSettings(BaseSettings):
     """Multimodal fusion configuration."""
     fusion_strategy: FusionStrategy = Field(default=FusionStrategy.CONFIDENCE_WEIGHTED)
-    roberta_weight: float = Field(default=0.35, ge=0.0, le=1.0)
-    llm_weight: float = Field(default=0.35, ge=0.0, le=1.0)
-    liwc_weight: float = Field(default=0.30, ge=0.0, le=1.0)
+    roberta_weight: float = Field(default=0.5, ge=0.0, le=1.0)
+    llm_weight: float = Field(default=0.3, ge=0.0, le=1.0)
+    liwc_weight: float = Field(default=0.2, ge=0.0, le=1.0)
     min_modalities: int = Field(default=1, ge=1, le=5)
     confidence_threshold: float = Field(default=0.4, ge=0.0, le=1.0)
     disagreement_threshold: float = Field(default=0.3, ge=0.0, le=0.5)

@@ -52,8 +52,11 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
     POOL_NAME = "personality_db"
 
     def __init__(self, client: PostgresClient, schema: str = "public") -> None:
+        import re as _re
+        assert _re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', schema), f"Invalid schema name: {schema}"
         self._client = client
         self._schema = schema
+        # Table names from config, not user input
         self._profiles_table = f"{schema}.personality_profiles"
         self._assessments_table = f"{schema}.trait_assessments"
         self._snapshots_table = f"{schema}.profile_snapshots"

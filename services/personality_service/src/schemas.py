@@ -40,7 +40,7 @@ class CommunicationStyleType(str, Enum):
 
 
 class EmotionCategory(str, Enum):
-    """Primary emotion categories for empathy detection."""
+    """Primary emotion categories for empathy detection (EmpatheticDialogues taxonomy)."""
     JOY = "joy"
     SADNESS = "sadness"
     ANGER = "anger"
@@ -50,6 +50,29 @@ class EmotionCategory(str, Enum):
     TRUST = "trust"
     ANTICIPATION = "anticipation"
     NEUTRAL = "neutral"
+    PROUD = "proud"
+    GRATEFUL = "grateful"
+    HOPEFUL = "hopeful"
+    CONTENT = "content"
+    CONFIDENT = "confident"
+    CARING = "caring"
+    FAITHFUL = "faithful"
+    IMPRESSED = "impressed"
+    EXCITED = "excited"
+    NOSTALGIC = "nostalgic"
+    LONELY = "lonely"
+    EMBARRASSED = "embarrassed"
+    GUILTY = "guilty"
+    ASHAMED = "ashamed"
+    JEALOUS = "jealous"
+    DEVASTATED = "devastated"
+    FURIOUS = "furious"
+    TERRIFIED = "terrified"
+    ANXIOUS = "anxious"
+    SENTIMENTAL = "sentimental"
+    ANNOYED = "annoyed"
+    DISAPPOINTED = "disappointed"
+    APPREHENSIVE = "apprehensive"
 
 
 class EmpathyComponent(str, Enum):

@@ -505,7 +505,9 @@ class MemoryService(ServiceBase):
             if tier == "tier_1_input":
                 storage[record.user_id] = record
             else:
-                storage.setdefault(record.user_id, []).append(record)
+                records_list = storage.setdefault(record.user_id, [])
+                records_list.append(record)
+                self._enforce_tier_limit(records_list)
 
     def _get_tier_records(self, user_id: UUID, tier: str) -> list[MemoryRecord]:
         """Get records from a tier for user."""
@@ -609,6 +611,13 @@ class MemoryService(ServiceBase):
         while len(working) > 20:
             working.pop(0)
 
+    def _enforce_tier_limit(self, records: list[MemoryRecord]) -> None:
+        """Evict oldest records when a tier exceeds max_tier_records_per_user."""
+        max_records = self._settings.max_tier_records_per_user
+        if len(records) > max_records:
+            records.sort(key=lambda r: r.created_at)
+            del records[:len(records) - max_records]
+
     def _build_basic_context(self, user_id: UUID, session_id: UUID | None,
                              current_message: str | None, token_budget: int) -> str:
         """Build basic context without assembler."""
@@ -639,8 +648,13 @@ class MemoryService(ServiceBase):
             for record in records:
                 if record.retention_category not in ("permanent", "long_term"):
                     age_days = (datetime.now(timezone.utc) - record.created_at).days
-                    decay_rate = Decimal("0.1") if record.retention_category == "medium_term" else Decimal("0.15")
-                    record.retention_strength = max(Decimal("0.1"), record.retention_strength - (decay_rate * age_days / 30))
+                    import math
+                    decay_rate = Decimal("0.05") if record.retention_category == "medium_term" else Decimal("0.15")
+                    elapsed_hours = age_days * 24
+                    record.retention_strength = max(
+                        Decimal("0.1"),
+                        Decimal(str(math.exp(-float(decay_rate) * elapsed_hours))) * record.retention_strength,
+                    )
                     decayed += 1
                     if record.retention_strength < Decimal("0.3"):
                         archived += 1

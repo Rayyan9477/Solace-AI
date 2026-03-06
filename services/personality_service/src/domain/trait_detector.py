@@ -79,7 +79,6 @@ class LIWCFeatureExtractor:
         """Extract LIWC features from text."""
         words = re.findall(r'\b[a-z]+\b', text.lower())
         word_count = len(words) if words else 1
-        word_set = set(words)
         features = LIWCFeatures(
             word_count=len(words),
             i_words_ratio=self._count_matches(words, self._I_WORDS) / word_count,

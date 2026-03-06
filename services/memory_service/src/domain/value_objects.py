@@ -97,19 +97,19 @@ class RetentionPolicy(BaseModel):
     @classmethod
     def long_term(cls) -> RetentionPolicy:
         """Important memories with slow decay."""
-        return cls(policy_type=RetentionPolicyType.LONG_TERM, base_decay_rate=Decimal("0.001"), min_retention_strength=Decimal("0.2"),
+        return cls(policy_type=RetentionPolicyType.LONG_TERM, base_decay_rate=Decimal("0.02"), min_retention_strength=Decimal("0.2"),
                    archive_threshold=Decimal("0.2"), delete_threshold=Decimal("0.05"), max_age_days=365, boost_on_access=Decimal("0.1"))
 
     @classmethod
     def medium_term(cls) -> RetentionPolicy:
         """Standard memories with moderate decay."""
-        return cls(policy_type=RetentionPolicyType.MEDIUM_TERM, base_decay_rate=Decimal("0.01"), min_retention_strength=Decimal("0.1"),
+        return cls(policy_type=RetentionPolicyType.MEDIUM_TERM, base_decay_rate=Decimal("0.05"), min_retention_strength=Decimal("0.1"),
                    archive_threshold=Decimal("0.1"), delete_threshold=Decimal("0.02"), max_age_days=90, boost_on_access=Decimal("0.08"))
 
     @classmethod
     def short_term(cls) -> RetentionPolicy:
         """Temporary memories with fast decay."""
-        return cls(policy_type=RetentionPolicyType.SHORT_TERM, base_decay_rate=Decimal("0.05"), min_retention_strength=Decimal("0.05"),
+        return cls(policy_type=RetentionPolicyType.SHORT_TERM, base_decay_rate=Decimal("0.15"), min_retention_strength=Decimal("0.05"),
                    archive_threshold=Decimal("0.05"), delete_threshold=Decimal("0.01"), max_age_days=30, boost_on_access=Decimal("0.05"))
 
     @classmethod
@@ -119,15 +119,18 @@ class RetentionPolicy(BaseModel):
                    archive_threshold=Decimal("0.1"), delete_threshold=Decimal("0.05"), max_age_days=7, boost_on_access=Decimal("0.02"))
 
     def calculate_decay(self, current_strength: Decimal, hours_elapsed: int, emotional_content: bool = False) -> Decimal:
-        """Calculate new retention strength after decay."""
+        """Calculate new retention strength after decay using Ebbinghaus model.
+
+        Uses R(t) = e^(-λ*t) * S where λ is the decay rate and S is current strength.
+        """
+        import math
         if self.policy_type == RetentionPolicyType.PERMANENT:
             return current_strength
         decay_rate = self.base_decay_rate
         if emotional_content:
             decay_rate = decay_rate * self.emotional_decay_modifier
-        total_decay = decay_rate * Decimal(hours_elapsed)
-        new_strength = max(Decimal("0"), current_strength - total_decay)
-        return new_strength
+        new_strength = Decimal(str(math.exp(-float(decay_rate) * hours_elapsed))) * current_strength
+        return max(Decimal("0"), new_strength)
 
     def get_action(self, retention_strength: Decimal) -> str:
         """Determine action based on retention strength."""

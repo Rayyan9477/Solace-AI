@@ -186,7 +186,7 @@ class TestRetentionPolicy:
 
     def test_medium_term_policy(self) -> None:
         policy = RetentionPolicy.medium_term()
-        assert policy.base_decay_rate == Decimal("0.01")
+        assert policy.base_decay_rate == Decimal("0.05")
 
     def test_calculate_decay(self) -> None:
         policy = RetentionPolicy.medium_term()

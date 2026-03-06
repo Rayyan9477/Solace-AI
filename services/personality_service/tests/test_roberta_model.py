@@ -17,7 +17,7 @@ class TestRoBERTaSettings:
 
     def test_default_settings(self) -> None:
         settings = RoBERTaSettings()
-        assert settings.model_name == "roberta-base"
+        assert settings.model_name == "roberta-large"
         assert settings.max_sequence_length == 512
         assert settings.batch_size == 8
         assert settings.device == "cpu"
@@ -111,7 +111,7 @@ class TestPersonalityClassificationHead:
     def test_forward_returns_prediction(self) -> None:
         settings = RoBERTaSettings()
         head = PersonalityClassificationHead(settings)
-        pooled = [0.1] * 768
+        pooled = [0.1] * 1024
         result = head.forward(pooled)
         assert isinstance(result, RoBERTaPrediction)
         assert len(result.trait_probabilities) == 5
@@ -119,7 +119,7 @@ class TestPersonalityClassificationHead:
     def test_forward_probabilities_in_range(self) -> None:
         settings = RoBERTaSettings()
         head = PersonalityClassificationHead(settings)
-        pooled = [0.5] * 768
+        pooled = [0.5] * 1024
         result = head.forward(pooled)
         for trait, prob in result.trait_probabilities.items():
             assert 0.0 <= prob <= 1.0
@@ -127,7 +127,7 @@ class TestPersonalityClassificationHead:
     def test_forward_confidence_in_range(self) -> None:
         settings = RoBERTaSettings()
         head = PersonalityClassificationHead(settings)
-        pooled = [0.3] * 768
+        pooled = [0.3] * 1024
         result = head.forward(pooled)
         assert 0.0 <= result.confidence <= 1.0
 
@@ -195,7 +195,7 @@ class TestRoBERTaPersonalityDetector:
         await detector.initialize()
         text = "This is a test sentence for embedding extraction."
         embeddings = await detector.get_embeddings(text)
-        assert len(embeddings) == 768
+        assert len(embeddings) == 1024
         assert all(isinstance(e, float) for e in embeddings)
 
     @pytest.mark.asyncio
@@ -210,7 +210,7 @@ class TestRoBERTaPersonalityDetector:
 
     def test_clear_cache(self) -> None:
         detector = RoBERTaPersonalityDetector()
-        detector._embedding_cache["test"] = [0.1] * 768
+        detector._embedding_cache["test"] = [0.1] * 1024
         detector.clear_cache()
         assert len(detector._embedding_cache) == 0
 

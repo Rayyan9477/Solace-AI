@@ -305,11 +305,12 @@ class TestServiceClients:
         assert resp_dict["data"] == {"key": "value"}
         assert resp_dict["response_time_ms"] == 25.5
 
-    def test_circuit_breaker_initial_state(self):
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_initial_state(self):
         from services.orchestrator_service.src.infrastructure.clients import CircuitBreaker, CircuitState
         breaker = CircuitBreaker(failure_threshold=3, recovery_timeout=30)
         assert breaker.state == CircuitState.CLOSED
-        assert breaker.allow_request() is True
+        assert await breaker.allow_request() is True
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_opens_on_failures(self):
@@ -320,7 +321,7 @@ class TestServiceClients:
         assert breaker.state == CircuitState.CLOSED
         await breaker.record_failure()
         assert breaker.state == CircuitState.OPEN
-        assert breaker.allow_request() is False
+        assert await breaker.allow_request() is False
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_resets_on_success(self):

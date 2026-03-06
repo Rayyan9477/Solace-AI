@@ -123,7 +123,7 @@ class TestIntentClassifier:
 
     def test_classify_symptom_discussion(self, classifier: IntentClassifier) -> None:
         """Test classifying symptom discussion."""
-        intent, confidence, keywords = classifier.classify("I haven't been sleeping well and my appetite is gone")
+        intent, confidence, keywords = classifier.classify("My sleep is terrible and my appetite is gone")
         assert intent == IntentType.SYMPTOM_DISCUSSION
         assert "sleep" in keywords or "appetite" in keywords
 

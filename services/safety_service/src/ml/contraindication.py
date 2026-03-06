@@ -416,10 +416,6 @@ class ContraindicationChecker:
         # Use maximum severity
         max_severity = max(c.severity for c in contraindications)
 
-        # Count absolute contraindications
-        absolute_count = sum(1 for c in contraindications
-                            if c.contraindication_type == ContraindicationType.ABSOLUTE)
-
         # Boost for multiple contraindications
         multiplicity_boost = min(Decimal(str(len(contraindications) - 1)) * Decimal("0.1"), Decimal("0.3"))
 

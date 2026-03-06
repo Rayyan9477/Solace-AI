@@ -4,6 +4,7 @@ Handles escalation to human clinicians, notifications, and crisis response coord
 """
 from __future__ import annotations
 import asyncio
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
@@ -398,13 +399,43 @@ class EscalationWorkflow:
         """Execute CRITICAL priority workflow - immediate response required."""
         escalation.actions_taken.append("CRITICAL workflow initiated")
         clinician = await self._assigner.assign_clinician(escalation)
+
+        notification_success = False
         if clinician:
             escalation.assigned_clinician_id = clinician
             escalation.actions_taken.append(f"Clinician {clinician} assigned")
-        channels = [NotificationType.PAGER, NotificationType.SMS, NotificationType.IN_APP]
-        if clinician:
+            channels = [NotificationType.PAGER, NotificationType.SMS, NotificationType.IN_APP]
             results = await self._notifications.send_multi_channel(clinician, escalation, channels)
             escalation.notifications_sent.extend([c for c, sent in results.items() if sent])
+            notification_success = any(results.values())
+
+        # Fallback: try email if primary channels all failed
+        if not notification_success and clinician:
+            try:
+                email_ok = await self._notifications.send_notification(
+                    clinician, escalation, NotificationType.EMAIL,
+                )
+                if email_ok:
+                    escalation.notifications_sent.append(NotificationType.EMAIL)
+                    notification_success = True
+                    escalation.actions_taken.append("Fallback email notification sent")
+            except Exception as e:
+                logger.error("fallback_email_failed", error=str(e),
+                             escalation_id=str(escalation.escalation_id))
+
+        if not notification_success:
+            logger.critical(
+                "crisis_notification_total_failure",
+                escalation_id=str(escalation.escalation_id),
+                user_id=str(escalation.user_id),
+                crisis_level=escalation.crisis_level,
+                clinician_assigned=clinician is not None,
+                message="CRITICAL: No notification channel succeeded — manual intervention required",
+            )
+            escalation.actions_taken.append(
+                "ALERT: All notification channels failed — manual follow-up required"
+            )
+
         escalation.actions_taken.append("Crisis resources displayed to user")
         escalation.actions_taken.append("All processing paused")
         escalation.actions_taken.append("Safety dialogue initiated")
@@ -447,6 +478,25 @@ class EscalationWorkflow:
         return escalation
 
 
+class EscalationRepository(ABC):
+    """Repository interface for persistent escalation storage.
+
+    TODO: Implement PostgreSQL persistence — current in-memory dict is volatile.
+    """
+
+    @abstractmethod
+    async def save_escalation(self, record: EscalationRecord) -> None: ...
+
+    @abstractmethod
+    async def get_escalation(self, escalation_id: UUID) -> EscalationRecord | None: ...
+
+    @abstractmethod
+    async def get_active_escalations(self, user_id: UUID | None = None) -> list[EscalationRecord]: ...
+
+    @abstractmethod
+    async def update_status(self, escalation_id: UUID, status: EscalationStatus) -> None: ...
+
+
 class EscalationManager:
     """Main escalation manager orchestrating all escalation components."""
 
@@ -454,8 +504,10 @@ class EscalationManager:
         self,
         settings: EscalationSettings | None = None,
         clinician_registry: Any | None = None,
+        repository: EscalationRepository | None = None,
     ) -> None:
         self._settings = settings or EscalationSettings()
+        self._repository = repository
         self._notification_service = NotificationServiceClient(
             self._settings,
             base_url=self._settings.notification_service_url
@@ -534,6 +586,12 @@ class EscalationManager:
             user_id=user_id, session_id=session_id, crisis_level=crisis_level,
             priority=priority, reason=reason, context=context or {})
         self._active_escalations[escalation.escalation_id] = escalation
+        if self._repository:
+            try:
+                await self._repository.save_escalation(escalation)
+            except Exception as e:
+                logger.error("escalation_persist_failed", error=str(e),
+                             escalation_id=str(escalation.escalation_id))
         logger.info("escalation_created", escalation_id=str(escalation.escalation_id),
             user_id=str(user_id), priority=priority.value, crisis_level=crisis_level)
         if priority == EscalationPriority.CRITICAL:

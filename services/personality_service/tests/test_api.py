@@ -16,6 +16,8 @@ from services.personality_service.src.schemas import (
 from services.personality_service.src.api import router
 from services.personality_service.src.domain.service import PersonalityOrchestrator
 
+TEST_USER_ID = "00000000-0000-4000-a000-000000000099"
+
 
 @pytest.fixture
 def mock_orchestrator() -> MagicMock:
@@ -41,7 +43,7 @@ def app(mock_orchestrator: MagicMock):
 
     # Override auth dependencies for testing
     test_app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
-        user_id="test-user", token_type=TokenType.ACCESS, roles=["user"],
+        user_id=TEST_USER_ID, token_type=TokenType.ACCESS, roles=["user"],
     )
     test_app.dependency_overrides[get_current_service] = lambda: AuthenticatedService(
         service_name="test-service", permissions=["personality:read", "personality:write"],
@@ -152,7 +154,8 @@ class TestProfileEndpoint:
 
     def test_get_profile_success(self, client: TestClient, mock_orchestrator: MagicMock) -> None:
         """Test successful profile retrieval."""
-        user_id = uuid4()
+        from uuid import UUID
+        user_id = UUID(TEST_USER_ID)
         from datetime import datetime
         mock_profile = ProfileSummaryDTO(
             user_id=user_id,
@@ -167,17 +170,17 @@ class TestProfileEndpoint:
             last_updated=datetime.now(timezone.utc),
             version=3,
         )
-        mock_orchestrator.get_profile = MagicMock(return_value=mock_profile)
-        response = client.get(f"/api/v1/personality/profile/{user_id}")
+        mock_orchestrator.get_profile = AsyncMock(return_value=mock_profile)
+        response = client.get(f"/api/v1/personality/profile/{TEST_USER_ID}")
         assert response.status_code == 200
         data = response.json()
         assert data["exists"] is True
-        assert data["profile"]["user_id"] == str(user_id)
+        assert data["profile"]["user_id"] == TEST_USER_ID
 
     def test_get_profile_not_found(self, client: TestClient, mock_orchestrator: MagicMock) -> None:
         """Test profile not found."""
-        mock_orchestrator.get_profile = MagicMock(return_value=None)
-        response = client.get(f"/api/v1/personality/profile/{uuid4()}")
+        mock_orchestrator.get_profile = AsyncMock(return_value=None)
+        response = client.get(f"/api/v1/personality/profile/{TEST_USER_ID}")
         assert response.status_code == 404
 
 
@@ -186,13 +189,13 @@ class TestStatisticsEndpoint:
 
     def test_get_statistics(self, client: TestClient, mock_orchestrator: MagicMock) -> None:
         """Test getting service statistics."""
-        mock_orchestrator.get_statistics = MagicMock(return_value={
+        mock_orchestrator.get_status = AsyncMock(return_value={
             "initialized": True,
             "total_requests": 100,
             "total_detections": 50,
             "profiles_count": 25,
         })
-        response = client.get("/api/v1/personality/statistics")
+        response = client.get("/api/v1/personality/status")
         assert response.status_code == 200
         data = response.json()
         assert data["initialized"] is True
