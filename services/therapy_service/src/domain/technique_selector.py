@@ -178,6 +178,8 @@ class TechniqueSelector:
             if user_context.get("current_risk", RiskLevel.NONE) in [RiskLevel.HIGH, RiskLevel.CRITICAL]:
                 if technique.category in ["grounding", "distress_tolerance"]:
                     score += 0.2
+            effectiveness = user_context.get("effectiveness_history", {}).get(str(technique.technique_id), 0.5)
+            score = score * 0.9 + effectiveness * 0.1
             scores[technique.technique_id] = max(0.0, min(1.0, score))
         return scores
 

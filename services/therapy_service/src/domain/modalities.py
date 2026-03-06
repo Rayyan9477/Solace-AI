@@ -510,6 +510,207 @@ class MIProvider(ModalityProvider):
         )
 
 
+class SFBTProvider(ModalityProvider):
+    """Solution-Focused Brief Therapy implementation."""
+
+    def __init__(self) -> None:
+        self._protocol = ModalityProtocol(
+            modality=TherapyModality.SFBT, name="Solution-Focused Brief Therapy",
+            description="Future-oriented therapy focusing on solutions rather than problems",
+            core_principles=["Focus on solutions not problems", "If it works, do more of it",
+                            "Small changes lead to big changes", "Clients are the experts on their lives",
+                            "The future is created and negotiable"],
+            key_techniques=["Miracle Question", "Scaling Questions", "Exception Finding",
+                           "Coping Questions", "Compliments"],
+            session_structure={"opening": ["Best hopes", "Problem-free talk", "Goal setting"],
+                              "working": ["Miracle question", "Exception finding", "Scaling"],
+                              "closing": ["Compliments", "Task suggestion", "Next steps"]},
+            contraindications=["Active psychosis", "Severe cognitive impairment",
+                              "Client requires extensive trauma processing"],
+            efficacy_evidence="Moderate evidence for depression, anxiety; strong for brief interventions",
+        )
+        self._techniques = self._initialize_techniques()
+
+    @property
+    def modality(self) -> TherapyModality:
+        return TherapyModality.SFBT
+
+    @property
+    def protocol(self) -> ModalityProtocol:
+        return self._protocol
+
+    def _initialize_techniques(self) -> list[TechniqueProtocol]:
+        return [
+            TechniqueProtocol(
+                name="Miracle Question", modality=TherapyModality.SFBT, category="future_orientation",
+                description="Imagine a future where the problem is solved",
+                rationale="Shifts focus from problems to solutions and desired outcomes",
+                steps=[
+                    TechniqueStep(1, "Set up the miracle question", "I'd like to ask you an unusual question...", "Client is curious"),
+                    TechniqueStep(2, "Ask the miracle question", "Suppose tonight while you sleep, a miracle happens and the problem is solved. What would be different tomorrow?", "Client describes desired future"),
+                    TechniqueStep(3, "Elaborate the vision", "What else would be different?", "Detailed vision emerges"),
+                    TechniqueStep(4, "Identify small signs", "What small thing would you notice first?", "Observable changes identified"),
+                    TechniqueStep(5, "Connect to current resources", "What parts of this are already happening, even a little?", "Exceptions found"),
+                ],
+                duration_minutes=20, materials_needed=[],
+            ),
+            TechniqueProtocol(
+                name="Scaling Questions", modality=TherapyModality.SFBT, category="assessment",
+                description="Use scales to measure progress and set goals",
+                rationale="Provides concrete measurement and highlights progress",
+                steps=[
+                    TechniqueStep(1, "Introduce the scale", "On a scale of 0-10, where 10 is your best hopes...", "Scale understood"),
+                    TechniqueStep(2, "Rate current position", "Where would you say you are right now?", "Number given"),
+                    TechniqueStep(3, "Explore current position", "What puts you at that number and not lower?", "Strengths identified"),
+                    TechniqueStep(4, "Identify next step", "What would one point higher look like?", "Concrete goal set"),
+                    TechniqueStep(5, "Build confidence", "What would help you move up one point?", "Action plan emerging"),
+                ],
+                duration_minutes=10, materials_needed=[],
+            ),
+            TechniqueProtocol(
+                name="Exception Finding", modality=TherapyModality.SFBT, category="resource_activation",
+                description="Identify times when the problem is absent or less severe",
+                rationale="Exceptions contain solutions - what works can be amplified",
+                steps=[
+                    TechniqueStep(1, "Ask about exceptions", "Tell me about a time recently when this problem wasn't happening", "Exception identified"),
+                    TechniqueStep(2, "Detail the exception", "What was different about that time?", "Differences noted"),
+                    TechniqueStep(3, "Identify contributing factors", "What did you do differently?", "Client actions identified"),
+                    TechniqueStep(4, "Amplify the exception", "How could you do more of what worked?", "Plan developing"),
+                ],
+                duration_minutes=12, materials_needed=[],
+            ),
+        ]
+
+    def get_techniques(self) -> list[TechniqueProtocol]:
+        return self._techniques
+
+    def select_intervention(self, context: InterventionContext) -> TechniqueProtocol | None:
+        concern_lower = context.current_concern.lower()
+        if any(word in concern_lower for word in ["future", "hope", "wish", "want", "dream"]):
+            return next((t for t in self._techniques if t.name == "Miracle Question"), None)
+        if any(word in concern_lower for word in ["progress", "better", "scale", "rate"]):
+            return next((t for t in self._techniques if t.name == "Scaling Questions"), None)
+        if any(word in concern_lower for word in ["sometimes", "except", "used to", "before"]):
+            return next((t for t in self._techniques if t.name == "Exception Finding"), None)
+        return self._techniques[0] if self._techniques else None
+
+    def generate_response(self, technique: TechniqueProtocol, user_input: str, context: InterventionContext) -> InterventionResult:
+        if technique.name == "Miracle Question":
+            response = "I'd like to ask you something a bit unusual. Suppose tonight, while you're sleeping, a miracle happens and the problem that brought you here is completely solved. When you wake up tomorrow, what's the first small thing you'd notice that tells you something is different?"
+            follow_ups = ["What else would be different?", "Who would be the first person to notice?"]
+        elif technique.name == "Scaling Questions":
+            response = "On a scale of 0 to 10, where 10 means things are exactly how you'd like them to be and 0 is the worst it's been, where would you say you are right now?"
+            follow_ups = ["What puts you at that number and not lower?", "What would one point higher look like?"]
+        else:
+            response = "It sounds like there are times when this problem isn't as strong. Can you tell me about a recent time when things were even a little bit better? What was different about that time?"
+            follow_ups = ["What were you doing differently?", "How could you do more of that?"]
+        return InterventionResult(
+            success=True, technique_name=technique.name, response_generated=response, follow_up_prompts=follow_ups,
+            homework_suggestion=f"Notice moments when {technique.name.lower()} applies in your daily life",
+            notes=["Used SFBT framework"],
+        )
+
+
+class MindfulnessProvider(ModalityProvider):
+    """Mindfulness-Based Therapy implementation."""
+
+    def __init__(self) -> None:
+        self._protocol = ModalityProtocol(
+            modality=TherapyModality.MINDFULNESS, name="Mindfulness-Based Therapy",
+            description="Present-moment awareness practices for emotional regulation and wellbeing",
+            core_principles=["Non-judgmental awareness", "Present moment focus", "Acceptance of experience",
+                            "Beginner's mind", "Letting go of attachment"],
+            key_techniques=["Body Scan", "Breath Awareness", "Loving-Kindness",
+                           "Progressive Relaxation", "Mindful Movement"],
+            session_structure={"opening": ["Brief centering", "Check-in", "Intention setting"],
+                              "working": ["Guided practice", "Inquiry", "Discussion"],
+                              "closing": ["Brief practice", "Home practice suggestion", "Reflection"]},
+            contraindications=["Acute trauma flashbacks", "Severe dissociation",
+                              "Active psychosis with poor reality testing"],
+            efficacy_evidence="Strong evidence for depression relapse prevention, anxiety, stress, chronic pain",
+        )
+        self._techniques = self._initialize_techniques()
+
+    @property
+    def modality(self) -> TherapyModality:
+        return TherapyModality.MINDFULNESS
+
+    @property
+    def protocol(self) -> ModalityProtocol:
+        return self._protocol
+
+    def _initialize_techniques(self) -> list[TechniqueProtocol]:
+        return [
+            TechniqueProtocol(
+                name="Body Scan", modality=TherapyModality.MINDFULNESS, category="awareness",
+                description="Systematic attention to body sensations from head to toe",
+                rationale="Develops interoceptive awareness and mind-body connection",
+                steps=[
+                    TechniqueStep(1, "Find a comfortable position", "Settle in, close eyes if comfortable", "Client settled"),
+                    TechniqueStep(2, "Bring attention to feet", "Notice any sensations in your feet", "Awareness begins"),
+                    TechniqueStep(3, "Slowly move upward", "Move attention through legs, torso, arms", "Body scanned"),
+                    TechniqueStep(4, "Notice without judgment", "Whatever you find is okay", "Acceptance practiced"),
+                    TechniqueStep(5, "Return to whole body", "Hold awareness of your entire body", "Integration complete"),
+                ],
+                duration_minutes=15, materials_needed=[],
+            ),
+            TechniqueProtocol(
+                name="Breath Awareness", modality=TherapyModality.MINDFULNESS, category="grounding",
+                description="Focus attention on the breath as an anchor to the present",
+                rationale="Breath is always available as an anchor to the present moment",
+                steps=[
+                    TechniqueStep(1, "Find the breath", "Notice where you feel the breath most clearly", "Anchor found"),
+                    TechniqueStep(2, "Follow the breath", "Follow the natural rhythm of breathing", "Attention focused"),
+                    TechniqueStep(3, "Notice wandering", "When mind wanders, gently note it", "Meta-awareness develops"),
+                    TechniqueStep(4, "Return to breath", "Kindly bring attention back each time", "Practice sustained"),
+                ],
+                duration_minutes=8, materials_needed=[],
+            ),
+            TechniqueProtocol(
+                name="Loving-Kindness", modality=TherapyModality.MINDFULNESS, category="compassion",
+                description="Generate feelings of warmth and goodwill toward self and others",
+                rationale="Cultivates self-compassion and reduces self-criticism",
+                steps=[
+                    TechniqueStep(1, "Begin with self", "May I be happy, may I be healthy, may I be safe", "Self-compassion practiced"),
+                    TechniqueStep(2, "Extend to loved one", "Bring to mind someone you care about", "Warmth generated"),
+                    TechniqueStep(3, "Extend to neutral person", "Someone you neither like nor dislike", "Circle expanding"),
+                    TechniqueStep(4, "Extend to difficult person", "If comfortable, include someone challenging", "Compassion stretches"),
+                    TechniqueStep(5, "Extend to all beings", "May all beings be happy and free from suffering", "Universal compassion"),
+                ],
+                duration_minutes=15, materials_needed=[],
+            ),
+        ]
+
+    def get_techniques(self) -> list[TechniqueProtocol]:
+        return self._techniques
+
+    def select_intervention(self, context: InterventionContext) -> TechniqueProtocol | None:
+        concern_lower = context.current_concern.lower()
+        if any(word in concern_lower for word in ["body", "tension", "physical", "pain"]):
+            return next((t for t in self._techniques if t.name == "Body Scan"), None)
+        if any(word in concern_lower for word in ["self-critical", "harsh", "compassion", "kind"]):
+            return next((t for t in self._techniques if t.name == "Loving-Kindness"), None)
+        if any(word in concern_lower for word in ["anxious", "racing", "calm", "breathe"]):
+            return next((t for t in self._techniques if t.name == "Breath Awareness"), None)
+        return self._techniques[0] if self._techniques else None
+
+    def generate_response(self, technique: TechniqueProtocol, user_input: str, context: InterventionContext) -> InterventionResult:
+        if technique.name == "Body Scan":
+            response = "Let's try a brief body scan. Find a comfortable position and, if you'd like, close your eyes. Starting at the top of your head, gently bring your attention downward, noticing any sensations you encounter - warmth, tension, tingling, or nothing at all. There's no right or wrong thing to feel."
+            follow_ups = ["What did you notice?", "Where did you feel the most tension?"]
+        elif technique.name == "Loving-Kindness":
+            response = "Let's practice some self-compassion. Place a hand on your heart if that feels comfortable. Silently repeat to yourself: 'May I be happy. May I be healthy. May I be safe. May I live with ease.' Notice what comes up without judging it."
+            follow_ups = ["How did that feel?", "What was it like to direct kindness toward yourself?"]
+        else:
+            response = "Let's take a moment together. Notice the natural rhythm of your breathing - the rise and fall. You don't need to change it. When your mind wanders, and it will, just gently bring attention back to the breath. Let's practice for a few moments."
+            follow_ups = ["What did you notice during the practice?", "How do you feel now compared to before?"]
+        return InterventionResult(
+            success=True, technique_name=technique.name, response_generated=response, follow_up_prompts=follow_ups,
+            homework_suggestion=f"Practice {technique.name.lower()} for 5-10 minutes daily",
+            notes=["Used Mindfulness framework"],
+        )
+
+
 class ModalityRegistry:
     """Registry of available therapy modalities."""
 
@@ -519,6 +720,8 @@ class ModalityRegistry:
             TherapyModality.DBT: DBTProvider(),
             TherapyModality.ACT: ACTProvider(),
             TherapyModality.MI: MIProvider(),
+            TherapyModality.SFBT: SFBTProvider(),
+            TherapyModality.MINDFULNESS: MindfulnessProvider(),
         }
         logger.info("modality_registry_initialized", modalities=list(self._providers.keys()))
 

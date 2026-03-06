@@ -208,11 +208,12 @@ class TestPermissionMatrix:
 class TestCircuitBreaker:
     """Tests for the circuit breaker pattern in service clients."""
 
-    def test_starts_closed(self):
+    @pytest.mark.asyncio
+    async def test_starts_closed(self):
         """New circuit breaker starts in CLOSED state."""
         cb = CircuitBreaker(failure_threshold=3, recovery_timeout=10)
         assert cb.state == CircuitState.CLOSED
-        assert cb.allow_request() is True
+        assert await cb.allow_request() is True
 
     @pytest.mark.asyncio
     async def test_opens_after_threshold_failures(self):
@@ -221,7 +222,7 @@ class TestCircuitBreaker:
         for _ in range(3):
             await cb.record_failure()
         assert cb.state == CircuitState.OPEN
-        assert cb.allow_request() is False
+        assert await cb.allow_request() is False
 
     @pytest.mark.asyncio
     async def test_resets_on_success(self):
@@ -231,7 +232,7 @@ class TestCircuitBreaker:
         await cb.record_failure()
         await cb.record_success()
         assert cb.state == CircuitState.CLOSED
-        assert cb.allow_request() is True
+        assert await cb.allow_request() is True
 
     @pytest.mark.asyncio
     async def test_half_open_after_recovery_timeout(self):
@@ -239,10 +240,9 @@ class TestCircuitBreaker:
         cb = CircuitBreaker(failure_threshold=2, recovery_timeout=0)
         await cb.record_failure()
         await cb.record_failure()
-        # With recovery_timeout=0, the state property immediately returns HALF_OPEN
-        # because elapsed time >= 0
+        # With recovery_timeout=0, allow_request() transitions OPEN → HALF_OPEN
+        assert await cb.allow_request() is True
         assert cb.state == CircuitState.HALF_OPEN
-        assert cb.allow_request() is True
 
 
 # ---------------------------------------------------------------------------

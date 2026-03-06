@@ -66,6 +66,8 @@ class SolaceTopic(str, Enum):
     MEMORY = "solace.memory"
     ANALYTICS = "solace.analytics"
     PERSONALITY = "solace.personality"
+    MESSAGES = "solace.messages"
+    SYSTEM = "solace.system"
 
     @property
     def dlq_topic(self) -> str:
@@ -89,6 +91,8 @@ TOPIC_CONFIGS: dict[SolaceTopic, TopicConfig] = {
     SolaceTopic.MEMORY: TopicConfig(name="solace.memory", partitions=4),
     SolaceTopic.ANALYTICS: TopicConfig(name="solace.analytics", partitions=2),
     SolaceTopic.PERSONALITY: TopicConfig(name="solace.personality", partitions=2),
+    SolaceTopic.MESSAGES: TopicConfig(name="solace.messages", partitions=4),
+    SolaceTopic.SYSTEM: TopicConfig(name="solace.system", partitions=2),
 }
 
 

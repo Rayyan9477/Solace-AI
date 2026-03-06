@@ -118,10 +118,13 @@ class AuthenticatedService(BaseModel):
 
 @lru_cache()
 def _get_jwt_manager() -> JWTManager:
-    """Get cached JWT manager instance.
+    """Get cached JWT manager instance (singleton per process).
 
-    Uses LRU cache to ensure singleton-like behavior.
-    Settings are loaded from environment variables.
+    Uses @lru_cache() (unbounded, no maxsize) to create exactly one JWTManager
+    per worker process. This is intentional: JWTManager holds no mutable state
+    that needs invalidation, and AuthSettings are read once from env vars at
+    startup. In multi-worker deployments (uvicorn --workers N), each worker
+    gets its own cached instance.
     """
     try:
         settings = AuthSettings()

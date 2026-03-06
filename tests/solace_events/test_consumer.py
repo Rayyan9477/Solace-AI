@@ -125,11 +125,11 @@ class TestOffsetTracker:
         await tracker.track_received("topic", 0, 2)
 
         committable = await tracker.mark_processed("topic", 0, 1)
-        # Can't commit yet - 2 still pending
-        assert committable is None
+        # Commits up to lowest pending (offset 2 still pending)
+        assert committable == 2
 
         committable = await tracker.mark_processed("topic", 0, 2)
-        # Now can commit offset 3
+        # All processed — commit past highest (2+1=3)
         assert committable == 3
 
     @pytest.mark.asyncio
@@ -139,13 +139,12 @@ class TestOffsetTracker:
         await tracker.track_received("topic", 0, 2)
         await tracker.track_received("topic", 0, 3)
 
-        # Process 2 first
+        # Process 2 first — lowest pending is still 1, no advance
         committable = await tracker.mark_processed("topic", 0, 2)
         assert committable is None
 
-        # Process 1
+        # Process 1 — lowest pending is now 3, commit up to 3
         committable = await tracker.mark_processed("topic", 0, 1)
-        # Can commit up to lowest pending (3)
         assert committable == 3
 
     @pytest.mark.asyncio

@@ -1,4 +1,10 @@
-"""Solace-AI PHI Protection - Detection and masking of Protected Health Information."""
+"""Solace-AI PHI Protection - Detection and masking of Protected Health Information.
+
+This module provides a structlog processor (PHISanitizer) that automatically
+redacts emails, phone numbers, SSNs, and other PHI patterns from log output.
+Injected into the structlog chain before the renderer in all service main.py
+files. See also: user-service api.py _mask_email() for explicit masking.
+"""
 
 from __future__ import annotations
 import re

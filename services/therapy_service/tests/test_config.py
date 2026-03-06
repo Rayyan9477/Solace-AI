@@ -54,7 +54,7 @@ class TestRedisSettings:
 
     def test_url_without_password(self) -> None:
         """Test Redis URL without password."""
-        settings = RedisSettings(host="redis.example.com", port=6380)
+        settings = RedisSettings(host="redis.example.com", port=6380, password="")
         url = settings.url
         assert url == "redis://redis.example.com:6380/0"
 

@@ -334,6 +334,12 @@ class InMemoryEventStore(EventStore):
     """
 
     def __init__(self) -> None:
+        import os
+        if os.environ.get("ENVIRONMENT", "development").lower() == "production":
+            raise RuntimeError(
+                "InMemoryEventStore must not be used in production. "
+                "Configure a persistent EventStore implementation."
+            )
         self._streams: dict[str, list[DomainEvent]] = {}
         self._all_events: list[DomainEvent] = []
 

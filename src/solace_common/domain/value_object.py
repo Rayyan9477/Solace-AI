@@ -58,7 +58,16 @@ class ValueObject(BaseModel, ABC):
 
     def __hash__(self) -> int:
         """Hash based on all attributes for use in sets and dicts."""
-        return hash(tuple(sorted(self.model_dump().items(), key=lambda x: x[0])))
+        return hash(self._make_hashable(self.model_dump()))
+
+    @staticmethod
+    def _make_hashable(obj: Any) -> Any:
+        """Recursively convert unhashable types to hashable equivalents."""
+        if isinstance(obj, dict):
+            return tuple(sorted((k, ValueObject._make_hashable(v)) for k, v in obj.items()))
+        if isinstance(obj, (list, set)):
+            return tuple(ValueObject._make_hashable(i) for i in obj)
+        return obj
 
 
 T = TypeVar("T")
@@ -144,6 +153,10 @@ class PhoneNumber(SingleValueObject[str]):
 
     def to_e164(self) -> str:
         """Format as E.164 international format."""
+        # Avoid double-prefixing if value already includes the country code
+        # E.164 max is 15 digits; a 10-digit US number needs the country code prepended
+        if len(self.value) > 10 and self.value.startswith(self.country_code):
+            return f"+{self.value}"
         return f"+{self.country_code}{self.value}"
 
     def to_national(self) -> str:
@@ -315,8 +328,9 @@ class HashedValue(SingleValueObject[str]):
     def matches(self, plain_text: str, salt: str = "") -> bool:
         """Check if plain text matches stored hash."""
         combined = f"{salt}{plain_text}"
+        import hmac
         hash_value = hashlib.sha256(combined.encode()).hexdigest()
-        return self.value == hash_value
+        return hmac.compare_digest(self.value, hash_value)
 
 
 class UserId(SingleValueObject[str]):

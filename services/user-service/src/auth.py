@@ -16,7 +16,9 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+import os
+
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
 
@@ -71,6 +73,18 @@ class SessionConfig(BaseSettings):
         env_file=".env",
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def _reject_insecure_defaults_in_production(self) -> SessionConfig:
+        """Reject insecure default secret key in production."""
+        _INSECURE_DEFAULTS = {"your-secret-key-change-in-production-32-chars"}
+        environment = os.environ.get("ENVIRONMENT", "development").lower()
+        if environment == "production" and self.secret_key in _INSECURE_DEFAULTS:
+            raise ValueError(
+                "SESSION_SECRET_KEY must be set to a unique, cryptographically "
+                "secure value in production. The default key is not allowed."
+            )
+        return self
 
 
 # --- Session Models ---

@@ -10,10 +10,34 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
 
+from abc import ABC, abstractmethod
 from ..schemas import SessionPhase, RiskLevel, TechniqueDTO, HomeworkDTO
 from .models import SessionState, PhaseTransitionResult
 
 logger = structlog.get_logger(__name__)
+
+
+class SessionRepository(ABC):
+    """Repository interface for persistent session storage.
+
+    TODO: Implement PostgreSQL persistence — current in-memory dict is volatile.
+    Sessions are lost on restart. DB migration deferred to separate PR.
+    """
+
+    @abstractmethod
+    async def save_session(self, session: SessionState) -> None: ...
+
+    @abstractmethod
+    async def get_session(self, session_id: UUID) -> SessionState | None: ...
+
+    @abstractmethod
+    async def get_active_sessions(self, user_id: UUID | None = None) -> list[SessionState]: ...
+
+    @abstractmethod
+    async def delete_session(self, session_id: UUID) -> None: ...
+
+    @abstractmethod
+    async def get_session_count(self, user_id: UUID) -> int: ...
 
 
 class SessionManagerSettings(BaseSettings):
@@ -34,11 +58,14 @@ class SessionManager:
     clinical criteria, user engagement, and safety considerations.
     """
 
-    def __init__(self, settings: SessionManagerSettings | None = None) -> None:
+    def __init__(self, settings: SessionManagerSettings | None = None,
+                 repository: SessionRepository | None = None) -> None:
         self._settings = settings or SessionManagerSettings()
+        self._repository = repository  # TODO: plug in persistence implementation
         self._active_sessions: dict[UUID, SessionState] = {}
         self._user_session_counts: dict[UUID, int] = {}
-        logger.info("session_manager_initialized", settings_applied=True)
+        logger.info("session_manager_initialized", settings_applied=True,
+                     persistent_storage=repository is not None)
 
     def create_session(
         self,
@@ -230,7 +257,6 @@ class SessionManager:
         """
         current = session.current_phase
         criteria_met = []
-        criteria_missing = []
 
         if current == SessionPhase.PRE_SESSION and target_phase == SessionPhase.OPENING:
             criteria_met.append("session_initialized")

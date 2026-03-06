@@ -35,7 +35,7 @@ class LLMClientSettings(BaseSettings):
     timeout_seconds: int = Field(default=30)
     enable_caching: bool = Field(default=True)
     cache_mode: str = Field(default="semantic")
-    enable_fallback: bool = Field(default=True)
+    enable_fallback: bool = Field(default=False)
     enable_load_balancing: bool = Field(default=False)
     load_balance_weight_primary: float = Field(default=0.7)
     trace_id_prefix: str = Field(default="solace")

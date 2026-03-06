@@ -35,7 +35,7 @@ class TestLLMClientSettings:
         assert settings.retry_attempts == 3
         assert settings.enable_caching is True
         assert settings.cache_mode == "semantic"
-        assert settings.enable_fallback is True
+        assert settings.enable_fallback is False
         assert settings.enable_load_balancing is False
 
     def test_custom_settings(self) -> None:
@@ -230,7 +230,7 @@ class TestUnifiedLLMClient:
             service_name="test_service",
         )
 
-        assert response == ""
+        assert response == "(LLM unavailable)"
 
     @pytest.mark.asyncio
     async def test_generate_with_mock_client(self) -> None:
@@ -278,7 +278,7 @@ class TestUnifiedLLMClient:
 
     @pytest.mark.asyncio
     async def test_generate_with_fallback(self) -> None:
-        """Test generate_with_fallback returns fallback on failure."""
+        """Test generate_with_fallback returns unavailable message when client is None."""
         client = UnifiedLLMClient()
         client._initialized = True
         client._client = None
@@ -289,7 +289,28 @@ class TestUnifiedLLMClient:
             fallback_response="Fallback response here",
             service_name="test_service",
         )
+        # When client is None, generate() returns "(LLM unavailable)" which is truthy
+        assert response == "(LLM unavailable)"
 
+    @pytest.mark.asyncio
+    async def test_generate_with_fallback_on_empty(self) -> None:
+        """Test generate_with_fallback returns fallback on empty response."""
+        client = UnifiedLLMClient()
+        client._initialized = True
+        client._client = MagicMock()
+        client._client.chat = MagicMock()
+        client._client.chat.completions = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = ""
+        client._client.chat.completions.create = AsyncMock(return_value=mock_response)
+
+        response = await client.generate_with_fallback(
+            system_prompt="Test",
+            user_message="Hello",
+            fallback_response="Fallback response here",
+            service_name="test_service",
+        )
         assert response == "Fallback response here"
 
     def test_extract_response_text_string(self) -> None:

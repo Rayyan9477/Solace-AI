@@ -45,6 +45,12 @@ class CrisisLevel(str, Enum):
             "extreme": cls.CRITICAL,
             "imminent": cls.CRITICAL,
             "critical": cls.CRITICAL,
+            # Spec-level aliases (GREEN/YELLOW/ORANGE/RED/EMERGENCY)
+            "green": cls.NONE,
+            "yellow": cls.LOW,
+            "orange": cls.ELEVATED,
+            "red": cls.HIGH,
+            "emergency": cls.CRITICAL,
         }
         normalized = value.strip().lower()
         if normalized in _ALIASES:
@@ -53,6 +59,17 @@ class CrisisLevel(str, Enum):
             f"Unknown crisis level: '{value}'. "
             f"Valid values: {', '.join(_ALIASES.keys())}"
         )
+
+    def to_spec_level(self) -> str:
+        """Map to system design spec level names."""
+        _MAP: dict[CrisisLevel, str] = {
+            CrisisLevel.NONE: "GREEN",
+            CrisisLevel.LOW: "YELLOW",
+            CrisisLevel.ELEVATED: "ORANGE",
+            CrisisLevel.HIGH: "RED",
+            CrisisLevel.CRITICAL: "EMERGENCY",
+        }
+        return _MAP[self]
 
     def to_severity_level(self) -> SeverityLevel:
         """Map CrisisLevel to SeverityLevel for cross-domain compatibility.

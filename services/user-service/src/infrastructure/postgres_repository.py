@@ -515,9 +515,13 @@ class PostgresConsentRepository(ConsentRepository):
     POOL_NAME = "user_db"
 
     def __init__(self, client: PostgresClient, schema: str = "public") -> None:
+        import re as _re
         self._client = client
         self._schema = schema
+        # Table name from config, not user input — safe for f-string interpolation.
         self._table = f"{schema}.consent_records"
+        assert _re.match(r'^[a-zA-Z_][a-zA-Z0-9_.]*$', self._table), \
+            f"Invalid table name: {self._table}"
 
     def _acquire(self):
         """Get connection from ConnectionPoolManager or legacy client."""

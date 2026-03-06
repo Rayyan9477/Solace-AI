@@ -65,8 +65,10 @@ class PostgresTreatmentPlanRepository(Repository[TreatmentPlanEntity]):
     POOL_NAME = "therapy_db"
 
     def __init__(self, client: PostgresClient, schema: str = "public") -> None:
+        import re as _re
+        assert _re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', schema), f"Invalid schema name: {schema}"
         self._client = client
-        self._table = f"{schema}.treatment_plans"
+        self._table = f"{schema}.treatment_plans"  # table name from config, not user input
 
     def _acquire(self):
         """Get connection from ConnectionPoolManager or legacy client."""
@@ -338,8 +340,10 @@ class PostgresTherapySessionRepository(Repository[TherapySessionEntity]):
     POOL_NAME = "therapy_db"
 
     def __init__(self, client: PostgresClient, schema: str = "public") -> None:
+        import re as _re
+        assert _re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', schema), f"Invalid schema name: {schema}"
         self._client = client
-        self._table = f"{schema}.therapy_sessions"
+        self._table = f"{schema}.therapy_sessions"  # table name from config, not user input
 
     def _acquire(self):
         """Get connection from ConnectionPoolManager or legacy client."""
@@ -641,8 +645,10 @@ class PostgresTechniqueRepository:
     POOL_NAME = "therapy_db"
 
     def __init__(self, client: PostgresClient, schema: str = "public") -> None:
+        import re as _re
+        assert _re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', schema), f"Invalid schema name: {schema}"
         self._client = client
-        self._table = f"{schema}.therapy_techniques"
+        self._table = f"{schema}.therapy_techniques"  # table name from config, not user input
 
     def _acquire(self):
         """Get connection from ConnectionPoolManager or legacy client."""
@@ -820,8 +826,10 @@ class PostgresOutcomeMeasureRepository:
     POOL_NAME = "therapy_db"
 
     def __init__(self, client: PostgresClient, schema: str = "public") -> None:
+        import re as _re
+        assert _re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', schema), f"Invalid schema name: {schema}"
         self._client = client
-        self._table = f"{schema}.outcome_measures"
+        self._table = f"{schema}.outcome_measures"  # table name from config, not user input
 
     def _acquire(self):
         """Get connection from ConnectionPoolManager or legacy client."""

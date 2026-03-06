@@ -480,6 +480,23 @@ class ErrorOccurredEvent(BaseEvent):
     stack_trace: str | None = Field(default=None)
 
 
+# Therapy Homework & Treatment Events
+class HomeworkAssignedEvent(BaseEvent):
+    """Event emitted when therapy homework is assigned."""
+    event_type: Literal["homework.assigned"] = "homework.assigned"
+    homework_description: str
+    technique_name: str
+    due_date: str | None = None
+
+
+class TreatmentResponseEvent(BaseEvent):
+    """Event emitted when treatment response is recorded."""
+    event_type: Literal["treatment.response"] = "treatment.response"
+    technique_name: str
+    response_rating: int
+    notes: str = ""
+
+
 # Event Registry for deserialization
 EVENT_REGISTRY: dict[str, type[BaseEvent]] = {
     # Session events
@@ -517,12 +534,15 @@ EVENT_REGISTRY: dict[str, type[BaseEvent]] = {
     "user.consent_changed": ConsentChangedKafkaEvent,
     # System events
     "system.health": SystemHealthEvent, "system.error": ErrorOccurredEvent,
+    # Homework & treatment events
+    "homework.assigned": HomeworkAssignedEvent, "treatment.response": TreatmentResponseEvent,
 }
 
 _TOPIC_MAP = {
     "session.": "solace.sessions", "safety.": "solace.safety", "diagnosis.": "solace.assessments",
     "therapy.": "solace.therapy", "memory.": "solace.memory", "personality.": "solace.personality",
-    "notification.": "solace.notifications", "system.": "solace.analytics",
+    "notification.": "solace.notifications", "system.": "solace.system",
+    "homework.": "solace.therapy", "treatment.": "solace.therapy",
 }
 
 

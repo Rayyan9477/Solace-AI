@@ -216,7 +216,12 @@ class TokenBlacklist(ABC):
 
 
 class InMemoryTokenBlacklist(TokenBlacklist):
-    """In-memory token blacklist for testing/development."""
+    """In-memory token blacklist for testing/development.
+
+    Memory management: _evict_expired() runs automatically every 100 token
+    revocations, removing entries whose natural JWT expiry has passed.
+    This prevents unbounded growth without needing a background sweep task.
+    """
 
     def __init__(self) -> None:
         self._blacklist: dict[str, datetime] = {}
@@ -526,11 +531,13 @@ class JWTManager:
                 "INVALID_AUDIENCE", "Invalid token audience"
             )
         except jwt.DecodeError as e:
+            logger.debug("jwt_decode_error", error=str(e))
             return AuthenticationResult.fail(
-                "DECODE_ERROR", f"Failed to decode token: {e}"
+                "DECODE_ERROR", "Failed to decode token"
             )
         except jwt.InvalidTokenError as e:
-            return AuthenticationResult.fail("INVALID_TOKEN", f"Invalid token: {e}")
+            logger.debug("jwt_invalid_token", error=str(e))
+            return AuthenticationResult.fail("INVALID_TOKEN", "Invalid token")
 
     def decode_token(
         self, token: str, expected_type: TokenType | None = None

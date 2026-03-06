@@ -91,7 +91,10 @@ class OffsetTracker:
 
     def __init__(self) -> None:
         self._offsets: dict[tuple[str, int], int] = {}
-        self._pending: dict[tuple[str, int], list[int]] = {}
+        self._pending: dict[tuple[str, int], set[int]] = {}
+        self._processed: dict[tuple[str, int], set[int]] = {}
+        self._min_offset: dict[tuple[str, int], int] = {}
+        self._max_offset: dict[tuple[str, int], int] = {}
         self._lock = asyncio.Lock()
 
     async def track_received(self, topic: str, partition: int, offset: int) -> None:
@@ -99,29 +102,40 @@ class OffsetTracker:
         async with self._lock:
             key = (topic, partition)
             if key not in self._pending:
-                self._pending[key] = []
-            self._pending[key].append(offset)
+                self._pending[key] = set()
+                self._processed[key] = set()
+                self._min_offset[key] = offset
+            self._pending[key].add(offset)
+            self._max_offset[key] = max(self._max_offset.get(key, -1), offset)
+            self._min_offset[key] = min(self._min_offset[key], offset)
 
     async def mark_processed(
         self, topic: str, partition: int, offset: int
     ) -> int | None:
-        """Mark offset as processed, return committable offset if available."""
+        """Mark offset as processed, return committable offset if available.
+
+        Walks contiguous processed offsets from the lowest tracked to find the
+        highest safe commit point.
+        """
         async with self._lock:
             key = (topic, partition)
             if key not in self._pending:
                 return None
-            pending = self._pending[key]
-            if offset in pending:
-                pending.remove(offset)
-            if not pending:
-                committable = offset + 1
+            self._pending[key].discard(offset)
+            self._processed[key].add(offset)
+            if not self._pending[key]:
+                committable = self._max_offset.get(key, offset) + 1
                 self._offsets[key] = committable
                 return committable
-            min_pending = min(pending)
-            if offset + 1 < min_pending:
-                committable = min_pending
-                self._offsets[key] = committable
-                return committable
+            # Walk contiguous processed offsets from the start
+            processed = self._processed[key]
+            cursor = self._min_offset[key]
+            while cursor in processed:
+                cursor += 1
+            prev_committed = self._offsets.get(key, self._min_offset[key])
+            if cursor > prev_committed:
+                self._offsets[key] = cursor
+                return cursor
             return None
 
     async def get_committed(self, topic: str, partition: int) -> int | None:
@@ -286,6 +300,7 @@ class EventConsumer:
         self._offset_tracker = OffsetTracker()
         self._metrics = ConsumerMetrics()
         self._running = False
+        self._loop_task: asyncio.Task[None] | None = None
         self._last_commit = datetime.now(timezone.utc)
         self._dead_letter_handler: (
             Callable[[BaseEvent, str], Awaitable[None]] | None
@@ -324,14 +339,22 @@ class EventConsumer:
         logger.info("Event consumer started", topics=topic_names)
 
     async def stop(self) -> None:
-        """Stop the consumer."""
+        """Stop the consumer and cancel the running loop task if any."""
         self._running = False
+        if self._loop_task and not self._loop_task.done():
+            self._loop_task.cancel()
+            try:
+                await self._loop_task
+            except asyncio.CancelledError:
+                pass
+            self._loop_task = None
         await self._commit_offsets()
         await self._consumer.stop()
         logger.info("Event consumer stopped")
 
     async def consume_loop(self) -> None:
         """Main consumption loop."""
+        self._loop_task = asyncio.current_task()
         while self._running:
             try:
                 messages = await self._consumer.poll(timeout_ms=1000)
