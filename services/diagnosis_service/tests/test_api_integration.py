@@ -297,7 +297,7 @@ class TestSymptomExtractionEndpoints:
             "name": "depressed_mood",
             "description": "Existing symptom",
             "symptom_type": "emotional",
-            "severity": "moderate",
+            "severity": "MODERATE",
             "confidence": "0.8",
         }]
         response = await async_client.post("/api/v1/diagnosis/extract-symptoms", json={
@@ -333,13 +333,13 @@ class TestDifferentialEndpoints:
         symptoms = [
             {"symptom_id": str(uuid4()), "name": "depressed_mood",
              "description": "Feeling sad", "symptom_type": "emotional",
-             "severity": "moderate", "confidence": "0.8"},
+             "severity": "MODERATE", "confidence": "0.8"},
             {"symptom_id": str(uuid4()), "name": "anhedonia",
              "description": "No interest", "symptom_type": "emotional",
-             "severity": "moderate", "confidence": "0.7"},
+             "severity": "MODERATE", "confidence": "0.7"},
             {"symptom_id": str(uuid4()), "name": "sleep_disturbance",
              "description": "Insomnia", "symptom_type": "somatic",
-             "severity": "mild", "confidence": "0.6"},
+             "severity": "MILD", "confidence": "0.6"},
         ]
         response = await async_client.post("/api/v1/diagnosis/differential", json={
             "user_id": str(uuid4()),
@@ -360,7 +360,7 @@ class TestDifferentialEndpoints:
         symptoms = [
             {"symptom_id": str(uuid4()), "name": "anxiety",
              "description": "Anxious", "symptom_type": "emotional",
-             "severity": "moderate", "confidence": "0.8"},
+             "severity": "MODERATE", "confidence": "0.8"},
         ]
         response = await async_client.post("/api/v1/diagnosis/differential", json={
             "user_id": str(uuid4()),
@@ -378,7 +378,7 @@ class TestDifferentialEndpoints:
         symptoms = [
             {"symptom_id": str(uuid4()), "name": "depressed_mood",
              "description": "Sad", "symptom_type": "emotional",
-             "severity": "mild", "confidence": "0.6"},
+             "severity": "MILD", "confidence": "0.6"},
         ]
         response = await async_client.post("/api/v1/diagnosis/differential", json={
             "user_id": str(uuid4()),
@@ -428,7 +428,7 @@ class TestServiceStatusEndpoints:
     @pytest.mark.asyncio
     async def test_delete_user_data(self, async_client: httpx.AsyncClient) -> None:
         """Test GDPR user data deletion."""
-        user_id = str(uuid4())
+        user_id = TEST_USER_ID
         await async_client.post("/api/v1/diagnosis/session/start", json={
             "user_id": user_id,
             "session_type": "assessment",

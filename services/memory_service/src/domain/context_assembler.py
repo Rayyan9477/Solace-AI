@@ -237,7 +237,7 @@ class ContextAssembler:
                                         session_memory: list[Any], budget: int) -> ContextSection:
         """Build recent messages section from working memory."""
         all_messages = list(working_memory) + list(session_memory)
-        all_messages = sorted(all_messages, key=lambda m: getattr(m, 'created_at', datetime.min))
+        all_messages = sorted(all_messages, key=lambda m: getattr(m, 'created_at', datetime.min.replace(tzinfo=timezone.utc)))
         recent = all_messages[-self._settings.max_recent_messages:]
         parts = ["[Conversation History]"]
         total_tokens = 5

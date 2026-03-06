@@ -65,9 +65,9 @@ class ExtractedFact:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-# KnowledgeTriple imported from semantic_memory to avoid duplicate definitions (M37).
-# The semantic_memory version is a superset (adds user_id, metadata with defaults).
-from .semantic_memory import KnowledgeTriple  # noqa: E402
+# MemoryTriple is the simplified dataclass for memory-tier triple storage.
+# knowledge_graph.MemoryTriple is the canonical Pydantic model with typed enums.
+from .semantic_memory import MemoryTriple  # noqa: E402
 
 
 class SummaryResult(BaseModel):
@@ -245,16 +245,16 @@ class ConsolidationPipeline:
                 entities.append(word.strip('.,!?'))
         return list(set(entities))[:5]
 
-    async def _build_knowledge_triples(self, facts: list[ExtractedFact]) -> list[KnowledgeTriple]:
+    async def _build_knowledge_triples(self, facts: list[ExtractedFact]) -> list[MemoryTriple]:
         """Build knowledge graph triples from extracted facts."""
-        triples: list[KnowledgeTriple] = []
+        triples: list[MemoryTriple] = []
         for fact in facts:
             for pattern_name, pattern in self._triple_patterns.items():
                 match = pattern.search(fact.content)
                 if match:
                     groups = match.groups()
                     if len(groups) >= 3:
-                        triple = KnowledgeTriple(
+                        triple = MemoryTriple(
                             subject=groups[0].strip() if groups[0] else "User",
                             predicate=groups[1].strip() if groups[1] else pattern_name,
                             object_value=groups[2].strip() if groups[2] else "",
@@ -265,7 +265,7 @@ class ConsolidationPipeline:
                             triples.append(triple)
                         break
             else:
-                triple = KnowledgeTriple(
+                triple = MemoryTriple(
                     subject="User", predicate=f"has_{fact.fact_type}",
                     object_value=fact.content[:100], confidence=fact.confidence,
                     source_fact_id=fact.fact_id,
@@ -274,7 +274,13 @@ class ConsolidationPipeline:
         return triples
 
     async def _apply_decay(self, records: list[Any]) -> tuple[int, int, int]:
-        """Apply Ebbinghaus decay model to records."""
+        """Apply Ebbinghaus exponential decay model to records.
+
+        Delegates to DecayManager for consistent decay calculation across the system.
+        """
+        from .decay_manager import DecayManager, DecayAction
+
+        decay_mgr = DecayManager()
         decayed = 0
         archived = 0
         deleted = 0
@@ -283,22 +289,23 @@ class ConsolidationPipeline:
                 continue
             if record.retention_category == "permanent":
                 continue
-            age_days = (datetime.now(timezone.utc) - record.created_at).days if hasattr(record, 'created_at') else 0
-            if record.retention_category == "short_term":
-                decay_rate = self._settings.decay_short_term_rate
-            elif record.retention_category == "medium_term":
-                decay_rate = self._settings.decay_medium_term_rate
-            else:
-                decay_rate = self._settings.decay_base_rate
             current_strength = getattr(record, 'retention_strength', Decimal("1.0"))
-            decay_factor = decay_rate * Decimal(str(age_days)) / Decimal("30")
-            new_strength = max(Decimal("0.0"), current_strength - decay_factor)
+            created_at = getattr(record, 'created_at', datetime.now(timezone.utc))
+            accessed_at = getattr(record, 'accessed_at', None)
+            item_id = getattr(record, 'record_id', uuid4())
+            result = decay_mgr.apply_decay(
+                item_id=item_id,
+                current_strength=current_strength,
+                retention_category=record.retention_category,
+                created_at=created_at,
+                accessed_at=accessed_at,
+            )
             if hasattr(record, 'retention_strength'):
-                record.retention_strength = new_strength
+                record.retention_strength = result.new_strength
             decayed += 1
-            if new_strength < self._settings.delete_threshold:
+            if result.action == DecayAction.DELETE:
                 deleted += 1
-            elif new_strength < self._settings.archive_threshold:
+            elif result.action == DecayAction.ARCHIVE:
                 archived += 1
         return decayed, archived, deleted
 
@@ -386,7 +393,7 @@ class ConsolidationPipeline:
                 "confidence": float(fact.confidence), "importance": float(fact.importance),
                 "retention": fact.retention_category, "related_entities": fact.related_entities}
 
-    def _triple_to_dict(self, triple: KnowledgeTriple) -> dict[str, Any]:
+    def _triple_to_dict(self, triple: MemoryTriple) -> dict[str, Any]:
         """Convert triple to dictionary."""
         return {"triple_id": str(triple.triple_id), "subject": triple.subject,
                 "predicate": triple.predicate, "object": triple.object_value, "confidence": float(triple.confidence)}

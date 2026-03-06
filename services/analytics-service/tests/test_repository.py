@@ -16,7 +16,7 @@ from repository import (
     ClickHouseRepository,
     InMemoryRepository,
     RepositoryError,
-    ConnectionError,
+    RepositoryConnectionError,
     QueryError,
     create_repository,
 )
@@ -469,10 +469,10 @@ class TestClickHouseRepository:
             source_service="test",
         )
 
-        with pytest.raises(ConnectionError):
+        with pytest.raises(RepositoryConnectionError):
             await repo.insert_event(event)
 
-        with pytest.raises(ConnectionError):
+        with pytest.raises(RepositoryConnectionError):
             await repo.query_events(
                 start_time=datetime.now(timezone.utc) - timedelta(hours=1),
                 end_time=datetime.now(timezone.utc),

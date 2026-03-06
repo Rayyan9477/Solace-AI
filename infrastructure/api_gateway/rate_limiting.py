@@ -198,13 +198,19 @@ class RedisRateLimitStore:
         raw_key = ":".join(components)
         return f"{self._prefix}{hashlib.sha256(raw_key.encode()).hexdigest()[:32]}"
 
+    _ATOMIC_INCR_SCRIPT = """
+    local count = redis.call('INCR', KEYS[1])
+    if count == 1 then
+        redis.call('EXPIRE', KEYS[1], ARGV[1])
+    end
+    return count
+    """
+
     async def async_increment(self, policy: RateLimitPolicy, identifier: str) -> RateLimitResult:
-        """Async increment using Redis INCR with TTL."""
+        """Async increment using atomic Redis Lua script (INCR + conditional EXPIRE)."""
         key = self._generate_key(policy, identifier)
         window_seconds = policy.window_seconds()
-        count = await self._redis.incr(key)
-        if count == 1:
-            await self._redis.expire(key, window_seconds)
+        count = await self._redis.eval(self._ATOMIC_INCR_SCRIPT, 1, key, window_seconds)
         ttl = await self._redis.ttl(key)
         allowed = count <= policy.limit
         remaining = max(0, policy.limit - count)

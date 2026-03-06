@@ -87,7 +87,7 @@ class TestClickHouseConfig:
         assert config.port == 8123
         assert config.database == "solace_analytics"
         assert config.username == "default"
-        assert config.password == ""
+        assert config.password.get_secret_value() == ""
         assert config.secure is False
         assert config.verify is True
         assert config.connect_timeout == 10.0

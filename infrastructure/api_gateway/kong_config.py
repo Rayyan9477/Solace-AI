@@ -39,9 +39,9 @@ class KongSettings(BaseSettings):
     enable_ssl_verify: bool = Field(default=True)
     workspace: str = Field(default="default")
     default_protocol: str = Field(default="http")
-    default_connect_timeout: int = Field(default=60000, ge=1000)
-    default_write_timeout: int = Field(default=60000, ge=1000)
-    default_read_timeout: int = Field(default=60000, ge=1000)
+    default_connect_timeout: int = Field(default=30000, ge=1000)
+    default_write_timeout: int = Field(default=30000, ge=1000)
+    default_read_timeout: int = Field(default=30000, ge=1000)
     model_config = SettingsConfigDict(env_prefix="KONG_", env_file=".env", extra="ignore")
 
     @field_validator("admin_url")
@@ -125,9 +125,9 @@ class ServiceConfig:
     protocol: str = "http"
     path: str = ""
     retries: int = 5
-    connect_timeout: int = 60000
-    write_timeout: int = 60000
-    read_timeout: int = 60000
+    connect_timeout: int = 30000
+    write_timeout: int = 30000
+    read_timeout: int = 30000
     enabled: bool = True
     tags: list[str] = field(default_factory=list)
 
@@ -335,13 +335,13 @@ def create_solace_gateway_config(settings: KongSettings | None = None) -> KongCo
     """Create pre-configured Kong gateway for Solace-AI services."""
     config = KongConfig(settings)
     config.define_upstream("orchestrator-upstream", algorithm=LoadBalancingAlgorithm.ROUND_ROBIN)
-    config.add_target_to_upstream("orchestrator-upstream", "orchestrator-service:8001", weight=100)
+    config.add_target_to_upstream("orchestrator-upstream", "orchestrator-service:8000", weight=100)
     config.define_upstream("user-upstream", algorithm=LoadBalancingAlgorithm.ROUND_ROBIN)
-    config.add_target_to_upstream("user-upstream", "user-service:8007", weight=100)
+    config.add_target_to_upstream("user-upstream", "user-service:8001", weight=100)
     config.define_upstream("safety-upstream", algorithm=LoadBalancingAlgorithm.ROUND_ROBIN)
     config.add_target_to_upstream("safety-upstream", "safety-service:8002", weight=100)
-    config.define_service("orchestrator-service", host="orchestrator-upstream", port=8001, path="/api/v1/orchestrator", tags=["solace", "orchestrator"])
-    config.define_service("user-service", host="user-upstream", port=8007, path="/api/v1/users", tags=["solace", "user"])
+    config.define_service("orchestrator-service", host="orchestrator-upstream", port=8000, path="/api/v1/orchestrator", tags=["solace", "orchestrator"])
+    config.define_service("user-service", host="user-upstream", port=8001, path="/api/v1/users", tags=["solace", "user"])
     config.define_service("safety-service", host="safety-upstream", port=8002, path="/api/v1/safety", tags=["solace", "safety"])
     logger.info("solace_gateway_config_created", services=3, upstreams=3)
     return config

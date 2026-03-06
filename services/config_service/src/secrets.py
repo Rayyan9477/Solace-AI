@@ -142,7 +142,6 @@ class VaultProvider(SecretProviderBase):
 
     async def get_secret(self, name: str, version: str | None = None) -> tuple[SecretStr, SecretMetadata]:
         await self._ensure_client()
-        path = f"{self._settings.vault_mount_path}/data/{name}"
         response = await asyncio.to_thread(
             self._client.secrets.kv.v2.read_secret_version,
             path=name, mount_point=self._settings.vault_mount_path, version=int(version) if version else None
@@ -270,7 +269,6 @@ class AWSSecretsManagerProvider(SecretProviderBase):
         await self._ensure_client()
         full_prefix = self._settings.aws_secrets_prefix + (prefix or "")
         paginator = self._client.get_paginator("list_secrets")
-        secrets: list[SecretMetadata] = []
         def _paginate():
             results = []
             for page in paginator.paginate(Filters=[{"Key": "name", "Values": [full_prefix]}]):

@@ -327,7 +327,7 @@ class TestReportService:
         assert stats["cached_reports"] == 0
 
     @pytest.mark.asyncio
-    async def test_invalid_report_type(self, report_service):
-        """Test that invalid report type raises error."""
-        with pytest.raises(ValueError):
-            await report_service.generate_report(ReportType.COMPLIANCE_AUDIT)
+    async def test_compliance_audit_report(self, report_service):
+        """Test that compliance audit report generates successfully."""
+        report = await report_service.generate_report(ReportType.COMPLIANCE_AUDIT)
+        assert report.report_type == ReportType.COMPLIANCE_AUDIT

@@ -17,7 +17,7 @@ services:
   # =============================================================================
 
   postgres:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     container_name: solace-postgres
     environment:
       POSTGRES_DB: ${POSTGRES_DATABASE:-solace}
@@ -35,7 +35,7 @@ services:
       retries: 5
     restart: unless-stopped
     networks:
-      - solace-network
+      - data
 
   redis:
     image: redis:7-alpine
@@ -52,7 +52,7 @@ services:
       retries: 5
     restart: unless-stopped
     networks:
-      - solace-network
+      - data
 
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
@@ -72,7 +72,7 @@ services:
       retries: 5
     restart: unless-stopped
     networks:
-      - solace-network
+      - data
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
@@ -93,7 +93,9 @@ services:
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     ports:
       - "29092:29092"
-      - "9092:9092"
+      # 9092 is the internal broker port — only expose to host if external clients need it.
+      # Services on solace-network reach Kafka via kafka:9092 without host port mapping.
+      # - "9092:9092"
     volumes:
       - kafka_data:/var/lib/kafka/data
     healthcheck:
@@ -103,14 +105,18 @@ services:
       retries: 5
     restart: unless-stopped
     networks:
-      - solace-network
+      - data
 
   weaviate:
     image: semitechnologies/weaviate:1.22.4
     container_name: solace-weaviate
     environment:
       QUERY_DEFAULTS_LIMIT: 25
-      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      # SECURITY: Anonymous access disabled. Use API key authentication.
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "false"
+      AUTHENTICATION_APIKEY_ENABLED: "true"
+      AUTHENTICATION_APIKEY_ALLOWED_KEYS: "${WEAVIATE_API_KEY:-solace-dev-key-change-in-production}"
+      AUTHENTICATION_APIKEY_USERS: "solace-admin"
       PERSISTENCE_DATA_PATH: "/var/lib/weaviate"
       DEFAULT_VECTORIZER_MODULE: "none"
       ENABLE_MODULES: ""
@@ -126,7 +132,7 @@ services:
       retries: 5
     restart: unless-stopped
     networks:
-      - solace-network
+      - data
 
   # =============================================================================
   # OBSERVABILITY STACK
@@ -144,7 +150,7 @@ services:
       - "6831:6831/udp" # Thrift compact
     restart: unless-stopped
     networks:
-      - solace-network
+      - monitoring
 
   prometheus:
     image: prom/prometheus:v2.47.0
@@ -160,12 +166,13 @@ services:
       - prometheus_data:/prometheus
     restart: unless-stopped
     networks:
-      - solace-network
+      - monitoring
 
   grafana:
     image: grafana/grafana:10.1.0
     container_name: solace-grafana
     environment:
+      # SECURITY: Change default admin credentials in production via GRAFANA_USER / GRAFANA_PASSWORD env vars.
       GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
@@ -178,7 +185,7 @@ services:
       - prometheus
     restart: unless-stopped
     networks:
-      - solace-network
+      - monitoring
 
   # =============================================================================
   # APPLICATION SERVICES
@@ -217,7 +224,8 @@ services:
       retries: 3
     restart: unless-stopped
     networks:
-      - solace-network
+      - backend
+      - data
 
   safety-service:
     build:
@@ -249,7 +257,8 @@ services:
       retries: 3
     restart: unless-stopped
     networks:
-      - solace-network
+      - backend
+      - data
 
   notification-service:
     build:
@@ -276,7 +285,7 @@ services:
       retries: 3
     restart: unless-stopped
     networks:
-      - solace-network
+      - backend
 
   diagnosis-service:
     build:
@@ -306,7 +315,8 @@ services:
       retries: 3
     restart: unless-stopped
     networks:
-      - solace-network
+      - backend
+      - data
 
   memory-service:
     build:
@@ -343,7 +353,8 @@ services:
       retries: 3
     restart: unless-stopped
     networks:
-      - solace-network
+      - backend
+      - data
 
   therapy-service:
     build:
@@ -375,7 +386,8 @@ services:
       retries: 3
     restart: unless-stopped
     networks:
-      - solace-network
+      - backend
+      - data
 
   personality-service:
     build:
@@ -405,7 +417,8 @@ services:
       retries: 3
     restart: unless-stopped
     networks:
-      - solace-network
+      - backend
+      - data
 
   orchestrator-service:
     build:
@@ -438,7 +451,8 @@ services:
       retries: 3
     restart: unless-stopped
     networks:
-      - solace-network
+      - backend
+      - frontend
 
   analytics-service:
     build:
@@ -463,7 +477,8 @@ services:
       retries: 3
     restart: unless-stopped
     networks:
-      - solace-network
+      - backend
+      - data
 
   config-service:
     build:
@@ -487,7 +502,8 @@ services:
       retries: 3
     restart: unless-stopped
     networks:
-      - solace-network
+      - backend
+      - data
 
   # =============================================================================
   # DEVELOPMENT TOOLS
@@ -501,7 +517,7 @@ services:
       - "8025:8025"   # Web UI
     restart: unless-stopped
     networks:
-      - solace-network
+      - backend
 
   # Kafka UI for development
   kafka-ui:
@@ -518,7 +534,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     networks:
-      - solace-network
+      - data
 
 # =============================================================================
 # VOLUMES
@@ -547,6 +563,11 @@ volumes:
 # =============================================================================
 
 networks:
-  solace-network:
+  frontend:
     driver: bridge
-    name: solace-network
+  backend:
+    driver: bridge
+  data:
+    driver: bridge
+  monitoring:
+    driver: bridge

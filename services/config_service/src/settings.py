@@ -394,7 +394,11 @@ class ConfigurationManager:
         return hashlib.sha256(serialized.encode()).hexdigest()
 
     async def _hot_reload_loop(self) -> None:
-        """Background task for hot configuration reload."""
+        """Background task for hot configuration reload.
+
+        Thread-safe: reload() → load() acquires self._lock, so concurrent
+        reloads from the API endpoint and this loop are serialized.
+        """
         while True:
             try:
                 await asyncio.sleep(self._settings.hot_reload_interval_seconds)

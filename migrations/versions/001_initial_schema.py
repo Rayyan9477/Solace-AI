@@ -23,16 +23,16 @@ def upgrade() -> None:
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("version", sa.Integer, nullable=False, default=1),
+        sa.Column("version", sa.Integer, nullable=False, server_default="1"),
         sa.Column("email", sa.String(255), nullable=False, unique=True),
         sa.Column("username", sa.String(128), nullable=True, unique=True),
         sa.Column("password_hash", sa.String(512), nullable=False),
-        sa.Column("is_active", sa.Boolean, nullable=False, default=True),
-        sa.Column("is_verified", sa.Boolean, nullable=False, default=False),
+        sa.Column("is_active", sa.Boolean, nullable=False, server_default="true"),
+        sa.Column("is_verified", sa.Boolean, nullable=False, server_default="false"),
         sa.Column("roles", JSONB, nullable=False, server_default="[]"),
         sa.Column("metadata", JSONB, nullable=False, server_default="{}"),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("state", sa.String(20), nullable=False, default="active"),
+        sa.Column("state", sa.String(20), nullable=False, server_default="active"),
     )
     op.create_index("ix_users_email", "users", ["email"])
     op.create_index("ix_users_created_at", "users", ["created_at"])
@@ -46,11 +46,11 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("event_type", sa.String(64), nullable=False),
         sa.Column("actor_id", sa.String(128), nullable=True),
-        sa.Column("actor_type", sa.String(32), nullable=False, default="user"),
+        sa.Column("actor_type", sa.String(32), nullable=False, server_default="user"),
         sa.Column("resource_type", sa.String(64), nullable=True),
         sa.Column("resource_id", sa.String(128), nullable=True),
         sa.Column("action", sa.String(64), nullable=False),
-        sa.Column("outcome", sa.String(32), nullable=False, default="success"),
+        sa.Column("outcome", sa.String(32), nullable=False, server_default="success"),
         sa.Column("details", JSONB, nullable=False, server_default="{}"),
         sa.Column("ip_address", sa.String(45), nullable=True),
         sa.Column("user_agent", sa.String(512), nullable=True),
@@ -67,11 +67,11 @@ def upgrade() -> None:
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("version", sa.Integer, nullable=False, default=1),
+        sa.Column("version", sa.Integer, nullable=False, server_default="1"),
         sa.Column("key", sa.String(128), nullable=False, unique=True),
         sa.Column("value", JSONB, nullable=False, server_default="{}"),
         sa.Column("description", sa.Text, nullable=True),
-        sa.Column("is_active", sa.Boolean, nullable=False, default=True),
+        sa.Column("is_active", sa.Boolean, nullable=False, server_default="true"),
     )
     op.create_index("ix_system_configurations_key", "system_configurations", ["key"])
 
@@ -84,8 +84,8 @@ def upgrade() -> None:
         sa.Column("type", sa.String(32), nullable=False),
         sa.Column("contact", sa.String(255), nullable=False),
         sa.Column("url", sa.String(512), nullable=True),
-        sa.Column("available_24_7", sa.Boolean, nullable=False, default=True),
-        sa.Column("priority", sa.Integer, nullable=False, default=0),
+        sa.Column("available_24_7", sa.Boolean, nullable=False, server_default="true"),
+        sa.Column("priority", sa.Integer, nullable=False, server_default="0"),
     )
     op.create_index("ix_safety_resources_code", "safety_resources", ["resource_code"])
 
@@ -122,13 +122,13 @@ def upgrade() -> None:
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("version", sa.Integer, nullable=False, default=1),
+        sa.Column("version", sa.Integer, nullable=False, server_default="1"),
         sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("severity_level", sa.Integer, nullable=False),
         sa.Column("event_type", sa.String(64), nullable=False),
         sa.Column("details", JSONB, nullable=False, server_default="{}"),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("state", sa.String(20), nullable=False, default="active"),
+        sa.Column("state", sa.String(20), nullable=False, server_default="active"),
         sa.Column("created_by", sa.String(64), nullable=True),
         sa.Column("updated_by", sa.String(64), nullable=True),
     )

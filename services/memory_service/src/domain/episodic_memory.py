@@ -271,23 +271,31 @@ class EpisodicMemoryManager:
         }
 
     def apply_decay(self, user_id: UUID, decay_rates: dict[str, Decimal]) -> tuple[int, int]:
-        """Apply decay to summaries and events."""
+        """Apply Ebbinghaus decay to summaries and events.
+
+        Uses R(t) = e^(-λ*t) * S where λ is the decay rate and t is elapsed hours.
+        """
+        import math
         decayed = 0
         archived = 0
         base_rate = decay_rates.get("episodic", Decimal("0.02"))
         for summary in self._summaries.get(user_id, []):
-            age_days = (datetime.now(timezone.utc) - summary.session_date).days
-            decay = base_rate * Decimal(str(age_days)) / Decimal("30")
-            summary.retention_strength = max(Decimal("0.1"), summary.retention_strength - decay)
+            elapsed_hours = (datetime.now(timezone.utc) - summary.session_date).total_seconds() / 3600
+            summary.retention_strength = max(
+                Decimal("0.1"),
+                Decimal(str(math.exp(-float(base_rate) * elapsed_hours))) * summary.retention_strength,
+            )
             decayed += 1
             if summary.retention_strength < Decimal("0.3"):
                 archived += 1
         for event in self._events.get(user_id, []):
             if event.event_type == EventType.CRISIS:
                 continue
-            age_days = (datetime.now(timezone.utc) - event.occurred_at).days
-            decay = base_rate * Decimal(str(age_days)) / Decimal("30")
-            event.retention_strength = max(Decimal("0.1"), event.retention_strength - decay)
+            elapsed_hours = (datetime.now(timezone.utc) - event.occurred_at).total_seconds() / 3600
+            event.retention_strength = max(
+                Decimal("0.1"),
+                Decimal(str(math.exp(-float(base_rate) * elapsed_hours))) * event.retention_strength,
+            )
             decayed += 1
             if event.retention_strength < Decimal("0.3"):
                 archived += 1

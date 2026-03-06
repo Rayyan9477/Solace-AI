@@ -262,7 +262,6 @@ class KnowledgeGraph:
     def get_entity_relationships(self, entity_name: str, include_incoming: bool = True, include_outgoing: bool = True) -> list[KnowledgeTriple]:
         """Get all relationships for an entity."""
         results = []
-        entity_lower = entity_name.lower()
         if include_outgoing:
             results.extend(self.query(subject=entity_name))
         if include_incoming:

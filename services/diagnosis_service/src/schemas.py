@@ -18,6 +18,7 @@ class DiagnosisPhase(str, Enum):
     ASSESSMENT = "assessment"
     DIAGNOSIS = "diagnosis"
     CLOSURE = "closure"
+    CRISIS = "crisis"
 
 
 from solace_common.enums import SeverityLevel  # noqa: E402

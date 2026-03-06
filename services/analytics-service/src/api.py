@@ -441,7 +441,8 @@ async def ingest_event(
             "source_service": "api-ingest",
             **request.metadata,
         },
-        **request.payload,
+        # Payload stored under its own key to prevent field override attacks
+        "payload": request.payload,
     }
 
     success = await consumer.process_event(event_data)

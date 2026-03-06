@@ -66,8 +66,14 @@ class UserFact:
 
 
 @dataclass
-class KnowledgeTriple:
-    """A knowledge graph triple (subject, predicate, object)."""
+class MemoryTriple:
+    """A simplified knowledge triple for memory tier storage.
+
+    Note: knowledge_graph.MemoryTriple is the canonical Pydantic model with
+    typed enums (EntityType, RelationType) for structured graph operations.
+    This dataclass uses plain strings and is used by SemanticMemoryManager
+    and the consolidation pipeline for lightweight triple storage.
+    """
     triple_id: UUID = field(default_factory=uuid4)
     user_id: UUID = field(default_factory=uuid4)
     subject: str = ""
@@ -106,7 +112,7 @@ class SemanticMemoryManager:
     def __init__(self, settings: SemanticMemorySettings | None = None) -> None:
         self._settings = settings or SemanticMemorySettings()
         self._facts: dict[UUID, list[UserFact]] = {}
-        self._triples: dict[UUID, list[KnowledgeTriple]] = {}
+        self._triples: dict[UUID, list[MemoryTriple]] = {}
         self._entities: dict[UUID, dict[str, Entity]] = {}
         self._stats = {"facts_stored": 0, "facts_updated": 0, "triples_stored": 0,
                        "queries": 0, "conflicts_resolved": 0}
@@ -218,10 +224,10 @@ class SemanticMemoryManager:
 
     def store_triple(self, user_id: UUID, subject: str, predicate: str, object_value: str,
                      confidence: Decimal, source_fact_id: UUID | None = None,
-                     metadata: dict[str, Any] | None = None) -> KnowledgeTriple:
+                     metadata: dict[str, Any] | None = None) -> MemoryTriple:
         """Store a knowledge graph triple."""
         self._stats["triples_stored"] += 1
-        triple = KnowledgeTriple(
+        triple = MemoryTriple(
             user_id=user_id, subject=subject, predicate=predicate,
             object_value=object_value, confidence=confidence,
             source_fact_id=source_fact_id, metadata=metadata or {},
@@ -234,7 +240,7 @@ class SemanticMemoryManager:
         logger.debug("triple_stored", user_id=str(user_id), subject=subject, predicate=predicate)
         return triple
 
-    def query_knowledge_graph(self, query: KnowledgeGraphQuery) -> list[KnowledgeTriple]:
+    def query_knowledge_graph(self, query: KnowledgeGraphQuery) -> list[MemoryTriple]:
         """Query the knowledge graph."""
         self._stats["queries"] += 1
         triples = self._triples.get(query.user_id, [])
@@ -247,7 +253,7 @@ class SemanticMemoryManager:
         triples = [t for t in triples if float(t.confidence) >= query.min_confidence]
         return sorted(triples, key=lambda t: t.confidence, reverse=True)[:query.limit]
 
-    def get_entity_relationships(self, user_id: UUID, entity_name: str) -> list[KnowledgeTriple]:
+    def get_entity_relationships(self, user_id: UUID, entity_name: str) -> list[MemoryTriple]:
         """Get all relationships for an entity."""
         triples = self._triples.get(user_id, [])
         name_lower = entity_name.lower()

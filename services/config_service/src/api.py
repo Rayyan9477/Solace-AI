@@ -166,6 +166,21 @@ async def health_check(
     )
 
 
+@router.get("/config/sections/{section}", response_model=ConfigSectionResponse)
+async def get_config_section(
+    section: str,
+    config: ConfigurationManager = Depends(_get_config_manager),
+    _: str = Depends(_verify_api_key),
+) -> ConfigSectionResponse:
+    """Get entire configuration section."""
+    data = config.get_section(section)
+    if not data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Section not found: {section}")
+    return ConfigSectionResponse(
+        section=section, data=data, environment=config.environment.value
+    )
+
+
 @router.get("/config/{key:path}", response_model=ConfigResponse)
 async def get_config_value(
     key: str,
@@ -185,21 +200,6 @@ async def get_config_value(
     except Exception as e:
         logger.error("config_get_error", key=key, error=str(e))
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-
-
-@router.get("/config/sections/{section}", response_model=ConfigSectionResponse)
-async def get_config_section(
-    section: str,
-    config: ConfigurationManager = Depends(_get_config_manager),
-    _: str = Depends(_verify_api_key),
-) -> ConfigSectionResponse:
-    """Get entire configuration section."""
-    data = config.get_section(section)
-    if not data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Section not found: {section}")
-    return ConfigSectionResponse(
-        section=section, data=data, environment=config.environment.value
-    )
 
 
 @router.post("/config/reload")

@@ -59,7 +59,11 @@ async def run_async_migrations() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode with async engine."""
+    """Run migrations in 'online' mode with async engine.
+
+    asyncio.run() is correct here: migrations run as a standalone CLI script
+    (alembic upgrade head), not inside a running event loop.
+    """
     asyncio.run(run_async_migrations())
 
 

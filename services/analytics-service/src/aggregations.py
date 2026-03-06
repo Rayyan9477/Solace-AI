@@ -268,7 +268,7 @@ class MetricsStore:
         for bucket in self._buckets[metric_name].values():
             if bucket.window.window_type != window_type:
                 continue
-            if bucket.window.end < start_time or bucket.window.start > end_time:
+            if bucket.window.end <= start_time or bucket.window.start >= end_time:
                 continue
             if labels and not self._labels_match(bucket.labels, labels):
                 continue

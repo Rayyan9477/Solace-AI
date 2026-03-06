@@ -61,8 +61,11 @@ class PostgresDiagnosisRepository(DiagnosisRepositoryPort):
     POOL_NAME = "diagnosis_db"
 
     def __init__(self, client: PostgresClient, schema: str = "public") -> None:
+        import re as _re
+        assert _re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', schema), f"Invalid schema name: {schema}"
         self._client = client
         self._schema = schema
+        # Table names from config, not user input
         self._sessions_table = f"{schema}.diagnosis_sessions"
         self._records_table = f"{schema}.diagnosis_records"
         self._stats = {"sessions_saved": 0, "records_saved": 0, "queries": 0, "deletes": 0}
@@ -389,12 +392,17 @@ class PostgresDiagnosisRepository(DiagnosisRepositoryPort):
 
     def _dict_to_symptom(self, data: dict[str, Any]) -> SymptomEntity:
         """Convert dictionary to symptom entity."""
+        try:
+            severity = SeverityLevel.from_string(data.get("severity", "mild"))
+        except ValueError:
+            logger.warning("unknown_severity_level", severity=data.get("severity"), fallback="MILD")
+            severity = SeverityLevel.MILD
         return SymptomEntity(
             id=UUID(data["id"]),
             name=data.get("name", ""),
             description=data.get("description", ""),
             symptom_type=SymptomType(data.get("symptom_type", "emotional")),
-            severity=SeverityLevel.from_string(data.get("severity", "mild")),
+            severity=severity,
             onset=data.get("onset"),
             duration=data.get("duration"),
             frequency=data.get("frequency"),
@@ -418,6 +426,12 @@ class PostgresDiagnosisRepository(DiagnosisRepositoryPort):
             for k, v in data["hitop_dimensions"].items():
                 hitop[k] = Decimal(v) if v else Decimal("0")
 
+        try:
+            severity = SeverityLevel.from_string(data.get("severity", "mild"))
+        except ValueError:
+            logger.warning("unknown_severity_level", severity=data.get("severity"), fallback="MILD")
+            severity = SeverityLevel.MILD
+
         return HypothesisEntity(
             id=UUID(data["id"]),
             name=data.get("name", ""),
@@ -429,7 +443,7 @@ class PostgresDiagnosisRepository(DiagnosisRepositoryPort):
             criteria_missing=data.get("criteria_missing", []),
             supporting_evidence=data.get("supporting_evidence", []),
             contra_evidence=data.get("contra_evidence", []),
-            severity=SeverityLevel.from_string(data.get("severity", "mild")),
+            severity=severity,
             hitop_dimensions=hitop,
             session_id=UUID(data["session_id"]) if data.get("session_id") else None,
             challenged=data.get("challenged", False),

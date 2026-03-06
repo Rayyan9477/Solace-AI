@@ -613,7 +613,8 @@ class ReportService:
             ReportType.ENGAGEMENT_METRICS: EngagementMetricsReportGenerator(),
             ReportType.COMPLIANCE_AUDIT: ComplianceAuditReportGenerator(),
         }
-        self._report_cache: dict[str, Report] = {}
+        self._report_cache: dict[str, tuple[Report, datetime]] = {}
+        self._cache_ttl = timedelta(minutes=15)
         self._stats = {"reports_generated": 0, "cache_hits": 0}
         logger.info("report_service_initialized", available_reports=list(self._generators.keys()))
 
@@ -628,9 +629,12 @@ class ReportService:
         cache_key = f"{report_type.value}:{time_range.start.isoformat()}:{time_range.end.isoformat()}"
 
         if use_cache and cache_key in self._report_cache:
-            self._stats["cache_hits"] += 1
-            logger.debug("report_cache_hit", report_type=report_type.value)
-            return self._report_cache[cache_key]
+            cached_report, cached_at = self._report_cache[cache_key]
+            if datetime.now(timezone.utc) - cached_at < self._cache_ttl:
+                self._stats["cache_hits"] += 1
+                logger.debug("report_cache_hit", report_type=report_type.value)
+                return cached_report
+            del self._report_cache[cache_key]
 
         generator = self._generators.get(report_type)
         if not generator:
@@ -638,7 +642,7 @@ class ReportService:
 
         logger.info("generating_report", report_type=report_type.value, period=time_range.period.value)
         report = await generator.generate(self._aggregator, time_range)
-        self._report_cache[cache_key] = report
+        self._report_cache[cache_key] = (report, datetime.now(timezone.utc))
         if len(self._report_cache) > 128:
             oldest_key = next(iter(self._report_cache))
             del self._report_cache[oldest_key]

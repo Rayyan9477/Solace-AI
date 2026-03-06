@@ -22,6 +22,10 @@ class SeveritySettings(BaseSettings):
     enable_gad7: bool = Field(default=True)
     enable_phq15: bool = Field(default=True)
     enable_pcl5: bool = Field(default=True)
+    enable_cssrs: bool = Field(default=True)
+    enable_audit: bool = Field(default=True)
+    enable_mdq: bool = Field(default=True)
+    enable_asrs: bool = Field(default=True)
     min_items_for_assessment: int = Field(default=3)
     imputation_method: str = Field(default="mean")
     model_config = SettingsConfigDict(env_prefix="SEVERITY_", env_file=".env", extra="ignore")
@@ -51,6 +55,10 @@ class SeverityAssessmentResult:
     anxiety_severity: QuestionnaireResult | None = None
     somatic_severity: QuestionnaireResult | None = None
     trauma_severity: QuestionnaireResult | None = None
+    suicidality_severity: QuestionnaireResult | None = None
+    alcohol_severity: QuestionnaireResult | None = None
+    bipolar_screen: QuestionnaireResult | None = None
+    adhd_screen: QuestionnaireResult | None = None
     composite_score: float = 0.0
     functional_impairment: str = "none"
 
@@ -64,6 +72,10 @@ class SeverityAssessor:
         self._gad7_items = self._build_gad7_items()
         self._phq15_items = self._build_phq15_items()
         self._pcl5_items = self._build_pcl5_items()
+        self._cssrs_items = self._build_cssrs_items()
+        self._audit_items = self._build_audit_items()
+        self._mdq_items = self._build_mdq_items()
+        self._asrs_items = self._build_asrs_items()
         self._symptom_mappings = self._build_symptom_mappings()
         self._stats = {"assessments": 0, "phq9_scored": 0, "gad7_scored": 0}
 
@@ -126,6 +138,63 @@ class SeverityAssessor:
             "pcl5_10": {"text": "Blaming yourself or others", "symptom": "blame"},
         }
 
+    def _build_cssrs_items(self) -> dict[str, dict[str, Any]]:
+        """Build C-SSRS suicidality assessment items."""
+        return {
+            "cssrs_1": {"text": "Wish to be dead", "symptom": "death_wish", "level": 1},
+            "cssrs_2": {"text": "Non-specific active suicidal thoughts", "symptom": "suicidal_thoughts", "level": 2},
+            "cssrs_3": {"text": "Active suicidal ideation with any methods (not plan) without intent", "symptom": "suicidal_ideation_methods", "level": 3},
+            "cssrs_4": {"text": "Active suicidal ideation with some intent to act, without specific plan", "symptom": "suicidal_intent", "level": 4},
+            "cssrs_5": {"text": "Active suicidal ideation with specific plan and intent", "symptom": "suicidal_plan", "level": 5},
+            "cssrs_6": {"text": "Preparatory acts or behavior", "symptom": "preparatory_behavior", "level": 5},
+        }
+
+    def _build_audit_items(self) -> dict[str, dict[str, Any]]:
+        """Build AUDIT alcohol screening items."""
+        return {
+            "audit_1": {"text": "How often do you have a drink containing alcohol?", "symptom": "alcohol_frequency"},
+            "audit_2": {"text": "How many drinks containing alcohol on a typical drinking day?", "symptom": "alcohol_quantity"},
+            "audit_3": {"text": "How often have you had 6+ drinks on one occasion?", "symptom": "binge_drinking"},
+            "audit_4": {"text": "Unable to stop drinking once started", "symptom": "impaired_control"},
+            "audit_5": {"text": "Failed to do what was normally expected due to drinking", "symptom": "role_failure"},
+            "audit_6": {"text": "Needed a first drink in the morning", "symptom": "morning_drinking"},
+            "audit_7": {"text": "Guilt or remorse after drinking", "symptom": "drinking_guilt"},
+            "audit_8": {"text": "Unable to remember events due to drinking", "symptom": "blackouts"},
+            "audit_9": {"text": "Injury related to drinking", "symptom": "alcohol_injury"},
+            "audit_10": {"text": "Others concerned about your drinking", "symptom": "others_concerned"},
+        }
+
+    def _build_mdq_items(self) -> dict[str, dict[str, Any]]:
+        """Build MDQ bipolar screening items."""
+        return {
+            "mdq_1": {"text": "Felt so good or hyper that others thought you were not your normal self", "symptom": "elevated_mood"},
+            "mdq_2": {"text": "Were so irritable that you shouted at people", "symptom": "irritability"},
+            "mdq_3": {"text": "Felt much more self-confident than usual", "symptom": "grandiosity"},
+            "mdq_4": {"text": "Got much less sleep than usual and still didn't feel tired", "symptom": "decreased_sleep"},
+            "mdq_5": {"text": "Were much more talkative or spoke faster than usual", "symptom": "pressured_speech"},
+            "mdq_6": {"text": "Thoughts raced through your head", "symptom": "racing_thoughts"},
+            "mdq_7": {"text": "Were so easily distracted that you had trouble concentrating", "symptom": "distractibility"},
+            "mdq_8": {"text": "Had much more energy than usual", "symptom": "increased_energy"},
+            "mdq_9": {"text": "Were much more active or did many more things than usual", "symptom": "increased_activity"},
+            "mdq_10": {"text": "Were much more social or outgoing than usual", "symptom": "increased_sociability"},
+            "mdq_11": {"text": "Were much more interested in sex than usual", "symptom": "hypersexuality"},
+            "mdq_12": {"text": "Did things that were unusual for you or that others might think excessive", "symptom": "excessive_behavior"},
+            "mdq_13": {"text": "Spending money got you or your family in trouble", "symptom": "reckless_spending"},
+            "mdq_14": {"text": "Several symptoms occurred during the same period", "symptom": "concurrent_symptoms"},
+            "mdq_15": {"text": "Caused moderate or serious problems", "symptom": "functional_impairment"},
+        }
+
+    def _build_asrs_items(self) -> dict[str, dict[str, Any]]:
+        """Build ASRS ADHD screening items."""
+        return {
+            "asrs_1": {"text": "Trouble wrapping up final details of a project", "symptom": "inattention_detail"},
+            "asrs_2": {"text": "Difficulty getting things in order for a task requiring organization", "symptom": "organization_difficulty"},
+            "asrs_3": {"text": "Problems remembering appointments or obligations", "symptom": "forgetfulness"},
+            "asrs_4": {"text": "Avoid or delay starting tasks requiring a lot of thought", "symptom": "task_avoidance"},
+            "asrs_5": {"text": "Fidget or squirm with hands or feet in long meetings", "symptom": "hyperactivity"},
+            "asrs_6": {"text": "Feel overly active and compelled to do things", "symptom": "restlessness"},
+        }
+
     def _build_symptom_mappings(self) -> dict[str, list[str]]:
         """Build symptom to questionnaire item mappings."""
         mappings: dict[str, list[str]] = {}
@@ -156,6 +225,14 @@ class SeverityAssessor:
             result.somatic_severity = self._score_phq15(all_responses)
         if self._settings.enable_pcl5:
             result.trauma_severity = self._score_pcl5(all_responses)
+        if self._settings.enable_cssrs:
+            result.suicidality_severity = self._score_cssrs(all_responses)
+        if self._settings.enable_audit:
+            result.alcohol_severity = self._score_audit(all_responses)
+        if self._settings.enable_mdq:
+            result.bipolar_screen = self._score_mdq(all_responses)
+        if self._settings.enable_asrs:
+            result.adhd_screen = self._score_asrs(all_responses)
         result.overall_severity = self._calculate_overall_severity(result)
         result.composite_score = self._calculate_composite_score(result)
         result.functional_impairment = self._assess_functional_impairment(result)
@@ -262,6 +339,72 @@ class SeverityAssessor:
         result.interpretation = self._get_pcl5_interpretation(result.total_score)
         return result
 
+    def _score_cssrs(self, responses: dict[str, int]) -> QuestionnaireResult:
+        """Score C-SSRS suicidality assessment."""
+        result = QuestionnaireResult(questionnaire="C-SSRS", max_score=5)
+        max_level = 0
+        item_scores: dict[str, int] = {}
+        for item_id, item in self._cssrs_items.items():
+            if item_id in responses and responses[item_id] > 0:
+                item_scores[item_id] = responses[item_id]
+                max_level = max(max_level, item["level"])
+                result.items_answered += 1
+        result.item_scores = item_scores
+        result.total_score = max_level
+        result.severity_level = self._interpret_cssrs(max_level)
+        result.interpretation = self._get_cssrs_interpretation(max_level)
+        result.recommendations = self._get_cssrs_recommendations(max_level)
+        return result
+
+    def _score_audit(self, responses: dict[str, int]) -> QuestionnaireResult:
+        """Score AUDIT alcohol screening."""
+        result = QuestionnaireResult(questionnaire="AUDIT", max_score=40)
+        item_scores: dict[str, int] = {}
+        for item_id in self._audit_items:
+            if item_id in responses:
+                score = min(max(responses[item_id], 0), 4)
+                item_scores[item_id] = score
+                result.items_answered += 1
+        result.item_scores = item_scores
+        result.total_score = sum(item_scores.values())
+        result.severity_level = self._interpret_audit(result.total_score)
+        result.interpretation = self._get_audit_interpretation(result.total_score)
+        return result
+
+    def _score_mdq(self, responses: dict[str, int]) -> QuestionnaireResult:
+        """Score MDQ bipolar screening."""
+        result = QuestionnaireResult(questionnaire="MDQ", max_score=15)
+        item_scores: dict[str, int] = {}
+        for item_id in self._mdq_items:
+            if item_id in responses:
+                score = min(max(responses[item_id], 0), 1)
+                item_scores[item_id] = score
+                result.items_answered += 1
+        result.item_scores = item_scores
+        result.total_score = sum(item_scores.values())
+        yes_count = sum(1 for v in list(item_scores.values())[:13] if v > 0)
+        concurrent = item_scores.get("mdq_14", 0) > 0
+        impairment = item_scores.get("mdq_15", 0) > 0
+        positive_screen = yes_count >= 7 and concurrent and impairment
+        result.severity_level = SeverityLevel.MODERATE if positive_screen else SeverityLevel.MINIMAL
+        result.interpretation = "Positive bipolar screen - clinical evaluation recommended" if positive_screen else "Negative bipolar screen"
+        return result
+
+    def _score_asrs(self, responses: dict[str, int]) -> QuestionnaireResult:
+        """Score ASRS ADHD screening."""
+        result = QuestionnaireResult(questionnaire="ASRS", max_score=24)
+        item_scores: dict[str, int] = {}
+        for item_id in self._asrs_items:
+            if item_id in responses:
+                score = min(max(responses[item_id], 0), 4)
+                item_scores[item_id] = score
+                result.items_answered += 1
+        result.item_scores = item_scores
+        result.total_score = sum(item_scores.values())
+        result.severity_level = self._interpret_asrs(result.total_score)
+        result.interpretation = self._get_asrs_interpretation(result.total_score)
+        return result
+
     def _interpret_phq9(self, score: int) -> SeverityLevel:
         """Interpret PHQ-9 score to severity level."""
         if score >= 20:
@@ -356,6 +499,56 @@ class SeverityAssessor:
             return ["Monitoring recommended", "Psychoeducation about anxiety management"]
         return ["Continue routine care"]
 
+    def _interpret_cssrs(self, level: int) -> SeverityLevel:
+        if level >= 4: return SeverityLevel.SEVERE
+        if level >= 3: return SeverityLevel.MODERATELY_SEVERE
+        if level >= 2: return SeverityLevel.MODERATE
+        if level >= 1: return SeverityLevel.MILD
+        return SeverityLevel.MINIMAL
+
+    def _get_cssrs_interpretation(self, level: int) -> str:
+        interpretations = {
+            0: "No suicidal ideation",
+            1: "Wish to be dead - passive ideation",
+            2: "Non-specific active suicidal thoughts",
+            3: "Active ideation with methods, no intent",
+            4: "Active ideation with intent, no plan",
+            5: "Active ideation with specific plan and intent - IMMEDIATE RISK",
+        }
+        return interpretations.get(level, "Unknown level")
+
+    def _get_cssrs_recommendations(self, level: int) -> list[str]:
+        if level >= 4: return ["Immediate safety assessment", "Consider hospitalization", "Remove access to means", "Contact emergency services if needed"]
+        if level >= 3: return ["Urgent clinical evaluation", "Safety planning", "Increase monitoring frequency"]
+        if level >= 2: return ["Clinical evaluation recommended", "Develop safety plan", "Regular follow-up"]
+        if level >= 1: return ["Monitor and reassess", "Explore protective factors"]
+        return ["Continue routine assessment"]
+
+    def _interpret_audit(self, score: int) -> SeverityLevel:
+        if score >= 20: return SeverityLevel.SEVERE
+        if score >= 16: return SeverityLevel.MODERATELY_SEVERE
+        if score >= 8: return SeverityLevel.MODERATE
+        if score >= 1: return SeverityLevel.MILD
+        return SeverityLevel.MINIMAL
+
+    def _get_audit_interpretation(self, score: int) -> str:
+        if score >= 20: return "Zone IV - Possible dependence, referral for evaluation"
+        if score >= 16: return "Zone III - Harmful/hazardous drinking, brief counseling + monitoring"
+        if score >= 8: return "Zone II - Hazardous drinking, simple advice recommended"
+        if score >= 1: return "Zone I - Low risk drinking"
+        return "No alcohol use indicated"
+
+    def _interpret_asrs(self, score: int) -> SeverityLevel:
+        if score >= 17: return SeverityLevel.SEVERE
+        if score >= 14: return SeverityLevel.MODERATE
+        if score >= 9: return SeverityLevel.MILD
+        return SeverityLevel.MINIMAL
+
+    def _get_asrs_interpretation(self, score: int) -> str:
+        if score >= 14: return "Highly consistent with ADHD - clinical evaluation recommended"
+        if score >= 9: return "Consistent with ADHD - further screening recommended"
+        return "Below ADHD screening threshold"
+
     def _calculate_overall_severity(self, result: SeverityAssessmentResult) -> SeverityLevel:
         """Calculate overall severity from individual assessments."""
         severities: list[SeverityLevel] = []
@@ -367,6 +560,14 @@ class SeverityAssessor:
             severities.append(result.somatic_severity.severity_level)
         if result.trauma_severity:
             severities.append(result.trauma_severity.severity_level)
+        if result.suicidality_severity:
+            severities.append(result.suicidality_severity.severity_level)
+        if result.alcohol_severity:
+            severities.append(result.alcohol_severity.severity_level)
+        if result.bipolar_screen:
+            severities.append(result.bipolar_screen.severity_level)
+        if result.adhd_screen:
+            severities.append(result.adhd_screen.severity_level)
         if not severities:
             return SeverityLevel.MINIMAL
         severity_order = [SeverityLevel.MINIMAL, SeverityLevel.MILD, SeverityLevel.MODERATE,

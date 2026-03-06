@@ -21,6 +21,8 @@ from .models import (
     SessionState, AssessmentResult, ExtractionResult, DifferentialResult,
     SessionStartResult, SessionEndResult, HistoryResult, ChallengeResult,
 )
+from .advocate import DevilsAdvocate, AdvocateSettings
+from .confidence import ConfidenceCalibrator, ConfidenceSettings
 from services.shared import ServiceBase
 
 if TYPE_CHECKING:
@@ -49,11 +51,15 @@ class DiagnosisService(ServiceBase):
     def __init__(self, settings: DiagnosisServiceSettings | None = None,
                  symptom_extractor: SymptomExtractor | None = None,
                  differential_generator: DifferentialGenerator | None = None,
-                 repository: DiagnosisRepositoryPort | None = None) -> None:
+                 repository: DiagnosisRepositoryPort | None = None,
+                 advocate: DevilsAdvocate | None = None,
+                 calibrator: ConfidenceCalibrator | None = None) -> None:
         self._settings = settings or DiagnosisServiceSettings()
         self._symptom_extractor = symptom_extractor
         self._differential_generator = differential_generator
         self._repository = repository
+        self._advocate = advocate or DevilsAdvocate()
+        self._calibrator = calibrator or ConfidenceCalibrator()
         self._active_sessions: dict[UUID, SessionState] = {}
         self._user_session_counts: dict[UUID, int] = {}
         self._user_history: dict[UUID, list[dict[str, Any]]] = {}
@@ -126,7 +132,7 @@ class DiagnosisService(ServiceBase):
         result.confidence_score = Decimal(str(step4_result["confidence"]))
         result.safety_flags = step1_result.get("risk_indicators", [])
         result.processing_time_ms = int((time.perf_counter() - start_time) * 1000)
-        self._update_session(session_id, result)
+        await self._update_session(session_id, result)
         logger.debug("assessment_completed", user_id=str(user_id), time_ms=result.processing_time_ms)
         return result
 
@@ -151,25 +157,30 @@ class DiagnosisService(ServiceBase):
         """Step 3: Challenge - Devil's Advocate adversarial review."""
         if not self._settings.enable_anti_sycophancy:
             return {"challenges": [], "alternatives": [], "biases": []}
-        challenges, biases = [], []
-        for hyp in hypotheses[:3]:
-            if hyp.confidence > Decimal("0.7"):
-                challenges.append(f"High confidence ({hyp.confidence}) for {hyp.name} may indicate confirmation bias")
-                biases.append("anchoring_bias")
-            if len(hyp.criteria_missing) > len(hyp.criteria_met):
-                challenges.append(f"{hyp.name} has more missing than met criteria")
-            unexplained = [s for s in symptoms if s.name not in str(hyp.supporting_evidence)]
-            if unexplained:
-                challenges.append(f"{len(unexplained)} symptoms unexplained by {hyp.name}")
-        if len(hypotheses) == 1:
-            biases.append("premature_closure")
-            challenges.append("Only one hypothesis considered - possible premature closure")
-        return {"challenges": challenges, "alternatives": [], "biases": biases}
+        all_challenges: list[str] = []
+        all_alternatives: list[str] = []
+        all_biases: list[str] = []
+        total_adjustment = Decimal("0.0")
+        for hyp in hypotheses[:self._settings.max_hypotheses]:
+            challenge_result = await self._advocate.challenge_hypothesis(hyp, symptoms, {})
+            all_challenges.extend(challenge_result.challenges)
+            all_alternatives.extend(challenge_result.alternative_explanations)
+            all_biases.extend(challenge_result.bias_flags)
+            total_adjustment += challenge_result.confidence_adjustment
+        bias_result = await self._advocate.analyze_bias(hypotheses, symptoms, [])
+        all_biases.extend(bias_result.detected_biases)
+        return {
+            "challenges": all_challenges,
+            "alternatives": all_alternatives,
+            "biases": list(set(all_biases)),
+            "confidence_adjustment": total_adjustment,
+            "bias_analysis": bias_result,
+        }
 
     async def _step4_synthesize(self, hypotheses: list[HypothesisDTO], challenge_result: dict[str, Any],
                                  phase: DiagnosisPhase, message: str) -> dict[str, Any]:
         """Step 4: Synthesize - Integrate and generate response."""
-        calibrated = self._calibrate_confidence(hypotheses, challenge_result)
+        calibrated = await self._calibrate_confidence(hypotheses, challenge_result)
         primary = calibrated[0] if calibrated else None
         alternatives = calibrated[1:] if len(calibrated) > 1 else []
         differential = DifferentialDTO(primary=primary, alternatives=alternatives,
@@ -179,24 +190,30 @@ class DiagnosisService(ServiceBase):
         return {"differential": differential, "next_question": next_question,
                 "response": response, "confidence": float(primary.confidence) if primary else 0.5}
 
-    def _calibrate_confidence(self, hypotheses: list[HypothesisDTO], challenges: dict[str, Any]) -> list[HypothesisDTO]:
-        """Calibrate confidence scores based on challenges."""
-        penalty = Decimal("0.05") * len(challenges.get("biases", []))
-        calibrated = [HypothesisDTO(
-            hypothesis_id=h.hypothesis_id, name=h.name, dsm5_code=h.dsm5_code, icd11_code=h.icd11_code,
-            confidence=max(Decimal("0.1"), h.confidence - penalty), confidence_interval=h.confidence_interval,
-            criteria_met=h.criteria_met, criteria_missing=h.criteria_missing,
-            supporting_evidence=h.supporting_evidence, contra_evidence=h.contra_evidence,
-            severity=h.severity, hitop_dimensions=h.hitop_dimensions,
-        ) for h in hypotheses]
-        return sorted(calibrated, key=lambda h: h.confidence, reverse=True)
+    async def _calibrate_confidence(self, hypotheses: list[HypothesisDTO], challenges: dict[str, Any]) -> list[HypothesisDTO]:
+        """Calibrate confidence scores using Bayesian calibrator and challenge results."""
+        calibrated_hypotheses: list[HypothesisDTO] = []
+        challenge_adjustment = challenges.get("confidence_adjustment", Decimal("0.0"))
+        for h in hypotheses:
+            cal_result = await self._calibrator.calibrate(h, [], {})
+            adjusted = max(Decimal("0.1"), cal_result.calibrated_confidence + challenge_adjustment)
+            adjusted = min(Decimal("0.95"), adjusted)
+            calibrated_hypotheses.append(HypothesisDTO(
+                hypothesis_id=h.hypothesis_id, name=h.name, dsm5_code=h.dsm5_code, icd11_code=h.icd11_code,
+                confidence=adjusted, confidence_interval=cal_result.confidence_interval,
+                criteria_met=h.criteria_met, criteria_missing=h.criteria_missing,
+                supporting_evidence=h.supporting_evidence, contra_evidence=h.contra_evidence,
+                severity=h.severity, hitop_dimensions=h.hitop_dimensions,
+            ))
+        return sorted(calibrated_hypotheses, key=lambda h: h.confidence, reverse=True)
 
     def _generate_next_question(self, phase: DiagnosisPhase, differential: DifferentialDTO, challenges: dict) -> str | None:
         """Generate next question based on phase and differential."""
         questions = {DiagnosisPhase.RAPPORT: "How have you been feeling overall lately?",
                     DiagnosisPhase.HISTORY: "Can you tell me more about when these feelings started?",
                     DiagnosisPhase.ASSESSMENT: "On a scale of 0-10, how would you rate the intensity?",
-                    DiagnosisPhase.DIAGNOSIS: "Based on what we've discussed, does this resonate with you?"}
+                    DiagnosisPhase.DIAGNOSIS: "Based on what we've discussed, does this resonate with you?",
+                    DiagnosisPhase.CRISIS: "I want to make sure you're safe right now. Can you tell me more about how you're feeling?"}
         if differential.missing_info:
             return f"Could you tell me more about {differential.missing_info[0]}?"
         return questions.get(phase)
@@ -207,7 +224,8 @@ class DiagnosisService(ServiceBase):
                     DiagnosisPhase.HISTORY: "I appreciate you telling me about your experiences.",
                     DiagnosisPhase.ASSESSMENT: "That helps me understand better what you're going through.",
                     DiagnosisPhase.DIAGNOSIS: "Based on our conversation, I have some observations to share.",
-                    DiagnosisPhase.CLOSURE: "Thank you for this conversation. Let's summarize what we discussed."}
+                    DiagnosisPhase.CLOSURE: "Thank you for this conversation. Let's summarize what we discussed.",
+                    DiagnosisPhase.CRISIS: "I hear you, and your safety is my top priority right now."}
         response = responses.get(phase, "I understand.")
         return f"{response} {next_question}" if next_question else response
 
@@ -215,17 +233,24 @@ class DiagnosisService(ServiceBase):
         """Determine next dialogue phase based on confidence."""
         phases = [DiagnosisPhase.RAPPORT, DiagnosisPhase.HISTORY, DiagnosisPhase.ASSESSMENT,
                  DiagnosisPhase.DIAGNOSIS, DiagnosisPhase.CLOSURE]
-        idx = phases.index(current)
+        idx = phases.index(current) if current in phases else 0
+        if current == DiagnosisPhase.CRISIS:
+            return DiagnosisPhase.CRISIS
         if confidence >= self._settings.phase_transition_threshold and idx < len(phases) - 1:
             return phases[idx + 1]
         return current
 
-    def _update_session(self, session_id: UUID, result: AssessmentResult) -> None:
+    async def _update_session(self, session_id: UUID, result: AssessmentResult) -> None:
         """Update session state with assessment result."""
-        if session_id in self._active_sessions:
-            session = self._active_sessions[session_id]
+        async with self._session_lock:
+            session = self._active_sessions.get(session_id)
+            if session is None:
+                return
             session.phase = result.phase
-            session.symptoms.extend(result.extracted_symptoms)
+            # Deduplicate symptoms before extending
+            existing_names = {s.name.lower() for s in session.symptoms}
+            new_symptoms = [s for s in result.extracted_symptoms if s.name.lower() not in existing_names]
+            session.symptoms.extend(new_symptoms)
             session.differential = result.differential
             session.reasoning_history.extend(result.reasoning_chain)
             session.safety_flags.extend(result.safety_flags)
@@ -316,7 +341,7 @@ class DiagnosisService(ServiceBase):
             except Exception as e:
                 logger.warning("session_record_persist_failed", session_id=str(session_id), error=str(e))
         async with self._session_lock:
-            del self._active_sessions[session_id]
+            self._active_sessions.pop(session_id, None)
         logger.info("session_ended", user_id=str(user_id), session_id=str(session_id))
         return SessionEndResult(duration_minutes=int(duration.total_seconds() / 60),
                                messages_exchanged=len(session.messages), final_differential=session.differential,
@@ -362,17 +387,19 @@ class DiagnosisService(ServiceBase):
 
     async def get_session_state(self, session_id: UUID) -> dict[str, Any] | None:
         """Get current session state."""
-        session = self._active_sessions.get(session_id)
-        if not session:
-            return None
-        return {"session_id": str(session.session_id), "user_id": str(session.user_id),
-                "phase": session.phase.value, "symptom_count": len(session.symptoms),
-                "started_at": session.started_at.isoformat()}
+        async with self._session_lock:
+            session = self._active_sessions.get(session_id)
+            if not session:
+                return None
+            return {"session_id": str(session.session_id), "user_id": str(session.user_id),
+                    "phase": session.phase.value, "symptom_count": len(session.symptoms),
+                    "started_at": session.started_at.isoformat()}
 
     async def challenge_hypothesis(self, session_id: UUID, hypothesis_id: UUID) -> ChallengeResult:
         """Trigger Devil's Advocate challenge."""
         self._stats["challenges"] += 1
-        session = self._active_sessions.get(session_id)
+        async with self._session_lock:
+            session = self._active_sessions.get(session_id)
         if not session or not session.differential:
             return ChallengeResult()
         hypotheses = ([session.differential.primary] if session.differential.primary else []) + session.differential.alternatives
@@ -387,9 +414,10 @@ class DiagnosisService(ServiceBase):
         """Delete all user data (GDPR compliance)."""
         self._user_history.pop(user_id, None)
         self._user_session_counts.pop(user_id, None)
-        for sid, session in list(self._active_sessions.items()):
-            if session.user_id == user_id:
-                del self._active_sessions[sid]
+        async with self._session_lock:
+            for sid, session in list(self._active_sessions.items()):
+                if session.user_id == user_id:
+                    self._active_sessions.pop(sid, None)
         logger.info("user_data_deleted", user_id=str(user_id))
 
     async def get_status(self) -> dict[str, Any]:
