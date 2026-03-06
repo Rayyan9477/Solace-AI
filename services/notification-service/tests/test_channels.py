@@ -209,15 +209,14 @@ class TestSMSChannel:
     @pytest.mark.asyncio
     async def test_send_sms_success(self, sms_channel):
         """Test successful SMS sending."""
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_response = MagicMock()
-            mock_response.json.return_value = {"sid": "SM123", "num_segments": 1}
-            mock_response.raise_for_status = MagicMock()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"sid": "SM123", "num_segments": 1}
+        mock_response.raise_for_status = MagicMock()
 
-            mock_instance = AsyncMock()
-            mock_instance.post.return_value = mock_response
-            mock_client.return_value.__aenter__.return_value = mock_instance
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
 
+        with patch.object(sms_channel, "_get_client", return_value=mock_client):
             result = await sms_channel.send(
                 recipient="+1234567890",
                 subject="Alert",
@@ -250,19 +249,18 @@ class TestPushChannel:
     @pytest.mark.asyncio
     async def test_send_push_success(self, push_channel):
         """Test successful push notification sending."""
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_response = MagicMock()
-            mock_response.json.return_value = {
-                "success": 1,
-                "failure": 0,
-                "message_id": "MSG123",
-            }
-            mock_response.raise_for_status = MagicMock()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "success": 1,
+            "failure": 0,
+            "message_id": "MSG123",
+        }
+        mock_response.raise_for_status = MagicMock()
 
-            mock_instance = AsyncMock()
-            mock_instance.post.return_value = mock_response
-            mock_client.return_value.__aenter__.return_value = mock_instance
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
 
+        with patch.object(push_channel, "_get_client", return_value=mock_client):
             result = await push_channel.send(
                 recipient="device_token_123",
                 subject="Push Title",

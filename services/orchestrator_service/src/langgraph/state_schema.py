@@ -16,6 +16,13 @@ from pydantic import BaseModel, Field
 
 from solace_common.enums import CrisisLevel as RiskLevel  # noqa: E402
 
+# Canonical crisis keywords shared across safety_precheck and supervisor routing.
+CRISIS_KEYWORDS: list[str] = [
+    "suicide", "kill myself", "end my life", "want to die", "self-harm",
+    "hurt myself", "cutting", "overdose", "no reason to live", "end it all",
+]
+HIGH_RISK_KEYWORDS: list[str] = ["plan to", "going to", "tonight", "method", "final"]
+
 
 class IntentType(str, Enum):
     """User intent classification types."""
@@ -41,6 +48,8 @@ class AgentType(str, Enum):
     CHAT = "chat"
     MEMORY = "memory"
     AGGREGATOR = "aggregator"
+    ASSESSMENT = "assessment"
+    EMOTION = "emotion"
 
 
 class ProcessingPhase(str, Enum):
@@ -270,6 +279,18 @@ class OrchestratorState(TypedDict, total=False):
     retrieved_memories: list[dict[str, Any]]
     assembled_context: str
     memory_sources: list[str]
+    conversation_id: str
+    message_timestamp: str
+    crisis_level: str
+    safety_override_active: bool
+    diagnosis_output: dict[str, Any]
+    therapy_output: dict[str, Any]
+    personality_output: dict[str, Any]
+    emotion_output: dict[str, Any]
+    aggregated_response: str
+    styled_response: str
+    active_agents: list[str]
+    routing_reason: str
 
 
 def create_initial_state(
@@ -317,6 +338,18 @@ def create_initial_state(
         retrieved_memories=[],
         assembled_context="",
         memory_sources=[],
+        conversation_id="",
+        message_timestamp="",
+        crisis_level="",
+        safety_override_active=False,
+        diagnosis_output={},
+        therapy_output={},
+        personality_output={},
+        emotion_output={},
+        aggregated_response="",
+        styled_response="",
+        active_agents=[],
+        routing_reason="",
     )
 
 

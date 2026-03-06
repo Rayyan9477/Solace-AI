@@ -392,6 +392,12 @@ class SafetyAgent:
         }
 
 
+_cached_safety_agent: SafetyAgent | None = None
+
+
 async def safety_agent_node(state: OrchestratorState) -> dict[str, Any]:
     """LangGraph node function for safety agent processing."""
-    return await SafetyAgent().process(state)
+    global _cached_safety_agent
+    if _cached_safety_agent is None:
+        _cached_safety_agent = SafetyAgent()
+    return await _cached_safety_agent.process(state)

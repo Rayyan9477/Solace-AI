@@ -57,7 +57,7 @@ class TechniqueCategory(str, Enum):
 
 class TherapyAgentSettings(BaseSettings):
     """Configuration for the therapy agent."""
-    service_url: str = Field(default="http://localhost:8003")
+    service_url: str = Field(default="http://localhost:8006")
     timeout_seconds: float = Field(default=15.0, ge=1.0, le=60.0)
     max_retries: int = Field(default=2, ge=0, le=5)
     fallback_on_service_error: bool = Field(default=True)
@@ -126,7 +126,12 @@ class TherapyResponse:
 
 
 class TherapyServiceClient:
-    """HTTP client for Therapy Service communication."""
+    """HTTP client for Therapy Service communication.
+
+    TODO: Replace per-request `async with httpx.AsyncClient(...)` with a shared
+    persistent httpx.AsyncClient for connection pooling. Same applies to
+    DiagnosisServiceClient, PersonalityServiceClient, and SafetyServiceClient.
+    """
 
     def __init__(self, settings: TherapyAgentSettings) -> None:
         self._settings = settings
@@ -391,6 +396,9 @@ class TherapyAgent:
         }
 
 
+_cached_therapy_agent: TherapyAgent | None = None
+
+
 async def therapy_agent_node(state: OrchestratorState) -> dict[str, Any]:
     """
     LangGraph node function for therapy agent processing.
@@ -401,5 +409,7 @@ async def therapy_agent_node(state: OrchestratorState) -> dict[str, Any]:
     Returns:
         State updates dictionary
     """
-    agent = TherapyAgent()
-    return await agent.process(state)
+    global _cached_therapy_agent
+    if _cached_therapy_agent is None:
+        _cached_therapy_agent = TherapyAgent()
+    return await _cached_therapy_agent.process(state)

@@ -5,7 +5,9 @@ Tests the FastAPI endpoints using test client with dependency overrides.
 """
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+_src_path = str(Path(__file__).parent.parent / "src")
+if _src_path not in sys.path:
+    sys.path.insert(0, _src_path)
 
 import pytest
 from uuid import uuid4
@@ -24,6 +26,17 @@ from domain.channels import ChannelType
 from solace_security.middleware import get_current_user, get_current_service, AuthenticatedUser, AuthenticatedService
 from solace_security.auth import TokenType
 
+# Force-import the notification api module to avoid sys.modules contamination
+# when running in the full test suite (another service's api.py may be cached)
+import importlib
+if "api" in sys.modules:
+    _cached_api = sys.modules.pop("api")
+else:
+    _cached_api = None
+import api as _notification_api
+if _cached_api is not None:
+    sys.modules["api"] = _cached_api
+
 
 @pytest.mark.integration
 class TestTemplateEndpoints:
@@ -32,7 +45,7 @@ class TestTemplateEndpoints:
     @pytest.fixture
     def app(self):
         """Create a minimal FastAPI app with template routes."""
-        from api import router
+        router = _notification_api.router
         app = FastAPI()
         app.include_router(router)
         app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
@@ -90,7 +103,7 @@ class TestValidationEndpoints:
     @pytest.fixture
     def app(self):
         """Create a minimal FastAPI app for validation tests."""
-        from api import router
+        router = _notification_api.router
         app = FastAPI()
         app.include_router(router)
         app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
@@ -175,7 +188,7 @@ class TestChannelEndpoints:
     @pytest.fixture
     def app(self):
         """Create a minimal FastAPI app."""
-        from api import router
+        router = _notification_api.router
         app = FastAPI()
         app.include_router(router)
         app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
@@ -212,7 +225,7 @@ class TestHealthEndpoint:
     @pytest.fixture
     def app(self):
         """Create a minimal FastAPI app."""
-        from api import router
+        router = _notification_api.router
         app = FastAPI()
         app.include_router(router)
         app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
@@ -298,7 +311,7 @@ class TestAPIRequestModels:
 
     def test_send_notification_request_valid(self):
         """Test valid notification request."""
-        from api import SendNotificationRequest
+        SendNotificationRequest = _notification_api.SendNotificationRequest
 
         request = SendNotificationRequest(
             template_type="welcome",
@@ -312,7 +325,7 @@ class TestAPIRequestModels:
 
     def test_send_email_request_valid(self):
         """Test valid email request."""
-        from api import SendEmailRequest
+        SendEmailRequest = _notification_api.SendEmailRequest
 
         request = SendEmailRequest(
             to_email="user@example.com",
@@ -323,7 +336,7 @@ class TestAPIRequestModels:
 
     def test_send_sms_request_valid(self):
         """Test valid SMS request."""
-        from api import SendSMSRequest
+        SendSMSRequest = _notification_api.SendSMSRequest
 
         request = SendSMSRequest(
             to_phone="+1234567890",
@@ -334,7 +347,7 @@ class TestAPIRequestModels:
 
     def test_send_push_request_valid(self):
         """Test valid push request."""
-        from api import SendPushRequest
+        SendPushRequest = _notification_api.SendPushRequest
 
         request = SendPushRequest(
             device_token="device_token_123456",

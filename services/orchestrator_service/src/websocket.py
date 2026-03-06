@@ -115,7 +115,14 @@ class WebSocketMessage:
 
 
 class ConnectionManager:
-    """Manages WebSocket connections for the orchestrator."""
+    """Manages WebSocket connections for the orchestrator.
+
+    Note: _connections and _user_connections are process-local dicts. In a
+    multi-worker deployment (uvicorn --workers N), each worker maintains its
+    own set of connections. Cross-worker messaging (e.g., via Redis pub/sub)
+    is not yet implemented — deploy with a single worker or use sticky sessions
+    until Redis pub/sub fan-out is added.
+    """
 
     def __init__(self, settings: WebSocketSettings | None = None, jwt_manager: Any = None) -> None:
         self._settings = settings or get_config().websocket()
@@ -289,7 +296,6 @@ class ConnectionManager:
 
     async def _ping_all(self) -> None:
         """Send ping to all active connections."""
-        pong_msg = WebSocketMessage.pong()
         for conn_id in list(self._connections.keys()):
             conn = self._connections.get(conn_id)
             if conn and conn.state in (ConnectionState.CONNECTED, ConnectionState.AUTHENTICATED):

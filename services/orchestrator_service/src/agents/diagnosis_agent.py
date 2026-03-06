@@ -47,7 +47,7 @@ from solace_common.enums import SeverityLevel  # noqa: E402
 
 class DiagnosisAgentSettings(BaseSettings):
     """Configuration for the diagnosis agent."""
-    service_url: str = Field(default="http://localhost:8002")
+    service_url: str = Field(default="http://localhost:8004")
     timeout_seconds: float = Field(default=15.0, ge=1.0, le=60.0)
     max_retries: int = Field(default=2, ge=0, le=5)
     enable_differential: bool = Field(default=True)
@@ -353,6 +353,9 @@ class DiagnosisAgent:
         }
 
 
+_cached_diagnosis_agent: DiagnosisAgent | None = None
+
+
 async def diagnosis_agent_node(state: OrchestratorState) -> dict[str, Any]:
     """
     LangGraph node function for diagnosis agent processing.
@@ -363,5 +366,7 @@ async def diagnosis_agent_node(state: OrchestratorState) -> dict[str, Any]:
     Returns:
         State updates dictionary
     """
-    agent = DiagnosisAgent()
-    return await agent.process(state)
+    global _cached_diagnosis_agent
+    if _cached_diagnosis_agent is None:
+        _cached_diagnosis_agent = DiagnosisAgent()
+    return await _cached_diagnosis_agent.process(state)

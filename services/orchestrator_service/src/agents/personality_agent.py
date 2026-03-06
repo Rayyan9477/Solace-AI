@@ -51,7 +51,7 @@ class AssessmentSource(str, Enum):
 
 class PersonalityAgentSettings(BaseSettings):
     """Configuration for the personality agent."""
-    service_url: str = Field(default="http://localhost:8004")
+    service_url: str = Field(default="http://localhost:8007")
     timeout_seconds: float = Field(default=10.0, ge=1.0, le=60.0)
     max_retries: int = Field(default=2, ge=0, le=5)
     fallback_on_service_error: bool = Field(default=True)
@@ -375,6 +375,9 @@ class PersonalityAgent:
         }
 
 
+_cached_personality_agent: PersonalityAgent | None = None
+
+
 async def personality_agent_node(state: OrchestratorState) -> dict[str, Any]:
     """
     LangGraph node function for personality agent processing.
@@ -385,5 +388,7 @@ async def personality_agent_node(state: OrchestratorState) -> dict[str, Any]:
     Returns:
         State updates dictionary
     """
-    agent = PersonalityAgent()
-    return await agent.process(state)
+    global _cached_personality_agent
+    if _cached_personality_agent is None:
+        _cached_personality_agent = PersonalityAgent()
+    return await _cached_personality_agent.process(state)

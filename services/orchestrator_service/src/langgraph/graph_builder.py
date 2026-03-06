@@ -26,7 +26,7 @@ from .state_schema import (
     MessageEntry,
     SafetyFlags,
 )
-from .supervisor import SupervisorAgent, SupervisorSettings, _supervisor_llm_client
+from .supervisor import SupervisorAgent, SupervisorSettings, get_supervisor_llm_client
 from .memory_node import memory_retrieval_node
 from .aggregator import Aggregator, aggregator_node as _real_aggregator_node
 
@@ -40,12 +40,16 @@ def _import_agent_nodes() -> dict[str, Any]:
     from ..agents.therapy_agent import therapy_agent_node as real_therapy_agent_node
     from ..agents.personality_agent import personality_agent_node as real_personality_agent_node
     from ..agents.safety_agent import safety_agent_node as real_safety_agent_node
+    from ..agents.assessment_agent import assessment_agent_node as real_assessment_agent_node
+    from ..agents.emotion_agent import emotion_agent_node as real_emotion_agent_node
     return {
         "chat": real_chat_agent_node,
         "diagnosis": real_diagnosis_agent_node,
         "therapy": real_therapy_agent_node,
         "personality": real_personality_agent_node,
         "safety": real_safety_agent_node,
+        "assessment": real_assessment_agent_node,
+        "emotion": real_emotion_agent_node,
     }
 
 
@@ -100,6 +104,9 @@ class GraphBuilderSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="ORCHESTRATOR_GRAPH_", env_file=".env", extra="ignore")
 
 
+from .state_schema import CRISIS_KEYWORDS, HIGH_RISK_KEYWORDS
+
+
 def _word_boundary_match(keyword: str, text: str) -> bool:
     """Check if keyword appears in text with word boundaries to avoid false positives.
 
@@ -114,8 +121,8 @@ def safety_precheck_node(state: OrchestratorState) -> dict[str, Any]:
     """Safety pre-check node - analyzes input for crisis indicators."""
     message = state.get("current_message", "")
     logger.info("safety_precheck_processing", message_length=len(message))
-    crisis_keywords = ["suicide", "kill myself", "end my life", "want to die", "self-harm", "hurt myself", "cutting", "overdose", "no reason to live", "end it all"]
-    high_risk_keywords = ["plan to", "going to", "tonight", "method", "final"]
+    crisis_keywords = CRISIS_KEYWORDS
+    high_risk_keywords = HIGH_RISK_KEYWORDS
     message_lower = message.lower()
     triggered = [kw for kw in crisis_keywords if _word_boundary_match(kw, message_lower)]
     high_risk_matches = [kw for kw in high_risk_keywords if _word_boundary_match(kw, message_lower)]
@@ -205,11 +212,38 @@ def safety_postcheck_node(state: OrchestratorState) -> dict[str, Any]:
 
     If harmful patterns are detected, the response text is rewritten using
     safe replacement phrases before being returned to the user.
+
+    Crisis responses are never filtered — they contain validated hotline
+    numbers and safety instructions that must be preserved verbatim.
     """
     import re
 
     final_response = state.get("final_response", "")
     logger.info("safety_postcheck_processing", response_length=len(final_response))
+
+    # Bypass filtering for crisis responses to preserve hotline instructions
+    safety_flags = state.get("safety_flags", {})
+    processing_phase = state.get("processing_phase", "")
+    is_crisis_response = (
+        safety_flags.get("crisis_detected", False)
+        or processing_phase == ProcessingPhase.CRISIS_HANDLING.value
+        or safety_flags.get("safety_resources_shown", False)
+    )
+
+    if is_crisis_response:
+        logger.info("safety_postcheck_crisis_bypass", reason="crisis response preserved")
+        return {
+            "final_response": final_response,
+            "processing_phase": ProcessingPhase.COMPLETED.value,
+            "agent_results": [
+                AgentResult(
+                    agent_type=AgentType.SAFETY,
+                    success=True,
+                    confidence=1.0,
+                    metadata={"phase": "postcheck", "filtered": False, "crisis_bypass": True},
+                ).to_dict()
+            ],
+        }
 
     filtered_response = final_response
     needs_filtering = False
@@ -273,6 +307,8 @@ def route_to_agents(state: OrchestratorState) -> list[str]:
         "diagnosis": "diagnosis_agent",
         "therapy": "therapy_agent",
         "personality": "personality_agent",
+        "assessment": "assessment_agent",
+        "emotion": "emotion_agent",
     }
     nodes = []
     for agent in selected_agents:
@@ -306,6 +342,27 @@ def route_after_safety_agent(state: OrchestratorState) -> Literal["crisis_handle
     return destination
 
 
+def style_applicator_node(state: OrchestratorState) -> dict[str, Any]:
+    """Style applicator node - applies personality-driven style to aggregated response."""
+    response = state.get("final_response", "")
+    personality_style = state.get("personality_style", {})
+    if not response or not personality_style:
+        return {"styled_response": response}
+
+    warmth = personality_style.get("warmth", 0.7)
+
+    styled = response
+    if warmth > 0.7 and not any(w in styled.lower() for w in ["i hear", "i understand", "that sounds"]):
+        styled = "I appreciate you sharing that. " + styled
+
+    logger.info("style_applicator_complete", has_personality=bool(personality_style))
+    return {
+        "styled_response": styled,
+        "final_response": styled,
+        "processing_phase": ProcessingPhase.RESPONSE_GENERATION.value,
+    }
+
+
 class OrchestratorGraphBuilder:
     """
     Builds the LangGraph state machine for multi-agent orchestration.
@@ -336,6 +393,12 @@ class OrchestratorGraphBuilder:
                 "postgres_checkpointer_unavailable",
                 msg="langgraph-checkpoint-postgres not installed, falling back to in-memory",
             )
+        import os
+        if os.environ.get("ENVIRONMENT", "development").lower() == "production":
+            logger.warning(
+                "in_memory_checkpointer_in_production",
+                msg="InMemorySaver loses state on restart. Install langgraph-checkpoint-postgres for durable checkpointing.",
+            )
         return InMemorySaver()
 
     def build(self) -> StateGraph:
@@ -363,7 +426,7 @@ class OrchestratorGraphBuilder:
             "supervisor",
             SupervisorAgent(
                 self._supervisor_settings,
-                llm_client=_supervisor_llm_client,
+                llm_client=get_supervisor_llm_client(),
             ).process,
         )
         builder.add_node("crisis_handler", crisis_handler_node)
@@ -373,24 +436,30 @@ class OrchestratorGraphBuilder:
         builder.add_node("therapy_agent", agent_nodes["therapy"])
         builder.add_node("personality_agent", agent_nodes["personality"])
         builder.add_node("safety_agent", agent_nodes["safety"])
+        builder.add_node("assessment_agent", agent_nodes["assessment"])
+        builder.add_node("emotion_agent", agent_nodes["emotion"])
         builder.add_node("aggregator", aggregator_node)
+        builder.add_node("style_applicator", style_applicator_node)
         builder.add_node("safety_postcheck", safety_postcheck_node)
         # Edges
         builder.add_edge(START, "safety_precheck")
         builder.add_conditional_edges("safety_precheck", route_after_safety, ["crisis_handler", "memory_retrieval"])
         builder.add_edge("memory_retrieval", "supervisor")
         builder.add_edge("crisis_handler", "safety_postcheck")
-        builder.add_conditional_edges("supervisor", route_to_agents, ["chat_agent", "diagnosis_agent", "therapy_agent", "personality_agent", "safety_agent"])
+        builder.add_conditional_edges("supervisor", route_to_agents, ["chat_agent", "diagnosis_agent", "therapy_agent", "personality_agent", "safety_agent", "assessment_agent", "emotion_agent"])
         builder.add_edge("chat_agent", "aggregator")
         builder.add_edge("diagnosis_agent", "aggregator")
         builder.add_edge("therapy_agent", "aggregator")
         builder.add_edge("personality_agent", "aggregator")
+        builder.add_edge("assessment_agent", "aggregator")
+        builder.add_edge("emotion_agent", "aggregator")
         # Safety agent has conditional routing: crisis -> crisis_handler, otherwise -> aggregator
         builder.add_conditional_edges("safety_agent", route_after_safety_agent, ["crisis_handler", "aggregator"])
-        builder.add_edge("aggregator", "safety_postcheck")
+        builder.add_edge("aggregator", "style_applicator")
+        builder.add_edge("style_applicator", "safety_postcheck")
         builder.add_edge("safety_postcheck", END)
         self._graph = builder
-        logger.info("orchestrator_graph_built", node_count=11)
+        logger.info("orchestrator_graph_built", node_count=14)
         return builder
 
     def compile(self) -> Any:

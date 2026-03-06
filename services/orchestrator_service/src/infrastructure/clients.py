@@ -77,11 +77,7 @@ class CircuitBreaker:
 
     @property
     def state(self) -> CircuitState:
-        """Get current circuit state."""
-        if self._state == CircuitState.OPEN and self._last_failure_time:
-            elapsed = (datetime.now(timezone.utc) - self._last_failure_time).total_seconds()
-            if elapsed >= self._recovery_timeout:
-                self._state = CircuitState.HALF_OPEN
+        """Get current circuit state (read-only, no mutation)."""
         return self._state
 
     async def record_success(self) -> None:
@@ -99,14 +95,15 @@ class CircuitBreaker:
                 self._state = CircuitState.OPEN
                 logger.warning("circuit_breaker_opened", failures=self._failure_count)
 
-    def allow_request(self) -> bool:
-        """Check if request should be allowed."""
-        state = self.state
-        if state == CircuitState.CLOSED:
-            return True
-        if state == CircuitState.HALF_OPEN:
-            return True
-        return False
+    async def allow_request(self) -> bool:
+        """Check if request should be allowed. Handles OPEN→HALF_OPEN transition under lock."""
+        async with self._lock:
+            if self._state == CircuitState.OPEN and self._last_failure_time:
+                elapsed = (datetime.now(timezone.utc) - self._last_failure_time).total_seconds()
+                if elapsed >= self._recovery_timeout:
+                    self._state = CircuitState.HALF_OPEN
+                    logger.info("circuit_breaker_half_open")
+            return self._state in (CircuitState.CLOSED, CircuitState.HALF_OPEN)
 
 
 class BaseServiceClient:
@@ -167,7 +164,7 @@ class BaseServiceClient:
         headers: dict[str, str] | None = None,
     ) -> ServiceResponse[dict[str, Any]]:
         """Execute HTTP request with retry logic."""
-        if not self._circuit.allow_request():
+        if not await self._circuit.allow_request():
             return ServiceResponse(success=False, error="Circuit breaker open", status_code=503)
         start_time = datetime.now(timezone.utc)
         last_error: str | None = None

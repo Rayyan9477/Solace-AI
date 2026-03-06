@@ -11,8 +11,9 @@ from dataclasses import dataclass, field
 from typing import Any
 from services.memory_service.src.domain.consolidation import (
     ConsolidationPipeline, ConsolidationSettings, ConsolidationPhase,
-    ConsolidationOutput, SummaryResult, ExtractedFact, KnowledgeTriple,
+    ConsolidationOutput, SummaryResult, ExtractedFact,
 )
+from services.memory_service.src.domain.semantic_memory import MemoryTriple
 
 
 @dataclass
@@ -237,7 +238,7 @@ class TestKnowledgeTripleBuilding:
         )
         triples = await consolidation_pipeline._build_knowledge_triples([fact])
         assert len(triples) >= 1
-        assert all(isinstance(t, KnowledgeTriple) for t in triples)
+        assert all(isinstance(t, MemoryTriple) for t in triples)
 
     @pytest.mark.asyncio
     async def test_triple_structure(self, consolidation_pipeline: ConsolidationPipeline,
@@ -443,7 +444,7 @@ class TestFactDictConversion:
 
     def test_triple_to_dict(self, consolidation_pipeline: ConsolidationPipeline) -> None:
         """Test converting triple to dictionary."""
-        triple = KnowledgeTriple(
+        triple = MemoryTriple(
             subject="User",
             predicate="has_sibling",
             object_value="Sarah",

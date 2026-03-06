@@ -21,6 +21,7 @@ from .state_schema import (
     ProcessingPhase,
     RiskLevel,
     AgentResult,
+    CRISIS_KEYWORDS,
 )
 
 if TYPE_CHECKING:
@@ -36,6 +37,15 @@ def configure_supervisor_llm(client: UnifiedLLMClient | None) -> None:
     """Set the LLM client for the supervisor. Called during orchestrator startup."""
     global _supervisor_llm_client
     _supervisor_llm_client = client
+
+
+def get_supervisor_llm_client() -> UnifiedLLMClient | None:
+    """Get the current supervisor LLM client reference.
+
+    Use this instead of importing _supervisor_llm_client directly,
+    since direct import captures the value at import time (always None).
+    """
+    return _supervisor_llm_client
 
 
 # Valid IntentType values for LLM response parsing
@@ -66,10 +76,7 @@ class SupervisorSettings(BaseSettings):
     enable_diagnosis_agent: bool = Field(default=True)
     enable_therapy_agent: bool = Field(default=True)
     default_intent: str = Field(default="general_chat")
-    crisis_keywords: list[str] = Field(default_factory=lambda: [
-        "suicide", "kill myself", "end my life", "want to die", "self-harm",
-        "hurt myself", "cutting", "overdose", "no reason to live",
-    ])
+    crisis_keywords: list[str] = Field(default_factory=lambda: list(CRISIS_KEYWORDS))
     emotional_keywords: list[str] = Field(default_factory=lambda: [
         "depressed", "anxious", "scared", "lonely", "overwhelmed", "hopeless",
         "worthless", "panic", "crying", "can't cope", "stressed", "angry",
@@ -136,7 +143,6 @@ class IntentClassifier:
             Tuple of (intent_type, confidence, matched_keywords)
         """
         message_lower = message.lower()
-        full_context = f"{conversation_context} {message_lower}"
         matched_keywords: list[str] = []
         if self._check_crisis_indicators(message_lower):
             keywords = [kw for kw in self._crisis_keywords if kw in message_lower]
@@ -264,10 +270,35 @@ class IntentClassifier:
 
 
 class AgentRouter:
-    """Routes requests to appropriate agents based on intent and context."""
+    """Routes requests to appropriate agents based on intent and context.
+
+    Priority levels (P0-P3) determine processing order:
+    - P0 (Safety): Always routes first, preempts all other agents
+    - P1 (Supervisor): Orchestration and routing decisions
+    - P2 (Clinical): Diagnosis, therapy, assessment agents
+    - P3 (Support): Personality, emotion, chat agents
+    """
+
+    # Agent priority levels per spec
+    PRIORITY_MAP: dict[AgentType, int] = {
+        AgentType.SAFETY: 0,       # P0 — always first
+        AgentType.SUPERVISOR: 1,   # P1 — orchestration
+        AgentType.DIAGNOSIS: 2,    # P2 — clinical
+        AgentType.THERAPY: 2,      # P2 — clinical
+        AgentType.ASSESSMENT: 2,   # P2 — clinical
+        AgentType.PERSONALITY: 3,  # P3 — support
+        AgentType.EMOTION: 3,      # P3 — support
+        AgentType.CHAT: 3,         # P3 — support
+        AgentType.MEMORY: 3,       # P3 — support
+        AgentType.AGGREGATOR: 3,   # P3 — support
+    }
 
     def __init__(self, settings: SupervisorSettings) -> None:
         self._settings = settings
+
+    def _sort_by_priority(self, agents: list[AgentType]) -> list[AgentType]:
+        """Sort agents by priority level (P0 first)."""
+        return sorted(agents, key=lambda a: self.PRIORITY_MAP.get(a, 3))
 
     def select_agents(
         self,
@@ -284,56 +315,57 @@ class AgentRouter:
             has_active_treatment: Whether user has an active treatment plan
 
         Returns:
-            Tuple of (selected agents list, routing reason)
+            Tuple of (selected agents list sorted by priority, routing reason)
         """
         if safety_flags.get("crisis_detected") or safety_flags.get("risk_level") in ("HIGH", "CRITICAL"):
-            return [AgentType.SAFETY], "Crisis detected - routing to safety agent exclusively"
+            return [AgentType.SAFETY], "P0 crisis - routing to safety agent exclusively"
         agent_mapping: dict[IntentType, tuple[list[AgentType], str]] = {
             IntentType.CRISIS_DISCLOSURE: (
                 [AgentType.SAFETY],
-                "Crisis disclosure - immediate safety assessment required"
+                "P0 crisis disclosure - immediate safety assessment required"
             ),
             IntentType.EMOTIONAL_SUPPORT: (
                 [AgentType.THERAPY, AgentType.PERSONALITY] if self._settings.enable_therapy_agent else [AgentType.CHAT, AgentType.PERSONALITY],
-                "Emotional support - therapy agent with personality adaptation"
+                "P2+P3 emotional support - therapy agent with personality adaptation"
             ),
             IntentType.SYMPTOM_DISCUSSION: (
                 [AgentType.DIAGNOSIS, AgentType.THERAPY] if self._settings.enable_diagnosis_agent else [AgentType.CHAT],
-                "Symptom discussion - diagnosis assessment with therapy support"
+                "P2 symptom discussion - diagnosis assessment with therapy support"
             ),
             IntentType.TREATMENT_INQUIRY: (
                 [AgentType.THERAPY, AgentType.PERSONALITY] if self._settings.enable_therapy_agent else [AgentType.CHAT],
-                "Treatment inquiry - therapy agent for intervention guidance"
+                "P2+P3 treatment inquiry - therapy agent for intervention guidance"
             ),
             IntentType.PROGRESS_UPDATE: (
                 [AgentType.THERAPY, AgentType.DIAGNOSIS] if has_active_treatment else [AgentType.CHAT],
-                "Progress update - therapy and diagnosis agents for tracking"
+                "P2 progress update - therapy and diagnosis agents for tracking"
             ),
             IntentType.ASSESSMENT_REQUEST: (
-                [AgentType.DIAGNOSIS] if self._settings.enable_diagnosis_agent else [AgentType.CHAT],
-                "Assessment request - diagnosis agent for formal assessment"
+                [AgentType.ASSESSMENT, AgentType.DIAGNOSIS] if self._settings.enable_diagnosis_agent else [AgentType.CHAT],
+                "P2 assessment request - assessment and diagnosis agents"
             ),
             IntentType.COPING_STRATEGY: (
                 [AgentType.THERAPY, AgentType.PERSONALITY] if self._settings.enable_therapy_agent else [AgentType.CHAT],
-                "Coping strategy - therapy agent for evidence-based techniques"
+                "P2+P3 coping strategy - therapy agent for evidence-based techniques"
             ),
             IntentType.PSYCHOEDUCATION: (
                 [AgentType.THERAPY, AgentType.DIAGNOSIS],
-                "Psychoeducation - combined clinical education"
+                "P2 psychoeducation - combined clinical education"
             ),
             IntentType.SESSION_MANAGEMENT: (
                 [AgentType.CHAT],
-                "Session management - general chat handler"
+                "P3 session management - general chat handler"
             ),
             IntentType.GENERAL_CHAT: (
                 [AgentType.CHAT, AgentType.PERSONALITY] if self._settings.enable_personality_adaptation else [AgentType.CHAT],
-                "General chat - conversational agent with personality"
+                "P3 general chat - conversational agent with personality"
             ),
         }
-        agents, reason = agent_mapping.get(intent, ([AgentType.CHAT], "Default routing to chat agent"))
+        agents, reason = agent_mapping.get(intent, ([AgentType.CHAT], "P3 default routing to chat agent"))
         if self._settings.enable_personality_adaptation and AgentType.PERSONALITY not in agents:
             if len(agents) < self._settings.max_parallel_agents:
                 agents = agents + [AgentType.PERSONALITY]
+        agents = self._sort_by_priority(agents)
         return agents[:self._settings.max_parallel_agents], reason
 
 

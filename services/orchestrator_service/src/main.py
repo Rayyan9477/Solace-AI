@@ -178,6 +178,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as e:
         logger.warning("orchestrator_kafka_bridge_not_configured", error=str(e))
 
+    app.state.startup_time = time.monotonic()
     logger.info(
         "orchestrator_service_started",
         environment=settings.environment,
@@ -329,10 +330,13 @@ async def health_check() -> dict:
     connection_count = sum(
         len(conns) for conns in getattr(app.state, "active_connections", {}).values()
     )
+    startup = getattr(app.state, "startup_time", None)
+    uptime_seconds = int(time.monotonic() - startup) if startup else None
     return {
         "status": "healthy",
         "service": "orchestrator-service",
         "version": "1.0.0",
+        "uptime_seconds": uptime_seconds,
         "graph_ready": hasattr(app.state, "compiled_graph")
         and app.state.compiled_graph is not None,
         "active_websocket_connections": connection_count,

@@ -216,7 +216,7 @@ class TestDiagnosisAgentSettings:
     def test_default_settings(self):
         """Test default settings values."""
         settings = DiagnosisAgentSettings()
-        assert settings.service_url == "http://localhost:8002"
+        assert settings.service_url == "http://localhost:8004"
         assert settings.enable_differential is True
         assert settings.min_confidence_threshold == 0.5
 
@@ -343,7 +343,7 @@ class TestTherapyAgentSettings:
     def test_default_settings(self):
         """Test default settings values."""
         settings = TherapyAgentSettings()
-        assert settings.service_url == "http://localhost:8003"
+        assert settings.service_url == "http://localhost:8006"
         assert settings.default_modality == "CBT"
         assert settings.enable_homework is True
 
@@ -449,7 +449,7 @@ class TestPersonalityAgentSettings:
     def test_default_settings(self):
         """Test default settings values."""
         settings = PersonalityAgentSettings()
-        assert settings.service_url == "http://localhost:8004"
+        assert settings.service_url == "http://localhost:8007"
         assert settings.enable_style_adaptation is True
         assert settings.min_text_length_for_detection == 50
 

@@ -26,6 +26,7 @@ logger = structlog.get_logger(__name__)
 
 # Module-level LLM client reference, set during orchestrator startup
 _llm_client: UnifiedLLMClient | None = None
+_cached_chat_agent: ChatAgent | None = None
 
 
 def configure_chat_agent_llm(client: UnifiedLLMClient | None) -> None:
@@ -134,7 +135,6 @@ class TopicClassifier:
     def classify(self, message: str) -> TopicClassification:
         """Classify the topic of a message."""
         message_lower = message.lower().strip()
-        message_with_spaces = f" {message_lower} "
         if self._matches_greeting(message_lower):
             return TopicClassification(
                 category=TopicCategory.GREETING,
@@ -527,5 +527,7 @@ async def chat_agent_node(state: OrchestratorState) -> dict[str, Any]:
     Returns:
         State updates dictionary
     """
-    agent = ChatAgent(llm_client=_llm_client)
-    return await agent.process(state)
+    global _cached_chat_agent
+    if _cached_chat_agent is None or _cached_chat_agent._llm_client is not _llm_client:
+        _cached_chat_agent = ChatAgent(llm_client=_llm_client)
+    return await _cached_chat_agent.process(state)

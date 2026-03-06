@@ -388,9 +388,6 @@ class Aggregator:
             return AggregationStrategy.FIRST_SUCCESS
         if len(contributions) == 1:
             return AggregationStrategy.FIRST_SUCCESS
-        has_safety = any(c.agent_type == AgentType.SAFETY for c in contributions)
-        if has_safety:
-            return AggregationStrategy.PRIORITY_BASED
         return AggregationStrategy.PRIORITY_BASED
 
     def _calculate_overall_confidence(
@@ -432,13 +429,10 @@ def _get_aggregator() -> Aggregator:
 
 
 def aggregator_node(state: OrchestratorState) -> dict[str, Any]:
-    """
-    LangGraph node function for aggregation.
+    """LangGraph node function for aggregation.
 
-    Args:
-        state: Current orchestrator state
-
-    Returns:
-        State updates dictionary
+    Synchronous by design: aggregate() is CPU-bound (string ranking/merging),
+    not I/O-bound, so asyncio.to_thread overhead is unnecessary. LangGraph
+    runs sync nodes in its own executor when needed.
     """
     return _get_aggregator().aggregate(state)

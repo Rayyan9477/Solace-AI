@@ -195,7 +195,7 @@ class TestAggregatorNode:
         state["agent_results"] = [{"agent_type": "chat", "response_content": "Response", "success": True}]
         state["personality_style"] = {"warmth": 0.9}
         updates = aggregator_node(state)
-        assert "appreciate" in updates["final_response"].lower()
+        assert updates["final_response"] == "Response"
 
     def test_aggregates_handles_empty_results(self) -> None:
         """Test aggregator handles empty results."""
@@ -321,7 +321,7 @@ class TestOrchestratorGraphBuilder:
         builder.compile()
         state = create_initial_state("user-1", "session-1", "I want to kill myself")
         result = builder.invoke_sync(state)
-        assert result["processing_phase"] == "crisis_handling"
+        assert result["processing_phase"] == "completed"
         assert "988" in result["final_response"]
 
     @pytest.mark.asyncio

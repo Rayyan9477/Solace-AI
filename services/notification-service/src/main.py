@@ -279,7 +279,7 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"] if settings.service.env == "development" else [],
+        allow_origins=["http://localhost:3000", "http://localhost:5173"] if settings.service.env == "development" else [],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

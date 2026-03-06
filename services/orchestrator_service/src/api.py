@@ -232,14 +232,17 @@ async def get_conversation_history(
 @router.get("/health/detailed", response_model=HealthResponse, summary="Detailed health check")
 async def detailed_health_check(request: Request) -> HealthResponse:
     """Get detailed health status of the orchestrator service."""
+    import time as _time
     graph_ready = hasattr(request.app.state, "compiled_graph") and request.app.state.compiled_graph is not None
     active_connections = getattr(request.app.state, "active_connections", {})
     active_sessions = sum(len(conns) for conns in active_connections.values())
+    startup = getattr(request.app.state, "startup_time", None)
+    uptime = _time.monotonic() - startup if startup else 0.0
     return HealthResponse(
         status="healthy" if graph_ready else "degraded",
         graph_ready=graph_ready,
         active_sessions=active_sessions,
-        uptime_seconds=0.0,
+        uptime_seconds=uptime,
     )
 
 
