@@ -10,7 +10,6 @@ Principles: Repository Pattern, Dependency Inversion
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -61,7 +60,7 @@ class PostgresUserRepository(UserRepository):
         """Save a new user to PostgreSQL."""
         query = f"""
             INSERT INTO {self._table} (
-                user_id, email, password_hash, display_name, role, status,
+                id, email, password_hash, display_name, role, status,
                 is_on_call, phone_number, timezone, locale, avatar_url, bio,
                 email_verified, email_verification_token, login_attempts,
                 locked_until, created_at, updated_at, last_login, deleted_at
@@ -107,7 +106,7 @@ class PostgresUserRepository(UserRepository):
         """Get user by ID from PostgreSQL."""
         query = f"""
             SELECT * FROM {self._table}
-            WHERE user_id = $1 AND deleted_at IS NULL
+            WHERE id = $1 AND deleted_at IS NULL
         """
         async with self._acquire() as conn:
             row = await conn.fetchrow(query, user_id)
@@ -149,7 +148,7 @@ class PostgresUserRepository(UserRepository):
                 updated_at = $17,
                 last_login = $18,
                 deleted_at = $19
-            WHERE user_id = $1
+            WHERE id = $1
             RETURNING *
         """
         async with self._acquire() as conn:
@@ -182,7 +181,7 @@ class PostgresUserRepository(UserRepository):
 
     async def delete(self, user_id: UUID) -> bool:
         """Delete a user by ID (hard delete) from PostgreSQL."""
-        query = f"DELETE FROM {self._table} WHERE user_id = $1"
+        query = f"DELETE FROM {self._table} WHERE id = $1"
         async with self._acquire() as conn:
             result = await conn.execute(query, user_id)
             deleted = result.split()[-1] != "0"
@@ -321,7 +320,7 @@ class PostgresUserRepository(UserRepository):
     def _row_to_entity(self, row: dict[str, Any]) -> User:
         """Convert a database row to a User entity."""
         return User(
-            user_id=row["user_id"],
+            user_id=row["id"],
             email=row["email"],
             password_hash=row["password_hash"],
             display_name=row["display_name"],
@@ -535,10 +534,10 @@ class PostgresConsentRepository(ConsentRepository):
         """Save a consent record to PostgreSQL."""
         query = f"""
             INSERT INTO {self._table} (
-                consent_id, user_id, consent_type, granted, granted_at,
-                ip_address, user_agent, consent_version, metadata
+                id, user_id, consent_type, granted, granted_at,
+                ip_address, user_agent, version
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9
+                $1, $2, $3, $4, $5, $6, $7, $8
             )
             RETURNING *
         """
@@ -552,8 +551,7 @@ class PostgresConsentRepository(ConsentRepository):
                 consent.granted_at,
                 consent.ip_address,
                 consent.user_agent,
-                consent.consent_version,
-                json.dumps(consent.metadata) if consent.metadata else None,
+                consent.version,
             )
             logger.debug(
                 "consent_saved_postgres",
@@ -575,7 +573,7 @@ class PostgresConsentRepository(ConsentRepository):
 
     async def get_by_id(self, consent_id: UUID) -> ConsentRecord | None:
         """Get consent record by ID from PostgreSQL."""
-        query = f"SELECT * FROM {self._table} WHERE consent_id = $1"
+        query = f"SELECT * FROM {self._table} WHERE id = $1"
         async with self._acquire() as conn:
             row = await conn.fetchrow(query, consent_id)
             if row is None:
@@ -584,18 +582,13 @@ class PostgresConsentRepository(ConsentRepository):
 
     def _row_to_entity(self, row: dict[str, Any]) -> ConsentRecord:
         """Convert a database row to a ConsentRecord entity."""
-        metadata = row.get("metadata")
-        if isinstance(metadata, str):
-            metadata = json.loads(metadata)
-
         return ConsentRecord(
-            consent_id=row["consent_id"],
+            consent_id=row["id"],
             user_id=row["user_id"],
             consent_type=ConsentType(row["consent_type"]),
             granted=row["granted"],
+            version=row.get("version", "1.0"),
             granted_at=row["granted_at"],
             ip_address=row.get("ip_address"),
             user_agent=row.get("user_agent"),
-            consent_version=row.get("consent_version"),
-            metadata=metadata or {},
         )

@@ -99,7 +99,7 @@ class TestSessionSettings:
         """Test default session settings."""
         settings = SessionSettings()
         assert settings.max_duration_minutes == 60
-        assert settings.enable_flexible_transitions is True
+        assert settings.enable_flexible_transitions is False
         assert settings.min_engagement_score == 0.3
 
     def test_constraints(self) -> None:

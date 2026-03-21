@@ -21,7 +21,7 @@ class TestSessionManagerSettings:
         settings = SessionManagerSettings()
         assert settings.min_opening_duration_sec == 180
         assert settings.max_session_duration_min == 60
-        assert settings.enable_flexible_transitions is True
+        assert settings.enable_flexible_transitions is False
         assert settings.min_engagement_score == 0.3
         assert settings.track_detailed_metrics is True
 

@@ -202,7 +202,13 @@ def to_kafka_event(event: DomainEvent) -> Any:
         correlation_id=event.correlation_id or event.event_id,
         source_service="therapy-service",
     )
-    base: dict[str, Any] = {"user_id": event.user_id, "session_id": None, "metadata": meta}
+    # Extract session_id from aggregate_id for session-type events, or from payload
+    session_id = event.payload.get("session_id")
+    if session_id and isinstance(session_id, str):
+        session_id = UUID(session_id)
+    elif event.aggregate_type == "therapy_session":
+        session_id = event.aggregate_id
+    base: dict[str, Any] = {"user_id": event.user_id, "session_id": session_id, "metadata": meta}
 
     if event.event_type == EventType.SESSION_STARTED:
         plan_id_str = event.payload.get("treatment_plan_id")
@@ -215,7 +221,7 @@ def to_kafka_event(event: DomainEvent) -> Any:
     if event.event_type == EventType.INTERVENTION_COMPLETED:
         modality_str = event.payload.get("modality", "CBT")
         try:
-            modality = TherapyModality(modality_str)
+            modality = TherapyModality(modality_str.upper())
         except ValueError:
             modality = TherapyModality.CBT
         return KafkaInterventionDelivered(

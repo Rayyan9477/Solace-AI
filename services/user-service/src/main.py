@@ -39,7 +39,7 @@ from .infrastructure.repository import (
     reset_repositories,
 )
 from .domain.service import UserService
-from .auth import SessionManager, SessionConfig, AuthenticationService
+from .auth import SessionManager, RedisSessionManager, SessionConfig, AuthenticationService
 
 logger = structlog.get_logger(__name__)
 
@@ -230,8 +230,25 @@ async def lifespan(app: FastAPI):
     )
 
     # --- 3. Repository Layer ---
-    repository_config = RepositoryConfig()
-    repository_factory = RepositoryFactory(repository_config)
+    # Connect to PostgreSQL for repository persistence
+    pg_client = None
+    try:
+        from solace_infrastructure.postgres import PostgresClient, PostgresSettings
+        pg_settings = PostgresSettings(
+            host=settings.database.host,
+            port=settings.database.port,
+            database=settings.database.name,
+            user=settings.database.user,
+            password=settings.database.password,
+        )
+        pg_client = PostgresClient(pg_settings)
+        await pg_client.connect()
+        logger.info("postgres_client_connected", host=settings.database.host, database=settings.database.name)
+    except Exception as pg_err:
+        logger.warning("postgres_client_unavailable", error=str(pg_err), hint="Repositories require PostgreSQL")
+
+    repository_config = RepositoryConfig(use_postgres=True)
+    repository_factory = RepositoryFactory(repository_config, postgres_client=pg_client)
 
     user_repository = repository_factory.get_user_repository()
     preferences_repository = repository_factory.get_preferences_repository()
@@ -255,7 +272,21 @@ async def lifespan(app: FastAPI):
         refresh_token_expire_days=settings.refresh_token_expire_days,
         session_timeout_minutes=settings.service.session_timeout_minutes,
     )
-    session_manager = SessionManager(session_config)
+    # Use Redis-backed sessions when Redis is available, fall back to in-memory
+    session_manager: SessionManager | RedisSessionManager
+    try:
+        import redis.asyncio as _aioredis
+        _session_redis = _aioredis.from_url(
+            settings.redis.url,
+            decode_responses=True,
+            socket_timeout=settings.redis.timeout,
+        )
+        await _session_redis.ping()
+        session_manager = RedisSessionManager(_session_redis, session_config)
+        logger.info("session_manager_initialized", backend="redis")
+    except Exception as _sess_err:
+        logger.warning("redis_session_unavailable", error=str(_sess_err), hint="Using in-memory session manager")
+        session_manager = SessionManager(session_config)
 
     auth_service = AuthenticationService(
         session_manager=session_manager,
@@ -324,6 +355,8 @@ async def lifespan(app: FastAPI):
     # --- Cleanup ---
     if event_bridge:
         await event_bridge.stop()
+    if pg_client is not None:
+        await pg_client.disconnect()
     logger.info("user_service_shutting_down", stats=state.stats)
     state.initialized = False
     _state = None

@@ -5,9 +5,9 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
+import structlog
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import structlog
 
 logger = structlog.get_logger(__name__)
 
@@ -42,7 +42,7 @@ class TopicConfig(BaseModel):
     name: str = Field(..., min_length=1, max_length=249)
     partitions: int = Field(default=4, ge=1, le=256)
     replication_factor: int = Field(default=3, ge=1, le=5)
-    retention_ms: int = Field(default=7776000000, ge=0)  # 90 days
+    retention_ms: int = Field(default=7776000000, ge=-1)  # 90 days, -1 for infinite
     cleanup_policy: str = Field(default="delete")
     min_insync_replicas: int = Field(default=2, ge=1)
 
@@ -68,6 +68,9 @@ class SolaceTopic(str, Enum):
     PERSONALITY = "solace.personality"
     MESSAGES = "solace.messages"
     SYSTEM = "solace.system"
+    NOTIFICATIONS = "solace.notifications"
+    AUDIT = "solace.audit"
+    USERS = "solace.users"
 
     @property
     def dlq_topic(self) -> str:
@@ -93,6 +96,11 @@ TOPIC_CONFIGS: dict[SolaceTopic, TopicConfig] = {
     SolaceTopic.PERSONALITY: TopicConfig(name="solace.personality", partitions=2),
     SolaceTopic.MESSAGES: TopicConfig(name="solace.messages", partitions=4),
     SolaceTopic.SYSTEM: TopicConfig(name="solace.system", partitions=2),
+    SolaceTopic.NOTIFICATIONS: TopicConfig(name="solace.notifications", partitions=2),
+    SolaceTopic.AUDIT: TopicConfig(
+        name="solace.audit", partitions=4, retention_ms=-1, cleanup_policy="compact",
+    ),
+    SolaceTopic.USERS: TopicConfig(name="solace.users", partitions=2),
 }
 
 

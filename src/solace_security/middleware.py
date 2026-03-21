@@ -19,22 +19,23 @@ Usage:
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import lru_cache
-from typing import Callable
 
+import structlog
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
-import structlog
 
 from .auth import (
+    AuthenticationResult,
     AuthSettings,
+    InMemoryTokenBlacklist,
     JWTManager,
     TokenPayload,
     TokenType,
-    AuthenticationResult,
 )
-from .authorization import Role, ROLE_PERMISSIONS
+from .authorization import ROLE_PERMISSIONS, Role
 
 logger = structlog.get_logger(__name__)
 
@@ -53,7 +54,7 @@ class AuthenticatedUser(BaseModel):
     metadata: dict = Field(default_factory=dict, description="Additional token metadata")
 
     @classmethod
-    def from_payload(cls, payload: TokenPayload) -> "AuthenticatedUser":
+    def from_payload(cls, payload: TokenPayload) -> AuthenticatedUser:
         """Create AuthenticatedUser from token payload."""
         return cls(
             user_id=payload.sub,
@@ -105,7 +106,7 @@ class AuthenticatedService(BaseModel):
     permissions: list[str] = Field(default_factory=list, description="Service permissions")
 
     @classmethod
-    def from_payload(cls, payload: TokenPayload) -> "AuthenticatedService":
+    def from_payload(cls, payload: TokenPayload) -> AuthenticatedService:
         """Create AuthenticatedService from token payload."""
         service_name = payload.metadata.get("service_name", payload.sub)
         if service_name.startswith("service:"):
@@ -116,7 +117,7 @@ class AuthenticatedService(BaseModel):
         )
 
 
-@lru_cache()
+@lru_cache
 def _get_jwt_manager() -> JWTManager:
     """Get cached JWT manager instance (singleton per process).
 
@@ -128,7 +129,7 @@ def _get_jwt_manager() -> JWTManager:
     """
     try:
         settings = AuthSettings()
-        return JWTManager(settings)
+        return JWTManager(settings, token_blacklist=InMemoryTokenBlacklist())
     except Exception as e:
         logger.error("jwt_manager_initialization_failed", error=str(e))
         raise

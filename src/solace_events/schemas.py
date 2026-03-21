@@ -1,12 +1,14 @@
 """Solace-AI Event Schemas - Pydantic models for all domain events."""
 from __future__ import annotations
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Any, Literal
 from uuid import UUID, uuid4
-from pydantic import BaseModel, ConfigDict, Field
+
 import structlog
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = structlog.get_logger(__name__)
 
@@ -14,7 +16,7 @@ logger = structlog.get_logger(__name__)
 class EventMetadata(BaseModel):
     """Metadata common to all events."""
     event_id: UUID = Field(default_factory=uuid4)
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     correlation_id: UUID = Field(default_factory=uuid4)
     causation_id: UUID | None = Field(default=None)
     version: int = Field(default=1, ge=1)
@@ -266,6 +268,7 @@ class TherapyModality(str, Enum):
     """Supported therapy modalities."""
     CBT, DBT, ACT, MI = "CBT", "DBT", "ACT", "MI"
     MINDFULNESS, PSYCHOEDUCATION = "MINDFULNESS", "PSYCHOEDUCATION"
+    SFBT = "SFBT"
 
 
 class TherapySessionStartedEvent(BaseEvent):
@@ -542,6 +545,7 @@ _TOPIC_MAP = {
     "session.": "solace.sessions", "safety.": "solace.safety", "diagnosis.": "solace.assessments",
     "therapy.": "solace.therapy", "memory.": "solace.memory", "personality.": "solace.personality",
     "notification.": "solace.notifications", "system.": "solace.system",
+    "user.": "solace.users",
     "homework.": "solace.therapy", "treatment.": "solace.therapy",
 }
 

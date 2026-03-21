@@ -167,6 +167,7 @@ class PostgresClient:
         last_error: Exception | None = None
         for attempt in range(max_retries):
             try:
+                ssl_context = self._settings.get_ssl_context()
                 self._pool = await asyncpg.create_pool(
                     dsn=self._settings.get_dsn(),
                     min_size=self._settings.min_pool_size,
@@ -174,6 +175,7 @@ class PostgresClient:
                     command_timeout=self._settings.command_timeout,
                     statement_cache_size=self._settings.statement_cache_size,
                     max_cached_statement_lifetime=self._settings.max_cached_statement_lifetime,
+                    ssl=ssl_context,
                     init=self._init_connection,
                 )
                 self._connected = True
@@ -182,6 +184,7 @@ class PostgresClient:
                     host=self._settings.host,
                     database=self._settings.database,
                     pool_size=self._settings.max_pool_size,
+                    ssl_mode=self._settings.get_effective_ssl_mode(),
                 )
                 return
             except (TimeoutError, asyncpg.PostgresError, OSError) as e:

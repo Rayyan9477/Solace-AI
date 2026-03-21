@@ -90,7 +90,7 @@ class SessionSettings(BaseSettings):
     max_duration_minutes: int = Field(default=60, ge=15, le=120)
     min_opening_duration_seconds: int = Field(default=180, ge=60, le=600)
     min_working_duration_minutes: int = Field(default=10, ge=5, le=30)
-    enable_flexible_transitions: bool = Field(default=True)
+    enable_flexible_transitions: bool = Field(default=False)
     min_engagement_score: float = Field(default=0.3, ge=0.0, le=1.0)
     auto_close_after_minutes: int = Field(default=90, ge=60, le=180)
     max_concurrent_sessions_per_user: int = Field(default=1, ge=1, le=3)

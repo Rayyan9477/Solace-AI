@@ -255,7 +255,7 @@ Be conservative: when uncertain, err on the side of caution and assess higher ri
 
         # Check cache if enabled
         if self._config.enable_caching:
-            cache_key = self._generate_cache_key(text, context)
+            cache_key = self._generate_cache_key(text, context, user_id)
             if cached := self._get_cached_assessment(cache_key):
                 logger.info("llm_assessment_cached", user_id=str(user_id) if user_id else None)
                 return cached
@@ -271,8 +271,8 @@ Be conservative: when uncertain, err on the side of caution and assess higher ri
             # Parse response
             assessment = self._parse_llm_response(assessment_json)
 
-            # Cache result
-            if self._config.enable_caching:
+            # Cache result - never cache crisis assessments (HIGH or CRITICAL)
+            if self._config.enable_caching and assessment.risk_level not in (RiskLevel.HIGH, RiskLevel.CRITICAL):
                 self._cache_assessment(cache_key, assessment)
 
             if user_id:
@@ -450,10 +450,10 @@ Be conservative: when uncertain, err on the side of caution and assess higher ri
             contextual_notes="Assessment performed using rule-based fallback"
         )
 
-    def _generate_cache_key(self, text: str, context: dict[str, Any] | None) -> str:
-        """Generate cache key from text and context."""
+    def _generate_cache_key(self, text: str, context: dict[str, Any] | None, user_id: UUID | None = None) -> str:
+        """Generate cache key from text, context, and user_id."""
         import hashlib
-        content = text + json.dumps(context or {}, sort_keys=True)
+        content = (str(user_id) if user_id else "") + text + json.dumps(context or {}, sort_keys=True)
         return hashlib.sha256(content.encode()).hexdigest()
 
     def _get_cached_assessment(self, cache_key: str) -> RiskAssessment | None:

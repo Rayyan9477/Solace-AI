@@ -61,6 +61,9 @@ class TechniqueSelector:
             ("Change Talk Elicitation", TherapyModality.MI, "engagement", "Evoke client's own arguments for change", 12, False, []),
             ("Body Scan", TherapyModality.MINDFULNESS, "awareness", "Systematic attention to body sensations", 15, True, ["trauma_dissociation", "acute_panic"]),
             ("5-4-3-2-1 Grounding", TherapyModality.MINDFULNESS, "grounding", "Sensory grounding technique for anxiety", 5, False, []),
+            ("Miracle Question", TherapyModality.SFBT, "solution_focused", "Visualize preferred future", 15, True, []),
+            ("Scaling Questions", TherapyModality.SFBT, "solution_focused", "Rate progress on 0-10 scale", 10, False, []),
+            ("Exception Finding", TherapyModality.SFBT, "solution_focused", "Identify times when problem is absent", 12, False, []),
         ]
         techniques = [TechniqueDTO(technique_id=uuid4(), name=s[0], modality=s[1], category=s[2],
                                     description=s[3], duration_minutes=s[4], requires_homework=s[5],
@@ -148,7 +151,7 @@ class TechniqueSelector:
                 if modality == technique.modality:
                     candidates.append(technique)
         if severity in [SeverityLevel.SEVERE, SeverityLevel.MODERATELY_SEVERE]:
-            candidates = [t for t in candidates if t.duration_minutes <= 12]
+            candidates = [t for t in candidates if t.duration_minutes <= 20]
         return candidates
 
     def _stage2_personalization(

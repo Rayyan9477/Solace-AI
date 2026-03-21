@@ -16,6 +16,11 @@ import structlog
 
 from .crisis_detector import CrisisDetector, CrisisDetectorSettings, DetectionResult, CrisisLevel, RiskFactor
 from .escalation import EscalationManager, EscalationSettings, EscalationResult
+from ..events import (
+    SafetyEventPublisher,
+    SafetyCheckCompletedEvent,
+    CrisisDetectedEvent,
+)
 from services.shared import ServiceBase
 
 logger = structlog.get_logger(__name__)
@@ -96,10 +101,12 @@ class SafetyService(ServiceBase):
 
     def __init__(self, settings: SafetyServiceSettings | None = None,
                  crisis_detector: CrisisDetector | None = None,
-                 escalation_manager: EscalationManager | None = None) -> None:
+                 escalation_manager: EscalationManager | None = None,
+                 event_publisher: SafetyEventPublisher | None = None) -> None:
         self._settings = settings or SafetyServiceSettings()
         self._crisis_detector = crisis_detector or CrisisDetector(CrisisDetectorSettings())
         self._escalation_manager = escalation_manager or EscalationManager(EscalationSettings())
+        self._event_publisher = event_publisher
         self._assessment_cache: dict[UUID, AssessmentCache] = {}
         self._user_risk_history: dict[UUID, dict[str, Any]] = {}
         self._conversation_history: dict[UUID, list[str]] = {}
@@ -121,6 +128,7 @@ class SafetyService(ServiceBase):
     async def shutdown(self) -> None:
         """Shutdown the safety service."""
         logger.info("safety_service_shutting_down", stats=self._stats)
+        await self._escalation_manager.shutdown()
         self._initialized = False
         self._assessment_cache.clear()
 
@@ -149,6 +157,17 @@ class SafetyService(ServiceBase):
             self._stats["crises_detected"] += 1
             self._update_user_risk_history(user_id, detection_result)
         protective_factors = self._identify_protective_factors(content, context or {})
+
+        # Apply protective factors to risk score (H-06)
+        if protective_factors:
+            original_crisis_level = detection_result.crisis_level
+            total_strength = sum(Decimal(str(f["strength"])) for f in protective_factors)
+            adjustment = total_strength * Decimal("0.15")
+            detection_result.risk_score = max(detection_result.risk_score - adjustment, Decimal("0.0"))
+            # Never reduce a CRITICAL below CRITICAL threshold
+            if original_crisis_level == CrisisLevel.CRITICAL:
+                detection_result.risk_score = max(detection_result.risk_score, Decimal("0.85"))
+
         recommended_action = self._determine_action(detection_result.crisis_level, check_type)
         if requires_escalation and self._should_auto_escalate(detection_result.crisis_level):
             await self._trigger_auto_escalation(user_id, session_id, detection_result)
@@ -166,6 +185,33 @@ class SafetyService(ServiceBase):
             detection_layer=max(detection_result.detection_layers_triggered) if detection_result.detection_layers_triggered else 1,
         )
         self._cache_assessment(user_id, result)
+
+        # Emit safety events if publisher is available
+        if self._event_publisher:
+            # Always emit SafetyCheckCompletedEvent
+            await self._event_publisher.publish(SafetyCheckCompletedEvent(
+                user_id=user_id,
+                session_id=session_id,
+                check_type=check_type,
+                is_safe=is_safe,
+                crisis_level=detection_result.crisis_level.value,
+                risk_score=detection_result.risk_score,
+                detection_time_ms=detection_time_ms,
+            ))
+            # Emit CrisisDetectedEvent when crisis_level is HIGH or CRITICAL
+            if detection_result.crisis_level in (CrisisLevel.HIGH, CrisisLevel.CRITICAL):
+                await self._event_publisher.publish(CrisisDetectedEvent(
+                    user_id=user_id,
+                    session_id=session_id,
+                    crisis_level=detection_result.crisis_level.value,
+                    risk_score=detection_result.risk_score,
+                    trigger_indicators=detection_result.trigger_indicators,
+                    detection_layers=detection_result.detection_layers_triggered,
+                    detection_time_ms=detection_time_ms,
+                    requires_escalation=requires_escalation,
+                    requires_human_review=requires_human_review,
+                ))
+
         logger.info("safety_check_completed", user_id=str(user_id), check_type=check_type,
             crisis_level=detection_result.crisis_level.value, is_safe=is_safe, time_ms=detection_time_ms)
         return result

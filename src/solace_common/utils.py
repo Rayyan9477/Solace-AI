@@ -8,13 +8,14 @@ import hmac
 import re
 import secrets
 import unicodedata
-from datetime import datetime, timedelta, timezone
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from functools import wraps
-from typing import Any, Awaitable, Callable, ParamSpec, TypeVar
+from typing import Any, ParamSpec, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
 import structlog
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = structlog.get_logger(__name__)
 
@@ -25,14 +26,14 @@ class DateTimeUtils:
     @staticmethod
     def utc_now() -> datetime:
         """Get current UTC datetime with timezone info."""
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
 
     @staticmethod
     def ensure_utc(dt: datetime) -> datetime:
         """Ensure datetime is UTC. Convert if necessary."""
         if dt.tzinfo is None:
-            return dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
+            return dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC)
 
     @staticmethod
     def to_timestamp(dt: datetime) -> float:
@@ -42,7 +43,7 @@ class DateTimeUtils:
     @staticmethod
     def from_timestamp(ts: float) -> datetime:
         """Create UTC datetime from Unix timestamp."""
-        return datetime.fromtimestamp(ts, tz=timezone.utc)
+        return datetime.fromtimestamp(ts, tz=UTC)
 
     @staticmethod
     def to_iso_string(dt: datetime) -> str:
@@ -311,7 +312,7 @@ class RetryConfig(BaseModel):
         return int(delay)
 
 
-async def retry_async(
+def retry_async(
     func: Callable[P, Awaitable[R]],
     config: RetryConfig | None = None,
     retryable_exceptions: tuple[type[Exception], ...] = (Exception,),

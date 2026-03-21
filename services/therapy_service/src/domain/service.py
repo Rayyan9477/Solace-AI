@@ -23,6 +23,9 @@ from services.shared import ServiceBase
 if TYPE_CHECKING:
     from .technique_selector import TechniqueSelector
     from .session_manager import SessionManager
+    from .treatment_planner import TreatmentPlanner
+    from .homework import HomeworkManager
+    from .progress import ProgressTracker
     from services.shared.infrastructure import UnifiedLLMClient
     from ..events import EventBus
     from ..infrastructure.context_assembler import ContextAssembler
@@ -62,6 +65,9 @@ class TherapyOrchestrator(ServiceBase):
         event_bus: "EventBus | None" = None,
         context_assembler: "ContextAssembler | None" = None,
         unit_of_work: "UnitOfWork | None" = None,
+        treatment_planner: "TreatmentPlanner | None" = None,
+        homework_manager: "HomeworkManager | None" = None,
+        progress_tracker: "ProgressTracker | None" = None,
     ) -> None:
         self._settings = settings or TherapyOrchestratorSettings()
         self._technique_selector = technique_selector
@@ -70,6 +76,9 @@ class TherapyOrchestrator(ServiceBase):
         self._event_bus = event_bus
         self._context_assembler = context_assembler
         self._unit_of_work = unit_of_work
+        self._treatment_planner = treatment_planner
+        self._homework_manager = homework_manager
+        self._progress_tracker = progress_tracker
         self._treatment_plans: dict[UUID, TreatmentPlanDTO] = {}
         self._initialized = False
         self._stats = {
@@ -108,7 +117,18 @@ class TherapyOrchestrator(ServiceBase):
             return SessionStartResult.failure("Session manager not initialized", "SESSION_MANAGER_NOT_INITIALIZED")
         treatment_plan = self._treatment_plans.get(treatment_plan_id)
         if not treatment_plan:
-            treatment_plan = self._create_mock_treatment_plan(user_id, treatment_plan_id, context)
+            if self._treatment_planner:
+                plan = self._treatment_planner.create_plan(
+                    user_id=user_id,
+                    diagnosis=context.get("diagnosis", "Depression"),
+                    severity=SeverityLevel(context.get("severity", SeverityLevel.MODERATE.value)) if isinstance(context.get("severity"), str) else context.get("severity", SeverityLevel.MODERATE),
+                    modality=TherapyModality(context.get("modality", TherapyModality.CBT.value)) if isinstance(context.get("modality"), str) else context.get("modality", TherapyModality.CBT),
+                    phq9_score=context.get("phq9_score"),
+                    initial_goals=context.get("initial_goals"),
+                )
+                treatment_plan = self._treatment_plan_to_dto(plan, treatment_plan_id)
+            else:
+                treatment_plan = self._create_mock_treatment_plan(user_id, treatment_plan_id, context)
             self._treatment_plans[treatment_plan_id] = treatment_plan
         session_id, session = self._session_manager.create_session(user_id=user_id, treatment_plan_id=treatment_plan_id, context=context)
         initial_message = ResponseGenerator.generate_initial_message(session.session_number, treatment_plan)
@@ -220,7 +240,7 @@ class TherapyOrchestrator(ServiceBase):
 
         homework = None
         if self._settings.enable_homework_assignment and technique_result.get("technique"):
-            if technique_result["technique"].requires_homework and session.current_phase == SessionPhase.CLOSING:
+            if technique_result["technique"].requires_homework and session.current_phase in (SessionPhase.WORKING, SessionPhase.CLOSING):
                 homework = self._create_homework_assignment(technique_result["technique"], session_id)
                 if homework:
                     self._session_manager.update_state(session_id, {"homework_assigned": homework})
@@ -310,7 +330,7 @@ class TherapyOrchestrator(ServiceBase):
                 alerts.append(f"Crisis keyword detected: {keyword}")
                 crisis_detected = True
                 self._stats["crisis_interventions"] += 1
-        if re.search(r'\bharm\b', message_lower) or re.search(r'\bdanger\b', message_lower):
+        if re.search(r'\bharm\s+(myself|herself|himself|themselves|me)\b', message_lower) or re.search(r'\b(in\s+danger|dangerous\s+to)\b', message_lower):
             alerts.append("Potential harm language detected")
             crisis_detected = True
         if crisis_detected:
@@ -418,9 +438,44 @@ class TherapyOrchestrator(ServiceBase):
             self._session_manager.transition_phase(session_id, target_phase, trigger="automatic")
 
     def _create_homework_assignment(self, technique: TechniqueDTO, session_id: UUID) -> HomeworkDTO | None:
-        """Create homework assignment from technique."""
+        """Create homework assignment from technique, using HomeworkManager when available."""
         if not technique.requires_homework:
             return None
+
+        # Use HomeworkManager if wired
+        if self._homework_manager:
+            # Map technique names to template keys
+            template_map = {
+                "Thought Record": "thought_record",
+                "Behavioral Activation": "behavioral_activation",
+                "Mindfulness of Breath": "mindfulness_practice",
+                "STOP Skill": "stop_skill",
+                "Values Clarification": "values_clarification",
+                "Exposure Hierarchy": "exposure_hierarchy",
+                "Body Scan": "mindfulness_practice",
+            }
+            template_name = template_map.get(technique.name)
+            if template_name:
+                # Get user_id from the session
+                session = self._session_manager.get_session(session_id) if self._session_manager else None
+                user_id = session.user_id if session else uuid4()
+                assignment = self._homework_manager.assign_homework(
+                    user_id=user_id,
+                    template_name=template_name,
+                    session_id=session_id,
+                    technique_id=technique.technique_id,
+                )
+                if assignment:
+                    return HomeworkDTO(
+                        homework_id=assignment.homework_id,
+                        title=assignment.title,
+                        description=assignment.description,
+                        technique_id=technique.technique_id,
+                        due_date=assignment.due_date,
+                        completed=False,
+                    )
+
+        # Fallback to inline creation
         descriptions = {
             "Thought Record": "Complete a thought record when you notice a strong negative emotion. Identify the situation, thought, emotion, and evidence.",
             "Behavioral Activation": "Schedule and complete 3 pleasant activities this week. Rate your mood before and after each activity.",
@@ -432,6 +487,24 @@ class TherapyOrchestrator(ServiceBase):
             homework_id=uuid4(), title=f"Practice: {technique.name}",
             description=descriptions.get(technique.name, f"Practice the {technique.name} technique daily."),
             technique_id=technique.technique_id, due_date=None, completed=False,
+        )
+
+    def _treatment_plan_to_dto(self, plan: Any, plan_id: UUID) -> TreatmentPlanDTO:
+        """Convert TreatmentPlanner's TreatmentPlan dataclass to TreatmentPlanDTO."""
+        # Map TreatmentPhase enum to integer phase number
+        phase_map = {"foundation": 1, "active_treatment": 2, "consolidation": 3, "maintenance": 4}
+        phase_value = plan.current_phase.value if hasattr(plan.current_phase, "value") else str(plan.current_phase)
+        current_phase_int = phase_map.get(phase_value, 1)
+        return TreatmentPlanDTO(
+            plan_id=plan_id,
+            user_id=plan.user_id,
+            primary_diagnosis=plan.primary_diagnosis,
+            severity=plan.severity,
+            primary_modality=plan.primary_modality,
+            adjunct_modalities=plan.adjunct_modalities,
+            current_phase=current_phase_int,
+            sessions_completed=plan.total_sessions_completed,
+            skills_acquired=plan.skills_acquired,
         )
 
     def _create_mock_treatment_plan(
@@ -544,27 +617,46 @@ class TherapyOrchestrator(ServiceBase):
         session_dates: list[datetime] = []
         mood_ratings: list[int] = []
 
+        # Query completed sessions from repository (H-18)
+        if self._unit_of_work:
+            try:
+                persisted_sessions = await self._unit_of_work.sessions.get_by_user(user_id)
+                for ps in persisted_sessions:
+                    completed_sessions += 1
+                    if hasattr(ps, "started_at") and hasattr(ps, "ended_at"):
+                        if ps.started_at and ps.ended_at:
+                            duration = (ps.ended_at - ps.started_at).total_seconds() / 60
+                            total_minutes += int(duration)
+                    if hasattr(ps, "skills_practiced"):
+                        techniques_used.update(ps.skills_practiced or [])
+                    if hasattr(ps, "started_at") and ps.started_at:
+                        session_dates.append(ps.started_at)
+                        if last_session is None or ps.started_at > last_session:
+                            last_session = ps.started_at
+            except Exception as e:
+                logger.warning("progress_repository_query_failed", error=str(e))
+
         if self._session_manager:
-            # Get user's session history
+            # Get user's active session history
             user_sessions = self._session_manager.get_user_sessions(user_id)
-            completed_sessions = len(user_sessions)
+            completed_sessions += len(user_sessions)
 
             for session in user_sessions:
-                # Calculate session duration
-                if hasattr(session, "start_time") and hasattr(session, "end_time"):
-                    if session.end_time and session.start_time:
-                        duration = (session.end_time - session.start_time).total_seconds() / 60
-                        total_minutes += int(duration)
+                # Calculate session duration (H-19: fix start_time -> started_at)
+                if hasattr(session, "started_at") and session.started_at:
+                    end_time = getattr(session, "ended_at", None) or datetime.now(timezone.utc)
+                    duration = (end_time - session.started_at).total_seconds() / 60
+                    total_minutes += int(duration)
 
                 # Collect techniques used
                 if hasattr(session, "skills_practiced"):
                     techniques_used.update(session.skills_practiced or [])
 
-                # Track last session and collect dates for streak calculation
-                if hasattr(session, "start_time") and session.start_time:
-                    session_dates.append(session.start_time)
-                    if last_session is None or session.start_time > last_session:
-                        last_session = session.start_time
+                # Track last session and collect dates for streak calculation (H-19: fix start_time -> started_at)
+                if hasattr(session, "started_at") and session.started_at:
+                    session_dates.append(session.started_at)
+                    if last_session is None or session.started_at > last_session:
+                        last_session = session.started_at
 
                 # Accumulate engagement scores
                 if hasattr(session, "engagement_score"):

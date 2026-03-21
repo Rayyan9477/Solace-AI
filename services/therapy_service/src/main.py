@@ -105,10 +105,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from .domain.service import TherapyOrchestrator, TherapyOrchestratorSettings
     from .domain.technique_selector import TechniqueSelector, TechniqueSelectorSettings
     from .domain.session_manager import SessionManager, SessionManagerSettings
+    from .domain.treatment_planner import TreatmentPlanner, TreatmentPlannerSettings
+    from .domain.homework import HomeworkManager, HomeworkManagerSettings
+    from .domain.progress import ProgressTracker, ProgressTrackerSettings
     from .events import EventBus
     from services.shared.infrastructure import UnifiedLLMClient, LLMClientSettings
     technique_selector = TechniqueSelector(TechniqueSelectorSettings())
     session_manager = SessionManager(SessionManagerSettings())
+    treatment_planner = TreatmentPlanner(TreatmentPlannerSettings())
+    homework_manager = HomeworkManager(HomeworkManagerSettings())
+    progress_tracker = ProgressTracker(ProgressTrackerSettings())
     llm_client = UnifiedLLMClient(LLMClientSettings())
     await llm_client.initialize()
 
@@ -144,6 +150,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         event_bus=event_bus,
         context_assembler=context_assembler,
         unit_of_work=unit_of_work,
+        treatment_planner=treatment_planner,
+        homework_manager=homework_manager,
+        progress_tracker=progress_tracker,
     )
     await therapy_orchestrator.initialize()
     app.state.settings = settings

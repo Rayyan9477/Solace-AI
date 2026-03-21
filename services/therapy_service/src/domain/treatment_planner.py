@@ -539,7 +539,19 @@ class TreatmentPlanner:
         recommendations = []
         if plan.baseline_phq9 is None or previous is None:
             return ResponseStatus.NOT_STARTED, ["Establish baseline before evaluating response"]
+
+        # Check remission first (takes priority over percentage-based classification)
+        if current <= 4:
+            recommendations = ["Transition to maintenance", "Prepare for termination", "Develop relapse prevention plan"]
+            return ResponseStatus.REMISSION, recommendations
+
         baseline = plan.baseline_phq9
+
+        # Handle baseline=0 edge case
+        if baseline == 0 and current > baseline:
+            recommendations = ["Immediate safety assessment", "Pause standard interventions", "Human clinician consultation"]
+            return ResponseStatus.DETERIORATING, recommendations
+
         reduction_percent = ((baseline - current) / baseline) * 100 if baseline > 0 else 0
         if current < previous:
             if reduction_percent >= 50:
@@ -555,9 +567,6 @@ class TreatmentPlanner:
         if reduction_percent < 25:
             recommendations = ["Reassess diagnosis accuracy", "Consider modality switch", "Explore treatment barriers"]
             return ResponseStatus.NON_RESPONSE, recommendations
-        if current <= 4:
-            recommendations = ["Transition to maintenance", "Prepare for termination", "Develop relapse prevention plan"]
-            return ResponseStatus.REMISSION, recommendations
         return ResponseStatus.RESPONDING, ["Continue monitoring"]
 
     def delete_plan(self, plan_id: UUID) -> bool:

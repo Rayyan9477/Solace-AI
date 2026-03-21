@@ -45,7 +45,7 @@ class SessionManagerSettings(BaseSettings):
     min_opening_duration_sec: int = Field(default=180)
     max_session_duration_min: int = Field(default=60)
     min_engagement_score: float = Field(default=0.3)
-    enable_flexible_transitions: bool = Field(default=True)
+    enable_flexible_transitions: bool = Field(default=False)
     track_detailed_metrics: bool = Field(default=True)
     model_config = SettingsConfigDict(env_prefix="SESSION_MANAGER_", env_file=".env", extra="ignore")
 
@@ -325,7 +325,19 @@ class SessionManager:
                 }
 
         if self._settings.enable_flexible_transitions:
-            return {"allowed": True, "criteria_met": ["flexible_mode_enabled"]}
+            # Only allow forward transitions even in flexible mode
+            phase_order = [
+                SessionPhase.PRE_SESSION, SessionPhase.OPENING,
+                SessionPhase.WORKING, SessionPhase.CLOSING,
+                SessionPhase.POST_SESSION,
+            ]
+            try:
+                current_idx = phase_order.index(session.current_phase)
+                target_idx = phase_order.index(target_phase)
+                if target_idx > current_idx:
+                    return {"allowed": True, "criteria_met": ["flexible_forward_transition"]}
+            except ValueError:
+                pass
 
         return {"allowed": False, "reason": "invalid_transition_path"}
 

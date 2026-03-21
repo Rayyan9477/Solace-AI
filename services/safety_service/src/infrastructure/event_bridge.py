@@ -48,6 +48,11 @@ _BRIDGED_EVENT_TYPES = frozenset({
     EventType.RISK_LEVEL_CHANGED,
     EventType.INCIDENT_CREATED,
     EventType.INCIDENT_RESOLVED,
+    EventType.SAFETY_PLAN_CREATED,
+    EventType.SAFETY_PLAN_ACTIVATED,
+    EventType.SAFETY_PLAN_UPDATED,
+    EventType.OUTPUT_FILTERED,
+    EventType.TRAJECTORY_ALERT,
 })
 
 

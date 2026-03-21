@@ -4,14 +4,13 @@ Enterprise-grade topic creation, configuration, and validation.
 """
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+import structlog
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import structlog
 
 logger = structlog.get_logger(__name__)
 
@@ -151,7 +150,7 @@ class TopicValidator:
         if len(name) > cls.MAX_NAME_LENGTH:
             return False, f"Topic name exceeds {cls.MAX_NAME_LENGTH} characters"
         if any(name.startswith(prefix) for prefix in cls.RESERVED_PREFIXES):
-            return False, f"Topic name uses reserved prefix"
+            return False, "Topic name uses reserved prefix"
         if not all(c in cls.VALID_CHARS for c in name):
             return False, "Topic name contains invalid characters"
         if ".." in name:
@@ -326,7 +325,17 @@ class TopicManager:
             TopicDefinition(name="solace.memory", partitions=4, priority=TopicPriority.NORMAL),
             TopicDefinition(name="solace.analytics", partitions=2, priority=TopicPriority.LOW),
             TopicDefinition(name="solace.personality", partitions=2, priority=TopicPriority.NORMAL),
+            TopicDefinition(name="solace.notifications", partitions=2, priority=TopicPriority.NORMAL),
+            TopicDefinition(name="solace.users", partitions=2, priority=TopicPriority.HIGH),
+            TopicDefinition(name="solace.system", partitions=2, priority=TopicPriority.NORMAL),
+            TopicDefinition(name="solace.messages", partitions=4, priority=TopicPriority.HIGH),
         ]
+        # Audit topic has special retention (10 years) and no DLQ
+        audit_topic = TopicDefinition(
+            name="solace.audit", partitions=4, priority=TopicPriority.CRITICAL,
+            retention_ms=315360000000, cleanup_policy=CleanupPolicy.COMPACT,
+        )
+        self.register_topic(audit_topic)
         for topic in topics:
             self.register_topic(topic)
             self.register_topic(TopicDefinition(
