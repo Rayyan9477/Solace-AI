@@ -101,11 +101,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             raise RuntimeError(f"PHI encryption is required in production: {e}") from e
         logger.warning("phi_encryption_not_configured", error=str(e))
 
+    from .config import get_safety_config
     from .domain.service import SafetyService, SafetyServiceSettings
     from .domain.crisis_detector import CrisisDetector, CrisisDetectorSettings
     from .domain.escalation import EscalationManager, EscalationSettings
-    crisis_detector = CrisisDetector(CrisisDetectorSettings())
-    escalation_manager = EscalationManager(EscalationSettings())
+    # Use centralized SafetyConfig to ensure all sub-components share consistent
+    # configuration sourced from the same environment / .env file (M-06).
+    safety_config = get_safety_config()
+    crisis_detector = CrisisDetector(CrisisDetectorSettings(
+        **{k: v for k, v in safety_config.crisis_detection.model_dump().items()
+           if k in CrisisDetectorSettings.model_fields},
+    ))
+    escalation_manager = EscalationManager(EscalationSettings(
+        **{k: v for k, v in safety_config.escalation.model_dump().items()
+           if k in EscalationSettings.model_fields},
+    ))
     safety_service = SafetyService(
         settings=SafetyServiceSettings(),
         crisis_detector=crisis_detector,

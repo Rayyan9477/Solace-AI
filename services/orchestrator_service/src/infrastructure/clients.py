@@ -401,7 +401,7 @@ class SafetyServiceClient(BaseServiceClient):
         user_id: UUID,
         session_id: UUID,
         message: str,
-        check_type: str = "FULL_ASSESSMENT",
+        check_type: str = "full_assessment",
     ) -> ServiceResponse[dict[str, Any]]:
         """Perform safety check on message content."""
         return await self.post(

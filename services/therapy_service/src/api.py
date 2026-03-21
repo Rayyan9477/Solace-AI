@@ -311,6 +311,13 @@ async def get_treatment_plan(
                 detail="Treatment plan not found for session"
             )
 
+        # Enforce ownership: user can only view their own treatment plan
+        if str(plan.user_id) != current_user.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: not your session",
+            )
+
         return plan
 
     except HTTPException:
@@ -408,10 +415,25 @@ async def delete_session(
     logger.info("session_deletion_requested", session_id=str(session_id))
 
     try:
+        # Enforce ownership: user can only delete their own sessions
+        state = await orchestrator.get_session_state(session_id=session_id)
+        if state is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found",
+            )
+        if str(state.user_id) != current_user.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: not your session",
+            )
+
         await orchestrator.delete_session(session_id=session_id)
         logger.info("session_deleted", session_id=str(session_id))
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("session_deletion_error", error=str(e), session_id=str(session_id))
         raise HTTPException(

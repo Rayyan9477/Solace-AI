@@ -137,7 +137,7 @@ class OutcomeMeasure:
             "name": "Generalized Anxiety Disorder-7",
             "min_score": 0, "max_score": 21, "items": 7,
             "thresholds": [(5, "minimal"), (10, "mild"), (15, "moderate"), (21, "severe")],
-            "rci": 4.0, "clinical_cutoff": 8, "higher_worse": True,
+            "rci": 4.0, "clinical_cutoff": 10, "higher_worse": True,
         },
         OutcomeInstrument.ORS: {
             "name": "Outcome Rating Scale",

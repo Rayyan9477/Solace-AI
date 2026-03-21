@@ -16,6 +16,8 @@ import structlog
 from ..schemas import (
     PersonalityTrait, AssessmentSource, OceanScoresDTO, TraitScoreDTO,
 )
+from ..ml.liwc_features import LIWCProcessor
+from ..ml.roberta_model import RoBERTaPersonalityDetector
 
 logger = structlog.get_logger(__name__)
 
@@ -24,9 +26,12 @@ class TraitDetectorSettings(BaseSettings):
     """Trait detector configuration."""
     min_text_length: int = Field(default=50)
     max_text_length: int = Field(default=10000)
-    ensemble_weights_text: float = Field(default=0.4, ge=0.0, le=1.0)
-    ensemble_weights_liwc: float = Field(default=0.3, ge=0.0, le=1.0)
+    ensemble_weights_roberta: float = Field(default=0.5, ge=0.0, le=1.0)
     ensemble_weights_llm: float = Field(default=0.3, ge=0.0, le=1.0)
+    ensemble_weights_liwc: float = Field(default=0.2, ge=0.0, le=1.0)
+    # Legacy text weight kept for backward compatibility but no longer used
+    # in the default ensemble. The LIWC processor replaces the old text detector.
+    ensemble_weights_text: float = Field(default=0.2, ge=0.0, le=1.0)
     confidence_base: float = Field(default=0.5)
     confidence_sample_factor: float = Field(default=0.1)
     llm_temperature: float = Field(default=0.3)
@@ -101,57 +106,41 @@ class LIWCFeatureExtractor:
 
 
 class TextBasedDetector:
-    """Detects OCEAN traits using text pattern analysis."""
+    """Detects OCEAN traits using the full LIWC processor for feature extraction."""
 
     def __init__(self) -> None:
-        self._liwc_extractor = LIWCFeatureExtractor()
+        self._liwc = LIWCProcessor()
 
-    def detect(self, text: str) -> TraitDetectionResult:
-        """Detect traits using text-based heuristics."""
-        features = self._liwc_extractor.extract(text)
-        scores = self._compute_trait_scores(features)
-        evidence = self._generate_evidence(features)
-        confidence = min(0.7, 0.3 + (features.word_count / 500) * 0.4)
-        return TraitDetectionResult(
-            source=AssessmentSource.TEXT_ANALYSIS,
-            scores=scores,
-            confidence=confidence,
-            evidence=evidence,
-        )
-
-    def _compute_trait_scores(self, features: LIWCFeatures) -> dict[PersonalityTrait, float]:
-        """Compute OCEAN scores from LIWC features."""
-        openness = self._clamp(0.5 + features.insight_words_ratio * 10 + features.question_marks_ratio * 5)
-        conscientiousness = self._clamp(0.5 + features.achievement_words_ratio * 8 - features.tentative_words_ratio * 3)
-        extraversion = self._clamp(0.5 + features.social_words_ratio * 8 + features.we_words_ratio * 5 + features.exclamation_ratio * 3)
-        agreeableness = self._clamp(0.5 + features.positive_emotion_ratio * 6 + features.social_words_ratio * 4 - features.negative_emotion_ratio * 3)
-        neuroticism = self._clamp(0.5 + features.negative_emotion_ratio * 8 + features.tentative_words_ratio * 4 - features.positive_emotion_ratio * 3)
-        return {
-            PersonalityTrait.OPENNESS: openness,
-            PersonalityTrait.CONSCIENTIOUSNESS: conscientiousness,
-            PersonalityTrait.EXTRAVERSION: extraversion,
-            PersonalityTrait.AGREEABLENESS: agreeableness,
-            PersonalityTrait.NEUROTICISM: neuroticism,
-        }
-
-    def _clamp(self, value: float) -> float:
-        """Clamp value between 0 and 1."""
-        return max(0.0, min(1.0, value))
-
-    def _generate_evidence(self, features: LIWCFeatures) -> list[str]:
-        """Generate evidence markers from features."""
-        evidence = []
-        if features.positive_emotion_ratio > 0.02:
-            evidence.append("high_positive_emotion")
-        if features.negative_emotion_ratio > 0.02:
-            evidence.append("elevated_negative_emotion")
-        if features.social_words_ratio > 0.02:
-            evidence.append("social_orientation")
-        if features.achievement_words_ratio > 0.015:
-            evidence.append("achievement_focus")
-        if features.insight_words_ratio > 0.01:
-            evidence.append("reflective_thinking")
-        return evidence
+    async def detect(self, text: str) -> TraitDetectionResult:
+        """Detect traits using full LIWC-based personality analysis."""
+        try:
+            ocean_scores = await self._liwc.process(text)
+            scores = {
+                PersonalityTrait.OPENNESS: ocean_scores.openness,
+                PersonalityTrait.CONSCIENTIOUSNESS: ocean_scores.conscientiousness,
+                PersonalityTrait.EXTRAVERSION: ocean_scores.extraversion,
+                PersonalityTrait.AGREEABLENESS: ocean_scores.agreeableness,
+                PersonalityTrait.NEUROTICISM: ocean_scores.neuroticism,
+            }
+            evidence = [
+                marker
+                for ts in ocean_scores.trait_scores
+                for marker in ts.evidence_markers
+            ]
+            return TraitDetectionResult(
+                source=AssessmentSource.LIWC_FEATURES,
+                scores=scores,
+                confidence=ocean_scores.overall_confidence,
+                evidence=evidence,
+            )
+        except Exception as e:
+            logger.warning("liwc_detection_failed", error=str(e))
+            return TraitDetectionResult(
+                source=AssessmentSource.LIWC_FEATURES,
+                scores={trait: 0.5 for trait in PersonalityTrait},
+                confidence=0.3,
+                evidence=[],
+            )
 
 
 class LLMBasedDetector:
@@ -231,18 +220,33 @@ Respond ONLY with valid JSON in this format:
 
 
 class TraitDetector:
-    """Ensemble trait detector combining multiple detection methods."""
+    """Ensemble trait detector combining RoBERTa, LLM, and LIWC detection methods."""
 
     def __init__(self, settings: TraitDetectorSettings | None = None, llm_client: Any = None) -> None:
         self._settings = settings or TraitDetectorSettings()
         self._text_detector = TextBasedDetector()
         self._llm_detector = LLMBasedDetector(llm_client) if llm_client else None
+        self._roberta: RoBERTaPersonalityDetector | None = None
+        try:
+            self._roberta = RoBERTaPersonalityDetector()
+        except Exception as e:
+            logger.warning("roberta_detector_unavailable", error=str(e))
         self._initialized = False
 
     async def initialize(self) -> None:
         """Initialize the trait detector."""
+        if self._roberta is not None:
+            try:
+                await self._roberta.initialize()
+            except Exception as e:
+                logger.warning("roberta_initialization_failed", error=str(e))
+                self._roberta = None
         self._initialized = True
-        logger.info("trait_detector_initialized", llm_enabled=self._llm_detector is not None)
+        logger.info(
+            "trait_detector_initialized",
+            llm_enabled=self._llm_detector is not None,
+            roberta_enabled=self._roberta is not None,
+        )
 
     async def detect(self, text: str, sources: list[AssessmentSource] | None = None) -> OceanScoresDTO:
         """Detect OCEAN traits using ensemble of detection methods."""
@@ -252,18 +256,74 @@ class TraitDetector:
         text = text[:self._settings.max_text_length]
         sources = sources or [AssessmentSource.ENSEMBLE]
         results: list[TraitDetectionResult] = []
-        text_result = self._text_detector.detect(text)
-        results.append(text_result)
+
+        # LIWC-based detection (replaced the old inline TextBasedDetector)
+        liwc_result = await self._text_detector.detect(text)
+        results.append(liwc_result)
+
+        # LLM zero-shot detection
         if self._settings.enable_llm_detection and self._llm_detector and AssessmentSource.ENSEMBLE in sources:
             llm_result = await self._llm_detector.detect(text)
             results.append(llm_result)
+
+        # RoBERTa detection
+        if self._roberta is not None:
+            try:
+                roberta_scores = await self._roberta.detect(text)
+                roberta_result = TraitDetectionResult(
+                    source=AssessmentSource.TEXT_ANALYSIS,
+                    scores={
+                        PersonalityTrait.OPENNESS: roberta_scores.openness,
+                        PersonalityTrait.CONSCIENTIOUSNESS: roberta_scores.conscientiousness,
+                        PersonalityTrait.EXTRAVERSION: roberta_scores.extraversion,
+                        PersonalityTrait.AGREEABLENESS: roberta_scores.agreeableness,
+                        PersonalityTrait.NEUROTICISM: roberta_scores.neuroticism,
+                    },
+                    confidence=roberta_scores.overall_confidence,
+                    evidence=[m for ts in roberta_scores.trait_scores for m in ts.evidence_markers],
+                )
+                results.append(roberta_result)
+            except Exception as e:
+                logger.warning("roberta_detection_failed", error=str(e))
+
         return self._ensemble_scores(results)
 
     def _ensemble_scores(self, results: list[TraitDetectionResult]) -> OceanScoresDTO:
-        """Combine multiple detection results into ensemble scores."""
+        """Combine multiple detection results into ensemble scores.
+
+        Uses 3-source weights (RoBERTa=0.5, LLM=0.3, LIWC=0.2) when all
+        three sources are available. Falls back to 2-source weights
+        (LLM=0.6, LIWC=0.4) when RoBERTa is absent, or single-source
+        weights when only one detector produced results.
+        """
         if not results:
             return self._neutral_scores()
-        weights = {AssessmentSource.TEXT_ANALYSIS: self._settings.ensemble_weights_text, AssessmentSource.LIWC_FEATURES: self._settings.ensemble_weights_liwc, AssessmentSource.LLM_ZERO_SHOT: self._settings.ensemble_weights_llm}
+
+        has_roberta = any(r.source == AssessmentSource.TEXT_ANALYSIS for r in results)
+        has_llm = any(r.source == AssessmentSource.LLM_ZERO_SHOT for r in results)
+        has_liwc = any(r.source == AssessmentSource.LIWC_FEATURES for r in results)
+
+        if has_roberta and has_llm and has_liwc:
+            # 3-source ensemble
+            weights = {
+                AssessmentSource.TEXT_ANALYSIS: self._settings.ensemble_weights_roberta,
+                AssessmentSource.LLM_ZERO_SHOT: self._settings.ensemble_weights_llm,
+                AssessmentSource.LIWC_FEATURES: self._settings.ensemble_weights_liwc,
+            }
+        elif has_llm and has_liwc:
+            # 2-source fallback: LLM=0.6, LIWC=0.4
+            weights = {
+                AssessmentSource.LLM_ZERO_SHOT: 0.6,
+                AssessmentSource.LIWC_FEATURES: 0.4,
+            }
+        else:
+            # Single source or other combinations: equal weighting
+            weights = {
+                AssessmentSource.TEXT_ANALYSIS: self._settings.ensemble_weights_roberta,
+                AssessmentSource.LLM_ZERO_SHOT: self._settings.ensemble_weights_llm,
+                AssessmentSource.LIWC_FEATURES: self._settings.ensemble_weights_liwc,
+            }
+
         weighted_scores: dict[PersonalityTrait, float] = {trait: 0.0 for trait in PersonalityTrait}
         total_weight = 0.0
         all_evidence: list[str] = []
@@ -305,5 +365,10 @@ class TraitDetector:
 
     async def shutdown(self) -> None:
         """Shutdown the trait detector."""
+        if self._roberta is not None:
+            try:
+                await self._roberta.shutdown()
+            except Exception:
+                pass
         self._initialized = False
         logger.info("trait_detector_shutdown")

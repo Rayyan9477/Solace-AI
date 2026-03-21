@@ -68,6 +68,30 @@ class AuditSettings(BaseSettings):
     )
     model_config = SettingsConfigDict(env_prefix="AUDIT_", env_file=".env", extra="ignore")
 
+    def validate_hmac_key_for_environment(self) -> None:
+        """Validate HMAC key configuration based on the deployment environment.
+
+        In production, an empty HMAC key compromises audit chain integrity
+        (HIPAA compliance). Raises RuntimeError in production, logs a warning
+        in other environments.
+        """
+        if self.hmac_key:
+            return
+        environment = os.getenv("ENVIRONMENT", "development").lower()
+        if environment == "production":
+            raise RuntimeError(
+                "AUDIT_HMAC_KEY must be set in production. An empty HMAC key "
+                "disables tamper-resistant audit chain verification, violating "
+                "HIPAA audit log integrity requirements."
+            )
+        logger.critical(
+            "audit_hmac_key_empty",
+            environment=environment,
+            message="AUDIT_HMAC_KEY is empty. Audit chain integrity uses plain "
+                    "hashes instead of HMAC. Set AUDIT_HMAC_KEY before deploying "
+                    "to production.",
+        )
+
 
 class AuditActor(BaseModel):
     """Actor performing the audited action."""
@@ -546,6 +570,7 @@ class AuditLogger:
                  settings: AuditSettings | None = None) -> None:
         self._store = store
         self._settings = settings or AuditSettings()
+        self._settings.validate_hmac_key_for_environment()
         self._last_hash: str | None = None
         self._lock = threading.Lock()
 
@@ -639,6 +664,7 @@ class AsyncAuditLogger:
                  settings: AuditSettings | None = None) -> None:
         self._store = store
         self._settings = settings or AuditSettings()
+        self._settings.validate_hmac_key_for_environment()
         self._last_hash: str | None = None
         import asyncio
         self._lock = asyncio.Lock()

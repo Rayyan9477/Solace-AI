@@ -211,17 +211,71 @@ class TestTraitDetectorSettings:
         assert settings.min_text_length == 50
         assert settings.max_text_length == 10000
         assert settings.enable_llm_detection is True
-        assert settings.ensemble_weights_text == 0.4
-        assert settings.ensemble_weights_liwc == 0.3
+        assert settings.ensemble_weights_roberta == 0.5
         assert settings.ensemble_weights_llm == 0.3
+        assert settings.ensemble_weights_liwc == 0.2
 
     def test_custom_settings(self) -> None:
         """Test custom settings."""
         settings = TraitDetectorSettings(
             min_text_length=100,
             enable_llm_detection=False,
-            ensemble_weights_text=0.6,
+            ensemble_weights_roberta=0.6,
         )
         assert settings.min_text_length == 100
         assert settings.enable_llm_detection is False
-        assert settings.ensemble_weights_text == 0.6
+        assert settings.ensemble_weights_roberta == 0.6
+
+
+class TestEnsembleWeights:
+    """Tests verifying ensemble weight configuration matches spec."""
+
+    def test_default_weights_match_spec(self) -> None:
+        """Default weights should be RoBERTa=0.5, LLM=0.3, LIWC=0.2."""
+        settings = TraitDetectorSettings()
+        assert settings.ensemble_weights_roberta == 0.5
+        assert settings.ensemble_weights_llm == 0.3
+        assert settings.ensemble_weights_liwc == 0.2
+
+    def test_weights_sum_to_one(self) -> None:
+        """The three primary ensemble weights must sum to 1.0."""
+        settings = TraitDetectorSettings()
+        total = (
+            settings.ensemble_weights_roberta
+            + settings.ensemble_weights_llm
+            + settings.ensemble_weights_liwc
+        )
+        assert abs(total - 1.0) < 0.01, (
+            f"Ensemble weights should sum to 1.0, got {total}"
+        )
+
+    def test_roberta_has_highest_weight(self) -> None:
+        """RoBERTa should have the highest default weight."""
+        settings = TraitDetectorSettings()
+        assert settings.ensemble_weights_roberta > settings.ensemble_weights_llm
+        assert settings.ensemble_weights_roberta > settings.ensemble_weights_liwc
+
+    def test_llm_weight_greater_than_liwc(self) -> None:
+        """LLM weight should be greater than LIWC weight."""
+        settings = TraitDetectorSettings()
+        assert settings.ensemble_weights_llm > settings.ensemble_weights_liwc
+
+    def test_all_weights_positive(self) -> None:
+        """All ensemble weights must be positive."""
+        settings = TraitDetectorSettings()
+        assert settings.ensemble_weights_roberta > 0.0
+        assert settings.ensemble_weights_llm > 0.0
+        assert settings.ensemble_weights_liwc > 0.0
+
+    def test_all_weights_at_most_one(self) -> None:
+        """No single weight should exceed 1.0."""
+        settings = TraitDetectorSettings()
+        assert settings.ensemble_weights_roberta <= 1.0
+        assert settings.ensemble_weights_llm <= 1.0
+        assert settings.ensemble_weights_liwc <= 1.0
+
+    def test_legacy_text_weight_still_exists(self) -> None:
+        """Legacy ensemble_weights_text should still be available for backward compat."""
+        settings = TraitDetectorSettings()
+        assert hasattr(settings, "ensemble_weights_text")
+        assert isinstance(settings.ensemble_weights_text, float)

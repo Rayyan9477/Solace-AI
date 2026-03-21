@@ -173,7 +173,14 @@ def to_kafka_event(event: DomainEvent) -> Any:
         correlation_id=event.correlation_id or event.event_id,
         source_service="personality-service",
     )
-    base: dict[str, Any] = {"user_id": event.user_id, "session_id": None, "metadata": meta}
+    # Extract session_id from payload or aggregate_id instead of hardcoding None
+    session_id = event.payload.get("session_id")
+    if session_id and isinstance(session_id, str):
+        session_id = UUID(session_id)
+    elif session_id is None and event.metadata.get("session_id"):
+        sid = event.metadata["session_id"]
+        session_id = UUID(sid) if isinstance(sid, str) else sid
+    base: dict[str, Any] = {"user_id": event.user_id, "session_id": session_id, "metadata": meta}
 
     if event.event_type == EventType.PROFILE_UPDATED:
         return KafkaProfileUpdated(

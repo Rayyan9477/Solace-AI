@@ -175,11 +175,19 @@ def get_safety_service(request: Request) -> SafetyService:
     return request.app.state.safety_service
 
 
+def get_escalation_manager(request: Request) -> Any:
+    """Dependency to get escalation manager from app state."""
+    if not hasattr(request.app.state, "escalation_manager"):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Escalation manager not initialized")
+    return request.app.state.escalation_manager
+
+
 @router.post("/check", response_model=SafetyCheckResponse, status_code=status.HTTP_200_OK)
 async def perform_safety_check(
     request: SafetyCheckRequest,
     service: AuthenticatedService = Depends(get_current_service),
     safety_service: SafetyService = Depends(get_safety_service),
+    escalation_manager: Any = Depends(get_escalation_manager),
 ) -> SafetyCheckResponse:
     """Perform safety check on content (pre-check or post-check)."""
     logger.info("safety_check_requested", user_id=str(request.user_id), check_type=request.check_type.value)
@@ -192,7 +200,7 @@ async def perform_safety_check(
     )
     crisis_resources = []
     if request.include_resources and result.crisis_level in (CrisisLevel.HIGH, CrisisLevel.CRITICAL):
-        crisis_resources = _get_crisis_resources(result.crisis_level)
+        crisis_resources = _get_crisis_resources(result.crisis_level, escalation_manager)
     return SafetyCheckResponse(
         user_id=request.user_id,
         session_id=request.session_id,
@@ -314,9 +322,15 @@ async def filter_output(
 
 
 @router.get("/resources", response_model=list[dict[str, str]], status_code=status.HTTP_200_OK)
-async def get_crisis_resources(level: CrisisLevel = CrisisLevel.HIGH) -> list[dict[str, str]]:
-    """Get crisis resources for specified level."""
-    return _get_crisis_resources(level)
+async def get_crisis_resources(
+    level: CrisisLevel = CrisisLevel.HIGH,
+    escalation_manager: Any = Depends(get_escalation_manager),
+) -> list[dict[str, str]]:
+    """Get crisis resources for specified level.
+
+    Routes through CrisisResourceManager in the domain layer (M-01).
+    """
+    return _get_crisis_resources(level, escalation_manager)
 
 
 @router.get("/status", response_model=dict[str, Any], status_code=status.HTTP_200_OK)
@@ -325,13 +339,15 @@ async def get_service_status(safety_service: SafetyService = Depends(get_safety_
     return await safety_service.get_status()
 
 
-def _get_crisis_resources(level: CrisisLevel) -> list[dict[str, str]]:
-    """Get crisis resources based on crisis level."""
-    resources = [
-        {"name": "988 Suicide & Crisis Lifeline", "contact": "988", "type": "phone", "available": "24/7"},
-        {"name": "Crisis Text Line", "contact": "Text HOME to 741741", "type": "text", "available": "24/7"},
-    ]
-    if level == CrisisLevel.CRITICAL:
-        resources.insert(0, {"name": "Emergency Services", "contact": "911", "type": "phone", "available": "24/7"})
-        resources.append({"name": "International Association for Suicide Prevention", "contact": "https://www.iasp.info/resources/Crisis_Centres/", "type": "web", "available": "24/7"})
-    return resources
+def _get_crisis_resources(level: CrisisLevel, escalation_manager: Any | None = None) -> list[dict[str, str]]:
+    """Get crisis resources via the domain-layer CrisisResourceManager.
+
+    Delegates to EscalationManager.get_crisis_resources() which owns the single
+    source-of-truth resource list (M-01: removed duplicate hardcoded resources).
+    """
+    if escalation_manager is not None:
+        return escalation_manager.get_crisis_resources(level.value)
+    # Fallback only if called without a manager (e.g. during startup before
+    # the app state is populated).  Import locally to avoid circular deps.
+    from .domain.escalation import CrisisResourceManager
+    return CrisisResourceManager().get_resources_for_level(level.value)

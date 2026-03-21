@@ -28,7 +28,7 @@ class ClinicianRegistrySettings(BaseSettings):
     request_timeout_seconds: float = Field(default=10.0, ge=1.0, le=60.0)
     cache_ttl_minutes: int = Field(default=5, ge=1, le=60)
     fallback_oncall_email: str = Field(
-        ...,
+        default="oncall@solace-ai.com",
         description="Fallback email for on-call team when user service is unavailable",
     )
     max_retries: int = Field(default=2, ge=0, le=5)

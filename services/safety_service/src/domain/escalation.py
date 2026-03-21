@@ -465,7 +465,7 @@ class EscalationWorkflow:
         escalation.actions_taken.append("Coping strategies reviewed")
         escalation.actions_taken.append("Support resources shared")
         if self._settings.enable_email_notifications:
-            escalation.actions_taken.append("Supervisor notified via email")
+            escalation.actions_taken.append("Event logged for supervisor review")
         escalation.status = EscalationStatus.PENDING
         return escalation
 

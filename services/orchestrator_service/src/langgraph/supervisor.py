@@ -325,8 +325,8 @@ class AgentRouter:
                 "P0 crisis disclosure - immediate safety assessment required"
             ),
             IntentType.EMOTIONAL_SUPPORT: (
-                [AgentType.THERAPY, AgentType.PERSONALITY] if self._settings.enable_therapy_agent else [AgentType.CHAT, AgentType.PERSONALITY],
-                "P2+P3 emotional support - therapy agent with personality adaptation"
+                [AgentType.THERAPY, AgentType.EMOTION, AgentType.PERSONALITY] if self._settings.enable_therapy_agent else [AgentType.EMOTION, AgentType.CHAT, AgentType.PERSONALITY],
+                "P2+P3 emotional support - therapy and emotion agents with personality adaptation"
             ),
             IntentType.SYMPTOM_DISCUSSION: (
                 [AgentType.DIAGNOSIS, AgentType.THERAPY] if self._settings.enable_diagnosis_agent else [AgentType.CHAT],

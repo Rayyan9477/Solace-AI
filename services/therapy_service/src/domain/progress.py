@@ -431,7 +431,12 @@ class ProgressTracker:
         return True
 
     def get_trend(self, user_id: UUID, measure_type: MeasureType, window: int = 5) -> dict[str, Any]:
-        """Get score trend for a measure."""
+        """Get score trend for a measure.
+
+        For instruments where lower scores are better (PHQ-9, GAD-7), a
+        decreasing raw score means the patient is improving. The returned
+        trend label reflects clinical meaning rather than raw direction.
+        """
         metric = self._metrics.get(user_id, {}).get(measure_type)
         if not metric or len(metric.scores_history) < 2:
             return {"trend": "insufficient_data", "scores": []}
@@ -440,12 +445,20 @@ class ProgressTracker:
         if len(scores) >= 2:
             diffs = [scores[i+1] - scores[i] for i in range(len(scores)-1)]
             avg_diff = sum(diffs) / len(diffs)
-            if avg_diff > 0.5:
-                trend = "increasing"
-            elif avg_diff < -0.5:
-                trend = "decreasing"
-            else:
+
+            # Determine whether higher scores are better for this instrument
+            instrument = recent[-1].instrument if recent else None
+            config = InstrumentConfig.get_config(instrument) if instrument else {}
+            higher_better = config.get("higher_better", False)
+
+            if abs(avg_diff) <= 0.5:
                 trend = "stable"
+            elif higher_better:
+                # For instruments like WHO-5/ORS: rising score = improving
+                trend = "improving" if avg_diff > 0.5 else "worsening"
+            else:
+                # For instruments like PHQ-9/GAD-7: falling score = improving
+                trend = "improving" if avg_diff < -0.5 else "worsening"
         else:
             trend = "insufficient_data"
         return {"trend": trend, "scores": scores, "avg_change": avg_diff if len(scores) >= 2 else 0}

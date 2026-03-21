@@ -180,7 +180,7 @@ class PersonalityServiceClient:
         session_id: str | None = None,
     ) -> PersonalityDetectionResult:
         """Detect personality traits from text."""
-        url = f"{self._base_url}/detect"
+        url = f"{self._base_url}/api/v1/personality/detect"
         payload = {
             "user_id": user_id,
             "text": text,
@@ -214,7 +214,7 @@ class PersonalityServiceClient:
 
     async def get_style(self, user_id: str) -> StyleResponse:
         """Get communication style for user."""
-        url = f"{self._base_url}/style"
+        url = f"{self._base_url}/api/v1/personality/style"
         payload = {"user_id": user_id}
         async with httpx.AsyncClient(timeout=self._settings.timeout_seconds) as client:
             response = await client.post(url, json=payload)

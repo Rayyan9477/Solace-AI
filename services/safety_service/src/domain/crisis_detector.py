@@ -464,6 +464,14 @@ class Layer2ProcessingGuard:
             (time.perf_counter() - start_time) * 1000
         )
         crisis_level = _crisis_level_from_score(risk_score, self._settings)
+        # Recalculate recommended_action based on the NEW crisis level after L2 adjustment
+        recommended_action = {
+            CrisisLevel.NONE: "continue",
+            CrisisLevel.LOW: "monitor",
+            CrisisLevel.ELEVATED: "assess",
+            CrisisLevel.HIGH: "intervene",
+            CrisisLevel.CRITICAL: "escalate_immediately",
+        }.get(crisis_level, "continue")
         return DetectionResult(
             crisis_detected=crisis_level != CrisisLevel.NONE,
             crisis_level=crisis_level,
@@ -473,7 +481,7 @@ class Layer2ProcessingGuard:
             confidence=self._calculate_confidence(risk_factors),
             detection_layers_triggered=layers_triggered,
             detection_time_ms=detection_time_ms,
-            recommended_action=layer1_result.recommended_action,
+            recommended_action=recommended_action,
         )
 
     def _check_severity_appropriateness(
@@ -577,6 +585,7 @@ class Layer4ContinuousMonitor:
         deteriorating = negative_ratio > Decimal("0.6") and current_level in (
             CrisisLevel.ELEVATED,
             CrisisLevel.HIGH,
+            CrisisLevel.CRITICAL,
         )
         trend = (
             "deteriorating"
@@ -677,12 +686,14 @@ class CrisisDetector:
         context = context or {}
 
         if self._settings.enable_layer_1:
+            # Always run Layer1 regex-based detection
+            layer1_result = self._layer1.detect(content, user_risk_history)
+            keyword_score = layer1_result.risk_score
             if self._keyword_detector:
+                # Also run ML keyword detection and take the higher score
                 keyword_matches = self._keyword_detector.detect(content, user_id)
-                keyword_score = self._keyword_detector.calculate_risk_score(keyword_matches)
-            else:
-                layer1_result = self._layer1.detect(content, user_risk_history)
-                keyword_score = layer1_result.risk_score
+                ml_keyword_score = self._keyword_detector.calculate_risk_score(keyword_matches)
+                keyword_score = max(ml_keyword_score, layer1_result.risk_score)
         else:
             keyword_score = Decimal("0.0")
 

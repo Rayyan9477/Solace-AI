@@ -10,16 +10,16 @@ Principles: Repository Pattern, Dependency Inversion
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import structlog
 
-from ..domain.entities import PersonalityProfile, TraitAssessment, ProfileSnapshot
-from ..domain.value_objects import OceanScores, CommunicationStyle, AssessmentMetadata
-from ..schemas import AssessmentSource, CommunicationStyleType
+from ..domain.entities import PersonalityProfile, ProfileSnapshot, TraitAssessment
+from ..domain.value_objects import AssessmentMetadata, CommunicationStyle, OceanScores
+from ..schemas import AssessmentSource
 from .repository import PersonalityRepositoryPort
 
 try:
@@ -92,13 +92,13 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
 
         query = f"""
             INSERT INTO {self._profiles_table} (
-                profile_id, user_id, ocean_scores, communication_style,
+                id, user_id, ocean_scores, communication_style,
                 assessment_count, stability_score, assessment_history,
                 created_at, updated_at, version
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
             )
-            ON CONFLICT (profile_id) DO UPDATE SET
+            ON CONFLICT (id) DO UPDATE SET
                 ocean_scores = EXCLUDED.ocean_scores,
                 communication_style = EXCLUDED.communication_style,
                 assessment_count = EXCLUDED.assessment_count,
@@ -127,7 +127,7 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
     async def get_profile(self, profile_id: UUID) -> PersonalityProfile | None:
         """Get a profile by ID from PostgreSQL."""
         self._stats["queries"] += 1
-        query = f"SELECT * FROM {self._profiles_table} WHERE profile_id = $1"
+        query = f"SELECT * FROM {self._profiles_table} WHERE id = $1"
         async with self._acquire() as conn:
             row = await conn.fetchrow(query, profile_id)
             if row is None:
@@ -158,7 +158,7 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
 
     async def delete_profile(self, profile_id: UUID) -> bool:
         """Delete a profile from PostgreSQL."""
-        query = f"DELETE FROM {self._profiles_table} WHERE profile_id = $1"
+        query = f"DELETE FROM {self._profiles_table} WHERE id = $1"
         async with self._acquire() as conn:
             result = await conn.execute(query, profile_id)
             deleted = result.split()[-1] != "0"
@@ -181,12 +181,12 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
 
         query = f"""
             INSERT INTO {self._assessments_table} (
-                assessment_id, user_id, ocean_scores, source,
+                id, user_id, ocean_scores, source,
                 metadata, evidence, created_at, version
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8
             )
-            ON CONFLICT (assessment_id) DO UPDATE SET
+            ON CONFLICT (id) DO UPDATE SET
                 ocean_scores = EXCLUDED.ocean_scores,
                 metadata = EXCLUDED.metadata,
                 evidence = EXCLUDED.evidence,
@@ -210,7 +210,7 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
     async def get_assessment(self, assessment_id: UUID) -> TraitAssessment | None:
         """Get assessment by ID from PostgreSQL."""
         self._stats["queries"] += 1
-        query = f"SELECT * FROM {self._assessments_table} WHERE assessment_id = $1"
+        query = f"SELECT * FROM {self._assessments_table} WHERE id = $1"
         async with self._acquire() as conn:
             row = await conn.fetchrow(query, assessment_id)
             if row is None:
@@ -244,13 +244,13 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
 
         query = f"""
             INSERT INTO {self._snapshots_table} (
-                snapshot_id, profile_id, user_id, ocean_scores,
+                id, profile_id, user_id, ocean_scores,
                 communication_style, stability_score, assessment_count,
                 captured_at, reason
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9
             )
-            ON CONFLICT (snapshot_id) DO NOTHING
+            ON CONFLICT (id) DO NOTHING
         """
         async with self._acquire() as conn:
             await conn.execute(
@@ -271,7 +271,7 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
     async def get_snapshot(self, snapshot_id: UUID) -> ProfileSnapshot | None:
         """Get snapshot by ID from PostgreSQL."""
         self._stats["queries"] += 1
-        query = f"SELECT * FROM {self._snapshots_table} WHERE snapshot_id = $1"
+        query = f"SELECT * FROM {self._snapshots_table} WHERE id = $1"
         async with self._acquire() as conn:
             row = await conn.fetchrow(query, snapshot_id)
             if row is None:
@@ -297,9 +297,9 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
 
         async with self._acquire() as conn:
             # Get profile ID first
-            query = f"SELECT profile_id FROM {self._profiles_table} WHERE user_id = $1"
+            query = f"SELECT id FROM {self._profiles_table} WHERE user_id = $1"
             row = await conn.fetchrow(query, user_id)
-            profile_id = row["profile_id"] if row else None
+            profile_id = row["id"] if row else None
 
             # Delete snapshots
             if profile_id:
@@ -360,14 +360,14 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
         assessment_history = [TraitAssessment.from_dict(a) for a in history_data]
 
         return PersonalityProfile(
-            profile_id=row["profile_id"],
+            profile_id=row["id"],
             user_id=row["user_id"],
             ocean_scores=ocean_scores,
             communication_style=communication_style,
             assessment_count=row.get("assessment_count", 0),
             stability_score=Decimal(str(row.get("stability_score", "0.0"))),
-            created_at=row.get("created_at", datetime.now(timezone.utc)),
-            updated_at=row.get("updated_at", datetime.now(timezone.utc)),
+            created_at=row.get("created_at", datetime.now(UTC)),
+            updated_at=row.get("updated_at", datetime.now(UTC)),
             version=row.get("version", 1),
             assessment_history=assessment_history,
         )
@@ -385,13 +385,13 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
         metadata = AssessmentMetadata.from_dict(metadata_data) if metadata_data else None
 
         return TraitAssessment(
-            assessment_id=row["assessment_id"],
+            assessment_id=row["id"],
             user_id=row["user_id"],
             ocean_scores=ocean_scores,
             source=AssessmentSource(row.get("source", "text_analysis")),
             metadata=metadata,
             evidence=list(row.get("evidence", [])),
-            created_at=row.get("created_at", datetime.now(timezone.utc)),
+            created_at=row.get("created_at", datetime.now(UTC)),
             version=row.get("version", 1),
         )
 
@@ -408,13 +408,13 @@ class PostgresPersonalityRepository(PersonalityRepositoryPort):
         communication_style = CommunicationStyle.from_dict(comm_style_data) if comm_style_data else None
 
         return ProfileSnapshot(
-            snapshot_id=row["snapshot_id"],
+            snapshot_id=row["id"],
             profile_id=row["profile_id"],
             user_id=row.get("user_id", row["profile_id"]),
             ocean_scores=ocean_scores,
             communication_style=communication_style,
             stability_score=Decimal(str(row.get("stability_score", "0.0"))),
             assessment_count=row.get("assessment_count", 0),
-            captured_at=row.get("captured_at", datetime.now(timezone.utc)),
+            captured_at=row.get("captured_at", datetime.now(UTC)),
             reason=row.get("reason", ""),
         )
