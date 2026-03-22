@@ -201,6 +201,9 @@ services:
       USER_SERVICE_PORT: 8001
       USER_SERVICE_JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
       USER_SERVICE_FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:-dev-encryption-key-32-characters}
+      AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+      FERNET_TOKEN_KEY: "${FERNET_TOKEN_KEY:-8kTaL3nRf9xQpZmVwYdE7gHjKbNcSuW2A5iO0tP4rXs=}"
+      FERNET_FIELD_KEY: "${FERNET_FIELD_KEY:-3mBvN7xRtYfW0pLqKjH8dS5gC2eA9iZuO6wTrXnMaQs=}"
       USER_DB_HOST: postgres
       USER_DB_PORT: 5432
       USER_DB_NAME: solace
@@ -286,6 +289,7 @@ services:
     restart: unless-stopped
     networks:
       - backend
+      - data
 
   diagnosis-service:
     build:

@@ -48,13 +48,38 @@ except ImportError:
     )
     from consumer import AnalyticsConsumer
 
-from solace_security.middleware import (
-    AuthenticatedUser,
-    AuthenticatedService,
-    get_current_user,
-    get_current_service,
-    require_roles,
-)
+try:
+    from solace_security.middleware import (
+        AuthenticatedUser,
+        AuthenticatedService,
+        get_current_user,
+        get_current_service,
+        require_roles,
+    )
+except ImportError:
+    import warnings as _warnings
+    _warnings.warn("solace_security not installed; using stub auth middleware", stacklevel=2)
+
+    from dataclasses import dataclass, field as _field
+    from uuid import UUID as _UUID
+
+    @dataclass
+    class AuthenticatedUser:
+        user_id: _UUID = None
+        roles: list = _field(default_factory=list)
+
+    @dataclass
+    class AuthenticatedService:
+        service_id: str = "stub"
+
+    async def get_current_user():
+        raise NotImplementedError("solace_security is not installed")
+
+    async def get_current_service():
+        raise NotImplementedError("solace_security is not installed")
+
+    def require_roles(*roles):
+        return get_current_user
 
 logger = structlog.get_logger(__name__)
 

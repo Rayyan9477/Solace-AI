@@ -170,9 +170,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             _event_pool = await ConnectionPoolManager.get_pool()
         except Exception:
             logger.debug("event_outbox_pool_not_available", hint="Using in-memory outbox")
-        event_bridge = await initialize_event_bridge(postgres_pool=_event_pool)
         event_bus = get_event_bus()
-        event_bus.subscribe_all(event_bridge.bridge_event)
+        event_bridge = await initialize_event_bridge(event_bus=event_bus, postgres_pool=_event_pool)
         app.state.event_bridge = event_bridge
         logger.info("orchestrator_kafka_bridge_started")
     except Exception as e:

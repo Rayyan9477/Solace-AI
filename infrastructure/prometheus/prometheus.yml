@@ -1,0 +1,63 @@
+# Solace-AI Prometheus Configuration
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # -------------------------------------------------------------------------
+  # Application services
+  # -------------------------------------------------------------------------
+  - job_name: orchestrator-service
+    static_configs:
+      - targets: ["orchestrator-service:8000"]
+
+  - job_name: user-service
+    static_configs:
+      - targets: ["user-service:8001"]
+
+  - job_name: safety-service
+    static_configs:
+      - targets: ["safety-service:8002"]
+
+  - job_name: diagnosis-service
+    static_configs:
+      - targets: ["diagnosis-service:8004"]
+
+  - job_name: therapy-service
+    static_configs:
+      - targets: ["therapy-service:8006"]
+
+  - job_name: memory-service
+    static_configs:
+      - targets: ["memory-service:8005"]
+
+  - job_name: personality-service
+    static_configs:
+      - targets: ["personality-service:8007"]
+
+  - job_name: notification-service
+    static_configs:
+      - targets: ["notification-service:8003"]
+
+  - job_name: analytics-service
+    static_configs:
+      - targets: ["analytics-service:8009"]
+
+  - job_name: config-service
+    static_configs:
+      - targets: ["config-service:8010"]
+
+  # -------------------------------------------------------------------------
+  # Infrastructure
+  # -------------------------------------------------------------------------
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres:5432"]
+
+  - job_name: redis
+    static_configs:
+      - targets: ["redis:6379"]
+
+  - job_name: kafka
+    static_configs:
+      - targets: ["kafka:9092"]
