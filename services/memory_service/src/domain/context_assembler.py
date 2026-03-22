@@ -276,14 +276,28 @@ class ContextAssembler:
         search_terms = [query] if query else []
         search_terms.extend(priority_topics)
         relevant_records = []
+        tier_authority = {"tier_5": 1.0, "tier_4": 0.8, "tier_3": 0.6, "tier_2": 0.4, "tier_1": 0.2}
         for record in memory_records:
             content = record.content if hasattr(record, 'content') else str(record)
             content_lower = content.lower()
-            relevance = sum(1 for term in search_terms if term.lower() in content_lower)
-            if relevance > 0:
-                importance = float(record.importance_score) if hasattr(record, 'importance_score') else 0.5
-                score = relevance * importance
-                relevant_records.append((record, score))
+            matched = sum(1 for term in search_terms if term.lower() in content_lower)
+            total_terms = max(len(search_terms), 1)
+            semantic_score = min(matched / total_terms, 1.0)
+            if semantic_score == 0:
+                continue
+            import math
+            age_days = 0.0
+            if hasattr(record, 'created_at') and record.created_at:
+                from datetime import datetime, timezone
+                now = datetime.now(timezone.utc)
+                created = record.created_at if record.created_at.tzinfo else record.created_at.replace(tzinfo=timezone.utc)
+                age_days = max((now - created).total_seconds() / 86400, 0.0)
+            recency_score = math.exp(-age_days / 30.0)
+            importance = float(record.importance_score) if hasattr(record, 'importance_score') else 0.5
+            tier = getattr(record, 'tier', 'tier_3')
+            authority = tier_authority.get(str(tier), 0.5)
+            score = (semantic_score * 0.4) + (recency_score * 0.3) + (importance * 0.2) + (authority * 0.1)
+            relevant_records.append((record, score))
         relevant_records.sort(key=lambda x: x[1], reverse=True)
         parts = ["[Retrieved Context]"]
         total_tokens = 5

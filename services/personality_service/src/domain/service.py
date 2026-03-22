@@ -118,6 +118,7 @@ class PersonalityOrchestrator(ServiceBase):
         style_adapter: StyleAdapter | None = None,
         llm_client: UnifiedLLMClient | None = None,
         repository: PersonalityRepositoryPort | None = None,
+        moel_generator: Any | None = None,
     ) -> None:
         self._settings = settings or PersonalityServiceSettings()
         self._trait_detector = trait_detector or TraitDetector(
@@ -125,6 +126,7 @@ class PersonalityOrchestrator(ServiceBase):
             llm_client,
         )
         self._style_adapter = style_adapter or StyleAdapter()
+        self._moel_generator = moel_generator  # MoEL empathy (ml/empathy.py), optional for MVP
         self._profile_store = ProfileStore()
         self._repository = repository
         self._initialized = False

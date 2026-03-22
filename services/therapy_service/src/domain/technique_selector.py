@@ -106,6 +106,19 @@ class TechniqueSelector:
 
         stage3_ranked = self._stage3_context_ranking(stage2_scores, session_phase, treatment_plan)
 
+        # Apply spec-weighted combination: 0.4*clinical + 0.3*personal + 0.2*context + 0.1*history
+        # Stage 1 is a boolean gate (1.0 for included candidates), Stage 2 is personalization (0-1),
+        # Stage 3 is context (0-1), history is effectiveness_history from user_context
+        stage3_reweighted = []
+        for technique, raw_score in stage3_ranked:
+            clinical = 1.0  # passed Stage 1 filter
+            personal = stage2_scores.get(technique.technique_id, 0.5)
+            context = raw_score
+            history = user_context.get("effectiveness_history", {}).get(str(technique.technique_id), 0.5)
+            final = 0.4 * clinical + 0.3 * personal + 0.2 * context + 0.1 * history
+            stage3_reweighted.append((technique, max(0.0, min(1.0, final))))
+        stage3_ranked = sorted(stage3_reweighted, key=lambda x: x[1], reverse=True)
+
         stage4_result = self._stage4_final_selection(stage3_ranked, user_context)
 
         if stage4_result["selected"]:

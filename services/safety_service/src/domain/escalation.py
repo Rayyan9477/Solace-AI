@@ -497,6 +497,30 @@ class EscalationRepository(ABC):
     async def update_status(self, escalation_id: UUID, status: EscalationStatus) -> None: ...
 
 
+class InMemoryEscalationRepository(EscalationRepository):
+    """In-memory implementation of EscalationRepository for MVP.
+    Replace with PostgresEscalationRepository for production persistence."""
+
+    def __init__(self) -> None:
+        self._records: dict[UUID, EscalationRecord] = {}
+
+    async def save_escalation(self, record: EscalationRecord) -> None:
+        self._records[record.escalation_id] = record
+
+    async def get_escalation(self, escalation_id: UUID) -> EscalationRecord | None:
+        return self._records.get(escalation_id)
+
+    async def get_active_escalations(self, user_id: UUID | None = None) -> list[EscalationRecord]:
+        records = list(self._records.values())
+        if user_id:
+            records = [r for r in records if r.user_id == user_id]
+        return [r for r in records if r.status in (EscalationStatus.PENDING, EscalationStatus.IN_PROGRESS)]
+
+    async def update_status(self, escalation_id: UUID, status: EscalationStatus) -> None:
+        if escalation_id in self._records:
+            self._records[escalation_id].status = status
+
+
 class EscalationManager:
     """Main escalation manager orchestrating all escalation components."""
 
@@ -507,7 +531,7 @@ class EscalationManager:
         repository: EscalationRepository | None = None,
     ) -> None:
         self._settings = settings or EscalationSettings()
-        self._repository = repository
+        self._repository = repository or InMemoryEscalationRepository()
         self._notification_service = NotificationServiceClient(
             self._settings,
             base_url=self._settings.notification_service_url

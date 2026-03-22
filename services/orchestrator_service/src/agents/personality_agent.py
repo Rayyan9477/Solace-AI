@@ -169,9 +169,10 @@ class StyleResponse:
 class PersonalityServiceClient:
     """HTTP client for Personality Service communication."""
 
-    def __init__(self, settings: PersonalityAgentSettings) -> None:
+    def __init__(self, settings: PersonalityAgentSettings, auth_headers: dict[str, str] | None = None) -> None:
         self._settings = settings
         self._base_url = settings.service_url.rstrip("/")
+        self._auth_headers = auth_headers or {}
 
     async def detect_personality(
         self,
@@ -188,7 +189,7 @@ class PersonalityServiceClient:
             "include_evidence": True,
             "sources": ["TEXT_ANALYSIS", "LLM_ZERO_SHOT"],
         }
-        async with httpx.AsyncClient(timeout=self._settings.timeout_seconds) as client:
+        async with httpx.AsyncClient(timeout=self._settings.timeout_seconds, headers=self._auth_headers) as client:
             for attempt in range(self._settings.max_retries + 1):
                 try:
                     response = await client.post(url, json=payload)
@@ -216,7 +217,7 @@ class PersonalityServiceClient:
         """Get communication style for user."""
         url = f"{self._base_url}/api/v1/personality/style"
         payload = {"user_id": user_id}
-        async with httpx.AsyncClient(timeout=self._settings.timeout_seconds) as client:
+        async with httpx.AsyncClient(timeout=self._settings.timeout_seconds, headers=self._auth_headers) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
             return StyleResponse.from_dict(response.json())

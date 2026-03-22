@@ -976,6 +976,19 @@ def upgrade() -> None:
 
 
 # ---------------------------------------------------------------------------
+# TODO: Post-MVP — Enable Row-Level Security for PHI tables
+# ---------------------------------------------------------------------------
+# ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+# CREATE POLICY user_isolation ON users USING (id = current_setting('app.current_user_id')::uuid);
+# Tables requiring RLS: users, diagnosis_sessions, diagnosis_symptoms,
+# diagnosis_hypotheses, diagnosis_records, therapy_sessions, therapy_interventions,
+# homework_assignments, treatment_plans, memory_records, session_summaries,
+# user_facts, personality_profiles, trait_assessments, safety_assessments,
+# safety_plans, consent_records, notifications
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
 # Downgrade — drop all tables in reverse dependency order
 # ---------------------------------------------------------------------------
 

@@ -295,6 +295,12 @@ class TraitDetector:
         three sources are available. Falls back to 2-source weights
         (LLM=0.6, LIWC=0.4) when RoBERTa is absent, or single-source
         weights when only one detector produced results.
+
+        Note: MultimodalFusion (ml/multimodal.py) is available for
+        text+voice+behavioral fusion (1408-dim combined vector).
+        Currently using direct weighted average for text-only MVP.
+        Wire MultimodalFusion.fuse() when voice/behavioral modalities
+        are added.
         """
         if not results:
             return self._neutral_scores()

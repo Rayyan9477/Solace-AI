@@ -114,7 +114,7 @@ class TestRedisSettings:
         settings = RedisSettings()
         assert settings.host == "localhost"
         assert settings.port == 6379
-        assert settings.working_memory_ttl == 3600
+        assert settings.working_memory_ttl == 14400  # 4 hours (M-64)
         assert settings.session_ttl == 86400
 
 

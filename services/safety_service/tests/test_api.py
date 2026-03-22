@@ -41,6 +41,7 @@ def app(mock_safety_service: MagicMock) -> FastAPI:
     test_app = FastAPI()
     test_app.include_router(router, prefix="/api/v1/safety")
     test_app.state.safety_service = mock_safety_service
+    test_app.state.escalation_manager = MagicMock()
     test_app.dependency_overrides[get_current_service] = _mock_service
     return test_app
 

@@ -82,6 +82,10 @@ class PostgresDiagnosisRepository(DiagnosisRepositoryPort):
         """Save a diagnosis session to PostgreSQL."""
         session.touch()
 
+        # JSON storage chosen for MVP simplicity. Relational tables
+        # (diagnosis_symptoms, diagnosis_hypotheses) exist in migration for
+        # future per-symptom/per-hypothesis querying. Migrate to relational
+        # writes post-MVP for optimized clinical analytics queries.
         # Serialize symptoms and hypotheses to JSON
         symptoms_json = json.dumps(
             [self._symptom_to_dict(s) for s in session.symptoms],

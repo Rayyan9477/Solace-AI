@@ -94,10 +94,11 @@ class TestReadinessEndpoint:
             mgr = ConfigurationManager()
             mgr._initialized = False
             settings_module._manager = mgr
-            result = await readiness()
-            # When not initialized, returns JSONResponse with 503
-            assert isinstance(result, JSONResponse)
-            assert result.status_code == 503
+            # When not initialized, raises HTTPException with 503 (M-56 fix)
+            from fastapi import HTTPException
+            with pytest.raises(HTTPException) as exc_info:
+                await readiness()
+            assert exc_info.value.status_code == 503
         finally:
             settings_module._manager = original
 

@@ -9,6 +9,8 @@ from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Any, TYPE_CHECKING
 from uuid import UUID, uuid4
+import math
+import os
 import structlog
 
 from .models import (
@@ -31,7 +33,15 @@ logger = structlog.get_logger(__name__)
 
 
 class MemoryService(ServiceBase):
-    """Main memory service orchestrating 5-tier memory hierarchy."""
+    """Main memory service orchestrating 5-tier memory hierarchy.
+
+    Tier-specific managers (WorkingMemoryManager, SessionMemoryManager,
+    EpisodicMemoryManager, SemanticMemoryManager) are available in this
+    package for advanced tier operations including token estimation, priority
+    queuing, and knowledge graph. Current implementation uses Redis-backed
+    dicts for T2/T3 and Postgres/Weaviate for T4/T5. Wire tier managers
+    for advanced features post-MVP.
+    """
 
     # Crisis keywords that force permanent retention (safety override)
     CRISIS_KEYWORDS: frozenset[str] = frozenset({
@@ -105,6 +115,25 @@ class MemoryService(ServiceBase):
                 pass
         self._initialized = False
 
+    async def _generate_embedding(self, text: str) -> list[float] | None:
+        """Generate text embedding via OpenAI API. Returns None if unavailable."""
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key or not text.strip():
+            return None
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    "https://api.openai.com/v1/embeddings",
+                    json={"model": "text-embedding-3-small", "input": text[:8000]},
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+                resp.raise_for_status()
+                return resp.json()["data"][0]["embedding"]
+        except Exception:
+            logger.debug("embedding_generation_failed", text_len=len(text))
+            return None
+
     async def store_memory(self, user_id: UUID, session_id: UUID | None, content: str,
                            content_type: str, tier: str, retention_category: str,
                            importance_score: Decimal, metadata: dict[str, Any]) -> StoreMemoryResult:
@@ -138,11 +167,13 @@ class MemoryService(ServiceBase):
                     "tier_4_episodic": CollectionName.SESSION_SUMMARY.value,
                     "tier_5_semantic": CollectionName.USER_FACT.value,
                 }
+                embedding = await self._generate_embedding(content)
                 vector_record = VectorRecord(
                     record_id=record.record_id, user_id=user_id,
                     session_id=session_id, content=content,
                     collection=_tier_to_collection.get(tier, CollectionName.CONVERSATION_MEMORY.value),
                     importance=float(importance_score), metadata=metadata,
+                    embedding=embedding or [],
                 )
                 await self._weaviate_repo.store_vector(vector_record)
             except Exception:
@@ -247,9 +278,10 @@ class MemoryService(ServiceBase):
             )
         context = self._build_basic_context(user_id, session_id, current_message, token_budget)
         assembly_time_ms = int((time.perf_counter() - start_time) * 1000)
+        estimated_tokens = len(context) // 4  # chars/4 matches ContextAssembler._estimate_tokens
         return ContextAssemblyResult(
-            assembled_context=context, total_tokens=len(context.split()),
-            token_breakdown={"basic": len(context.split())}, sources_used=["working_memory"],
+            assembled_context=context, total_tokens=estimated_tokens,
+            token_breakdown={"basic": estimated_tokens}, sources_used=["working_memory"],
             assembly_time_ms=assembly_time_ms,
         )
 

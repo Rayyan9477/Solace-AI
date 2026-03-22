@@ -934,7 +934,7 @@ class TestMemoryEventsComplete:
             storage_time_ms=25,
         )
         assert event.event_type == "memory.stored"
-        assert event.tier == "tier_3_session"
+        assert event.memory_tier == "tier_3_session"  # H-45: renamed from tier
         assert event.storage_time_ms == 25
 
     def test_memory_retrieved_event_fields(self):
