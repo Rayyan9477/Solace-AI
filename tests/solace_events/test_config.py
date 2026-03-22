@@ -216,7 +216,10 @@ class TestTopicHelpers:
         assert "solace.safety" in topics
         assert "solace.messages" in topics
         assert "solace.system" in topics
-        assert len(topics) == 9
+        assert "solace.notifications" in topics
+        assert "solace.audit" in topics
+        assert "solace.users" in topics
+        assert len(topics) == 12
 
     def test_get_dlq_topics(self) -> None:
         """Test getting all DLQ topic names."""
@@ -224,7 +227,10 @@ class TestTopicHelpers:
 
         assert "solace.sessions.dlq" in dlq_topics
         assert "solace.safety.dlq" in dlq_topics
-        assert len(dlq_topics) == 9
+        assert "solace.notifications.dlq" in dlq_topics
+        assert "solace.audit.dlq" in dlq_topics
+        assert "solace.users.dlq" in dlq_topics
+        assert len(dlq_topics) == 12
 
     def test_topic_configs_exist(self) -> None:
         """Test all topics have configs."""

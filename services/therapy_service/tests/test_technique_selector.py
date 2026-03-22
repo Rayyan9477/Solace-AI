@@ -329,6 +329,58 @@ class TestContraindicationValidation:
         assert result is not None
 
 
+class TestSFBTTechniques:
+    """Tests for Solution-Focused Brief Therapy (SFBT) technique integration."""
+
+    def test_sfbt_techniques_in_library(self) -> None:
+        """SFBT modality should have at least 3 techniques registered."""
+        selector = TechniqueSelector()
+        sfbt_techniques = selector.get_techniques_by_modality(TherapyModality.SFBT)
+        assert len(sfbt_techniques) >= 3
+
+    def test_sfbt_core_techniques_present(self) -> None:
+        """SFBT must include Miracle Question, Scaling Questions, and Exception Finding."""
+        selector = TechniqueSelector()
+        sfbt_techniques = selector.get_techniques_by_modality(TherapyModality.SFBT)
+        names = {t.name for t in sfbt_techniques}
+        assert "Miracle Question" in names, "Missing Miracle Question technique"
+        assert "Scaling Questions" in names, "Missing Scaling Questions technique"
+        assert "Exception Finding" in names, "Missing Exception Finding technique"
+
+    def test_sfbt_techniques_have_solution_focused_category(self) -> None:
+        """All SFBT techniques should have solution_focused category."""
+        selector = TechniqueSelector()
+        sfbt_techniques = selector.get_techniques_by_modality(TherapyModality.SFBT)
+        for technique in sfbt_techniques:
+            assert technique.category == "solution_focused", (
+                f"SFBT technique '{technique.name}' has category '{technique.category}' "
+                f"instead of 'solution_focused'"
+            )
+
+    def test_sfbt_techniques_have_correct_modality(self) -> None:
+        """All SFBT techniques must have SFBT modality."""
+        selector = TechniqueSelector()
+        sfbt_techniques = selector.get_techniques_by_modality(TherapyModality.SFBT)
+        for technique in sfbt_techniques:
+            assert technique.modality == TherapyModality.SFBT
+
+    def test_sfbt_miracle_question_has_homework(self) -> None:
+        """Miracle Question should require homework follow-up."""
+        selector = TechniqueSelector()
+        sfbt_techniques = selector.get_techniques_by_modality(TherapyModality.SFBT)
+        miracle = next((t for t in sfbt_techniques if t.name == "Miracle Question"), None)
+        assert miracle is not None
+        assert miracle.requires_homework is True
+
+    def test_sfbt_scaling_questions_no_homework(self) -> None:
+        """Scaling Questions should not require homework (in-session tool)."""
+        selector = TechniqueSelector()
+        sfbt_techniques = selector.get_techniques_by_modality(TherapyModality.SFBT)
+        scaling = next((t for t in sfbt_techniques if t.name == "Scaling Questions"), None)
+        assert scaling is not None
+        assert scaling.requires_homework is False
+
+
 class TestTechniqueDTO:
     """Tests for TechniqueDTO properties."""
 

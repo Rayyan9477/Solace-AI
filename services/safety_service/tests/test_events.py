@@ -336,3 +336,100 @@ class TestEventPublisherSingleton:
         publisher = await initialize_event_publisher()
         assert publisher._running is True
         await publisher.stop()
+
+
+class TestSafetyEventPublishing:
+    """Tests for safety event publishing wiring through SafetyService.check_safety."""
+
+    @pytest.mark.asyncio
+    async def test_check_safety_emits_completed_event(self) -> None:
+        """Verify SafetyCheckCompletedEvent is emitted after check_safety call.
+
+        Wires a SafetyEventPublisher with an AuditEventHandler into SafetyService,
+        runs a safe check, and confirms the handler received the event.
+        """
+        from uuid import uuid4 as _uuid4
+        from services.safety_service.src.domain.service import SafetyService
+
+        publisher = SafetyEventPublisher()
+        handler = AuditEventHandler()
+        publisher.register_handler(EventType.SAFETY_CHECK_COMPLETED, handler)
+        await publisher.start()
+
+        service = SafetyService(event_publisher=publisher)
+        await service.initialize()
+
+        user_id = _uuid4()
+        await service.check_safety(
+            user_id=user_id,
+            session_id=None,
+            content="I had a good day today",
+            check_type="pre_check",
+        )
+
+        await asyncio.sleep(0.1)
+        await publisher.stop()
+        await service.shutdown()
+
+        audit_log = handler.get_audit_log()
+        assert len(audit_log) >= 1
+        completed_events = [
+            e for e in audit_log
+            if e["event_type"] == EventType.SAFETY_CHECK_COMPLETED.value
+        ]
+        assert len(completed_events) == 1
+        assert completed_events[0]["user_id"] == str(user_id)
+
+    @pytest.mark.asyncio
+    async def test_check_safety_emits_crisis_event_for_high_risk(self) -> None:
+        """Verify CrisisDetectedEvent is emitted for high-risk content."""
+        from uuid import uuid4 as _uuid4
+        from services.safety_service.src.domain.service import SafetyService
+
+        publisher = SafetyEventPublisher()
+        handler = AuditEventHandler()
+        publisher.register_handler(EventType.CRISIS_DETECTED, handler)
+        publisher.register_handler(EventType.SAFETY_CHECK_COMPLETED, handler)
+        await publisher.start()
+
+        service = SafetyService(event_publisher=publisher)
+        await service.initialize()
+
+        user_id = _uuid4()
+        await service.check_safety(
+            user_id=user_id,
+            session_id=None,
+            content="I want to kill myself tonight",
+            check_type="pre_check",
+        )
+
+        await asyncio.sleep(0.1)
+        await publisher.stop()
+        await service.shutdown()
+
+        audit_log = handler.get_audit_log()
+        crisis_events = [
+            e for e in audit_log
+            if e["event_type"] == EventType.CRISIS_DETECTED.value
+        ]
+        assert len(crisis_events) == 1
+
+    @pytest.mark.asyncio
+    async def test_no_events_emitted_without_publisher(self) -> None:
+        """Verify no errors when SafetyService has no event publisher."""
+        from uuid import uuid4 as _uuid4
+        from services.safety_service.src.domain.service import SafetyService
+
+        service = SafetyService(event_publisher=None)
+        await service.initialize()
+
+        user_id = _uuid4()
+        # Should not raise even without publisher
+        result = await service.check_safety(
+            user_id=user_id,
+            session_id=None,
+            content="Just a normal message",
+            check_type="pre_check",
+        )
+        assert result.is_safe is True
+        await service.shutdown()

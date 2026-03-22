@@ -14,6 +14,7 @@ from solace_common.utils import (
     StringUtils,
     ValidationPatterns,
     ValidationUtils,
+    retry_async,
 )
 
 
@@ -349,3 +350,108 @@ class TestCollectionUtils:
         assert CollectionUtils.safe_get(data, "a.b") == {"c": 42}
         assert CollectionUtils.safe_get(data, "a.x.y") is None
         assert CollectionUtils.safe_get(data, "missing", default="default") == "default"
+
+
+class TestRetryAsync:
+    """Tests for retry_async decorator."""
+
+    def test_retry_async_returns_callable_not_coroutine(self) -> None:
+        """Verify retry_async wraps a function, not a coroutine object."""
+        import asyncio
+
+        async def dummy() -> str:
+            return "ok"
+
+        wrapped = retry_async(dummy)
+        assert not asyncio.iscoroutine(wrapped)
+        assert callable(wrapped)
+
+    @pytest.mark.asyncio
+    async def test_retry_async_succeeds_immediately(self) -> None:
+        """Test retry_async with a function that succeeds on first call."""
+        call_count = 0
+
+        async def succeeding() -> str:
+            nonlocal call_count
+            call_count += 1
+            return "success"
+
+        wrapped = retry_async(succeeding, RetryConfig(max_attempts=3, jitter=False))
+        result = await wrapped()
+        assert result == "success"
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_retry_async_retries_on_failure(self) -> None:
+        """Test retry_async retries transient failures up to max_attempts."""
+        call_count = 0
+
+        async def failing() -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise ConnectionError("fail")
+            return "success"
+
+        config = RetryConfig(max_attempts=3, initial_delay_ms=10, jitter=False)
+        wrapped = retry_async(failing, config)
+        result = await wrapped()
+        assert result == "success"
+        assert call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_retry_async_exhausts_attempts(self) -> None:
+        """Test retry_async raises last exception when all attempts fail."""
+        call_count = 0
+
+        async def always_failing() -> str:
+            nonlocal call_count
+            call_count += 1
+            raise ConnectionError(f"fail #{call_count}")
+
+        config = RetryConfig(max_attempts=3, initial_delay_ms=10, jitter=False)
+        wrapped = retry_async(always_failing, config)
+
+        with pytest.raises(ConnectionError, match="fail #3"):
+            await wrapped()
+        assert call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_retry_async_respects_retryable_exceptions(self) -> None:
+        """Test retry_async only retries specified exception types."""
+        call_count = 0
+
+        async def failing_with_value_error() -> str:
+            nonlocal call_count
+            call_count += 1
+            raise ValueError("not retryable")
+
+        config = RetryConfig(max_attempts=3, initial_delay_ms=10, jitter=False)
+        wrapped = retry_async(
+            failing_with_value_error,
+            config,
+            retryable_exceptions=(ConnectionError,),
+        )
+
+        with pytest.raises(ValueError, match="not retryable"):
+            await wrapped()
+        # Should fail immediately since ValueError is not retryable
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_retry_async_passes_arguments(self) -> None:
+        """Test retry_async forwards args and kwargs to the wrapped function."""
+        async def add(a: int, b: int, offset: int = 0) -> int:
+            return a + b + offset
+
+        wrapped = retry_async(add, RetryConfig(max_attempts=1))
+        result = await wrapped(3, 4, offset=10)
+        assert result == 17
+
+    def test_retry_async_preserves_function_name(self) -> None:
+        """Test retry_async preserves the original function name via wraps."""
+        async def my_special_function() -> None:
+            pass
+
+        wrapped = retry_async(my_special_function)
+        assert wrapped.__name__ == "my_special_function"
