@@ -3,22 +3,39 @@ Solace-AI Memory Service - PostgreSQL Repository.
 Async repository for structured memory storage using SQLAlchemy and asyncpg.
 """
 from __future__ import annotations
+
 import asyncio
 import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import asdict
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any, AsyncIterator, Protocol
+from typing import Any, Protocol
 from uuid import UUID, uuid4
+
+import structlog
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from sqlalchemy import MetaData, Table, Column, String, DateTime, Numeric, Text, Boolean, JSON
-from sqlalchemy import select, insert, update, delete, and_, or_, func
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    MetaData,
+    Numeric,
+    String,
+    Table,
+    Text,
+    and_,
+    delete,
+    func,
+    insert,
+    select,
+    update,
+)
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
-import structlog
 
 logger = structlog.get_logger(__name__)
 
@@ -26,7 +43,7 @@ metadata = MetaData()
 
 memory_records = Table(
     "memory_records", metadata,
-    Column("record_id", PG_UUID(as_uuid=True), primary_key=True, default=uuid4),
+    Column("id", PG_UUID(as_uuid=True), primary_key=True, default=uuid4),
     Column("user_id", PG_UUID(as_uuid=True), nullable=False, index=True),
     Column("session_id", PG_UUID(as_uuid=True), nullable=True, index=True),
     Column("tier", String(50), nullable=False, index=True),
@@ -37,14 +54,14 @@ memory_records = Table(
     Column("emotional_valence", Numeric(5, 4), nullable=True),
     Column("retention_strength", Numeric(5, 4), default=Decimal("1.0")),
     Column("metadata", JSON, default=dict),
-    Column("created_at", DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)),
-    Column("accessed_at", DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)),
+    Column("created_at", DateTime(timezone=True), default=lambda: datetime.now(UTC)),
+    Column("accessed_at", DateTime(timezone=True), default=lambda: datetime.now(UTC)),
     Column("is_archived", Boolean, default=False),
 )
 
 session_summaries = Table(
     "session_summaries", metadata,
-    Column("summary_id", PG_UUID(as_uuid=True), primary_key=True, default=uuid4),
+    Column("id", PG_UUID(as_uuid=True), primary_key=True, default=uuid4),
     Column("session_id", PG_UUID(as_uuid=True), nullable=False, unique=True),
     Column("user_id", PG_UUID(as_uuid=True), nullable=False, index=True),
     Column("session_number", Numeric, default=1),
@@ -56,13 +73,13 @@ session_summaries = Table(
     Column("message_count", Numeric, default=0),
     Column("duration_minutes", Numeric, default=0),
     Column("session_date", DateTime(timezone=True)),
-    Column("created_at", DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)),
+    Column("created_at", DateTime(timezone=True), default=lambda: datetime.now(UTC)),
     Column("retention_strength", Numeric(5, 4), default=Decimal("1.0")),
 )
 
 user_facts = Table(
     "user_facts", metadata,
-    Column("fact_id", PG_UUID(as_uuid=True), primary_key=True, default=uuid4),
+    Column("id", PG_UUID(as_uuid=True), primary_key=True, default=uuid4),
     Column("user_id", PG_UUID(as_uuid=True), nullable=False, index=True),
     Column("category", String(50), nullable=False, index=True),
     Column("content", Text, nullable=False),
@@ -73,15 +90,15 @@ user_facts = Table(
     Column("version", Numeric, default=1),
     Column("supersedes", PG_UUID(as_uuid=True), nullable=True),
     Column("verified_at", DateTime(timezone=True), nullable=True),
-    Column("created_at", DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)),
-    Column("updated_at", DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)),
+    Column("created_at", DateTime(timezone=True), default=lambda: datetime.now(UTC)),
+    Column("updated_at", DateTime(timezone=True), default=lambda: datetime.now(UTC)),
     Column("related_entities", JSON, default=list),
     Column("metadata", JSON, default=dict),
 )
 
 therapeutic_events = Table(
     "therapeutic_events", metadata,
-    Column("event_id", PG_UUID(as_uuid=True), primary_key=True, default=uuid4),
+    Column("id", PG_UUID(as_uuid=True), primary_key=True, default=uuid4),
     Column("user_id", PG_UUID(as_uuid=True), nullable=False, index=True),
     Column("session_id", PG_UUID(as_uuid=True), nullable=True, index=True),
     Column("event_type", String(50), nullable=False, index=True),
@@ -89,7 +106,7 @@ therapeutic_events = Table(
     Column("title", String(255), nullable=False),
     Column("description", Text, default=""),
     Column("occurred_at", DateTime(timezone=True), nullable=False),
-    Column("ingested_at", DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)),
+    Column("ingested_at", DateTime(timezone=True), default=lambda: datetime.now(UTC)),
     Column("valid_from", DateTime(timezone=True), nullable=True),
     Column("valid_to", DateTime(timezone=True), nullable=True),
     Column("related_events", JSON, default=list),
@@ -161,9 +178,11 @@ class PostgresRepository:
                 raise
 
     async def initialize(self) -> None:
-        """Create database tables if not exist."""
+        """Verify database connectivity. Table creation is handled by Alembic migrations."""
         async with self._engine.begin() as conn:
-            await conn.run_sync(metadata.create_all)
+            # Table creation is now managed by Alembic migrations in the centralized ORM.
+            # Previously: await conn.run_sync(metadata.create_all)
+            await conn.execute(select(func.now()))
         logger.info("postgres_initialized", database=self._settings.database)
 
     async def close(self) -> None:
@@ -177,7 +196,7 @@ class PostgresRepository:
         self._stats["inserts"] += 1
         async with self.session() as session:
             stmt = insert(memory_records).values(
-                record_id=record.record_id, user_id=record.user_id,
+                id=record.record_id, user_id=record.user_id,
                 session_id=record.session_id, tier=record.tier,
                 content=record.content, content_type=record.content_type,
                 retention_category=record.retention_category,
@@ -193,7 +212,7 @@ class PostgresRepository:
         """Get a memory record by ID."""
         self._stats["queries"] += 1
         async with self.session() as session:
-            stmt = select(memory_records).where(memory_records.c.record_id == record_id)
+            stmt = select(memory_records).where(memory_records.c.id == record_id)
             result = await session.execute(stmt)
             row = result.fetchone()
             if row:
@@ -209,8 +228,8 @@ class PostgresRepository:
         try:
             async with self.session() as session:
                 await session.execute(
-                    update(memory_records).where(memory_records.c.record_id == record_id)
-                    .values(accessed_at=datetime.now(timezone.utc))
+                    update(memory_records).where(memory_records.c.id == record_id)
+                    .values(accessed_at=datetime.now(UTC))
                 )
         except Exception:
             logger.debug("access_time_update_failed", record_id=str(record_id))
@@ -242,7 +261,7 @@ class PostgresRepository:
         """Update retention strength for decay model."""
         self._stats["updates"] += 1
         async with self.session() as session:
-            stmt = update(memory_records).where(memory_records.c.record_id == record_id) \
+            stmt = update(memory_records).where(memory_records.c.id == record_id) \
                 .values(retention_strength=new_strength)
             result = await session.execute(stmt)
             return result.rowcount > 0
@@ -251,7 +270,7 @@ class PostgresRepository:
         """Archive a memory record."""
         self._stats["updates"] += 1
         async with self.session() as session:
-            stmt = update(memory_records).where(memory_records.c.record_id == record_id) \
+            stmt = update(memory_records).where(memory_records.c.id == record_id) \
                 .values(is_archived=True)
             result = await session.execute(stmt)
             return result.rowcount > 0
@@ -260,7 +279,7 @@ class PostgresRepository:
         """Permanently delete a memory record."""
         self._stats["deletes"] += 1
         async with self.session() as session:
-            stmt = delete(memory_records).where(memory_records.c.record_id == record_id)
+            stmt = delete(memory_records).where(memory_records.c.id == record_id)
             result = await session.execute(stmt)
             return result.rowcount > 0
 
@@ -269,7 +288,9 @@ class PostgresRepository:
         self._stats["inserts"] += 1
         summary_id = summary_data.get("summary_id", uuid4())
         async with self.session() as session:
-            stmt = insert(session_summaries).values(summary_id=summary_id, **summary_data)
+            stmt = insert(session_summaries).values(id=summary_id, **{
+                k: v for k, v in summary_data.items() if k != "summary_id"
+            })
             await session.execute(stmt)
         logger.debug("session_summary_stored", summary_id=str(summary_id))
         return summary_id
@@ -288,7 +309,9 @@ class PostgresRepository:
         self._stats["inserts"] += 1
         fact_id = fact_data.get("fact_id", uuid4())
         async with self.session() as session:
-            stmt = insert(user_facts).values(fact_id=fact_id, **fact_data)
+            stmt = insert(user_facts).values(id=fact_id, **{
+                k: v for k, v in fact_data.items() if k != "fact_id"
+            })
             await session.execute(stmt)
         logger.debug("user_fact_stored", fact_id=str(fact_id))
         return fact_id
@@ -312,7 +335,9 @@ class PostgresRepository:
         self._stats["inserts"] += 1
         event_id = event_data.get("event_id", uuid4())
         async with self.session() as session:
-            stmt = insert(therapeutic_events).values(event_id=event_id, **event_data)
+            stmt = insert(therapeutic_events).values(id=event_id, **{
+                k: v for k, v in event_data.items() if k != "event_id"
+            })
             await session.execute(stmt)
         logger.debug("therapeutic_event_stored", event_id=str(event_id))
         return event_id
@@ -341,20 +366,43 @@ class PostgresRepository:
 
     async def apply_batch_decay(self, user_id: UUID, decay_factor: Decimal,
                                   exclude_permanent: bool = True) -> int:
-        """Apply decay to all user records in batch."""
+        """Apply exponential decay to all user records in batch.
+
+        Uses Ebbinghaus formula: retention = retention_strength * exp(-rate * hours_since_last_access)
+        where rate is the decay_factor per hour.
+        """
         self._stats["updates"] += 1
         async with self.session() as session:
-            conditions = [memory_records.c.user_id == user_id]
+            conditions = [
+                memory_records.c.user_id == user_id,
+                memory_records.c.is_archived == False,
+            ]
             if exclude_permanent:
                 conditions.append(memory_records.c.retention_category != "permanent")
+            # Exponential decay based on hours since last access/update
+            hours_elapsed = func.extract(
+                "epoch",
+                func.now() - func.coalesce(memory_records.c.accessed_at, memory_records.c.created_at),
+            ) / 3600.0
             stmt = update(memory_records).where(and_(*conditions)).values(
                 retention_strength=func.greatest(
                     Decimal("0.0"),
-                    memory_records.c.retention_strength - decay_factor
+                    memory_records.c.retention_strength * func.exp(-decay_factor * hours_elapsed),
                 )
             )
             result = await session.execute(stmt)
             return result.rowcount
+
+    async def get_max_session_number(self, user_id: UUID) -> int | None:
+        """Get the maximum session number for a user (for session count recovery)."""
+        self._stats["queries"] += 1
+        async with self.session() as session:
+            stmt = select(func.max(session_summaries.c.session_number)).where(
+                session_summaries.c.user_id == user_id
+            )
+            result = await session.execute(stmt)
+            row = result.scalar()
+            return int(row) if row is not None else None
 
     async def delete_user_data(self, user_id: UUID) -> tuple[int, int, int, int]:
         """Delete all data for a user (GDPR compliance)."""

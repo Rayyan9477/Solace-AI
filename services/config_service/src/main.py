@@ -7,7 +7,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
@@ -132,7 +132,7 @@ async def readiness() -> dict[str, str]:
     """Kubernetes readiness probe."""
     config = get_config_manager()
     if not config._initialized:
-        return JSONResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content={"status": "not_ready"})
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Service not ready")
     return {"status": "ready"}
 
 

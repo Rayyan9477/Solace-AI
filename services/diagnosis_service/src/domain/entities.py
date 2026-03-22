@@ -130,15 +130,19 @@ class HypothesisEntity(EntityBase):
         self.touch()
 
     def _update_confidence_level(self) -> None:
-        """Update confidence level based on score."""
-        if self.confidence >= Decimal("0.8"):
-            self.confidence_level = ConfidenceLevel.VERY_HIGH
-        elif self.confidence >= Decimal("0.6"):
+        """Update confidence level based on score.
+
+        Unified spec thresholds:
+        >= 0.70 = HIGH, 0.50-0.70 = MEDIUM, 0.30-0.50 = LOW, < 0.30 = ESCALATE
+        """
+        if self.confidence >= Decimal("0.70"):
             self.confidence_level = ConfidenceLevel.HIGH
-        elif self.confidence >= Decimal("0.4"):
+        elif self.confidence >= Decimal("0.50"):
             self.confidence_level = ConfidenceLevel.MEDIUM
-        else:
+        elif self.confidence >= Decimal("0.30"):
             self.confidence_level = ConfidenceLevel.LOW
+        else:
+            self.confidence_level = ConfidenceLevel.ESCALATE
 
     def add_evidence(self, evidence: str, supporting: bool = True) -> None:
         """Add supporting or contradicting evidence."""

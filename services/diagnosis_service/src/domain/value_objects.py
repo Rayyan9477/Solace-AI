@@ -51,16 +51,16 @@ class SeverityScore:
 
     @classmethod
     def from_pcl5(cls, score: int) -> SeverityScore:
-        """Create severity score from PCL-5."""
-        if score >= 61:
+        """Create severity score from PCL-5 (10-item version, max_score=40)."""
+        if score >= 31:
             level, interp = SeverityLevel.SEVERE, "Severe PTSD symptoms"
-        elif score >= 44:
+        elif score >= 22:
             level, interp = SeverityLevel.MODERATE, "Moderate PTSD symptoms"
-        elif score >= 33:
+        elif score >= 17:
             level, interp = SeverityLevel.MILD, "Mild PTSD symptoms - meets clinical threshold"
         else:
             level, interp = SeverityLevel.MINIMAL, "Below clinical threshold"
-        return cls(raw_score=score, max_score=80, level=level, instrument="PCL-5", interpretation=interp)
+        return cls(raw_score=score, max_score=40, level=level, instrument="PCL-5", interpretation=interp)
 
     @property
     def percentage(self) -> float:
@@ -85,16 +85,20 @@ class ConfidenceScore:
 
     @classmethod
     def create(cls, value: Decimal, evidence_count: int = 0, challenged: bool = False) -> ConfidenceScore:
-        """Create confidence score with automatic level calculation."""
+        """Create confidence score with automatic level calculation.
+
+        Unified spec thresholds:
+        >= 0.70 = HIGH, 0.50-0.70 = MEDIUM, 0.30-0.50 = LOW, < 0.30 = ESCALATE
+        """
         clamped = max(Decimal("0"), min(Decimal("1"), value))
-        if clamped >= Decimal("0.8"):
-            level = ConfidenceLevel.VERY_HIGH
-        elif clamped >= Decimal("0.6"):
+        if clamped >= Decimal("0.70"):
             level = ConfidenceLevel.HIGH
-        elif clamped >= Decimal("0.4"):
+        elif clamped >= Decimal("0.50"):
             level = ConfidenceLevel.MEDIUM
-        else:
+        elif clamped >= Decimal("0.30"):
             level = ConfidenceLevel.LOW
+        else:
+            level = ConfidenceLevel.ESCALATE
         margin = Decimal("0.1") if evidence_count >= 3 else Decimal("0.15")
         interval_low = max(Decimal("0"), clamped - margin)
         interval_high = min(Decimal("1"), clamped + margin)

@@ -75,7 +75,7 @@ class UserServiceSettings(BaseSettings):
     """Configuration for User Service integration."""
 
     user_service_url: str = Field(
-        default="http://localhost:8006",
+        default="http://localhost:8001",
         description="URL of the User Service for on-call clinician lookup",
     )
     request_timeout: float = Field(

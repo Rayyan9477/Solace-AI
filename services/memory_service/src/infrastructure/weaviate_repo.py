@@ -110,6 +110,7 @@ class WeaviateRepository:
             return
         try:
             from weaviate.classes.config import Configure, Property, DataType, VectorDistances
+            import weaviate.classes as wvc
             schemas = {
                 CollectionName.CONVERSATION_MEMORY.value: [
                     Property(name="user_id", data_type=DataType.TEXT),
@@ -135,12 +136,27 @@ class WeaviateRepository:
                     Property(name="confidence", data_type=DataType.NUMBER),
                     Property(name="importance", data_type=DataType.NUMBER),
                 ],
+                CollectionName.THERAPEUTIC_INSIGHT.value: [
+                    Property(name="user_id", data_type=DataType.TEXT),
+                    Property(name="session_id", data_type=DataType.TEXT),
+                    Property(name="content", data_type=DataType.TEXT),
+                    Property(name="insight_type", data_type=DataType.TEXT),
+                    Property(name="importance", data_type=DataType.NUMBER),
+                    Property(name="timestamp", data_type=DataType.DATE),
+                ],
+                CollectionName.CRISIS_EVENT.value: [
+                    Property(name="user_id", data_type=DataType.TEXT),
+                    Property(name="session_id", data_type=DataType.TEXT),
+                    Property(name="content", data_type=DataType.TEXT),
+                    Property(name="severity", data_type=DataType.TEXT),
+                    Property(name="timestamp", data_type=DataType.DATE),
+                ],
             }
             for name, properties in schemas.items():
                 if not await asyncio.to_thread(self._client.collections.exists, name):
                     await asyncio.to_thread(
                         self._client.collections.create, name=name, properties=properties,
-                        vector_config=Configure.Vectors.none(name="default"),
+                        vectorizer_config=wvc.config.Configure.Vectorizer.none(),
                         vector_index_config=Configure.VectorIndex.hnsw(distance_metric=VectorDistances.COSINE))
                 self._collections[name] = await asyncio.to_thread(self._client.collections.get, name)
         except Exception as e:

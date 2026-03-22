@@ -101,8 +101,32 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from .domain.service import MemoryService, MemoryServiceSettings
     from .domain.context_assembler import ContextAssembler, ContextAssemblerSettings
     from .domain.consolidation import ConsolidationPipeline, ConsolidationSettings
+    from .domain.decay_manager import DecayManager
+    from .infrastructure.hybrid_search import HybridSearchEngine, HybridSearchSettings
+
+    # Shared DecayManager instance for consistent decay across service and consolidation
+    decay_manager = DecayManager()
+
     context_assembler = ContextAssembler(ContextAssemblerSettings())
-    consolidation_pipeline = ConsolidationPipeline(ConsolidationSettings())
+    consolidation_pipeline = ConsolidationPipeline(ConsolidationSettings(), decay_manager=decay_manager)
+
+    # Hybrid BM25 + semantic search engine for memory retrieval
+    search_engine = HybridSearchEngine(HybridSearchSettings())
+
+    # Initialize Redis for T2 working memory and T3 session memory cache
+    redis_cache = None
+    try:
+        from .infrastructure.redis_cache import RedisCache, RedisSettings
+        redis_cache = RedisCache(RedisSettings())
+        await redis_cache.initialize()
+        if redis_cache.is_initialized():
+            logger.info("redis_cache_initialized")
+        else:
+            logger.debug("redis_cache_not_available", hint="Using in-memory only for T2/T3")
+            redis_cache = None
+    except Exception as e:
+        logger.debug("redis_not_available", error=str(e), hint="Using in-memory only for T2/T3")
+        redis_cache = None
 
     # Initialize Weaviate for vector search (optional — degrades gracefully)
     weaviate_repo = None
@@ -127,7 +151,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         context_assembler=context_assembler,
         consolidation_pipeline=consolidation_pipeline,
         postgres_repo=postgres_repo,
+        search_engine=search_engine,
         weaviate_repo=weaviate_repo,
+        redis_cache=redis_cache,
+        decay_manager=decay_manager,
     )
     await memory_service.initialize()
     app.state.settings = settings
@@ -139,6 +166,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
     logger.info("memory_service_stopping")
     await memory_service.shutdown()
+    if redis_cache:
+        await redis_cache.close()
     logger.info("memory_service_stopped")
 
 

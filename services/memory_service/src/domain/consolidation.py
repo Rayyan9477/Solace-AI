@@ -99,8 +99,10 @@ class ConsolidationOutput(BaseModel):
 class ConsolidationPipeline:
     """Memory consolidation pipeline for session end processing."""
 
-    def __init__(self, settings: ConsolidationSettings | None = None) -> None:
+    def __init__(self, settings: ConsolidationSettings | None = None,
+                 decay_manager: Any | None = None) -> None:
         self._settings = settings or ConsolidationSettings()
+        self._decay_manager = decay_manager
         self._fact_patterns = self._compile_fact_patterns()
         self._triple_patterns = self._compile_triple_patterns()
         self._therapeutic_techniques = self._load_therapeutic_techniques()
@@ -276,11 +278,12 @@ class ConsolidationPipeline:
     async def _apply_decay(self, records: list[Any]) -> tuple[int, int, int]:
         """Apply Ebbinghaus exponential decay model to records.
 
-        Delegates to DecayManager for consistent decay calculation across the system.
+        Delegates to the shared DecayManager for consistent decay calculation
+        across the system, or creates a local one as fallback.
         """
         from .decay_manager import DecayManager, DecayAction
 
-        decay_mgr = DecayManager()
+        decay_mgr = self._decay_manager or DecayManager()
         decayed = 0
         archived = 0
         deleted = 0

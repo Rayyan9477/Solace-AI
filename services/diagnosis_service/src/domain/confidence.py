@@ -295,14 +295,18 @@ class ConfidenceCalibrator:
         return min(1.0, uncertainty)
 
     def _determine_confidence_level(self, confidence: float) -> ConfidenceLevel:
-        """Determine categorical confidence level."""
-        if confidence >= 0.85:
-            return ConfidenceLevel.VERY_HIGH
-        if confidence >= 0.7:
+        """Determine categorical confidence level.
+
+        Unified spec thresholds:
+        >= 0.70 = HIGH, 0.50-0.70 = MEDIUM, 0.30-0.50 = LOW, < 0.30 = ESCALATE
+        """
+        if confidence >= 0.70:
             return ConfidenceLevel.HIGH
-        if confidence >= 0.5:
+        if confidence >= 0.50:
             return ConfidenceLevel.MEDIUM
-        return ConfidenceLevel.LOW
+        if confidence >= 0.30:
+            return ConfidenceLevel.LOW
+        return ConfidenceLevel.ESCALATE
 
     async def calibrate_multiple(self, hypotheses: list[HypothesisDTO],
                                   symptoms: list[SymptomDTO],

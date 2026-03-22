@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Any, TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 import structlog
 
 from .models import (
@@ -22,8 +22,10 @@ from services.shared import ServiceBase
 if TYPE_CHECKING:
     from .context_assembler import ContextAssembler
     from .consolidation import ConsolidationPipeline
+    from .decay_manager import DecayManager
     from ..infrastructure.postgres_repo import PostgresRepository
     from ..infrastructure.weaviate_repo import WeaviateRepository
+    from ..infrastructure.redis_cache import RedisCache
 
 logger = structlog.get_logger(__name__)
 
@@ -31,18 +33,28 @@ logger = structlog.get_logger(__name__)
 class MemoryService(ServiceBase):
     """Main memory service orchestrating 5-tier memory hierarchy."""
 
+    # Crisis keywords that force permanent retention (safety override)
+    CRISIS_KEYWORDS: frozenset[str] = frozenset({
+        "suicide", "kill myself", "end my life", "self-harm",
+        "hurt myself", "want to die",
+    })
+
     def __init__(self, settings: MemoryServiceSettings | None = None,
                  context_assembler: ContextAssembler | None = None,
                  consolidation_pipeline: ConsolidationPipeline | None = None,
                  postgres_repo: PostgresRepository | None = None,
                  search_engine: Any | None = None,
-                 weaviate_repo: WeaviateRepository | None = None) -> None:
+                 weaviate_repo: WeaviateRepository | None = None,
+                 redis_cache: RedisCache | None = None,
+                 decay_manager: DecayManager | None = None) -> None:
         self._settings = settings or MemoryServiceSettings()
         self._context_assembler = context_assembler
         self._consolidation_pipeline = consolidation_pipeline
         self._postgres_repo = postgres_repo
         self._search_engine = search_engine
         self._weaviate_repo = weaviate_repo
+        self._redis = redis_cache
+        self._decay_manager = decay_manager
         # Tiers 1-2: always in-memory (ephemeral per-session data)
         self._tier_1_input: dict[UUID, MemoryRecord] = {}
         self._tier_2_working: dict[UUID, list[MemoryRecord]] = {}
@@ -99,6 +111,11 @@ class MemoryService(ServiceBase):
         """Store a memory record to the specified tier."""
         start_time = time.perf_counter()
         self._stats["total_stores"] += 1
+        # Safety override: crisis content is always permanent
+        if any(kw in content.lower() for kw in self.CRISIS_KEYWORDS):
+            retention_category = "permanent"
+            importance_score = Decimal("1.0")
+            logger.info("crisis_safety_override_store", user_id=str(user_id))
         record = MemoryRecord(
             user_id=user_id, session_id=session_id, tier=tier, content=content,
             content_type=content_type, retention_category=retention_category,
@@ -147,6 +164,26 @@ class MemoryService(ServiceBase):
         persistent_tiers = {"tier_3_session", "tier_4_episodic", "tier_5_semantic"}
 
         for tier in search_tiers:
+            # Try Redis first for T2 working memory
+            if self._redis and tier == "tier_2_working" and session_id:
+                try:
+                    cached_wm = await self._redis.get_working_memory(user_id, session_id)
+                    if cached_wm and cached_wm.items:
+                        for item in cached_wm.items:
+                            record = MemoryRecord(
+                                record_id=UUID(item["record_id"]) if "record_id" in item else uuid4(),
+                                user_id=user_id, session_id=session_id,
+                                tier="tier_2_working", content=item.get("content", ""),
+                                content_type="message",
+                                importance_score=Decimal(str(item.get("importance", 0.5))),
+                                metadata={"role": item.get("role", "user")},
+                            )
+                            if record.importance_score >= min_importance:
+                                all_records.append(record)
+                        continue  # Redis had data, skip in-memory fallback
+                except Exception:
+                    logger.debug("redis_working_memory_read_failed", user_id=str(user_id))
+
             if self._postgres_repo and tier in persistent_tiers:
                 # Query persistent storage for tiers 3-5
                 try:
@@ -221,6 +258,13 @@ class MemoryService(ServiceBase):
         """Start a new session for user."""
         self._stats["sessions_started"] += 1
         async with self._tier_lock:
+            # Recover session count from Postgres on first session for this user
+            if user_id not in self._user_session_counts and self._postgres_repo:
+                try:
+                    max_num = await self._postgres_repo.get_max_session_number(user_id)
+                    self._user_session_counts[user_id] = max_num or 0
+                except Exception:
+                    logger.exception("postgres_session_count_recovery_failed", user_id=str(user_id))
             session_number = self._user_session_counts.get(user_id, 0) + 1
             self._user_session_counts[user_id] = session_number
             session = SessionState(
@@ -287,9 +331,16 @@ class MemoryService(ServiceBase):
         """Add a message to the current session."""
         start_time = time.perf_counter()
         importance = importance_override if importance_override is not None else self._calculate_importance(content, role)
+        retention_category = "medium_term"
+        # Safety override: crisis content is always permanent
+        if any(kw in content.lower() for kw in self.CRISIS_KEYWORDS):
+            retention_category = "permanent"
+            importance = Decimal("1.0")
+            logger.info("crisis_safety_override_message", user_id=str(user_id), session_id=str(session_id))
         record = MemoryRecord(
             user_id=user_id, session_id=session_id, tier="tier_3_session",
             content=content, content_type="message", importance_score=importance,
+            retention_category=retention_category,
             metadata={"role": role, "emotion": emotion_detected, **metadata},
         )
         tier_list = self._tier_3_session.setdefault(user_id, [])
@@ -308,6 +359,32 @@ class MemoryService(ServiceBase):
                 await self._postgres_repo.store_memory_record(record)
             except Exception:
                 logger.exception("postgres_add_message_failed", record_id=str(record.record_id))
+        # Write-through to Redis for T2 working memory and T3 session memory
+        if self._redis:
+            try:
+                from ..infrastructure.redis_cache import CachedWorkingMemory, CachedSessionState
+                # T2: cache working memory items to Redis
+                working_items = [
+                    {"record_id": str(r.record_id), "content": r.content,
+                     "role": r.metadata.get("role", "user"), "importance": float(r.importance_score)}
+                    for r in self._tier_2_working.get(user_id, [])
+                ]
+                wm = CachedWorkingMemory(
+                    user_id=user_id, session_id=session_id,
+                    items=working_items, total_tokens=len(working_items) * 50,
+                )
+                await self._redis.set_working_memory(wm)
+                # T3: update session state in Redis
+                if session:
+                    session_state = CachedSessionState(
+                        session_id=session_id, user_id=user_id,
+                        session_number=session.session_number,
+                        message_count=len(session.messages),
+                        started_at=session.started_at,
+                    )
+                    await self._redis.set_session_state(session_state)
+            except Exception:
+                logger.debug("redis_cache_write_failed", record_id=str(record.record_id))
         storage_time_ms = int((time.perf_counter() - start_time) * 1000)
         return AddMessageResult(
             message_id=record.record_id, stored_to_tier="tier_3_session",
@@ -631,10 +708,17 @@ class MemoryService(ServiceBase):
         return "\n".join(parts)
 
     async def _apply_decay_model(self, user_id: UUID) -> tuple[int, int]:
-        """Apply Ebbinghaus decay model to memories."""
+        """Apply Ebbinghaus decay model to memories.
+
+        Uses exponential decay: R(t) = stability * e^(-lambda * t)
+        where stability is derived from access_count.
+        Long-term memories decay slowly (rate 0.02); only permanent is exempt.
+        """
+        import math
+
         decayed = 0
         archived = 0
-        # Apply batch decay in postgres
+        # Apply exponential batch decay in postgres
         if self._postgres_repo:
             try:
                 decayed = await self._postgres_repo.apply_batch_decay(
@@ -646,16 +730,24 @@ class MemoryService(ServiceBase):
         for tier_storage in [self._tier_3_session, self._tier_4_episodic]:
             records = tier_storage.get(user_id, [])
             for record in records:
-                if record.retention_category not in ("permanent", "long_term"):
-                    age_days = (datetime.now(timezone.utc) - record.created_at).days
-                    import math
-                    decay_rate = Decimal("0.05") if record.retention_category == "medium_term" else Decimal("0.15")
-                    elapsed_hours = age_days * 24
-                    record.retention_strength = max(
-                        Decimal("0.1"),
-                        Decimal(str(math.exp(-float(decay_rate) * elapsed_hours))) * record.retention_strength,
-                    )
-                    decayed += 1
-                    if record.retention_strength < Decimal("0.3"):
-                        archived += 1
+                # Only permanent memories are exempt; long_term decays at 0.02
+                if record.retention_category == "permanent":
+                    continue
+                elapsed_hours = (datetime.now(timezone.utc) - record.created_at).total_seconds() / 3600
+                if record.retention_category == "long_term":
+                    decay_rate = Decimal("0.02")
+                elif record.retention_category == "medium_term":
+                    decay_rate = Decimal("0.05")
+                else:
+                    decay_rate = Decimal("0.15")
+                # Stability based on access count (each access boosts 1.5x, max 3.0)
+                access_count = getattr(record, 'access_count', 0)
+                stability = min(3.0, 1.0 * (1.5 ** access_count))
+                record.retention_strength = max(
+                    Decimal("0.1"),
+                    Decimal(str(stability)) * Decimal(str(math.exp(-float(decay_rate) * elapsed_hours))),
+                )
+                decayed += 1
+                if record.retention_strength < Decimal("0.3"):
+                    archived += 1
         return decayed, archived

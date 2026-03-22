@@ -23,11 +23,19 @@ MEMORY_DLQ_TOPIC = "solace.memory.dlq"
 
 
 class MemoryStoredEvent(BaseEvent):
-    """Emitted when a memory is stored."""
+    """Emitted when a memory is stored.
+
+    Field names aligned with canonical MemoryStoredEvent in solace_events.schemas:
+    - memory_id (was record_id)
+    - memory_tier (was tier)
+    """
     event_type: Literal["memory.stored"] = "memory.stored"
-    record_id: UUID
-    tier: str
+    memory_id: UUID
+    memory_tier: str
     content_type: str
+    retention_category: str = Field(default="MEDIUM_TERM")
+    embedding_generated: bool = Field(default=False)
+    ttl_hours: int | None = Field(default=None, ge=0)
     importance_score: Decimal = Field(ge=Decimal("0"), le=Decimal("1"))
     storage_backend: str
     storage_time_ms: int = Field(ge=0)
@@ -105,8 +113,8 @@ class MemoryEventFactory:
                       importance_score: Decimal, storage_backend: str, storage_time_ms: int,
                       correlation_id: UUID | None = None) -> MemoryStoredEvent:
         metadata = EventMetadata(source_service="memory-service", correlation_id=correlation_id or uuid4())
-        return MemoryStoredEvent(user_id=user_id, session_id=session_id, metadata=metadata, record_id=record_id,
-                                 tier=tier, content_type=content_type, importance_score=importance_score,
+        return MemoryStoredEvent(user_id=user_id, session_id=session_id, metadata=metadata, memory_id=record_id,
+                                 memory_tier=tier, content_type=content_type, importance_score=importance_score,
                                  storage_backend=storage_backend, storage_time_ms=storage_time_ms)
 
     @staticmethod

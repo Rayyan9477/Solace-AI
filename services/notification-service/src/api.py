@@ -16,16 +16,59 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel, Field, EmailStr
 import structlog
 
-from solace_security.middleware import (
-    AuthenticatedUser,
-    AuthenticatedService,
-    get_current_user,
-    get_current_user_optional,
-    get_current_service,
-    require_roles,
-    require_permissions,
-)
-from solace_security import Role, Permission
+try:
+    from solace_security.middleware import (
+        AuthenticatedUser,
+        AuthenticatedService,
+        get_current_user,
+        get_current_user_optional,
+        get_current_service,
+        require_roles,
+        require_permissions,
+    )
+    from solace_security import Role, Permission
+except ImportError:
+    import warnings as _warnings
+    _warnings.warn("solace_security not installed; using stub auth middleware", stacklevel=2)
+
+    from dataclasses import dataclass, field as _field
+    from uuid import UUID as _UUID
+
+    @dataclass
+    class AuthenticatedUser:
+        user_id: _UUID = None
+        roles: list = _field(default_factory=list)
+
+    @dataclass
+    class AuthenticatedService:
+        service_id: str = "stub"
+
+    class _StubRole:
+        ADMIN = "admin"
+        CLINICIAN = "clinician"
+        SERVICE = "service"
+        PATIENT = "patient"
+
+    class _StubPermission:
+        pass
+
+    Role = _StubRole
+    Permission = _StubPermission
+
+    async def get_current_user():
+        raise NotImplementedError("solace_security is not installed")
+
+    async def get_current_user_optional():
+        return None
+
+    async def get_current_service():
+        raise NotImplementedError("solace_security is not installed")
+
+    def require_roles(*roles):
+        return get_current_user
+
+    def require_permissions(*perms):
+        return get_current_user
 
 try:
     from .domain import (

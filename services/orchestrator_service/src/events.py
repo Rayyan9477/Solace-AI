@@ -84,10 +84,17 @@ class EventFactory:
         )
 
     @staticmethod
-    def session_ended(session_id: UUID, user_id: UUID, reason: str = "normal") -> OrchestratorEvent:
+    def session_ended(
+        session_id: UUID,
+        user_id: UUID,
+        reason: str = "normal",
+        duration_seconds: int = 0,
+        message_count: int = 0,
+    ) -> OrchestratorEvent:
         return OrchestratorEvent(
             event_id=uuid4(), event_type=EventType.SESSION_ENDED, timestamp=datetime.now(timezone.utc),
-            session_id=session_id, user_id=user_id, payload={"reason": reason},
+            session_id=session_id, user_id=user_id,
+            payload={"reason": reason, "duration_seconds": duration_seconds, "message_count": message_count},
         )
 
     @staticmethod
@@ -175,7 +182,11 @@ def to_kafka_event(event: OrchestratorEvent) -> Any:
     base: dict[str, Any] = {"user_id": event.user_id, "session_id": event.session_id, "metadata": meta}
 
     if event.event_type == EventType.SESSION_STARTED:
-        return KafkaSessionStarted(**base, session_number=1, channel="web")
+        return KafkaSessionStarted(
+            **base,
+            session_number=int(event.payload.get("session_number", 1)),
+            channel=event.payload.get("channel", "web"),
+        )
 
     if event.event_type == EventType.SESSION_ENDED:
         return KafkaSessionEnded(

@@ -133,15 +133,18 @@ class UserDataDeletedEvent(DiagnosisEvent):
 def to_kafka_event(event: DiagnosisEvent) -> Any:
     """Convert local diagnosis event to canonical Kafka event for inter-service messaging.
 
-    Maps diagnosis completion events to canonical schemas.
+    Maps diagnosis completion and safety flag events to canonical schemas.
     Returns None for internal-only events or if solace_events is not available.
     """
     try:
+        from decimal import Decimal as _Decimal
         from src.solace_events.schemas import (
             EventMetadata as KafkaMetadata,
             DiagnosisCompletedEvent as KafkaDiagnosisCompleted,
+            CrisisDetectedEvent as KafkaCrisisDetected,
             ClinicalHypothesis, Confidence,
         )
+        from solace_common.enums import CrisisLevel
     except ImportError:
         logger.debug("solace_events_not_available_for_bridge")
         return None
@@ -170,6 +173,28 @@ def to_kafka_event(event: DiagnosisEvent) -> Any:
         return KafkaDiagnosisCompleted(
             **base, assessment_id=event.record_id, primary_hypothesis=primary,
             stepped_care_level=0,
+        )
+
+    if isinstance(event, SafetyFlagRaisedEvent):
+        # Map severity string to CrisisLevel enum
+        severity_to_crisis = {
+            "low": CrisisLevel.LOW,
+            "moderate": CrisisLevel.ELEVATED,
+            "high": CrisisLevel.HIGH,
+            "critical": CrisisLevel.CRITICAL,
+            "severe": CrisisLevel.HIGH,
+        }
+        crisis_level = severity_to_crisis.get(
+            event.severity.lower(), CrisisLevel.ELEVATED,
+        )
+        return KafkaCrisisDetected(
+            **base,
+            crisis_level=crisis_level,
+            trigger_indicators=[event.trigger_text] if event.trigger_text else [],
+            detection_layer=1,
+            confidence=_Decimal("0.7"),
+            escalation_action=event.recommended_action or "review",
+            requires_human_review=event.severity.lower() in ("high", "critical", "severe"),
         )
 
     return None

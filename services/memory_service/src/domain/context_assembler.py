@@ -236,8 +236,15 @@ class ContextAssembler:
     def _build_recent_messages_section(self, working_memory: list[Any],
                                         session_memory: list[Any], budget: int) -> ContextSection:
         """Build recent messages section from working memory."""
-        all_messages = list(working_memory) + list(session_memory)
-        all_messages = sorted(all_messages, key=lambda m: getattr(m, 'created_at', datetime.min.replace(tzinfo=timezone.utc)))
+        # Deduplicate records that appear in both working and session memory
+        seen: set[Any] = set()
+        unique_records: list[Any] = []
+        for record in list(working_memory) + list(session_memory):
+            rid = getattr(record, 'record_id', None) or id(record)
+            if rid not in seen:
+                seen.add(rid)
+                unique_records.append(record)
+        all_messages = sorted(unique_records, key=lambda m: getattr(m, 'created_at', datetime.min.replace(tzinfo=timezone.utc)))
         recent = all_messages[-self._settings.max_recent_messages:]
         parts = ["[Conversation History]"]
         total_tokens = 5

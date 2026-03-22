@@ -26,6 +26,7 @@ from solace_common.enums import SeverityLevel  # noqa: E402
 
 class ConfidenceLevel(str, Enum):
     """Hypothesis confidence levels."""
+    ESCALATE = "escalate"
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"

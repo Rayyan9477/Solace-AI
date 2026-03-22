@@ -25,7 +25,7 @@ class RedisSettings(BaseSettings):
     ssl: bool = Field(default=False)
     socket_timeout: int = Field(default=5)
     connection_pool_size: int = Field(default=10)
-    working_memory_ttl: int = Field(default=3600)
+    working_memory_ttl: int = Field(default=14400)
     session_ttl: int = Field(default=86400)
     cache_ttl: int = Field(default=300)
     key_prefix: str = Field(default="solace:memory:")

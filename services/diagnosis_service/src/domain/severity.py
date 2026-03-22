@@ -121,6 +121,8 @@ class SeverityAssessor:
             "phq15_11": {"text": "Nausea, gas, or indigestion", "symptom": "nausea"},
             "phq15_12": {"text": "Feeling tired or having low energy", "symptom": "fatigue"},
             "phq15_13": {"text": "Trouble sleeping", "symptom": "sleep_disturbance"},
+            "phq15_14": {"text": "Menstrual cramps or other problems with your periods", "symptom": "menstrual_problems"},
+            "phq15_15": {"text": "Pain or problems during sexual intercourse", "symptom": "sexual_pain"},
         }
 
     def _build_pcl5_items(self) -> dict[str, dict[str, Any]]:
@@ -247,7 +249,7 @@ class SeverityAssessor:
             SeverityLevel.MINIMAL: 0,
             SeverityLevel.MILD: 1,
             SeverityLevel.MODERATE: 2,
-            SeverityLevel.MODERATELY_SEVERE: 2,
+            SeverityLevel.MODERATELY_SEVERE: 3,
             SeverityLevel.SEVERE: 3,
         }
         for symptom in symptoms:
@@ -326,7 +328,7 @@ class SeverityAssessor:
 
     def _score_pcl5(self, responses: dict[str, int]) -> QuestionnaireResult:
         """Score PCL-5 PTSD checklist."""
-        result = QuestionnaireResult(questionnaire="PCL-5", max_score=80)
+        result = QuestionnaireResult(questionnaire="PCL-5", max_score=40)
         item_scores: dict[str, int] = {}
         for item_id in self._pcl5_items:
             if item_id in responses:
@@ -435,10 +437,10 @@ class SeverityAssessor:
         return SeverityLevel.MINIMAL
 
     def _interpret_pcl5(self, score: int) -> SeverityLevel:
-        """Interpret PCL-5 score to severity level."""
-        if score >= 61: return SeverityLevel.SEVERE
-        if score >= 44: return SeverityLevel.MODERATE
-        if score >= 33: return SeverityLevel.MILD
+        """Interpret PCL-5 score to severity level (10-item version, max_score=40)."""
+        if score >= 31: return SeverityLevel.SEVERE
+        if score >= 22: return SeverityLevel.MODERATE
+        if score >= 17: return SeverityLevel.MILD
         return SeverityLevel.MINIMAL
 
     def _get_phq9_interpretation(self, score: int) -> str:
@@ -475,7 +477,7 @@ class SeverityAssessor:
 
     def _get_pcl5_interpretation(self, score: int) -> str:
         """Get PCL-5 interpretation."""
-        return "Probable PTSD diagnosis - clinical evaluation recommended" if score >= 33 else "Below clinical threshold for PTSD"
+        return "Probable PTSD diagnosis - clinical evaluation recommended" if score >= 17 else "Below clinical threshold for PTSD"
 
     def _get_phq9_recommendations(self, severity: SeverityLevel) -> list[str]:
         """Get PHQ-9 based recommendations."""

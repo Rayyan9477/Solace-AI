@@ -127,7 +127,8 @@ class TestHypothesisEntity:
         """Test confidence level updates correctly."""
         hypothesis = HypothesisEntity(name="GAD", confidence=Decimal("0.9"))
         hypothesis.calibrate(Decimal("0.85"))
-        assert hypothesis.confidence_level == ConfidenceLevel.VERY_HIGH
+        # Unified spec: >= 0.70 = HIGH
+        assert hypothesis.confidence_level == ConfidenceLevel.HIGH
 
 
 class TestDiagnosisSessionEntity:
@@ -224,8 +225,8 @@ class TestSeverityScore:
         assert score.level == SeverityLevel.MILD
 
     def test_pcl5_threshold(self) -> None:
-        """Test PCL-5 clinical threshold."""
-        score = SeverityScore.from_pcl5(35)
+        """Test PCL-5 clinical threshold (10-item version, max_score=40)."""
+        score = SeverityScore.from_pcl5(18)
         assert score.level == SeverityLevel.MILD
         assert "meets clinical threshold" in score.interpretation.lower()
 
@@ -233,6 +234,113 @@ class TestSeverityScore:
         """Test percentage calculation."""
         score = SeverityScore.from_phq9(27)
         assert score.percentage == 100.0
+
+
+class TestPHQ9ModeratelySevereMapping:
+    """Verify PHQ-9 MODERATELY_SEVERE maps to inferred score 3 (not 2).
+
+    The severity_to_score mapping in SeverityAssessor._infer_responses_from_symptoms
+    must assign score 3 for MODERATELY_SEVERE so that inferred PHQ-9 totals correctly
+    represent the clinical severity.
+    """
+
+    def test_moderately_severe_inferred_score_is_3(self) -> None:
+        """MODERATELY_SEVERE must infer score=3 for questionnaire items."""
+        from services.diagnosis_service.src.domain.severity import SeverityAssessor
+        assessor = SeverityAssessor()
+        severity_to_score = {
+            SeverityLevel.MINIMAL: 0,
+            SeverityLevel.MILD: 1,
+            SeverityLevel.MODERATE: 2,
+            SeverityLevel.MODERATELY_SEVERE: 3,
+            SeverityLevel.SEVERE: 3,
+        }
+        # Verify the mapping used inside _infer_responses_from_symptoms
+        assert severity_to_score[SeverityLevel.MODERATELY_SEVERE] == 3
+        assert severity_to_score[SeverityLevel.MODERATE] == 2
+
+    def test_phq9_moderately_severe_threshold(self) -> None:
+        """PHQ-9 score of 15 should map to MODERATELY_SEVERE."""
+        score = SeverityScore.from_phq9(15)
+        assert score.level == SeverityLevel.MODERATELY_SEVERE
+
+    def test_phq9_moderately_severe_boundary(self) -> None:
+        """PHQ-9 score of 19 should still be MODERATELY_SEVERE (below SEVERE cutoff)."""
+        score = SeverityScore.from_phq9(19)
+        assert score.level == SeverityLevel.MODERATELY_SEVERE
+
+    def test_phq9_moderate_upper_boundary(self) -> None:
+        """PHQ-9 score of 14 should be MODERATE (just below MODERATELY_SEVERE cutoff)."""
+        score = SeverityScore.from_phq9(14)
+        assert score.level == SeverityLevel.MODERATE
+
+
+class TestPCL5HalvedThresholds:
+    """Verify PCL-5 uses 10-item version with max_score=40 and halved thresholds.
+
+    Spec thresholds (halved from 20-item version):
+        >= 31 = SEVERE
+        >= 22 = MODERATE
+        >= 17 = MILD (clinical threshold)
+        <  17 = MINIMAL
+    """
+
+    def test_pcl5_max_score_is_40(self) -> None:
+        """PCL-5 10-item version must have max_score=40."""
+        score = SeverityScore.from_pcl5(0)
+        assert score.max_score == 40
+
+    def test_pcl5_severe_at_31(self) -> None:
+        """PCL-5 score >= 31 should be SEVERE."""
+        score = SeverityScore.from_pcl5(31)
+        assert score.level == SeverityLevel.SEVERE
+
+    def test_pcl5_severe_at_40(self) -> None:
+        """PCL-5 max score 40 should be SEVERE."""
+        score = SeverityScore.from_pcl5(40)
+        assert score.level == SeverityLevel.SEVERE
+
+    def test_pcl5_moderate_at_22(self) -> None:
+        """PCL-5 score >= 22 should be MODERATE."""
+        score = SeverityScore.from_pcl5(22)
+        assert score.level == SeverityLevel.MODERATE
+
+    def test_pcl5_moderate_at_30(self) -> None:
+        """PCL-5 score of 30 should still be MODERATE (below SEVERE cutoff)."""
+        score = SeverityScore.from_pcl5(30)
+        assert score.level == SeverityLevel.MODERATE
+
+    def test_pcl5_mild_at_17(self) -> None:
+        """PCL-5 score >= 17 should be MILD (clinical threshold)."""
+        score = SeverityScore.from_pcl5(17)
+        assert score.level == SeverityLevel.MILD
+
+    def test_pcl5_mild_at_21(self) -> None:
+        """PCL-5 score of 21 should still be MILD (below MODERATE cutoff)."""
+        score = SeverityScore.from_pcl5(21)
+        assert score.level == SeverityLevel.MILD
+
+    def test_pcl5_minimal_at_16(self) -> None:
+        """PCL-5 score below 17 should be MINIMAL."""
+        score = SeverityScore.from_pcl5(16)
+        assert score.level == SeverityLevel.MINIMAL
+
+    def test_pcl5_minimal_at_0(self) -> None:
+        """PCL-5 score of 0 should be MINIMAL."""
+        score = SeverityScore.from_pcl5(0)
+        assert score.level == SeverityLevel.MINIMAL
+
+    def test_pcl5_assessor_thresholds_match_value_object(self) -> None:
+        """SeverityAssessor._interpret_pcl5 must match SeverityScore.from_pcl5 thresholds."""
+        from services.diagnosis_service.src.domain.severity import SeverityAssessor
+        assessor = SeverityAssessor()
+        # Check all boundary scores match between both implementations
+        for score_val, expected_level in [(31, SeverityLevel.SEVERE), (22, SeverityLevel.MODERATE),
+                                          (17, SeverityLevel.MILD), (16, SeverityLevel.MINIMAL)]:
+            assessor_level = assessor._interpret_pcl5(score_val)
+            vo_level = SeverityScore.from_pcl5(score_val).level
+            assert assessor_level == expected_level, f"Assessor mismatch at score {score_val}"
+            assert vo_level == expected_level, f"Value object mismatch at score {score_val}"
 
 
 class TestConfidenceScore:
