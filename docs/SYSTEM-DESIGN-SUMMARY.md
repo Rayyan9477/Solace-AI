@@ -2,6 +2,38 @@
 
 > Synthesized from 22 design documents (~20,000+ lines) + 3 architecture diagrams.
 > Purpose: Unified reference for comparing design intent vs. codebase implementation.
+> **Last updated**: 2026-04-11 (implementation status annotations added)
+
+---
+
+## Implementation Status (as of 2026-04-11)
+
+> Quick reference: how much of the design spec is actually implemented and working.
+
+| Component | Design Status | Implementation Status | Gap Summary |
+|-----------|:---:|:---:|---|
+| **Orchestrator (LangGraph)** | Complete | Partial | Graph runs, supervisor routes. Assessment agent wired. Emotion agent stub. Style applicator removed. |
+| **Safety (4-Layer)** | Complete | Partial | L1-L4 detection implemented. Event publisher NOT wired. Regex bypassed when ML active (C-12). Escalation in-memory. |
+| **Diagnosis (AMIE 4-Step)** | Complete | Partial | 4-step chain works. Events never dispatched (C-14). Confidence thresholds wrong (C-15). Bayesian calibration broken. |
+| **Therapy (6 Modalities)** | Complete | Partial | CBT/DBT/ACT/MI/Mindfulness/SFBT coded. Planner wired (C-17 fixed). Remission unreachable (C-16). |
+| **Personality (OCEAN)** | Complete | Minimal | LIWC + LLM ensemble works. RoBERTa never called (H-21). MoEL empathy unused (H-24). Multimodal fusion dead. |
+| **Memory (5-Tier)** | Complete | Partial | Redis wired for T2. T4/T5 still dict-backed. Decay formula wrong (C-20/21). No embeddings (H-28). |
+| **Events (Kafka)** | Complete | Mostly Done | All 42 schemas defined. 12 topics configured. Publisher/consumer/DLQ/outbox all implemented. Services don't emit yet. |
+| **Security** | Complete | Partial | JWT works (per-worker). RBAC type mismatch (NEW-02). PHI encryption infra exists but never activated (H-57). HMAC crashes (NEW-01). |
+| **Infrastructure** | Complete | Mostly Done | PostgreSQL/Redis/Weaviate/Kafka clients work. ORM entities defined. Migrations incomplete (C-05-07). |
+| **Observability** | Complete | Implemented | Prometheus, Jaeger, Grafana dashboards, alerting rules all coded. |
+| **Testing** | Complete | Good | 70+ test files, 17 marker categories. Mocks/factories/contracts all present. |
+| **CI/CD** | Specified | Partial | GitHub Actions workflow exists. No integration tests or Docker build in pipeline. |
+
+### Key Design-vs-Reality Gaps
+
+1. **gRPC vs HTTP**: Design specifies gRPC + Protobuf. Reality uses HTTP/REST (FastAPI). Acceptable for MVP.
+2. **RS256 vs HS256**: Design specifies RS256 JWT. Reality uses HS256. Should upgrade post-MVP.
+3. **mTLS**: Design specifies Istio mTLS. Reality uses service tokens over HTTP. Acceptable for MVP.
+4. **HashiCorp Vault**: Design specifies. Not implemented. Config service provides secret management.
+5. **Kubernetes**: Design specifies K8s. Docker Compose only. Acceptable for MVP.
+6. **Event Publishing**: 42 event schemas defined, 12 topics configured, but most services don't emit events yet.
+7. **PHI Encryption**: Full infrastructure exists (EncryptedFieldMixin, ClinicalBase, event listeners). Never activated at startup.
 
 ---
 

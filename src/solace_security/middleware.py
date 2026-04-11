@@ -19,6 +19,7 @@ Usage:
 """
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from functools import lru_cache
 
@@ -32,6 +33,8 @@ from .auth import (
     AuthSettings,
     InMemoryTokenBlacklist,
     JWTManager,
+    RedisTokenBlacklist,
+    TokenBlacklist,
     TokenPayload,
     TokenType,
 )
@@ -117,6 +120,54 @@ class AuthenticatedService(BaseModel):
         )
 
 
+def _build_token_blacklist() -> TokenBlacklist:
+    """Construct a TokenBlacklist from environment configuration.
+
+    Selection order:
+    1. If ``AUTH_BLACKLIST_BACKEND=memory`` is set, force InMemoryTokenBlacklist
+       (useful for tests and single-worker dev servers).
+    2. If ``REDIS_URL`` is set, build a RedisTokenBlacklist from it. This is
+       required in multi-worker deployments (uvicorn --workers N) so that
+       token revocation in one worker is visible to all others.
+    3. Otherwise, fall back to InMemoryTokenBlacklist with a warning.
+
+    The Redis path tolerates import and connection errors by logging and
+    falling back to in-memory, so services still start in environments where
+    Redis is unavailable.
+    """
+    backend_override = os.environ.get("AUTH_BLACKLIST_BACKEND", "").strip().lower()
+    if backend_override == "memory":
+        logger.info("token_blacklist_initialized", backend="memory", reason="explicit_override")
+        return InMemoryTokenBlacklist()
+
+    redis_url = os.environ.get("REDIS_URL", "").strip()
+    if redis_url:
+        try:
+            import redis.asyncio as aioredis
+
+            redis_client = aioredis.from_url(
+                redis_url,
+                decode_responses=True,
+                socket_timeout=float(os.environ.get("REDIS_TIMEOUT", "5.0")),
+            )
+            logger.info("token_blacklist_initialized", backend="redis", url=redis_url)
+            return RedisTokenBlacklist(redis_client)
+        except Exception as err:
+            logger.warning(
+                "redis_blacklist_unavailable",
+                error=str(err),
+                hint="Falling back to in-memory blacklist; token revocation will NOT propagate across workers.",
+            )
+
+    logger.warning(
+        "token_blacklist_initialized",
+        backend="memory",
+        reason="no_redis_url",
+        hint="Set REDIS_URL for multi-worker-safe token revocation.",
+    )
+    return InMemoryTokenBlacklist()
+
+
 @lru_cache
 def _get_jwt_manager() -> JWTManager:
     """Get cached JWT manager instance (singleton per process).
@@ -125,11 +176,12 @@ def _get_jwt_manager() -> JWTManager:
     per worker process. This is intentional: JWTManager holds no mutable state
     that needs invalidation, and AuthSettings are read once from env vars at
     startup. In multi-worker deployments (uvicorn --workers N), each worker
-    gets its own cached instance.
+    gets its own cached instance, but they share the same Redis-backed
+    blacklist (when REDIS_URL is set) so revocation propagates across workers.
     """
     try:
         settings = AuthSettings()
-        return JWTManager(settings, token_blacklist=InMemoryTokenBlacklist())
+        return JWTManager(settings, token_blacklist=_build_token_blacklist())
     except Exception as e:
         logger.error("jwt_manager_initialization_failed", error=str(e))
         raise

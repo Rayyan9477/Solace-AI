@@ -5,14 +5,17 @@ Tests JWT manager initialization and authentication dependency wiring.
 from __future__ import annotations
 
 import os
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
 
 from solace_security.auth import (
-    AuthSettings,
+    AuthenticationResult,
     InMemoryTokenBlacklist,
     JWTManager,
+    RedisTokenBlacklist,
+    TokenPayload,
     TokenType,
 )
 from solace_security.middleware import (
@@ -22,7 +25,6 @@ from solace_security.middleware import (
     _get_jwt_manager,
     _handle_auth_failure,
 )
-from solace_security.auth import AuthenticationResult, TokenPayload
 
 
 class TestJWTManagerInitialization:
@@ -64,6 +66,63 @@ class TestJWTManagerInitialization:
         _get_jwt_manager.cache_clear()
         manager2 = _get_jwt_manager()
         assert manager1 is not manager2
+
+
+class TestJWTManagerRedisBlacklist:
+    """Tests for C-01: middleware must use Redis-backed blacklist when available.
+
+    In multi-worker deployments, InMemoryTokenBlacklist is per-process. Token
+    revocation in worker A is invisible to worker B, violating HIPAA audit
+    requirements for session revocation. When REDIS_URL is set, _get_jwt_manager
+    must build a RedisTokenBlacklist instead.
+    """
+
+    def setup_method(self) -> None:
+        """Clear cache and ensure AUTH_SECRET_KEY set."""
+        _get_jwt_manager.cache_clear()
+        os.environ.setdefault(
+            "AUTH_SECRET_KEY",
+            "test-middleware-secret-key-32-bytes-long!!",
+        )
+
+    def teardown_method(self) -> None:
+        """Clean up cache and env vars after each test."""
+        _get_jwt_manager.cache_clear()
+        os.environ.pop("REDIS_URL", None)
+        os.environ.pop("AUTH_BLACKLIST_BACKEND", None)
+
+    def test_uses_redis_blacklist_when_redis_url_set(self) -> None:
+        """Setting REDIS_URL should produce a RedisTokenBlacklist."""
+        os.environ["REDIS_URL"] = "redis://localhost:6379/0"
+        mock_client = MagicMock()
+        with patch(
+            "redis.asyncio.from_url", return_value=mock_client
+        ) as from_url_mock:
+            manager = _get_jwt_manager()
+            from_url_mock.assert_called_once()
+            assert isinstance(manager._blacklist, RedisTokenBlacklist)
+
+    def test_falls_back_to_inmemory_when_redis_url_absent(self) -> None:
+        """No REDIS_URL should keep the InMemoryTokenBlacklist fallback."""
+        os.environ.pop("REDIS_URL", None)
+        manager = _get_jwt_manager()
+        assert isinstance(manager._blacklist, InMemoryTokenBlacklist)
+
+    def test_falls_back_to_inmemory_when_redis_import_fails(self) -> None:
+        """If redis.asyncio.from_url raises, we fall back to InMemoryTokenBlacklist."""
+        os.environ["REDIS_URL"] = "redis://localhost:6379/0"
+        with patch(
+            "redis.asyncio.from_url", side_effect=RuntimeError("no redis")
+        ):
+            manager = _get_jwt_manager()
+            assert isinstance(manager._blacklist, InMemoryTokenBlacklist)
+
+    def test_explicit_inmemory_backend_override(self) -> None:
+        """AUTH_BLACKLIST_BACKEND=memory should force InMemoryTokenBlacklist even with REDIS_URL set."""
+        os.environ["REDIS_URL"] = "redis://localhost:6379/0"
+        os.environ["AUTH_BLACKLIST_BACKEND"] = "memory"
+        manager = _get_jwt_manager()
+        assert isinstance(manager._blacklist, InMemoryTokenBlacklist)
 
 
 class TestExtractToken:

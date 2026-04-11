@@ -475,28 +475,42 @@ class ServiceAuthenticatedClient:
 
 
 # FastAPI dependency for service authentication
-async def get_service_auth_dependency(
+def get_service_auth_dependency(
     token_manager: ServiceTokenManager,
     required_permissions: list[str] | None = None,
-) -> Callable[[str], Awaitable[ServiceAuthResult]]:
+) -> Callable[..., Awaitable[ServiceAuthResult]]:
     """
     Create a FastAPI dependency for service authentication.
 
+    This is a *factory* — it synchronously returns an awaitable dependency that
+    FastAPI can inject. Do NOT mark the factory async; FastAPI calls it during
+    route setup (not per-request) and expects an immediate callable.
+
+    The inner ``_verify_service`` dependency uses ``Header(None)`` so FastAPI
+    extracts the ``Authorization`` request header. Without ``Header()``, the
+    parameter would be treated as a body field and no header value would ever
+    reach the dependency, causing every request to fail with
+    "Missing Authorization header" even with a valid token (NEW-05).
+
     Usage:
-        from fastapi import Depends, Header
+        from fastapi import Depends
+
+        verify_service = get_service_auth_dependency(
+            token_manager, ["service:read:memory"]
+        )
 
         @app.get("/internal/endpoint")
         async def internal_endpoint(
-            service_auth: ServiceAuthResult = Depends(
-                get_service_auth_dependency(token_manager, ["service:read:memory"])
-            ),
+            service_auth: ServiceAuthResult = Depends(verify_service),
         ):
             if not service_auth.authenticated:
                 raise HTTPException(status_code=401, detail=service_auth.error)
             ...
     """
+    from fastapi import Header
+
     async def _verify_service(
-        authorization: str | None = None,
+        authorization: str | None = Header(default=None, alias="Authorization"),
     ) -> ServiceAuthResult:
         if not authorization:
             return ServiceAuthResult.failure("Missing Authorization header")

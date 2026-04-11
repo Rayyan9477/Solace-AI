@@ -1,7 +1,7 @@
 # Solace-AI MVP Fix Plan — Prioritized Task List
 
-> **Date**: 2026-03-20
-> **Source**: 192 issues from 10-agent deep review against system design spec
+> **Date**: 2026-04-11
+> **Source**: 192 issues from 10-agent deep review against system design spec + follow-up audit
 > **Goal**: Fix all Critical + High issues to achieve a demo-ready MVP
 > **Strategy**: Foundation first (unblock everything), then services (clinical core), then polish
 
@@ -12,15 +12,16 @@
 These issues block the entire platform from starting. Fix before anything else.
 
 ### 0.1 Fix JWT Authentication (C-01) — Unblocks all API endpoints
-- [ ] In `src/solace_security/middleware.py:131`, change `JWTManager(settings)` to `JWTManager(settings, token_blacklist=InMemoryTokenBlacklist())`
-- [ ] Add import for `InMemoryTokenBlacklist` from `auth.py`
+- [x] In `src/solace_security/middleware.py:131`, change `JWTManager(settings)` to `JWTManager(settings, token_blacklist=InMemoryTokenBlacklist())`
+- [x] Add import for `InMemoryTokenBlacklist` from `auth.py`
+- [ ] Replace `InMemoryTokenBlacklist` with `RedisTokenBlacklist` for multi-worker safety
 - [ ] Verify all services can authenticate requests
 
 ### 0.2 Fix Database Migrations (C-05, C-06, C-07, C-09)
 - [ ] Create `alembic.ini` at project root with proper config
 - [ ] Rewrite `001_initial_schema.py` to match actual ORM entities
 - [ ] Generate migration for all 22+ domain tables using `alembic revision --autogenerate`
-- [ ] Fix PK column name mismatches: personality repo (`profile_id`→`id`), user repo (`user_id`→`id`)
+- [ ] Fix PK column name mismatches: personality repo (`profile_id`->`id`), user repo (`user_id`->`id`)
 - [ ] Remove `metadata.create_all` from memory service postgres_repo — use migrations instead
 - [ ] Fix memory service table schemas to match centralized ORM entities (C-08)
 
@@ -33,15 +34,21 @@ These issues block the entire platform from starting. Fix before anything else.
 - [ ] Update `.env.example` with all required env vars
 
 ### 0.4 Fix `retry_async` (C-02)
-- [ ] Remove `async` from `retry_async` function signature in `src/solace_common/utils.py:314`
+- [x] Remove `async` from `retry_async` function signature in `src/solace_common/utils.py:314`
 
 ### 0.5 Fix Event Topic Routing (C-03, C-04, H-44, H-59, H-61)
-- [ ] Add `"user.": "solace.users"` to `_TOPIC_MAP` in `src/solace_events/schemas.py`
-- [ ] Add `NOTIFICATIONS = "solace.notifications"` to `SolaceTopic` enum + `TOPIC_CONFIGS`
-- [ ] Add `AUDIT = "solace.audit"` to `SolaceTopic` enum with retention=-1 (infinite)
-- [ ] Add `USERS = "solace.users"` to `SolaceTopic` enum + `TOPIC_CONFIGS`
-- [ ] Add SFBT to `TherapyModality` enum: `SFBT = "SFBT"` (H-36, H-42)
-- [ ] Export all 23 missing event classes from `solace_events/__init__.py` (H-35)
+- [x] Add `"user.": "solace.users"` to `_TOPIC_MAP` in `src/solace_events/schemas.py`
+- [x] Add `NOTIFICATIONS = "solace.notifications"` to `SolaceTopic` enum + `TOPIC_CONFIGS`
+- [x] Add `AUDIT = "solace.audit"` to `SolaceTopic` enum with retention=-1 (infinite)
+- [x] Add `USERS = "solace.users"` to `SolaceTopic` enum + `TOPIC_CONFIGS`
+- [x] Add SFBT to `TherapyModality` enum: `SFBT = "SFBT"` (H-36, H-42)
+- [x] Export all 23 missing event classes from `solace_events/__init__.py` (H-35)
+
+### 0.6 Fix HMAC digestmod crash (NEW-01)
+- [ ] In `audit.py:152`, change `hmac.new(key, msg, "sha256")` to `hmac.new(key, msg, hashlib.sha256)`
+
+### 0.7 Fix encryption dev key length (NEW-06)
+- [ ] Change `"dev-only-insecure-key-32-bytes!!"` (33 chars) to `"dev-only-insecure-key-32-bytes!"` (32 chars)
 
 ---
 
@@ -61,9 +68,10 @@ These issues block the entire platform from starting. Fix before anything else.
 - [ ] Change `user_service_url` default from `http://localhost:8006` to `http://localhost:8001`
 
 ### 1.4 Fix Escalation Issues (H-02, H-03, H-04)
-- [ ] Recalculate `recommended_action` from new crisis_level after L2 adjustment (H-02)
+- [x] Recalculate `recommended_action` from new crisis_level after L2 adjustment (H-02)
 - [ ] In medium escalation workflow, send actual notification or remove false audit claim (H-03)
-- [ ] Add PostgreSQL persistence for escalation records via EscalationRepository (H-04)
+- [x] Add in-memory persistence for escalation records via `InMemoryEscalationRepository` (H-04 partial)
+- [ ] Add PostgreSQL persistence for escalation records via `EscalationRepository` (H-04 remaining)
 
 ### 1.5 Fix LLM Assessor Cache (H-05)
 - [ ] Include `user_id` in cache key
@@ -115,10 +123,10 @@ These issues block the entire platform from starting. Fix before anything else.
 ## Phase 3: Therapy Service (treatment delivery)
 
 ### 3.1 Wire TreatmentPlanner, HomeworkManager, ProgressTracker (C-17)
-- [ ] Instantiate `TreatmentPlanner`, `HomeworkManager`, `ProgressTracker`, `InterventionDeliveryService` in lifespan
-- [ ] Pass to `TherapyOrchestrator` constructor
-- [ ] Replace `_create_mock_treatment_plan` with `TreatmentPlanner.create_plan()`
-- [ ] Replace inline homework with `HomeworkManager.assign_homework()`
+- [x] Instantiate `TreatmentPlanner`, `HomeworkManager`, `ProgressTracker`, `InterventionDeliveryService` in lifespan
+- [x] Pass to `TherapyOrchestrator` constructor
+- [x] Replace `_create_mock_treatment_plan` with `TreatmentPlanner.create_plan()`
+- [x] Replace inline homework with `HomeworkManager.assign_homework()`
 
 ### 3.2 Fix Remission Classification (C-16)
 - [ ] Move remission check (`current <= 4`) to TOP of `_evaluate_treatment_response`
@@ -131,11 +139,11 @@ These issues block the entire platform from starting. Fix before anything else.
 - [ ] Allow homework assignment during WORKING phase, not just CLOSING
 
 ### 3.5 Fix Technique Duration Filter (H-15)
-- [ ] Increase threshold from ≤12 to ≤20 min for severe patients, or use soft penalty
+- [ ] Increase threshold from <=12 to <=20 min for severe patients, or use soft penalty
 
 ### 3.6 Fix Progress Endpoint (H-18, H-19)
 - [ ] Query persistent repository for completed sessions, not just active in-memory
-- [ ] Fix attribute names: `start_time` → `started_at`
+- [ ] Fix attribute names: `start_time` -> `started_at`
 
 ### 3.7 Fix Session State Machine (H-17)
 - [ ] Default `enable_flexible_transitions` to False, or restrict to forward-only transitions
@@ -159,7 +167,7 @@ These issues block the entire platform from starting. Fix before anything else.
 
 ### 4.2 Fix Decay Formula (C-20, C-21)
 - [ ] Track `stability` (S) separately from `retention_strength`
-- [ ] Formula: `retention_strength = e^(-λ*t) * stability` (stability only modified by reinforcement)
+- [ ] Formula: `retention_strength = e^(-t) * stability` (stability only modified by reinforcement)
 - [ ] Fix Postgres batch decay: replace linear subtraction with exponential formula
 - [ ] Unify decay config rates across config.py, decay_manager.py, consolidation.py (M-32)
 
@@ -169,7 +177,7 @@ These issues block the entire platform from starting. Fix before anything else.
 - [ ] Add TherapeuticInsight + CrisisEvent collections to memory service (H-58/DB-10)
 
 ### 4.4 Implement Relevance Scoring (H-29)
-- [ ] Replace keyword matching with spec formula: `Semantic×0.4 + Recency×0.3 + Importance×0.2 + Authority×0.1`
+- [ ] Replace keyword matching with spec formula: `Semantic*0.4 + Recency*0.3 + Importance*0.2 + Authority*0.1`
 
 ### 4.5 Fix Consolidation Pipeline (H-30)
 - [ ] Inject shared `DecayManager` instance into `ConsolidationPipeline`
@@ -220,6 +228,12 @@ These issues block the entire platform from starting. Fix before anything else.
 - [ ] Add session initialization call to memory service on session creation
 - [ ] Add REST session end endpoint that triggers memory consolidation
 
+### 5.10 Fix authorization permission type mismatch (NEW-02)
+- [ ] In `authorization.py:109`, convert `Permission` enum to string before comparison with `list[str]`
+
+### 5.11 Fix service_auth Header dependency (NEW-05)
+- [ ] Add FastAPI `Header()` default to `_verify_service()` parameter so it is injected correctly
+
 ---
 
 ## Phase 6: Integration + Events (cross-service reliability)
@@ -228,7 +242,7 @@ These issues block the entire platform from starting. Fix before anything else.
 - [ ] Normalize modality to uppercase before Kafka enum construction: `TherapyModality(modality_str.upper())`
 
 ### 6.2 Fix Memory Event Schema Compatibility (H-45)
-- [ ] Align memory service event field names with canonical schemas (`record_id`→`memory_id`, `tier`→`memory_tier`)
+- [ ] Align memory service event field names with canonical schemas (`record_id`->`memory_id`, `tier`->`memory_tier`)
 
 ### 6.3 Fix Session Ended Event Data (M-44)
 - [ ] Include `duration_seconds` and `message_count` in `EventFactory.session_ended()` payload
@@ -240,14 +254,14 @@ These issues block the entire platform from starting. Fix before anything else.
 - [ ] Add `SafetyFlagRaisedEvent` mapping in diagnosis `to_kafka_event()`
 
 ### 6.6 Auto-Subscribe Orchestrator Kafka Bridge (L-23)
-- [ ] Use `subscribe_all()` pattern for orchestrator event bus → Kafka bridge
+- [ ] Use `subscribe_all()` pattern for orchestrator event bus -> Kafka bridge
 
 ---
 
 ## Phase 7: Supporting Services + Infrastructure
 
 ### 7.1 Fix User-Service Repository (H-49, H-53)
-- [ ] Fix consent field names: `consent_version` → `version`
+- [ ] Fix consent field names: `consent_version` -> `version`
 - [ ] Wire PostgreSQL client into RepositoryFactory with `use_postgres=True`
 
 ### 7.2 Fix Import Fallbacks (H-50, H-51)
@@ -265,14 +279,16 @@ These issues block the entire platform from starting. Fix before anything else.
 - [ ] Create migration for `contraindication_rules`, `rule_alternatives`, `rule_prerequisites`
 - [ ] Or load rules from seed data into existing tables
 
-### 7.6 Add Security Essentials (H-39, H-40, H-56, H-57)
+### 7.6 Add Security Essentials (H-39, H-40, H-56, H-57, NEW-03, NEW-04)
 - [ ] Pass SSL context to asyncpg `create_pool()` (H-39)
 - [ ] Make HMAC key required in production guards (H-40)
 - [ ] Wire `configure_phi_encryption()` at startup (H-57)
+- [ ] Add `__phi_fields__` to `DiagnosisSession` and `Hypothesis` entities (NEW-03, NEW-04)
 - [ ] Add RLS policies to PHI-containing tables (H-56) — can defer to post-MVP
 
 ### 7.7 Create CI/CD Pipeline (H-47)
-- [ ] Create `.github/workflows/ci.yml`: lint (ruff), type check (mypy), test (pytest), Docker build
+- [x] Create `.github/workflows/ci.yml`: lint (ruff), type check (mypy), test (pytest), Docker build
+- [ ] Add integration test stage and coverage reporting
 
 ---
 
@@ -307,20 +323,29 @@ These issues block the entire platform from starting. Fix before anything else.
 - [ ] Fix config service readiness to return 503 (M-56)
 - [ ] Add runtime dependencies to pyproject.toml (L-29)
 
+### 8.6 PHI Protection Polish (NEW-07, NEW-08, NEW-09)
+- [ ] Fix phone number masking to output consistent `[PHONE]` placeholder instead of malformed format (NEW-07)
+- [ ] Broaden SSN pattern regex to catch common variants like `XXX XX XXXX` (NEW-08)
+- [ ] Enforce `MIN_CONFIDENCE_THRESHOLD` gate before returning PHI detection results (NEW-09)
+
+### 8.7 Infrastructure Resilience (NEW-10)
+- [ ] Fix connection pool race condition — guard pool creation with a lock to prevent duplicate pools under concurrent access (NEW-10)
+
 ---
 
 ## Execution Order Summary
 
-| Phase | Issues Fixed | Estimated Scope | Prerequisite |
-|-------|------------|-----------------|-------------|
-| **0: Foundation** | C-01 through C-11 + H-35,36,44,52,59,61 | ~20 issues, 2-3 days | None |
-| **1: Safety** | C-12,C-13,C-22 + 7 HIGHs + 1 MED | ~11 issues, 2 days | Phase 0 |
-| **2: Diagnosis** | C-14,C-15 + 5 HIGHs + 2 MEDs | ~9 issues, 1-2 days | Phase 0 |
-| **3: Therapy** | C-16,C-17 + 7 HIGHs + 3 MEDs | ~12 issues, 2-3 days | Phase 0 |
-| **4: Memory** | C-18-C-21 + 7 HIGHs + 2 MEDs | ~13 issues, 2-3 days | Phase 0 |
-| **5: Orch+Pers** | 7 HIGHs + 4 MEDs | ~11 issues, 2 days | Phases 1-4 |
-| **6: Integration** | 1 HIGH + 5 MEDs + 1 LOW | ~7 issues, 1 day | Phases 1-5 |
-| **7: Supporting** | 7 HIGHs + 2 MEDs | ~9 issues, 1-2 days | Phase 0 |
-| **8: Polish** | Remaining MEDs + LOWs | ~20+ issues, ongoing | All above |
+| Phase | Issues Fixed | Estimated Scope | Prerequisite | Status |
+|-------|------------|-----------------|-------------|--------|
+| **0: Foundation** | C-01 through C-11 + H-35,36,44,52,59,61 + NEW-01,NEW-06 | ~22 issues, 2-3 days | None | In Progress (C-01 partial, C-02 done, C-03/04/H-35/36/44/59/61 done) |
+| **1: Safety** | C-12,C-13,C-22 + 7 HIGHs + 1 MED | ~11 issues, 2 days | Phase 0 | In Progress (H-02 done, H-04 partial) |
+| **2: Diagnosis** | C-14,C-15 + 5 HIGHs + 2 MEDs | ~9 issues, 1-2 days | Phase 0 | Not Started |
+| **3: Therapy** | C-16,C-17 + 7 HIGHs + 3 MEDs | ~12 issues, 2-3 days | Phase 0 | In Progress (C-17 done) |
+| **4: Memory** | C-18-C-21 + 7 HIGHs + 2 MEDs | ~13 issues, 2-3 days | Phase 0 | Not Started |
+| **5: Orch+Pers** | 7 HIGHs + 4 MEDs + NEW-02,NEW-05 | ~13 issues, 2 days | Phases 1-4 | Not Started |
+| **6: Integration** | 1 HIGH + 5 MEDs + 1 LOW | ~7 issues, 1 day | Phases 1-5 | Not Started |
+| **7: Supporting** | 7 HIGHs + 2 MEDs + NEW-03,NEW-04 | ~11 issues, 1-2 days | Phase 0 | In Progress (H-47 partial) |
+| **8: Polish** | Remaining MEDs + LOWs + NEW-07-10 | ~24 issues, ongoing | All above | Not Started |
 
-**Total Critical Path**: Phases 0-6 = ~72 issues in ~14-18 working days
+**Total Critical Path**: Phases 0-6 = ~87 issues in ~14-18 working days
+**Completed so far**: ~12 items across Phases 0, 1, 3, and 7
