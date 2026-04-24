@@ -3,17 +3,18 @@ Solace-AI Escalation Manager - Crisis escalation workflow management.
 Handles escalation to human clinicians, notifications, and crisis response coordination.
 """
 from __future__ import annotations
+
 import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from decimal import Decimal
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
+
+import structlog
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import structlog
 
 logger = structlog.get_logger(__name__)
 
@@ -87,7 +88,7 @@ class EscalationResult(BaseModel):
     actions_taken: list[str] = Field(default_factory=list, description="Actions taken")
     estimated_response_minutes: int | None = Field(default=None, description="Estimated response time")
     resources_provided: bool = Field(default=False, description="Crisis resources provided")
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass
@@ -104,7 +105,7 @@ class EscalationRecord:
     notifications_sent: list[NotificationType] = field(default_factory=list)
     actions_taken: list[str] = field(default_factory=list)
     context: dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     acknowledged_at: datetime | None = None
     resolved_at: datetime | None = None
 
@@ -276,7 +277,7 @@ class NotificationServiceClient:
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         channel_results = {}
-        for channel, result in zip(channels, results):
+        for channel, result in zip(channels, results, strict=False):
             if isinstance(result, Exception):
                 logger.error("notification_channel_exception", channel=channel.value, error=str(result))
                 channel_results[channel] = False
@@ -459,13 +460,50 @@ class EscalationWorkflow:
         return escalation
 
     async def execute_medium_workflow(self, escalation: EscalationRecord) -> EscalationRecord:
-        """Execute MEDIUM priority workflow - timely response required."""
+        """Execute MEDIUM priority workflow - timely response required.
+
+        H-03: When email notifications are enabled, the workflow assigns an
+        on-call clinician and sends a real email notification — not just an
+        audit string. Previously the workflow appended
+        ``"Event logged for supervisor review"`` without actually sending
+        anything, which constituted a false audit claim.
+        """
         escalation.actions_taken.append("MEDIUM workflow initiated")
         escalation.actions_taken.append("Enhanced monitoring enabled")
         escalation.actions_taken.append("Coping strategies reviewed")
         escalation.actions_taken.append("Support resources shared")
+
         if self._settings.enable_email_notifications:
-            escalation.actions_taken.append("Event logged for supervisor review")
+            clinician = await self._assigner.assign_clinician(escalation)
+            if clinician:
+                escalation.assigned_clinician_id = clinician
+                escalation.actions_taken.append(f"Clinician {clinician} assigned")
+                try:
+                    email_ok = await self._notifications.send_notification(
+                        clinician, escalation, NotificationType.EMAIL,
+                    )
+                    if email_ok:
+                        escalation.notifications_sent.append(NotificationType.EMAIL)
+                        escalation.actions_taken.append("Supervisor email notification sent")
+                    else:
+                        escalation.actions_taken.append(
+                            "Supervisor email send returned failure; queued for retry"
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "medium_escalation_email_failed",
+                        escalation_id=str(escalation.escalation_id),
+                        error=str(e),
+                    )
+                    escalation.actions_taken.append(
+                        "Supervisor email failed; escalation remains pending for retry"
+                    )
+            else:
+                # No on-call clinician available: record honestly.
+                escalation.actions_taken.append(
+                    "No on-call supervisor available; escalation queued"
+                )
+
         escalation.status = EscalationStatus.PENDING
         return escalation
 
@@ -521,6 +559,169 @@ class InMemoryEscalationRepository(EscalationRepository):
             self._records[escalation_id].status = status
 
 
+class PostgresEscalationRepository(EscalationRepository):
+    """PostgreSQL-backed EscalationRepository for production persistence.
+
+    H-04: replaces the in-memory repository so escalation state survives
+    process restarts. Schema is provisioned by Alembic migration
+    ``003_safety_escalations_table``.
+
+    Expects an ``asyncpg.Pool`` wired up at service startup (the safety
+    service lifespan creates the pool from ``DatabaseConfig``).
+
+    Schema shape (see migration for full DDL):
+        escalations (
+            escalation_id UUID PK,
+            user_id UUID NOT NULL,
+            session_id UUID NULL,
+            crisis_level VARCHAR(16) NOT NULL,
+            priority VARCHAR(16) NOT NULL,
+            status VARCHAR(32) NOT NULL,
+            reason TEXT NOT NULL,
+            assigned_clinician_id UUID NULL,
+            notifications_sent JSONB NOT NULL DEFAULT '[]',
+            actions_taken JSONB NOT NULL DEFAULT '[]',
+            context JSONB NOT NULL DEFAULT '{}',
+            created_at TIMESTAMPTZ NOT NULL,
+            acknowledged_at TIMESTAMPTZ NULL,
+            resolved_at TIMESTAMPTZ NULL
+        )
+    """
+
+    _TABLE = "escalations"
+
+    def __init__(self, pool: Any) -> None:
+        """Args:
+            pool: an ``asyncpg.Pool`` (or anything exposing ``acquire()``).
+        """
+        self._pool = pool
+
+    async def save_escalation(self, record: EscalationRecord) -> None:
+        """Upsert on escalation_id so workflow updates replace prior state."""
+        import json
+
+        async with self._pool.acquire() as conn:
+            # {self._TABLE} is a class-level constant; all user-supplied
+            # values bind via $N parameters, not string interpolation.
+            await conn.execute(
+                f"""
+                INSERT INTO {self._TABLE} (
+                    escalation_id, user_id, session_id, crisis_level,
+                    priority, status, reason, assigned_clinician_id,
+                    notifications_sent, actions_taken, context,
+                    created_at, acknowledged_at, resolved_at
+                )
+                VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8,
+                    $9::jsonb, $10::jsonb, $11::jsonb,
+                    $12, $13, $14
+                )
+                ON CONFLICT (escalation_id) DO UPDATE SET
+                    status = EXCLUDED.status,
+                    assigned_clinician_id = EXCLUDED.assigned_clinician_id,
+                    notifications_sent = EXCLUDED.notifications_sent,
+                    actions_taken = EXCLUDED.actions_taken,
+                    acknowledged_at = EXCLUDED.acknowledged_at,
+                    resolved_at = EXCLUDED.resolved_at
+                """,
+                record.escalation_id,
+                record.user_id,
+                record.session_id,
+                record.crisis_level,
+                record.priority.value if isinstance(record.priority, Enum) else str(record.priority),
+                record.status.value,
+                record.reason,
+                record.assigned_clinician_id,
+                json.dumps([n.value for n in record.notifications_sent]),
+                json.dumps(list(record.actions_taken)),
+                json.dumps(record.context, default=str),
+                record.created_at,
+                record.acknowledged_at,
+                record.resolved_at,
+            )
+
+    async def get_escalation(self, escalation_id: UUID) -> EscalationRecord | None:
+        # {self._TABLE} is a class-level constant, not user input.
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"SELECT * FROM {self._TABLE} WHERE escalation_id = $1",  # noqa: S608
+                escalation_id,
+            )
+            return self._row_to_record(row) if row else None
+
+    async def get_active_escalations(
+        self, user_id: UUID | None = None
+    ) -> list[EscalationRecord]:
+        """Return PENDING / ACKNOWLEDGED / IN_PROGRESS escalations.
+
+        {self._TABLE} is a class constant; parameters bind via $N.
+        """
+        active_statuses = [
+            EscalationStatus.PENDING.value,
+            EscalationStatus.ACKNOWLEDGED.value,
+            EscalationStatus.IN_PROGRESS.value,
+        ]
+        async with self._pool.acquire() as conn:
+            if user_id:
+                rows = await conn.fetch(
+                    f"""SELECT * FROM {self._TABLE}
+                        WHERE status = ANY($1::text[]) AND user_id = $2
+                        ORDER BY created_at ASC""",  # noqa: S608
+                    active_statuses,
+                    user_id,
+                )
+            else:
+                rows = await conn.fetch(
+                    f"""SELECT * FROM {self._TABLE}
+                        WHERE status = ANY($1::text[])
+                        ORDER BY created_at ASC""",  # noqa: S608
+                    active_statuses,
+                )
+            return [self._row_to_record(r) for r in rows]
+
+    async def update_status(
+        self, escalation_id: UUID, status: EscalationStatus
+    ) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                f"UPDATE {self._TABLE} SET status = $2 WHERE escalation_id = $1",  # noqa: S608
+                escalation_id,
+                status.value,
+            )
+
+    @staticmethod
+    def _row_to_record(row: Any) -> EscalationRecord:
+        import json
+
+        def _loads(v: Any, default: Any) -> Any:
+            if v is None:
+                return default
+            if isinstance(v, list | dict):
+                return v
+            return json.loads(v)
+
+        notifications_raw = _loads(row["notifications_sent"], [])
+        actions_raw = _loads(row["actions_taken"], [])
+        context_raw = _loads(row["context"], {})
+
+        return EscalationRecord(
+            escalation_id=row["escalation_id"],
+            user_id=row["user_id"],
+            session_id=row["session_id"],
+            crisis_level=row["crisis_level"],
+            priority=EscalationPriority(row["priority"]),
+            status=EscalationStatus(row["status"]),
+            reason=row["reason"],
+            assigned_clinician_id=row["assigned_clinician_id"],
+            notifications_sent=[NotificationType(n) for n in notifications_raw],
+            actions_taken=list(actions_raw),
+            context=dict(context_raw),
+            created_at=row["created_at"],
+            acknowledged_at=row["acknowledged_at"],
+            resolved_at=row["resolved_at"],
+        )
+
+
 class EscalationManager:
     """Main escalation manager orchestrating all escalation components."""
 
@@ -540,7 +741,10 @@ class EscalationManager:
         # Use provided registry or attempt to create one from settings
         if clinician_registry is None:
             try:
-                from ..infrastructure.clinician_registry import ClinicianRegistry, ClinicianRegistrySettings
+                from ..infrastructure.clinician_registry import (
+                    ClinicianRegistry,
+                    ClinicianRegistrySettings,
+                )
                 registry_settings = ClinicianRegistrySettings()
                 clinician_registry = ClinicianRegistry(registry_settings)
                 logger.info("clinician_registry_created_from_settings")
@@ -582,7 +786,7 @@ class EscalationManager:
         """
         # Deduplication check
         dedup_key = (user_id, crisis_level)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         last_escalation_at = self._dedup_window.get(dedup_key)
         if last_escalation_at and (now - last_escalation_at) < self._dedup_ttl:
             logger.info(
@@ -657,7 +861,7 @@ class EscalationManager:
             return False
         escalation = self._active_escalations[escalation_id]
         escalation.status = EscalationStatus.ACKNOWLEDGED
-        escalation.acknowledged_at = datetime.now(timezone.utc)
+        escalation.acknowledged_at = datetime.now(UTC)
         escalation.actions_taken.append(f"Acknowledged by clinician {clinician_id}")
         logger.info("escalation_acknowledged", escalation_id=str(escalation_id), clinician_id=str(clinician_id))
         return True
@@ -668,7 +872,7 @@ class EscalationManager:
             return False
         escalation = self._active_escalations[escalation_id]
         escalation.status = EscalationStatus.RESOLVED
-        escalation.resolved_at = datetime.now(timezone.utc)
+        escalation.resolved_at = datetime.now(UTC)
         escalation.actions_taken.append(f"Resolved: {resolution_notes}")
         if escalation.assigned_clinician_id:
             self._clinician_assigner.release_clinician(escalation.assigned_clinician_id)

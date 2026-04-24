@@ -3,14 +3,25 @@ Unit tests for Solace-AI Safety Service Domain Entities.
 Tests SafetyAssessment, SafetyPlan, SafetyIncident, and UserRiskProfile entities.
 """
 from __future__ import annotations
-import pytest
-from datetime import datetime, timezone, timedelta
+
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
+
+import pytest
+
 from services.safety_service.src.domain.entities import (
-    SafetyPlan, SafetyPlanStatus, WarningSign, CopingStrategy, EmergencyContact,
-    SafeEnvironmentAction, SafetyAssessment, AssessmentType, SafetyIncident,
-    IncidentSeverity, IncidentStatus, UserRiskProfile,
+    AssessmentType,
+    CopingStrategy,
+    EmergencyContact,
+    IncidentSeverity,
+    IncidentStatus,
+    SafetyAssessment,
+    SafetyIncident,
+    SafetyPlan,
+    SafetyPlanStatus,
+    UserRiskProfile,
+    WarningSign,
 )
 
 
@@ -125,7 +136,7 @@ class TestSafetyPlan:
         """Test plan expiration detection."""
         plan = SafetyPlan(
             user_id=uuid4(),
-            expires_at=datetime.now(timezone.utc) - timedelta(days=1),
+            expires_at=datetime.now(UTC) - timedelta(days=1),
         )
         assert plan.is_expired is True
 
@@ -133,7 +144,7 @@ class TestSafetyPlan:
         """Test non-expired plan."""
         plan = SafetyPlan(
             user_id=uuid4(),
-            expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+            expires_at=datetime.now(UTC) + timedelta(days=30),
         )
         assert plan.is_expired is False
 
@@ -177,7 +188,7 @@ class TestSafetyPlan:
         """Test days until review calculation."""
         plan = SafetyPlan(
             user_id=uuid4(),
-            next_review_due=datetime.now(timezone.utc) + timedelta(days=5),
+            next_review_due=datetime.now(UTC) + timedelta(days=5),
         )
         assert plan.days_until_review == 5
 
@@ -306,7 +317,7 @@ class TestSafetyIncident:
             crisis_level="HIGH",
             description="Test",
             follow_up_required=True,
-            follow_up_due=datetime.now(timezone.utc) - timedelta(hours=1),
+            follow_up_due=datetime.now(UTC) - timedelta(hours=1),
         )
         assert incident.is_overdue is True
 

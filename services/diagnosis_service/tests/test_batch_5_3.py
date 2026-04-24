@@ -3,33 +3,52 @@ Solace-AI Diagnosis Service - Batch 5.3 Unit Tests.
 Tests for entities, value objects, repository, events, and config.
 """
 from __future__ import annotations
+
 from decimal import Decimal
 from uuid import uuid4
+
 import pytest
 import pytest_asyncio
 
-from services.diagnosis_service.src.schemas import (
-    DiagnosisPhase, SeverityLevel, SymptomType, ConfidenceLevel,
+from services.diagnosis_service.src.config import (
+    AISettings,
+    DatabaseSettings,
+    DiagnosisServiceConfig,
+    ReasoningSettings,
+    RedisSettings,
+    SafetySettings,
+    get_config,
+    reload_config,
 )
 from services.diagnosis_service.src.domain.entities import (
-    EntityBase, SymptomEntity, HypothesisEntity, DiagnosisSessionEntity, DiagnosisRecordEntity,
+    DiagnosisRecordEntity,
+    DiagnosisSessionEntity,
+    EntityBase,
+    HypothesisEntity,
+    SymptomEntity,
 )
 from services.diagnosis_service.src.domain.value_objects import (
-    SeverityScore, ConfidenceScore, TemporalInfo, DiagnosisCriteria,
-    HiTOPDimension, ClinicalHypothesis, SessionProgress,
-)
-from services.diagnosis_service.src.infrastructure.repository import RepositoryFactory
-from services.diagnosis_service.tests.fixtures import (
-    InMemoryDiagnosisRepository, SessionQueryBuilder, RecordQueryBuilder,
+    ClinicalHypothesis,
+    ConfidenceScore,
+    SeverityScore,
+    TemporalInfo,
 )
 from services.diagnosis_service.src.events import (
-    DiagnosisEvent, SessionStartedEvent, SessionEndedEvent, PhaseTransitionEvent,
-    SymptomExtractedEvent, HypothesisGeneratedEvent, HypothesisChallengedEvent,
-    SafetyFlagRaisedEvent, EventDispatcher, EventFactory,
+    DiagnosisEvent,
+    EventDispatcher,
+    EventFactory,
+    SessionEndedEvent,
+    SessionStartedEvent,
 )
-from services.diagnosis_service.src.config import (
-    DatabaseSettings, RedisSettings, AISettings, ReasoningSettings,
-    SafetySettings, ObservabilitySettings, DiagnosisServiceConfig, get_config, reload_config,
+from services.diagnosis_service.src.infrastructure.repository import RepositoryFactory
+from services.diagnosis_service.src.schemas import (
+    ConfidenceLevel,
+    DiagnosisPhase,
+    SeverityLevel,
+)
+from services.diagnosis_service.tests.fixtures import (
+    InMemoryDiagnosisRepository,
+    SessionQueryBuilder,
 )
 
 
@@ -225,8 +244,12 @@ class TestSeverityScore:
         assert score.level == SeverityLevel.MILD
 
     def test_pcl5_threshold(self) -> None:
-        """Test PCL-5 clinical threshold (10-item version, max_score=40)."""
-        score = SeverityScore.from_pcl5(18)
+        """Test PCL-5 clinical MILD threshold (10-item screener, max_score=40).
+
+        H-10: The halved cutoff puts MILD at 9-10. A score of 10 is above
+        the MILD floor but below the halved MODERATE cutoff at 11.
+        """
+        score = SeverityScore.from_pcl5(10)
         assert score.level == SeverityLevel.MILD
         assert "meets clinical threshold" in score.interpretation.lower()
 
@@ -276,13 +299,12 @@ class TestPHQ9ModeratelySevereMapping:
 
 
 class TestPCL5HalvedThresholds:
-    """Verify PCL-5 uses 10-item version with max_score=40 and halved thresholds.
+    """H-10: Verify PCL-5 uses the 10-item screener (max_score=40) with
+    thresholds properly halved from the Weathers 2013 20-item standard.
 
-    Spec thresholds (halved from 20-item version):
-        >= 31 = SEVERE
-        >= 22 = MODERATE
-        >= 17 = MILD (clinical threshold)
-        <  17 = MINIMAL
+    Standard 20-item cutoffs: 31 SEVERE, 22 MODERATE, 17 MILD (max 80).
+    Halved 10-item cutoffs: 16 SEVERE, 11 MODERATE, 9 MILD (max 40).
+    See ``docs/CLINICAL-VALIDATION.md`` for the documented deviation.
     """
 
     def test_pcl5_max_score_is_40(self) -> None:
@@ -290,8 +312,13 @@ class TestPCL5HalvedThresholds:
         score = SeverityScore.from_pcl5(0)
         assert score.max_score == 40
 
-    def test_pcl5_severe_at_31(self) -> None:
-        """PCL-5 score >= 31 should be SEVERE."""
+    def test_pcl5_severe_at_16(self) -> None:
+        """H-10: PCL-5 score >= 16 should be SEVERE on the halved scale."""
+        score = SeverityScore.from_pcl5(16)
+        assert score.level == SeverityLevel.SEVERE
+
+    def test_pcl5_severe_at_31_still_severe(self) -> None:
+        """A 31 on the 10-item scale is well above the halved SEVERE cutoff."""
         score = SeverityScore.from_pcl5(31)
         assert score.level == SeverityLevel.SEVERE
 
@@ -300,29 +327,29 @@ class TestPCL5HalvedThresholds:
         score = SeverityScore.from_pcl5(40)
         assert score.level == SeverityLevel.SEVERE
 
-    def test_pcl5_moderate_at_22(self) -> None:
-        """PCL-5 score >= 22 should be MODERATE."""
-        score = SeverityScore.from_pcl5(22)
+    def test_pcl5_moderate_at_11(self) -> None:
+        """H-10: PCL-5 score >= 11 should be MODERATE on the halved scale."""
+        score = SeverityScore.from_pcl5(11)
         assert score.level == SeverityLevel.MODERATE
 
-    def test_pcl5_moderate_at_30(self) -> None:
-        """PCL-5 score of 30 should still be MODERATE (below SEVERE cutoff)."""
-        score = SeverityScore.from_pcl5(30)
+    def test_pcl5_moderate_at_15(self) -> None:
+        """PCL-5 score of 15 should still be MODERATE (just below halved SEVERE)."""
+        score = SeverityScore.from_pcl5(15)
         assert score.level == SeverityLevel.MODERATE
 
-    def test_pcl5_mild_at_17(self) -> None:
-        """PCL-5 score >= 17 should be MILD (clinical threshold)."""
-        score = SeverityScore.from_pcl5(17)
+    def test_pcl5_mild_at_9(self) -> None:
+        """H-10: PCL-5 score >= 9 should be MILD on the halved scale."""
+        score = SeverityScore.from_pcl5(9)
         assert score.level == SeverityLevel.MILD
 
-    def test_pcl5_mild_at_21(self) -> None:
-        """PCL-5 score of 21 should still be MILD (below MODERATE cutoff)."""
-        score = SeverityScore.from_pcl5(21)
+    def test_pcl5_mild_at_10(self) -> None:
+        """PCL-5 score of 10 should still be MILD (just below halved MODERATE)."""
+        score = SeverityScore.from_pcl5(10)
         assert score.level == SeverityLevel.MILD
 
-    def test_pcl5_minimal_at_16(self) -> None:
-        """PCL-5 score below 17 should be MINIMAL."""
-        score = SeverityScore.from_pcl5(16)
+    def test_pcl5_minimal_at_8(self) -> None:
+        """PCL-5 score below 9 should be MINIMAL on the halved scale."""
+        score = SeverityScore.from_pcl5(8)
         assert score.level == SeverityLevel.MINIMAL
 
     def test_pcl5_minimal_at_0(self) -> None:
@@ -331,16 +358,26 @@ class TestPCL5HalvedThresholds:
         assert score.level == SeverityLevel.MINIMAL
 
     def test_pcl5_assessor_thresholds_match_value_object(self) -> None:
-        """SeverityAssessor._interpret_pcl5 must match SeverityScore.from_pcl5 thresholds."""
+        """SeverityAssessor._interpret_pcl5 must match SeverityScore.from_pcl5
+        thresholds under the halved 10-item scale."""
         from services.diagnosis_service.src.domain.severity import SeverityAssessor
         assessor = SeverityAssessor()
-        # Check all boundary scores match between both implementations
-        for score_val, expected_level in [(31, SeverityLevel.SEVERE), (22, SeverityLevel.MODERATE),
-                                          (17, SeverityLevel.MILD), (16, SeverityLevel.MINIMAL)]:
+        for score_val, expected_level in [
+            (16, SeverityLevel.SEVERE),
+            (11, SeverityLevel.MODERATE),
+            (9, SeverityLevel.MILD),
+            (8, SeverityLevel.MINIMAL),
+        ]:
             assessor_level = assessor._interpret_pcl5(score_val)
             vo_level = SeverityScore.from_pcl5(score_val).level
-            assert assessor_level == expected_level, f"Assessor mismatch at score {score_val}"
-            assert vo_level == expected_level, f"Value object mismatch at score {score_val}"
+            assert assessor_level == expected_level, (
+                f"Assessor mismatch at score {score_val}: got {assessor_level}, "
+                f"expected {expected_level}"
+            )
+            assert vo_level == expected_level, (
+                f"Value object mismatch at score {score_val}: got {vo_level}, "
+                f"expected {expected_level}"
+            )
 
 
 class TestConfidenceScore:

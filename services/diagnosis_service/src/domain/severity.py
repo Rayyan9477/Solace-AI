@@ -1,15 +1,37 @@
 """
-Solace-AI Diagnosis Service - PHQ-9/GAD-7 Severity Assessment.
+Solace-AI Diagnosis Service - PHQ-9/GAD-7/PCL-5 Severity Assessment.
+
 Implements standardized clinical questionnaire scoring and severity mapping.
+
+Clinical citations (all thresholds must trace to one of these):
+  - PHQ-9: Kroenke, Spitzer, Williams 2001, JAMA.
+           "PHQ-9: Validity of a brief depression severity measure."
+           Severity bands: 0-4 Minimal, 5-9 Mild, 10-14 Moderate,
+                           15-19 Moderately Severe, 20-27 Severe.
+  - GAD-7: Spitzer, Kroenke, Williams, Lowe 2006, Arch Intern Med.
+           "A brief measure for assessing generalized anxiety disorder."
+           Severity bands: 0-4 Minimal, 5-9 Mild, 10-14 Moderate, 15-21 Severe.
+  - PCL-5: Weathers et al. 2013. "The PTSD Checklist for DSM-5 (PCL-5)."
+           Standard 20-item diagnostic cutoff: 31-33 = probable PTSD.
+           We use a 10-item abbreviated screener (max score 40 instead
+           of 80); see ``docs/CLINICAL-VALIDATION.md`` for the documented
+           deviation and the halved cutoffs used below.
+  - PHQ-15: Kroenke, Spitzer, Williams 2002, Psychosom Med.
+            "PHQ-15: Validity of a new measure for evaluating the
+            severity of somatic symptoms."
+
+Any change to the thresholds below must update ``docs/CLINICAL-VALIDATION.md``.
 """
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
+
+import structlog
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import structlog
 
 from ..schemas import SeverityLevel, SymptomDTO
 
@@ -437,10 +459,24 @@ class SeverityAssessor:
         return SeverityLevel.MINIMAL
 
     def _interpret_pcl5(self, score: int) -> SeverityLevel:
-        """Interpret PCL-5 score to severity level (10-item version, max_score=40)."""
-        if score >= 31: return SeverityLevel.SEVERE
-        if score >= 22: return SeverityLevel.MODERATE
-        if score >= 17: return SeverityLevel.MILD
+        """Interpret PCL-5 score to severity level (10-item screener, max=40).
+
+        H-10: The standard PCL-5 is a 20-item instrument (max 80) with a
+        published probable-PTSD cutoff of 31-33 (Weathers 2013). This
+        service uses an abbreviated 10-item screener with max score 40,
+        so all thresholds are halved to preserve the same clinical
+        sensitivity: the 20-item ``>=31`` maps to ``>=16`` here. Documented
+        deviation in ``docs/CLINICAL-VALIDATION.md``.
+        """
+        # Halved cutoffs: 31 -> 16 (probable PTSD / severe on 10-item)
+        #                 22 -> 11 (moderate symptoms)
+        #                 17 -> 9  (mild but clinically notable)
+        if score >= 16:
+            return SeverityLevel.SEVERE
+        if score >= 11:
+            return SeverityLevel.MODERATE
+        if score >= 9:
+            return SeverityLevel.MILD
         return SeverityLevel.MINIMAL
 
     def _get_phq9_interpretation(self, score: int) -> str:

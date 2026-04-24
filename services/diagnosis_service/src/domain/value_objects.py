@@ -3,13 +3,13 @@ Solace-AI Diagnosis Service - Domain Value Objects.
 Immutable value objects for clinical diagnosis domain.
 """
 from __future__ import annotations
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+
+from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
-from typing import Any
 from uuid import UUID, uuid4
 
-from ..schemas import SeverityLevel, ConfidenceLevel, SymptomType, DiagnosisPhase
+from ..schemas import ConfidenceLevel, DiagnosisPhase, SeverityLevel
 
 
 @dataclass(frozen=True)
@@ -51,12 +51,22 @@ class SeverityScore:
 
     @classmethod
     def from_pcl5(cls, score: int) -> SeverityScore:
-        """Create severity score from PCL-5 (10-item version, max_score=40)."""
-        if score >= 31:
+        """Create severity score from PCL-5 10-item screener (max_score=40).
+
+        H-10: The Weathers 2013 PCL-5 standard is a 20-item instrument
+        (max 80, probable-PTSD cutoff 31-33). This service uses a 10-item
+        abbreviated screener with max 40, so cutoffs are halved to keep
+        the same clinical sensitivity:
+            16 (was 31) = SEVERE / probable PTSD
+            11 (was 22) = MODERATE
+             9 (was 17) = MILD clinically notable
+        See ``docs/CLINICAL-VALIDATION.md`` for the documented deviation.
+        """
+        if score >= 16:
             level, interp = SeverityLevel.SEVERE, "Severe PTSD symptoms"
-        elif score >= 22:
+        elif score >= 11:
             level, interp = SeverityLevel.MODERATE, "Moderate PTSD symptoms"
-        elif score >= 17:
+        elif score >= 9:
             level, interp = SeverityLevel.MILD, "Mild PTSD symptoms - meets clinical threshold"
         else:
             level, interp = SeverityLevel.MINIMAL, "Below clinical threshold"

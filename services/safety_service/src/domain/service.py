@@ -3,25 +3,35 @@ Solace-AI Safety Service - Main safety orchestration service.
 Coordinates crisis detection, escalation, and safety monitoring across all layers.
 """
 from __future__ import annotations
-import asyncio
+
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
+
+import structlog
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import structlog
 
-from .crisis_detector import CrisisDetector, CrisisDetectorSettings, DetectionResult, CrisisLevel, RiskFactor
-from .escalation import EscalationManager, EscalationSettings, EscalationResult
-from ..events import (
-    SafetyEventPublisher,
-    SafetyCheckCompletedEvent,
-    CrisisDetectedEvent,
-)
 from services.shared import ServiceBase
+
+from ..events import (
+    CrisisDetectedEvent,
+    EscalationTriggeredEvent,
+    OutputFilteredEvent,
+    SafetyCheckCompletedEvent,
+    SafetyEventPublisher,
+)
+from .crisis_detector import (
+    CrisisDetector,
+    CrisisDetectorSettings,
+    CrisisLevel,
+    DetectionResult,
+    RiskFactor,
+)
+from .escalation import EscalationManager, EscalationResult, EscalationSettings
 
 logger = structlog.get_logger(__name__)
 
@@ -93,7 +103,7 @@ class AssessmentCache:
     """Cache for recent safety assessments."""
     user_id: UUID
     assessment: SafetyCheckResult
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 class SafetyService(ServiceBase):
@@ -250,6 +260,21 @@ class SafetyService(ServiceBase):
         )
         logger.info("escalation_triggered", user_id=str(user_id),
             escalation_id=str(result.escalation_id), priority=result.priority)
+
+        # C-13: emit EscalationTriggeredEvent so notification/audit/analytics
+        # services can react. Without this, the Kafka bridge never sees the
+        # escalation and the on-call clinician is not alerted.
+        if self._event_publisher:
+            await self._event_publisher.publish(EscalationTriggeredEvent(
+                user_id=user_id,
+                session_id=session_id,
+                escalation_id=result.escalation_id,
+                priority=result.priority,
+                crisis_level=crisis_level,
+                reason=reason,
+                assigned_clinician_id=getattr(result, "assigned_clinician_id", None),
+                notification_channels=list(getattr(result, "notification_channels", []) or []),
+            ))
         return result
 
     async def assess_safety(self, user_id: UUID, session_id: UUID | None, messages: list[str],
@@ -305,6 +330,25 @@ class SafetyService(ServiceBase):
                 resources_appended = True
                 modifications.append("Crisis resources appended")
         filter_time_ms = int((time.perf_counter() - start_time) * 1000)
+
+        # C-13: emit OutputFilteredEvent whenever the output was modified
+        # (content filtered or resources appended). Required for the audit
+        # trail: which AI responses did we alter, and why.
+        if self._event_publisher and (modifications or resources_appended):
+            filter_reason = (
+                "crisis_content_modified"
+                if modifications and not resources_appended
+                else "crisis_resources_appended"
+                if resources_appended and not modifications
+                else "content_modified_and_resources_appended"
+            )
+            await self._event_publisher.publish(OutputFilteredEvent(
+                user_id=user_id,
+                modifications_count=len(modifications),
+                filter_reason=filter_reason,
+                resources_appended=resources_appended,
+            ))
+
         return OutputFilterResult(
             filtered_response=filtered_response,
             modifications_made=modifications,
@@ -351,7 +395,7 @@ class SafetyService(ServiceBase):
             self._user_risk_history[user_id]["previous_crisis_events"] += 1
             self._user_risk_history[user_id]["recent_escalation"] = True
             self._user_risk_history[user_id]["last_crisis_level"] = detection.crisis_level.value
-            self._user_risk_history[user_id]["last_crisis_time"] = datetime.now(timezone.utc).isoformat()
+            self._user_risk_history[user_id]["last_crisis_time"] = datetime.now(UTC).isoformat()
 
     def _identify_protective_factors(self, content: str, context: dict[str, Any]) -> list[dict[str, Any]]:
         """Identify protective factors in content."""
@@ -412,7 +456,7 @@ class SafetyService(ServiceBase):
         entry = self._assessment_cache.get(user_id)
         if entry is None:
             return None
-        elapsed = (datetime.now(timezone.utc) - entry.timestamp).total_seconds()
+        elapsed = (datetime.now(UTC) - entry.timestamp).total_seconds()
         if elapsed > self._settings.assessment_cache_ttl_seconds:
             del self._assessment_cache[user_id]
             return None
@@ -420,7 +464,7 @@ class SafetyService(ServiceBase):
 
     def _evict_expired_cache(self) -> None:
         """Remove expired assessment cache entries."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         ttl = self._settings.assessment_cache_ttl_seconds
         expired = [
             uid for uid, entry in self._assessment_cache.items()

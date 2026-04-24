@@ -2,18 +2,20 @@
 Batch 3.3 Integration Test - End-to-end functional validation of all ML components.
 Tests the full pipeline from keyword detection through LLM assessment and contraindication checking.
 """
-import pytest
 from decimal import Decimal
 from uuid import uuid4
-from services.safety_service.src.ml.keyword_detector import KeywordDetector
-from services.safety_service.src.ml.sentiment_analyzer import SentimentAnalyzer
-from services.safety_service.src.ml.pattern_matcher import PatternMatcher
-from services.safety_service.src.ml.llm_assessor import LLMAssessor
+
+import pytest
+
 from services.safety_service.src.ml.contraindication import (
     ContraindicationChecker,
-    TherapyTechnique,
     MentalHealthCondition,
+    TherapyTechnique,
 )
+from services.safety_service.src.ml.keyword_detector import KeywordDetector
+from services.safety_service.src.ml.llm_assessor import LLMAssessor
+from services.safety_service.src.ml.pattern_matcher import PatternMatcher
+from services.safety_service.src.ml.sentiment_analyzer import SentimentAnalyzer
 
 
 class TestBatch33Integration:
@@ -102,7 +104,7 @@ class TestBatch33Integration:
         if keyword_risk > 0 or sentiment_result.risk_score > 0 or pattern_risk > 0:
             avg_risk = (keyword_risk + sentiment_result.risk_score + pattern_risk) / Decimal("3")
             assert avg_risk < Decimal("0.9")  # Not critical
-        print(f"[OK] Moderate case processed correctly")
+        print("[OK] Moderate case processed correctly")
 
     def test_crisis_detection_pipeline_safe(
         self,
@@ -209,7 +211,7 @@ class TestBatch33Integration:
             keyword_risk + sentiment_result.risk_score + pattern_risk
         ) / Decimal("3")
 
-        print(f"[OK] Detection summary:")
+        print("[OK] Detection summary:")
         print(f"    Keyword matches: {len(keyword_matches)}")
         print(f"    Pattern matches: {len(pattern_matches)}")
         print(f"    Sentiment: {sentiment_result.emotional_state.value}")
