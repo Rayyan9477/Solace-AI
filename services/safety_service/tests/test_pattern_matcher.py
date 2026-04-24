@@ -1,13 +1,14 @@
 """
 Tests for pattern_matcher.py - Advanced pattern-based crisis detection.
 """
-import pytest
 from decimal import Decimal
 from uuid import uuid4
+
+import pytest
+
 from services.safety_service.src.ml.pattern_matcher import (
     PatternMatcher,
     PatternMatcherConfig,
-    PatternMatch,
     PatternType,
 )
 

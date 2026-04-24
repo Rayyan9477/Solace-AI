@@ -1,15 +1,15 @@
 """
 Tests for sentiment_analyzer.py - Clinical sentiment analysis for risk assessment.
 """
-import pytest
 from decimal import Decimal
 from uuid import uuid4
+
+import pytest
+
 from services.safety_service.src.ml.sentiment_analyzer import (
-    SentimentAnalyzer,
-    SentimentAnalyzerConfig,
-    SentimentResult,
-    SentimentPolarity,
     EmotionalState,
+    SentimentAnalyzer,
+    SentimentPolarity,
 )
 
 

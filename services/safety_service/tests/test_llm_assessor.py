@@ -1,17 +1,19 @@
 """
 Tests for llm_assessor.py - LLM-based deep risk assessment.
 """
-import pytest
 from decimal import Decimal
 from uuid import uuid4
+
+import pytest
+
 from services.safety_service.src.ml.llm_assessor import (
     LLMAssessor,
     LLMAssessorConfig,
+    ProtectiveFactor,
     RiskAssessment,
-    RiskLevel,
     RiskDimension,
     RiskFactor,
-    ProtectiveFactor,
+    RiskLevel,
 )
 
 
@@ -173,6 +175,79 @@ class TestLLMAssessor:
 
         assert key1 == key2  # Same input = same key
         assert key1 != key3  # Different input = different key
+
+    def test_cache_key_includes_user_id(self, assessor: LLMAssessor) -> None:
+        """H-05 regression: cache key must differ between users for identical text.
+
+        Before the fix, two users with the same message would collide on the
+        same cache key, and user A could receive user B's risk assessment.
+        This is a privacy + safety bug: a correctly non-crisis assessment
+        for one user could be served for another user whose identical phrase
+        actually indicates crisis given their context.
+        """
+        text = "same utterance across users"
+        context = {"intent": "discuss"}
+
+        user_a = uuid4()
+        user_b = uuid4()
+
+        key_a = assessor._generate_cache_key(text, context, user_a)
+        key_b = assessor._generate_cache_key(text, context, user_b)
+        key_none = assessor._generate_cache_key(text, context)
+        key_a_again = assessor._generate_cache_key(text, context, user_a)
+
+        assert key_a != key_b, (
+            "H-05 regression: identical text for different users must not "
+            "produce the same cache key. This risks cross-user PHI leakage."
+        )
+        assert key_a != key_none, "user-scoped key must differ from anonymous key"
+        assert key_a == key_a_again, "same user + same input must be reproducible"
+
+    @pytest.mark.asyncio
+    async def test_crisis_assessments_are_not_cached(self, assessor: LLMAssessor) -> None:
+        """H-05 regression: HIGH/CRITICAL results must never be cached.
+
+        Caching a transient crisis state could mask a real-time intervention
+        signal on a subsequent call. The assess() method skips caching when
+        the assessment resolves to HIGH or CRITICAL.
+        """
+        # Stub the LLM call to return a HIGH-risk assessment every time.
+        # We return the JSON shape the real parser expects rather than a
+        # RiskAssessment object — that way the full parse path runs.
+        async def _fake_call_llm(system_prompt: str, user_prompt: str) -> str:
+            # Round-trip the assessment through parse_llm_response by returning
+            # a JSON object the real parser understands.
+            return (
+                '{"risk_level":"HIGH","risk_score":0.75,"confidence":0.9,'
+                '"clinical_summary":"simulated high risk",'
+                '"risk_factors":[],"protective_factors":[],"immediate_risk":false,'
+                '"recommended_actions":["monitor"],"warning_signs":[],'
+                '"contextual_notes":""}'
+            )
+
+        assessor._call_llm = _fake_call_llm  # type: ignore[assignment,method-assign]
+
+        user_id = uuid4()
+        text = "I have been thinking about ending it all"
+
+        # Two calls with identical inputs — if caching were active on HIGH,
+        # we'd hit the cache and _call_llm would not run the second time.
+        call_count = {"n": 0}
+        original = _fake_call_llm
+
+        async def _counting_call(sp: str, up: str) -> str:
+            call_count["n"] += 1
+            return await original(sp, up)
+
+        assessor._call_llm = _counting_call  # type: ignore[assignment,method-assign]
+
+        await assessor.assess(text, user_id=user_id)
+        await assessor.assess(text, user_id=user_id)
+
+        assert call_count["n"] == 2, (
+            "H-05 regression: HIGH-risk assessment must not be cached. "
+            "The LLM should be called again on the second identical request."
+        )
 
     def test_get_cached_assessment_miss(self, assessor: LLMAssessor) -> None:
         """Test cache miss returns None."""

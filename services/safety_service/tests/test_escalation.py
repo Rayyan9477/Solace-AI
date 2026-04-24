@@ -3,15 +3,25 @@ Unit tests for Solace-AI Escalation Manager.
 Tests escalation workflows, clinician assignment, and notifications.
 """
 from __future__ import annotations
+
 from dataclasses import dataclass
 from unittest.mock import AsyncMock
-import pytest
 from uuid import UUID, uuid4
+
+import pytest
+
 from services.safety_service.src.domain.escalation import (
-    EscalationManager, EscalationSettings, EscalationResult,
-    EscalationPriority, EscalationStatus, NotificationType,
-    EscalationRecord, NotificationService, ClinicianAssigner,
-    CrisisResourceManager, EscalationWorkflow,
+    ClinicianAssigner,
+    CrisisResourceManager,
+    EscalationManager,
+    EscalationPriority,
+    EscalationRecord,
+    EscalationResult,
+    EscalationSettings,
+    EscalationStatus,
+    EscalationWorkflow,
+    NotificationService,
+    NotificationType,
 )
 
 
@@ -206,6 +216,48 @@ class TestEscalationWorkflow:
         result = await workflow.execute_medium_workflow(escalation)
         assert "MEDIUM workflow initiated" in result.actions_taken
         assert "Enhanced monitoring enabled" in result.actions_taken
+
+    @pytest.mark.asyncio
+    async def test_medium_workflow_sends_real_supervisor_email(
+        self, workflow: EscalationWorkflow
+    ) -> None:
+        """H-03 regression: MEDIUM workflow must actually send a supervisor
+        email when email notifications are enabled. Previously it logged
+        ``"Event logged for supervisor review"`` as an action but never
+        called the notification service — a false audit claim.
+        """
+        # Replace the notification service with a capturing spy so we can
+        # assert the call actually happens. The spy records every
+        # send_notification invocation.
+        send_calls: list[dict[str, object]] = []
+
+        async def _spy_send(
+            clinician_id, escalation, channel, retry_count=0,
+        ):
+            send_calls.append(
+                {"clinician_id": clinician_id, "channel": channel}
+            )
+            return True
+
+        workflow._notifications.send_notification = _spy_send  # type: ignore[assignment,method-assign]
+
+        escalation = EscalationRecord(
+            user_id=uuid4(),
+            crisis_level="ELEVATED",
+            priority=EscalationPriority.MEDIUM,
+        )
+        result = await workflow.execute_medium_workflow(escalation)
+
+        # If the fix is in place, at least one send_notification call was made
+        assert len(send_calls) >= 1, (
+            "H-03 regression: MEDIUM escalation workflow must call "
+            "notification_service.send_notification() when email is enabled. "
+            "Previously the workflow only logged a misleading action string."
+        )
+        # The recorded action should not claim more than actually happened
+        assert "Event logged for supervisor review" not in result.actions_taken, (
+            "H-03 regression: misleading action string removed"
+        )
 
     @pytest.mark.asyncio
     async def test_low_workflow(self, workflow: EscalationWorkflow) -> None:

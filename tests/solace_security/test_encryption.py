@@ -1,22 +1,24 @@
 """Unit tests for encryption module."""
 
 from __future__ import annotations
+
 import pytest
 from cryptography.exceptions import InvalidTag
 from pydantic import ValidationError
+
 from solace_security.encryption import (
-    EncryptionAlgorithm,
-    KeyDerivationFunction,
-    EncryptionSettings,
-    EncryptedData,
-    KeyManager,
+    KEY_SIZE,
     AESGCMCipher,
+    EncryptedData,
+    EncryptionAlgorithm,
+    EncryptionSettings,
     Encryptor,
     FieldEncryptor,
+    KeyDerivationFunction,
+    KeyManager,
     SecureTokenGenerator,
     create_encryptor,
     create_field_encryptor,
-    KEY_SIZE,
 )
 
 
@@ -46,6 +48,27 @@ class TestEncryptionSettings:
         """Test that master_key must be exactly 32 bytes."""
         with pytest.raises(ValueError, match="exactly 32 bytes"):
             EncryptionSettings(master_key="short-key")
+
+    def test_master_key_rejects_multibyte_string_even_if_32_chars(self):
+        """H-38: validation must count BYTES, not characters.
+
+        A 32-*character* string containing multi-byte UTF-8 glyphs encodes to
+        more than 32 bytes. AES-256 needs exactly 32 bytes of key material —
+        silently accepting the string would either truncate downstream or
+        crash the cipher. Must reject at settings-load time.
+        """
+        # 31 ASCII chars + 1 character "é" → 31 + 2 = 33 bytes.
+        key_33_bytes = "abcdefghijklmnopqrstuvwxyz01234é"
+        assert len(key_33_bytes) == 32  # correct char count
+        assert len(key_33_bytes.encode("utf-8")) == 33  # wrong byte count
+        with pytest.raises(ValueError, match="exactly 32 bytes"):
+            EncryptionSettings(master_key=key_33_bytes)
+
+    def test_master_key_accepts_32_byte_ascii(self):
+        """H-38 regression: valid 32-byte ASCII keys still pass."""
+        key = "a" * 32
+        settings = EncryptionSettings(master_key=key)
+        assert settings.master_key.get_secret_value() == key
 
 
 class TestEncryptionAlgorithm:

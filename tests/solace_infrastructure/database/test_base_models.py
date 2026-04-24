@@ -1,30 +1,23 @@
 """Unit tests for base SQLAlchemy models."""
 from __future__ import annotations
 
-import uuid
-from datetime import datetime, timezone, timedelta
-
-import pytest
-from sqlalchemy import Column, String
-from sqlalchemy.orm import Mapped, mapped_column
-
 from solace_infrastructure.database.base_models import (
+    AuditableModel,
+    AuditMixin,
     Base,
     BaseModel,
-    AuditableModel,
+    ClinicalBase,
+    ConfigurationBase,
+    ModelState,
+    SafetyEventBase,
+    SessionBase,
+    SoftDeleteMixin,
+    TenantMixin,
     TenantModel,
     TimestampMixin,
-    SoftDeleteMixin,
-    VersionMixin,
-    AuditMixin,
-    TenantMixin,
-    ModelState,
-    get_model_table_name,
     UserProfileBase,
-    SessionBase,
-    ClinicalBase,
-    SafetyEventBase,
-    ConfigurationBase,
+    VersionMixin,
+    get_model_table_name,
 )
 
 
@@ -72,7 +65,7 @@ class TestVersionMixin:
     def test_increment_version_method_exists(self) -> None:
         """Test VersionMixin has increment_version method."""
         assert hasattr(VersionMixin, "increment_version")
-        assert callable(getattr(VersionMixin, "increment_version"))
+        assert callable(VersionMixin.increment_version)
 
 
 class TestAuditMixin:
@@ -218,3 +211,171 @@ class TestConcreteModel:
     def test_base_model_is_abstract(self) -> None:
         """Test BaseModel is marked as abstract."""
         assert BaseModel.__abstract__ is True
+
+
+# ---------------------------------------------------------------------------
+# PHI Encryption Tests — NEW-03/NEW-04: JSONB list/dict PHI support
+# ---------------------------------------------------------------------------
+
+class _FakeEntity:
+    """Minimal stand-in for a ClinicalBase-like entity.
+
+    We reuse only the encrypt_phi_fields / decrypt_phi_fields methods by
+    binding them unbound — this avoids the SQLAlchemy declarative ceremony
+    of spinning up a full mapped class. ClinicalBase's PHI helpers only
+    touch attributes named in __phi_fields__, so any plain object works.
+    """
+
+    __phi_fields__: list[str]
+
+    def __init__(self, phi_fields: list[str], **attrs: object) -> None:
+        self.__phi_fields__ = phi_fields
+        for k, v in attrs.items():
+            setattr(self, k, v)
+
+
+def _make_field_encryptor():
+    """Build a FieldEncryptor suitable for unit tests (dev key + test salt)."""
+    from pydantic import SecretStr
+
+    from solace_security.encryption import (
+        EncryptionSettings,
+        Encryptor,
+        FieldEncryptor,
+    )
+
+    settings = EncryptionSettings.for_development()
+    settings = settings.model_copy(
+        update={"search_hash_salt": SecretStr("phi-jsonb-roundtrip-salt-32-bytes!!")}
+    )
+    return FieldEncryptor(Encryptor(settings), settings=settings)
+
+
+class TestPhiEncryptionJSONB:
+    """NEW-03/NEW-04: encrypt_phi_fields must also protect JSONB list/dict fields.
+
+    DiagnosisSession.messages and Hypothesis.supporting_evidence are JSONB
+    columns that hold clinical conversation content and rationale — PHI by
+    any reasonable reading of HIPAA. The legacy implementation only handled
+    str values and silently ignored list/dict, leaving conversation history
+    in plaintext in the database.
+
+    After the fix, list and dict values are JSON-serialized, encrypted, and
+    stored as the "v1$"-prefixed ciphertext string. On load, the string is
+    detected, decrypted, and JSON-deserialized back to the original type.
+    """
+
+    # ---- str path (regression guard) ----
+
+    def test_str_value_roundtrips(self) -> None:
+        fe = _make_field_encryptor()
+        entity = _FakeEntity(["summary"], summary="depressed for 3 weeks")
+        ClinicalBase.encrypt_phi_fields(entity, fe)
+        assert isinstance(entity.summary, str)
+        assert entity.summary.startswith("v1$")
+        ClinicalBase.decrypt_phi_fields(entity, fe)
+        assert entity.summary == "depressed for 3 weeks"
+
+    # ---- list path (NEW-03: DiagnosisSession.messages) ----
+
+    def test_list_of_dicts_roundtrips(self) -> None:
+        fe = _make_field_encryptor()
+        original = [
+            {"role": "user", "content": "I can't sleep"},
+            {"role": "assistant", "content": "tell me more"},
+        ]
+        entity = _FakeEntity(["messages"], messages=original)
+        ClinicalBase.encrypt_phi_fields(entity, fe)
+        # After encryption, stored value is a ciphertext string, not a list
+        assert isinstance(entity.messages, str)
+        assert entity.messages.startswith("v1$")
+        ClinicalBase.decrypt_phi_fields(entity, fe)
+        assert entity.messages == original
+
+    def test_empty_list_roundtrips(self) -> None:
+        fe = _make_field_encryptor()
+        entity = _FakeEntity(["messages"], messages=[])
+        ClinicalBase.encrypt_phi_fields(entity, fe)
+        assert isinstance(entity.messages, str)
+        assert entity.messages.startswith("v1$")
+        ClinicalBase.decrypt_phi_fields(entity, fe)
+        assert entity.messages == []
+
+    # ---- dict path (NEW-04: Hypothesis evidence as dict) ----
+
+    def test_dict_roundtrips(self) -> None:
+        fe = _make_field_encryptor()
+        original = {"dsm5_code": "F41.1", "criteria_met": 5, "notes": "GAD likely"}
+        entity = _FakeEntity(["evidence"], evidence=original)
+        ClinicalBase.encrypt_phi_fields(entity, fe)
+        assert isinstance(entity.evidence, str)
+        assert entity.evidence.startswith("v1$")
+        ClinicalBase.decrypt_phi_fields(entity, fe)
+        assert entity.evidence == original
+
+    # ---- idempotency guards ----
+
+    def test_already_encrypted_str_is_not_double_encrypted(self) -> None:
+        fe = _make_field_encryptor()
+        entity = _FakeEntity(["summary"], summary="hello")
+        ClinicalBase.encrypt_phi_fields(entity, fe)
+        before = entity.summary
+        ClinicalBase.encrypt_phi_fields(entity, fe)
+        assert entity.summary == before
+
+    def test_none_value_is_skipped(self) -> None:
+        fe = _make_field_encryptor()
+        entity = _FakeEntity(["summary", "messages"], summary=None, messages=None)
+        ClinicalBase.encrypt_phi_fields(entity, fe)
+        assert entity.summary is None
+        assert entity.messages is None
+
+    def test_non_phi_field_untouched(self) -> None:
+        """Fields not declared in __phi_fields__ must remain unchanged."""
+        fe = _make_field_encryptor()
+        entity = _FakeEntity(
+            ["messages"], messages=[{"x": 1}], extra_notes="not PHI"
+        )
+        ClinicalBase.encrypt_phi_fields(entity, fe)
+        assert entity.extra_notes == "not PHI"
+        ClinicalBase.decrypt_phi_fields(entity, fe)
+        assert entity.extra_notes == "not PHI"
+
+
+# ---------------------------------------------------------------------------
+# NEW-03 / NEW-04 wire-up tests — declared __phi_fields__ on diagnosis entities
+# ---------------------------------------------------------------------------
+
+class TestDiagnosisEntityPhiFields:
+    """NEW-03, NEW-04: verify diagnosis_entities declare the right PHI fields."""
+
+    def test_diagnosis_session_messages_is_phi(self) -> None:
+        """NEW-03: DiagnosisSession.messages holds conversation history (PHI)."""
+        from solace_infrastructure.database.entities.diagnosis_entities import (
+            DiagnosisSession,
+        )
+
+        assert "messages" in DiagnosisSession.__phi_fields__, (
+            "DiagnosisSession.messages stores plaintext conversation history "
+            "and must be listed in __phi_fields__ for auto-encryption at rest."
+        )
+
+    def test_hypothesis_declares_phi_fields(self) -> None:
+        """NEW-04: Hypothesis supporting evidence fields must be encrypted."""
+        from solace_infrastructure.database.entities.diagnosis_entities import (
+            Hypothesis,
+        )
+
+        required_phi = {
+            "supporting_evidence",
+            "contra_evidence",
+            "challenge_results",
+            "criteria_met",
+            "criteria_missing",
+        }
+        declared = set(Hypothesis.__phi_fields__)
+        missing = required_phi - declared
+        assert not missing, (
+            f"Hypothesis is missing PHI field declarations for: {sorted(missing)}. "
+            f"All JSONB clinical-evidence fields must be encrypted at rest."
+        )

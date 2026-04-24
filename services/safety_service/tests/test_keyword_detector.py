@@ -1,15 +1,16 @@
 """
 Tests for keyword_detector.py - Fast crisis keyword detection with trie-based matching.
 """
-import pytest
 from decimal import Decimal
 from uuid import uuid4
+
+import pytest
+
 from services.safety_service.src.ml.keyword_detector import (
+    KeywordCategory,
     KeywordDetector,
     KeywordDetectorConfig,
-    KeywordMatch,
     KeywordSeverity,
-    KeywordCategory,
 )
 
 
