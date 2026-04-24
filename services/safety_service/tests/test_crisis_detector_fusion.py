@@ -5,14 +5,14 @@ work together correctly in the multi-layer detection pipeline.
 """
 from __future__ import annotations
 
-import pytest
 from decimal import Decimal
 from unittest.mock import MagicMock
+
+import pytest
 
 from services.safety_service.src.domain.crisis_detector import (
     CrisisDetector,
     CrisisDetectorSettings,
-    DetectionResult,
 )
 from solace_common.enums import CrisisLevel
 

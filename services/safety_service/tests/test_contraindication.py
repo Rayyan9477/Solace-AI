@@ -1,17 +1,17 @@
 """
 Tests for contraindication.py - Therapeutic technique contraindication checking.
 """
-import pytest
 from decimal import Decimal
 from uuid import uuid4
+
+import pytest
+
 from services.safety_service.src.ml.contraindication import (
     ContraindicationChecker,
     ContraindicationConfig,
-    ContraindicationResult,
     ContraindicationType,
-    TherapyTechnique,
     MentalHealthCondition,
-    ContraindicationMatch,
+    TherapyTechnique,
 )
 
 

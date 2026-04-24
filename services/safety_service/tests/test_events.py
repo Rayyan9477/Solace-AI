@@ -3,16 +3,29 @@ Unit tests for Solace-AI Safety Service Events.
 Tests domain events and event publishing.
 """
 from __future__ import annotations
+
 import asyncio
-import pytest
 from decimal import Decimal
 from uuid import uuid4
+
+import pytest
+
 from services.safety_service.src.events import (
-    EventType, SafetyEvent, CrisisDetectedEvent, CrisisResolvedEvent,
-    EscalationTriggeredEvent, EscalationAcknowledgedEvent, EscalationResolvedEvent,
-    SafetyCheckCompletedEvent, RiskLevelChangedEvent, IncidentCreatedEvent,
-    IncidentResolvedEvent, SafetyEventHandler, SafetyEventPublisher,
-    AuditEventHandler, get_event_publisher, initialize_event_publisher,
+    AuditEventHandler,
+    CrisisDetectedEvent,
+    CrisisResolvedEvent,
+    EscalationAcknowledgedEvent,
+    EscalationResolvedEvent,
+    EscalationTriggeredEvent,
+    EventType,
+    IncidentCreatedEvent,
+    IncidentResolvedEvent,
+    RiskLevelChangedEvent,
+    SafetyCheckCompletedEvent,
+    SafetyEvent,
+    SafetyEventPublisher,
+    get_event_publisher,
+    initialize_event_publisher,
 )
 
 
@@ -349,6 +362,7 @@ class TestSafetyEventPublishing:
         runs a safe check, and confirms the handler received the event.
         """
         from uuid import uuid4 as _uuid4
+
         from services.safety_service.src.domain.service import SafetyService
 
         publisher = SafetyEventPublisher()
@@ -384,6 +398,7 @@ class TestSafetyEventPublishing:
     async def test_check_safety_emits_crisis_event_for_high_risk(self) -> None:
         """Verify CrisisDetectedEvent is emitted for high-risk content."""
         from uuid import uuid4 as _uuid4
+
         from services.safety_service.src.domain.service import SafetyService
 
         publisher = SafetyEventPublisher()
@@ -418,6 +433,7 @@ class TestSafetyEventPublishing:
     async def test_no_events_emitted_without_publisher(self) -> None:
         """Verify no errors when SafetyService has no event publisher."""
         from uuid import uuid4 as _uuid4
+
         from services.safety_service.src.domain.service import SafetyService
 
         service = SafetyService(event_publisher=None)

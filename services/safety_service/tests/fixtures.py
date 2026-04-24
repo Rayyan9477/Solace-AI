@@ -6,22 +6,27 @@ These classes were moved from production code to keep the production
 repository layer strictly PostgreSQL-backed.
 """
 from __future__ import annotations
+
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import structlog
 
 from services.safety_service.src.domain.entities import (
-    SafetyAssessment, SafetyPlan, SafetyIncident, UserRiskProfile,
-    SafetyPlanStatus, IncidentStatus, IncidentSeverity,
+    IncidentStatus,
+    SafetyAssessment,
+    SafetyIncident,
+    SafetyPlan,
+    SafetyPlanStatus,
+    UserRiskProfile,
 )
 from services.safety_service.src.infrastructure.repository import (
-    SafetyAssessmentRepository,
-    SafetyPlanRepository,
-    SafetyIncidentRepository,
-    UserRiskProfileRepository,
     EntityNotFoundError,
+    SafetyAssessmentRepository,
+    SafetyIncidentRepository,
+    SafetyPlanRepository,
+    UserRiskProfileRepository,
 )
 
 logger = structlog.get_logger(__name__)
@@ -52,7 +57,7 @@ class InMemorySafetyAssessmentRepository(SafetyAssessmentRepository):
         return [a for a in self._assessments.values() if a.session_id == session_id]
 
     async def get_recent(self, user_id: UUID, hours: int = 24) -> list[SafetyAssessment]:
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        cutoff = datetime.now(UTC) - timedelta(hours=hours)
         return [a for a in self._assessments.values()
                 if a.user_id == user_id and a.created_at >= cutoff]
 

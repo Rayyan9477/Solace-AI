@@ -3,12 +3,21 @@ Unit tests for Solace-AI Safety Service Configuration.
 Tests centralized configuration management.
 """
 from __future__ import annotations
-import pytest
+
 from decimal import Decimal
+
+import pytest
+
 from services.safety_service.src.config import (
-    SafetyServiceConfig, CrisisDetectionConfig, EscalationConfig,
-    SafetyMonitoringConfig, SafetyRepositoryConfig, SafetyEventsConfig,
-    SafetyConfig, get_safety_config, reset_config,
+    CrisisDetectionConfig,
+    EscalationConfig,
+    SafetyConfig,
+    SafetyEventsConfig,
+    SafetyMonitoringConfig,
+    SafetyRepositoryConfig,
+    SafetyServiceConfig,
+    get_safety_config,
+    reset_config,
 )
 
 

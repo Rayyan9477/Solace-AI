@@ -3,23 +3,34 @@ Unit tests for Solace-AI Safety Service API endpoints.
 Tests FastAPI endpoints for safety checking and crisis management.
 """
 from __future__ import annotations
-import pytest
-from uuid import uuid4
+
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
-from fastapi.testclient import TestClient
+from uuid import uuid4
+
+import pytest
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from services.safety_service.src.api import (
-    router, SafetyCheckRequest, SafetyCheckResponse, CrisisLevel,
-    SafetyCheckType, CrisisDetectionRequest, EscalationRequest,
-    SafetyAssessmentRequest, OutputFilterRequest, RiskFactorDTO,
+    CrisisDetectionRequest,
+    CrisisLevel,
+    EscalationRequest,
+    RiskFactorDTO,
+    SafetyAssessmentRequest,
+    SafetyCheckRequest,
+    SafetyCheckResponse,
+    SafetyCheckType,
+    router,
 )
-from services.safety_service.src.domain.service import SafetyService, SafetyCheckResult
 from services.safety_service.src.domain.crisis_detector import (
-    CrisisLevel as DomainCrisisLevel, RiskFactor,
+    CrisisLevel as DomainCrisisLevel,
+)
+from services.safety_service.src.domain.crisis_detector import (
+    RiskFactor,
 )
 from services.safety_service.src.domain.escalation import EscalationResult
+from services.safety_service.src.domain.service import SafetyCheckResult, SafetyService
 from solace_security.middleware import AuthenticatedService, get_current_service
 
 

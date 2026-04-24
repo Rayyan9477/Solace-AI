@@ -1,8 +1,9 @@
 """Shared test fixtures for safety service tests."""
 from __future__ import annotations
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 
 @pytest.fixture(autouse=True)

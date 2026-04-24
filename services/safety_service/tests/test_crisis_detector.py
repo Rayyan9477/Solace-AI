@@ -3,12 +3,21 @@ Unit tests for Solace-AI Crisis Detector.
 Tests multi-layer crisis detection with various risk scenarios.
 """
 from __future__ import annotations
-import pytest
+
 from decimal import Decimal
+
+import pytest
+
 from services.safety_service.src.domain.crisis_detector import (
-    CrisisDetector, CrisisDetectorSettings, CrisisLevel, RiskFactor,
-    DetectionResult, Layer1InputGate, Layer2ProcessingGuard,
-    Layer3OutputFilter, Layer4ContinuousMonitor, KeywordSet,
+    CrisisDetector,
+    CrisisDetectorSettings,
+    CrisisLevel,
+    DetectionResult,
+    Layer1InputGate,
+    Layer2ProcessingGuard,
+    Layer3OutputFilter,
+    Layer4ContinuousMonitor,
+    RiskFactor,
 )
 
 
@@ -39,6 +48,69 @@ class TestCrisisLevel:
         """Test NONE level from low score."""
         assert CrisisLevel.from_score(Decimal("0.2")) == CrisisLevel.NONE
         assert CrisisLevel.from_score(Decimal("0.0")) == CrisisLevel.NONE
+
+
+class TestLayer4DeteriorationCoversCritical:
+    """M-03 regression: the L4 deterioration check must consider a CRITICAL
+    current_level as eligible for ``deteriorating=True``. Silently reporting
+    'stable' for a CRITICAL-level user whose trajectory is worsening is a
+    direct patient-safety regression.
+    """
+
+    def test_critical_user_with_negative_trajectory_flagged_deteriorating(
+        self,
+    ) -> None:
+        from services.safety_service.src.domain.crisis_detector import (
+            Layer4ContinuousMonitor,
+        )
+
+        layer4 = Layer4ContinuousMonitor(CrisisDetectorSettings())
+        # >60% negative ratio in the last five messages. The L4 monitor keys
+        # off the keywords in _is_negative: worse/bad/terrible/hopeless/
+        # can't/won't/never/hate/alone — so 4-of-5 must hit.
+        history = [
+            "things are getting worse",
+            "I feel terrible and hopeless",
+            "I can't keep doing this",
+            "it's all bad",
+            "nothing matters anymore",  # not negative -> fifth neutral message
+        ]
+        result = layer4.analyze_trajectory(history, CrisisLevel.CRITICAL)
+        assert result["deteriorating"] is True, (
+            "M-03: CRITICAL + high negative ratio must be flagged "
+            "deteriorating so a TrajectoryAlertEvent can fire. "
+            f"Got trend={result['trend']} ratio={result.get('negative_ratio')}."
+        )
+
+    def test_high_user_with_negative_trajectory_flagged_deteriorating(self) -> None:
+        """Sanity: HIGH was always included; still should work."""
+        from services.safety_service.src.domain.crisis_detector import (
+            Layer4ContinuousMonitor,
+        )
+
+        layer4 = Layer4ContinuousMonitor(CrisisDetectorSettings())
+        history = [
+            "things are getting worse",
+            "I feel terrible",
+            "I can't take it",
+            "bad",
+            "I'm exhausted",  # neutral
+        ]
+        result = layer4.analyze_trajectory(history, CrisisLevel.HIGH)
+        assert result["deteriorating"] is True
+
+    def test_low_user_not_flagged_deteriorating(self) -> None:
+        """Negative invariant: LOW users should NOT be flagged deteriorating
+        no matter the negative ratio (the deterioration classifier only
+        escalates users already in an elevated/high/critical posture)."""
+        from services.safety_service.src.domain.crisis_detector import (
+            Layer4ContinuousMonitor,
+        )
+
+        layer4 = Layer4ContinuousMonitor(CrisisDetectorSettings())
+        history = ["bad"] * 5
+        result = layer4.analyze_trajectory(history, CrisisLevel.LOW)
+        assert result["deteriorating"] is False
 
 
 class TestRiskFactor:
