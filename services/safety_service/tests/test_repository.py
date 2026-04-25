@@ -3,22 +3,33 @@ Unit tests for Solace-AI Safety Service Repository Layer.
 Tests repository abstractions and in-memory implementations.
 """
 from __future__ import annotations
-import pytest
-from datetime import datetime, timezone, timedelta
+
 from decimal import Decimal
 from uuid import uuid4
+
+import pytest
+
+from services.safety_service.src.domain.entities import (
+    IncidentSeverity,
+    IncidentStatus,
+    SafetyAssessment,
+    SafetyIncident,
+    SafetyPlan,
+    SafetyPlanStatus,
+    UserRiskProfile,
+)
 from services.safety_service.src.infrastructure.repository import (
-    RepositoryError, EntityNotFoundError, DuplicateEntityError,
-    SafetyRepositoryFactory, get_repository_factory, reset_repositories,
+    EntityNotFoundError,
+    RepositoryError,
+    SafetyRepositoryFactory,
+    get_repository_factory,
+    reset_repositories,
 )
 from services.safety_service.tests.fixtures import (
-    InMemorySafetyAssessmentRepository, InMemorySafetyPlanRepository,
-    InMemorySafetyIncidentRepository, InMemoryUserRiskProfileRepository,
-)
-from services.safety_service.src.domain.entities import (
-    SafetyAssessment, AssessmentType, SafetyPlan, SafetyPlanStatus,
-    WarningSign, CopingStrategy, EmergencyContact,
-    SafetyIncident, IncidentSeverity, IncidentStatus, UserRiskProfile,
+    InMemorySafetyAssessmentRepository,
+    InMemorySafetyIncidentRepository,
+    InMemorySafetyPlanRepository,
+    InMemoryUserRiskProfileRepository,
 )
 
 

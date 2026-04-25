@@ -1,21 +1,22 @@
 """Solace-AI Encryption - AES-256 encryption for PHI data protection."""
 
 from __future__ import annotations
+
 import base64
 import hashlib
 import hmac
 import os
 import secrets
-from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+import structlog
 from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import structlog
 
 logger = structlog.get_logger(__name__)
 
@@ -63,7 +64,7 @@ class EncryptionSettings(BaseSettings):
     )
 
     @classmethod
-    def for_development(cls) -> "EncryptionSettings":
+    def for_development(cls) -> EncryptionSettings:
         """Create settings with a development-only key. NOT FOR PRODUCTION."""
         import warnings
 
@@ -81,12 +82,24 @@ class EncryptionSettings(BaseSettings):
         return cls(master_key=SecretStr("dev-only-insecure-key-32-bytes!!"))
 
     def model_post_init(self, __context: Any) -> None:
-        """Validate master key after initialization."""
+        """Validate master key after initialization.
+
+        H-38: AES-256 needs exactly ``KEY_SIZE`` (32) BYTES of key material.
+        We must validate against the UTF-8 byte length, not the Python
+        ``len()`` which counts characters. A 32-character string with
+        multi-byte glyphs (e.g. accented letters, emoji) encodes to more
+        than 32 bytes and would either silently truncate downstream or
+        crash the cipher at use-time.
+        """
         key_value = self.master_key.get_secret_value()
-        if len(key_value) != KEY_SIZE:
+        key_bytes = key_value.encode("utf-8")
+        if len(key_bytes) != KEY_SIZE:
             raise ValueError(
-                f"ENCRYPTION_MASTER_KEY must be exactly {KEY_SIZE} bytes, got {len(key_value)}. "
-                f'Generate a secure key with: python -c "import secrets; print(secrets.token_urlsafe({KEY_SIZE})[:32])"'
+                f"ENCRYPTION_MASTER_KEY must be exactly {KEY_SIZE} bytes, "
+                f"got {len(key_bytes)} bytes ({len(key_value)} characters). "
+                f'Generate a secure key with: python -c "import secrets; '
+                f'print(secrets.token_bytes({KEY_SIZE}).hex())" '
+                "(hex-encoded 32-byte key, safe across encodings)."
             )
 
 
@@ -99,7 +112,7 @@ class EncryptedData(BaseModel):
     algorithm: EncryptionAlgorithm = Field(default=EncryptionAlgorithm.AES_256_GCM)
     key_id: str | None = Field(default=None, description="Key identifier for rotation")
     version: int = Field(default=1, description="Encryption format version")
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def to_compact(self) -> str:
         """Serialize to compact string format."""

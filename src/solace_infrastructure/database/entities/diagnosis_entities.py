@@ -8,7 +8,7 @@ All clinical data inherits from ClinicalBase for PHI encryption.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, ClassVar
 
@@ -26,7 +26,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..base_models import ClinicalBase
 from ..schema_registry import SchemaRegistry
-
 
 # Enumerations
 
@@ -73,7 +72,10 @@ class DiagnosisSession(ClinicalBase):
     """
 
     __tablename__ = "diagnosis_sessions"
-    __phi_fields__: ClassVar[list[str]] = ["summary"]
+    # NEW-03: messages stores full conversation history as JSONB (PHI).
+    # ClinicalBase.encrypt_phi_fields now serializes list/dict via JSON
+    # before encrypting, so the entire conversation is protected at rest.
+    __phi_fields__: ClassVar[list[str]] = ["summary", "messages"]
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False,
@@ -103,7 +105,7 @@ class DiagnosisSession(ClinicalBase):
     # Timing
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False,
-        default=lambda: datetime.now(timezone.utc), index=True,
+        default=lambda: datetime.now(UTC), index=True,
     )
     ended_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True,
@@ -213,6 +215,17 @@ class Hypothesis(ClinicalBase):
     """
 
     __tablename__ = "diagnosis_hypotheses"
+    # NEW-04: clinical evidence JSONB fields are PHI — they contain the raw
+    # rationale for a differential diagnosis and the Devil's Advocate
+    # challenge analysis. All must be encrypted at rest via the list/dict
+    # support added to ClinicalBase.encrypt_phi_fields.
+    __phi_fields__: ClassVar[list[str]] = [
+        "criteria_met",
+        "criteria_missing",
+        "supporting_evidence",
+        "contra_evidence",
+        "challenge_results",
+    ]
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False,
@@ -321,12 +334,12 @@ class DiagnosisRecord(ClinicalBase):
 
 
 __all__ = [
-    "DiagnosisPhase",
-    "SymptomType",
-    "DiagnosisSeverity",
     "ConfidenceLevel",
-    "DiagnosisSession",
-    "Symptom",
-    "Hypothesis",
+    "DiagnosisPhase",
     "DiagnosisRecord",
+    "DiagnosisSession",
+    "DiagnosisSeverity",
+    "Hypothesis",
+    "Symptom",
+    "SymptomType",
 ]

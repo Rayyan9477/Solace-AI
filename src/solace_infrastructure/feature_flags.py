@@ -115,9 +115,13 @@ class FeatureFlags:
             jira_ticket="SOLACE-1236",
         ),
         # Phase 2.3: SSL/TLS Enforcement
+        # H-39: default ON for prod + staging. The environment strategy still
+        # scopes this so dev/test runs against local non-SSL Postgres keep
+        # working. PHI transiting unencrypted on internal network = HIPAA
+        # violation, so this must be a safe-by-default flag.
         "enforce_database_ssl": FeatureFlagConfig(
             name="enforce_database_ssl",
-            enabled=False,
+            enabled=True,
             strategy=RolloutStrategy.ENVIRONMENT,
             allowed_environments=["production", "staging"],
             description="Enforce SSL/TLS for all database connections",
@@ -262,7 +266,7 @@ class FeatureFlags:
             return True
 
         # Consistent hash: same flag + identifier always returns same result
-        hash_input = f"{flag_name}:{identifier}".encode("utf-8")
+        hash_input = f"{flag_name}:{identifier}".encode()
         hash_value = int(hashlib.sha256(hash_input).hexdigest()[:8], 16)
         bucket = hash_value % 100  # Map to 0-99
 
@@ -417,8 +421,8 @@ def feature_flagged(flag_name: str, fallback_return: Any = None):
 
 # Export public API
 __all__ = [
-    "FeatureFlags",
     "FeatureFlagConfig",
+    "FeatureFlags",
     "RolloutStrategy",
     "feature_flagged",
 ]

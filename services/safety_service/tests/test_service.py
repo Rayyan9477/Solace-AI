@@ -3,20 +3,28 @@ Unit tests for Solace-AI Safety Service.
 Tests main safety orchestration and coordination.
 """
 from __future__ import annotations
+
 from dataclasses import dataclass
-from unittest.mock import AsyncMock
-import pytest
 from decimal import Decimal
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
-from services.safety_service.src.domain.service import (
-    SafetyService, SafetyServiceSettings, SafetyCheckResult,
-    CrisisDetectionResult, SafetyAssessmentResult, OutputFilterResult,
-)
+
+import pytest
+
 from services.safety_service.src.domain.crisis_detector import (
-    CrisisDetector, CrisisDetectorSettings, CrisisLevel,
+    CrisisDetector,
+    CrisisDetectorSettings,
+    CrisisLevel,
 )
 from services.safety_service.src.domain.escalation import (
-    EscalationManager, EscalationSettings,
+    EscalationManager,
+    EscalationSettings,
+)
+from services.safety_service.src.domain.service import (
+    OutputFilterResult,
+    SafetyCheckResult,
+    SafetyService,
+    SafetyServiceSettings,
 )
 
 
@@ -369,3 +377,196 @@ class TestIntegration:
         await service.check_safety(user_id, None, "Things are getting worse", "pre_check")
         result = await service.check_safety(user_id, None, "I don't want to live anymore", "pre_check")
         assert result.crisis_level in (CrisisLevel.LOW, CrisisLevel.ELEVATED, CrisisLevel.HIGH, CrisisLevel.CRITICAL)
+
+
+class _CapturingEventPublisher:
+    """Minimal stand-in for SafetyEventPublisher that records emitted events.
+
+    The real publisher has a start/stop lifecycle and an async queue; for
+    testing which events fire from a given service method we only need the
+    ``publish(event)`` coroutine.
+    """
+
+    def __init__(self) -> None:
+        self.events: list = []  # type: ignore[type-arg]
+
+    async def publish(self, event) -> None:  # type: ignore[no-untyped-def]
+        self.events.append(event)
+
+    def event_types(self) -> list[str]:
+        return [e.event_type.value for e in self.events]
+
+
+class TestSafetyServiceEventEmission:
+    """C-13 regression: SafetyService must emit the right events from every
+    clinically significant operation — not just check_safety.
+
+    The Sprint 0 audit confirmed C-13 is partially wired for
+    ``check_safety`` and ``detect_crisis``. Sprint 2 Day 2 adds the missing
+    emissions for ``escalate`` (EscalationTriggeredEvent) and
+    ``filter_output`` (OutputFilteredEvent). Without these, downstream
+    services (notification, audit, analytics) cannot react to crises and
+    HIPAA accounting of disclosures is incomplete.
+    """
+
+    @pytest.fixture
+    def service_with_publisher(self) -> tuple[SafetyService, _CapturingEventPublisher]:
+        settings = SafetyServiceSettings()
+        crisis_detector = CrisisDetector(CrisisDetectorSettings())
+        registry = _make_mock_registry(pool_size=2)
+        escalation_manager = EscalationManager(
+            EscalationSettings(), clinician_registry=registry
+        )
+        publisher = _CapturingEventPublisher()
+        # Inject the capturing publisher as the service's event publisher
+        svc = SafetyService(
+            settings, crisis_detector, escalation_manager, event_publisher=publisher,
+        )
+        return svc, publisher
+
+    @pytest.mark.asyncio
+    async def test_escalate_emits_escalation_triggered_event(
+        self,
+        service_with_publisher: tuple[SafetyService, _CapturingEventPublisher],
+    ) -> None:
+        """C-13: escalate() must emit EscalationTriggeredEvent."""
+        service, publisher = service_with_publisher
+        await service.initialize()
+        await service.escalate(
+            user_id=uuid4(),
+            session_id=uuid4(),
+            crisis_level="HIGH",
+            reason="suicidal ideation",
+        )
+        assert "safety.escalation.triggered" in publisher.event_types(), (
+            f"C-13 regression: expected safety.escalation.triggered in emitted "
+            f"events {publisher.event_types()}. Without this, the notification "
+            f"service cannot alert the on-call clinician."
+        )
+
+    @pytest.mark.asyncio
+    async def test_filter_output_emits_output_filtered_event_when_modified(
+        self,
+        service_with_publisher: tuple[SafetyService, _CapturingEventPublisher],
+    ) -> None:
+        """C-13: filter_output() must emit OutputFilteredEvent when it
+        modifies the response (either content filtering or appending
+        crisis resources). Essential for the audit trail."""
+        service, publisher = service_with_publisher
+        await service.initialize()
+        await service.filter_output(
+            user_id=uuid4(),
+            original_response="You should be careful",
+            user_crisis_level="HIGH",
+            include_resources=True,
+        )
+        assert "safety.output.filtered" in publisher.event_types(), (
+            f"C-13 regression: filter_output with HIGH crisis + resources="
+            f"True must emit safety.output.filtered. Actual events: "
+            f"{publisher.event_types()}"
+        )
+
+
+class TestProtectiveFactorRiskAdjustment:
+    """H-06 regression: protective factors must reduce numerical risk score
+    while never suppressing a CRITICAL crisis below the CRITICAL threshold.
+
+    Clinical invariant: protective factors modulate quantitative risk but do
+    not downgrade a detected crisis category. A critical-level ideation is
+    still critical even if the user has strong social support; evidence
+    base is too weak to let NLP-detected factors "talk us out of" a
+    flagged crisis.
+    """
+
+    @pytest.fixture
+    def service(self) -> SafetyService:
+        settings = SafetyServiceSettings()
+        crisis_detector = CrisisDetector(CrisisDetectorSettings())
+        registry = _make_mock_registry(pool_size=2)
+        escalation_manager = EscalationManager(
+            EscalationSettings(), clinician_registry=registry
+        )
+        return SafetyService(settings, crisis_detector, escalation_manager)
+
+    @pytest.mark.asyncio
+    async def test_protective_factors_reduce_moderate_risk(
+        self, service: SafetyService
+    ) -> None:
+        """Protective factor presence lowers a non-critical risk score."""
+        await service.initialize()
+        content_with = "I feel anxious but my family and therapy have been helpful"
+        content_without = "I feel anxious"
+
+        with_factors = await service.check_safety(
+            user_id=uuid4(),
+            session_id=uuid4(),
+            content=content_with,
+            check_type="pre_check",
+        )
+        without_factors = await service.check_safety(
+            user_id=uuid4(),
+            session_id=uuid4(),
+            content=content_without,
+            check_type="pre_check",
+        )
+        assert len(with_factors.protective_factors) > 0
+        # Numerical risk should be lower when protective factors are present
+        assert with_factors.risk_score <= without_factors.risk_score
+
+    @pytest.mark.asyncio
+    async def test_critical_risk_never_suppressed_by_protective_factors(
+        self, service: SafetyService
+    ) -> None:
+        """H-06 core invariant: strong protective factors must NOT reduce a
+        CRITICAL-level assessment's risk_score below the CRITICAL threshold
+        (0.85). Otherwise a user reporting suicidal ideation plus a list of
+        positives could be silently downgraded.
+        """
+        await service.initialize()
+        critical_with_positives = (
+            "I'm going to kill myself tonight, but my family has been great "
+            "and therapy and medication really help and I have coping skills "
+            "and hope for the future."
+        )
+        result = await service.check_safety(
+            user_id=uuid4(),
+            session_id=uuid4(),
+            content=critical_with_positives,
+            check_type="pre_check",
+        )
+        assert len(result.protective_factors) >= 3, (
+            "Sanity: the seeded content should trip at least 3 protective "
+            "factor keywords (family, therapy, medication, coping, hope)."
+        )
+        if result.crisis_level == CrisisLevel.CRITICAL:
+            assert result.risk_score >= Decimal("0.85"), (
+                "H-06: risk_score of a CRITICAL event must not drop below "
+                "0.85 even in the presence of many protective factors."
+            )
+            assert result.requires_escalation is True
+            assert result.requires_human_review is True
+
+    @pytest.mark.asyncio
+    async def test_protective_factors_never_flip_is_safe_on_crisis(
+        self, service: SafetyService
+    ) -> None:
+        """Sister invariant to the CRITICAL floor: is_safe must remain False
+        whenever the assessed crisis_level is HIGH or CRITICAL, regardless
+        of the count of protective factors identified.
+        """
+        await service.initialize()
+        result = await service.check_safety(
+            user_id=uuid4(),
+            session_id=uuid4(),
+            content=(
+                "I want to end my life tonight, but my family and friends "
+                "have been supportive and therapy is helping me cope."
+            ),
+            check_type="pre_check",
+        )
+        if result.crisis_level in (CrisisLevel.HIGH, CrisisLevel.CRITICAL):
+            assert result.is_safe is False, (
+                "H-06: protective factor presence must not re-flag a "
+                "HIGH/CRITICAL assessment as safe."
+            )
+            assert result.requires_escalation is True

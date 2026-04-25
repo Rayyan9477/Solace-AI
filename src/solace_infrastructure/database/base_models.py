@@ -11,13 +11,13 @@ Provides enterprise-grade base models with:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, ClassVar, TypeVar
 
+import structlog
 from sqlalchemy import (
     Boolean,
-    Column,
     DateTime,
     ForeignKey,
     Integer,
@@ -31,7 +31,6 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-import structlog
 
 logger = structlog.get_logger(__name__)
 
@@ -63,14 +62,14 @@ class TimestampMixin:
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         nullable=False,
         index=True,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
         nullable=False,
     )
 
@@ -102,7 +101,7 @@ class SoftDeleteMixin:
 
     def soft_delete(self) -> None:
         """Mark record as deleted without physical removal."""
-        self.deleted_at = datetime.now(timezone.utc)
+        self.deleted_at = datetime.now(UTC)
         self.state = ModelState.DELETED.value
 
     def restore(self) -> None:
@@ -256,7 +255,7 @@ class AuditTrailMixin:
         Args:
             accessor_id: ID of user or system accessing the record
         """
-        self.last_accessed_at = datetime.now(timezone.utc)
+        self.last_accessed_at = datetime.now(UTC)
         self.last_accessed_by = accessor_id
         self.access_count += 1
 
@@ -272,7 +271,7 @@ class AuditTrailMixin:
             self.change_history = {"changes": []}
 
         change_record = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "changed_by": changed_by,
             "description": change_description,
             "fields": changed_fields or [],
@@ -418,33 +417,98 @@ class ClinicalBase(AuditableModel, EncryptedFieldMixin, AuditTrailMixin):
     # encryption_key_id is now inherited from EncryptedFieldMixin
     # and is REQUIRED (nullable=False) for HIPAA compliance
 
+    # Internal tag prefixes for PHI payload typing. When a non-str value
+    # (list or dict) is encrypted we prepend a single-byte marker to the
+    # plaintext so the decrypt path can restore the original Python type.
+    # The marker is INSIDE the ciphertext, so the stored column still just
+    # shows the standard "v1$..." envelope. No schema change is needed.
+    _PHI_JSON_LIST_MARKER: ClassVar[str] = "\x00L\x00"
+    _PHI_JSON_DICT_MARKER: ClassVar[str] = "\x00D\x00"
+
     def encrypt_phi_fields(self, field_encryptor: Any) -> None:
         """Encrypt all declared PHI fields using the given FieldEncryptor.
+
+        Supports three value types:
+          - ``str``: encrypted directly
+          - ``list``: JSON-serialized then encrypted (NEW-03: messages JSONB)
+          - ``dict``: JSON-serialized then encrypted (NEW-04: evidence JSONB)
+
+        Already-encrypted values (string starting with ``v1$``) are left alone
+        so this method is idempotent. ``None`` values are skipped.
 
         Args:
             field_encryptor: A FieldEncryptor instance from solace_security.encryption
         """
+        import json
+
         for field_name in self.__phi_fields__:
             value = getattr(self, field_name, None)
-            if value is not None and isinstance(value, str) and not value.startswith("v1$"):
-                encrypted = field_encryptor.encrypt_field(value, field_name)
-                setattr(self, field_name, encrypted)
+            if value is None:
+                continue
+            if isinstance(value, str):
+                if value.startswith("v1$"):
+                    continue  # already encrypted
+                plaintext = value
+            elif isinstance(value, list):
+                plaintext = ClinicalBase._PHI_JSON_LIST_MARKER + json.dumps(
+                    value, default=str
+                )
+            elif isinstance(value, dict):
+                plaintext = ClinicalBase._PHI_JSON_DICT_MARKER + json.dumps(
+                    value, default=str
+                )
+            else:
+                # Unsupported type — skip and warn so misconfig is visible.
+                logger.warning(
+                    "phi_encrypt_skipped_unsupported_type",
+                    field=field_name,
+                    entity=self.__class__.__name__,
+                    value_type=type(value).__name__,
+                )
+                continue
+            encrypted = field_encryptor.encrypt_field(plaintext, field_name)
+            setattr(self, field_name, encrypted)
 
     def decrypt_phi_fields(self, field_encryptor: Any) -> None:
         """Decrypt all declared PHI fields using the given FieldEncryptor.
 
+        Restores the original Python type based on internal marker bytes
+        written during encryption:
+          - no marker -> ``str``
+          - list marker -> ``list`` via ``json.loads``
+          - dict marker -> ``dict`` via ``json.loads``
+
         Args:
             field_encryptor: A FieldEncryptor instance from solace_security.encryption
         """
+        import json
+
         for field_name in self.__phi_fields__:
             value = getattr(self, field_name, None)
-            if value is not None and isinstance(value, str) and value.startswith("v1$"):
-                try:
-                    decrypted = field_encryptor.decrypt_field(value, field_name)
-                    setattr(self, field_name, decrypted)
-                except Exception:
-                    logger.error("phi_decrypt_failed", field=field_name,
-                                 entity=self.__class__.__name__, id=str(self.id))
+            if value is None or not isinstance(value, str) or not value.startswith("v1$"):
+                continue
+            try:
+                plaintext = field_encryptor.decrypt_field(value, field_name)
+            except Exception:
+                logger.error(
+                    "phi_decrypt_failed",
+                    field=field_name,
+                    entity=self.__class__.__name__,
+                    id=str(getattr(self, "id", "<unknown>")),
+                )
+                continue
+
+            if plaintext.startswith(ClinicalBase._PHI_JSON_LIST_MARKER):
+                restored: Any = json.loads(
+                    plaintext[len(ClinicalBase._PHI_JSON_LIST_MARKER):]
+                )
+            elif plaintext.startswith(ClinicalBase._PHI_JSON_DICT_MARKER):
+                restored = json.loads(
+                    plaintext[len(ClinicalBase._PHI_JSON_DICT_MARKER):]
+                )
+            else:
+                restored = plaintext
+            setattr(self, field_name, restored)
 
 
 class SafetyEventBase(AuditableModel):

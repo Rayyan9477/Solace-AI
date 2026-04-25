@@ -3,14 +3,23 @@ Unit tests for Solace-AI Safety Service Value Objects.
 Tests immutable value objects for safety domain.
 """
 from __future__ import annotations
-import pytest
-from datetime import datetime, timezone
+
 from decimal import Decimal
+
+import pytest
+
 from services.safety_service.src.domain.value_objects import (
-    RiskScore, RiskSeverity, TriggerIndicator, TriggerCategory,
-    ProtectiveFactor, ProtectiveFactorType, DetectionLayer,
-    ContraindicationRule, SafetyThresholds, ResponseModification,
+    ContraindicationRule,
+    DetectionLayer,
+    ProtectiveFactor,
+    ProtectiveFactorType,
+    ResponseModification,
+    RiskScore,
+    RiskSeverity,
+    SafetyThresholds,
     TrajectoryAnalysis,
+    TriggerCategory,
+    TriggerIndicator,
 )
 
 
