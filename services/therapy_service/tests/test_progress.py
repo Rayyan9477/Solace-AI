@@ -242,14 +242,25 @@ class TestProgressTracker:
         assert metric.target_score == 5.0
 
     def test_get_trend(self) -> None:
-        """Test getting score trend."""
+        """Test getting score trend.
+
+        M-20: For PHQ-9 / GAD-7 a FALLING raw score means the patient is
+        IMPROVING (fewer symptoms endorsed). The pre-M-20 version of this
+        test incorrectly asserted ``trend == "decreasing"`` -- describing
+        the numeric direction rather than the clinical direction. The
+        canonical semantics across the therapy service use clinical terms
+        (improving / worsening), so the assertion must too.
+        """
         tracker = ProgressTracker()
         user_id = uuid4()
         # Record decreasing scores (improvement for PHQ-9)
         for score in [20, 18, 15, 12, 10]:
             tracker.record_score(user_id=user_id, instrument=InstrumentType.PHQ9, raw_score=score)
         trend = tracker.get_trend(user_id, MeasureType.DEPRESSION)
-        assert trend["trend"] == "decreasing"
+        assert trend["trend"] == "improving", (
+            f"M-20: PHQ-9 falling scores indicate clinical IMPROVEMENT. "
+            f"Got trend={trend['trend']}."
+        )
 
     def test_get_all_metrics(self) -> None:
         """Test getting all metrics for a user."""
