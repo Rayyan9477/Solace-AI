@@ -215,3 +215,31 @@ To prevent confusion:
 - **Per-hypothesis Devil's Advocate** challenges (H-07) are applied
   individually; the bug that applied a single total to all
   hypotheses is closed.
+
+---
+
+## 9. Corrections from the 2026-07-21 review
+
+> Added 2026-07-21. The multi-agent review (see
+> [SYSTEM-REVIEW-2026-07-21.md](SYSTEM-REVIEW-2026-07-21.md) and the
+> `REV-` appendix in [BUG-BACKLOG.md](BUG-BACKLOG.md)) found that two
+> §8 "NOT limitations" claims above no longer hold in code. They are
+> corrected here rather than edited in place, to preserve the record.
+
+- **PHI encryption at rest is NOT wired in all 8 services.**
+  `configure_phi_encryption()` is called in only 6 services
+  (diagnosis, memory, orchestrator, personality, safety, therapy). It
+  is absent from user-service, notification-service,
+  analytics-service, and config_service. Tracked as **REV-12**.
+- **The audit chain is NOT exercised at runtime.** No service calls
+  `configure_audit_logger`; `test_audit_chain.py` exercises the
+  primitive in isolation, and the per-process `_last_hash` breaks the
+  chain across restarts/replicas. Tracked as **REV-14**.
+- **Crisis 4-layer detection has an under-escalation gap.** Layer 1
+  does run alongside ML keyword detection (C-12 holds), but a lone
+  CRITICAL-tier keyword can score below the escalation threshold with
+  no max-severity override. Tracked as **REV-02**.
+
+The three §8 claims about multi-provider LLM fallback and the C-12
+Layer-1 regex remain accurate; only the encryption/audit/scoring
+claims are corrected above.

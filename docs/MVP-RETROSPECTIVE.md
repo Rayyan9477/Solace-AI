@@ -1,5 +1,7 @@
 # Solace-AI MVP Retrospective
 
+> ⚠️ **OVERCLAIMS E2E SCOPE (flagged 2026-07-21).** "Backend complete and ready to integrate" is directionally true for the sprint fixes but overstated on integration: the 2026-07-21 review found the crisis E2E uses an in-memory escalation repo (not Postgres), the hash-chained audit log is not exercised at runtime, and the Kafka event plane never actually publishes. Read alongside [SYSTEM-REVIEW-2026-07-21.md](SYSTEM-REVIEW-2026-07-21.md) and [ENTERPRISE-READINESS-REMEDIATION-PLAN.md](ENTERPRISE-READINESS-REMEDIATION-PLAN.md).
+
 > **Period**: Sprints 0-8 (early April 2026 → 2026-04-25)
 > **Plan**: `~/.claude/plans/drifting-kindling-karp.md`
 > **Outcome**: shipped. Backend complete and ready for the

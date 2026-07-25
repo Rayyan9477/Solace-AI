@@ -1,5 +1,7 @@
 # Solace-AI System Design Summary
 
+> ⚠️ **STATUS TABLE STALE (flagged 2026-07-21).** The design intent below is still useful, but the implementation-status annotations (dated 2026-04-11) drifted from code — e.g. PostgresEscalationRepository now exists yet the in-memory default is still active, the event plane is coded but never publishes, and the vector store is Weaviate (not ChromaDB). For verified current state see [SYSTEM-REVIEW-2026-07-21.md](SYSTEM-REVIEW-2026-07-21.md); for the fix plan see [ENTERPRISE-READINESS-REMEDIATION-PLAN.md](ENTERPRISE-READINESS-REMEDIATION-PLAN.md).
+
 > Synthesized from 22 design documents (~20,000+ lines) + 3 architecture diagrams.
 > Purpose: Unified reference for comparing design intent vs. codebase implementation.
 > **Last updated**: 2026-04-11 (implementation status annotations added)

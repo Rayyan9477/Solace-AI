@@ -1,5 +1,7 @@
 # Solace-AI MVP Fix Plan — Prioritized Task List
 
+> ⚠️ **STALE (flagged 2026-07-21).** This April task list still contains fix tasks for already-fixed issues and for retracted false positives (tasks 0.6, 0.7, 5.10). The current, launch-oriented plan is [ENTERPRISE-READINESS-REMEDIATION-PLAN.md](ENTERPRISE-READINESS-REMEDIATION-PLAN.md), backed by the `REV-` appendix in [BUG-BACKLOG.md](BUG-BACKLOG.md).
+
 > **Date**: 2026-04-11
 > **Source**: 192 issues from 10-agent deep review against system design spec + follow-up audit
 > **Goal**: Fix all Critical + High issues to achieve a demo-ready MVP

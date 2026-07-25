@@ -1,3 +1,12 @@
+<!--
+⚠️ OUTDATED README (flagged 2026-07-21). This file describes a legacy Streamlit/Gemini
+monolith (app.py, chat.py, launch_api.py, config.yaml) that is NOT the current codebase.
+The repo is now 10 FastAPI microservices under services/ + shared libs under src/.
+For accurate system state see docs/SYSTEM-REVIEW-2026-07-21.md and
+docs/ENTERPRISE-READINESS-REMEDIATION-PLAN.md. This README needs a full rewrite (tracked
+as a doc-debt item in the review §2).
+-->
+
 # 🌟 Solace AI: Your Empathetic Digital Confidant
 
 <div align="center">

@@ -1,5 +1,7 @@
 # Solace-AI Clinical Validation
 
+> ℹ️ **Strongest doc, two attribution fixes (flagged 2026-07-21).** The clinical thresholds here are verified in code. Two corrections: the H-13 contextual crisis regexes live in the **therapy** service (`therapy_service/src/domain/service.py:333`), not the safety Layer-1 detector; and "ESCALATE blocks insight generation" references code that doesn't exist (ESCALATE is a label with no gating). Also see accuracy items REV-25/27/28/29/30 in [BUG-BACKLOG.md](BUG-BACKLOG.md) that need clinician reconciliation before sign-off.
+
 > **Audience**: Licensed clinicians evaluating the MVP.
 > **Purpose**: Explicitly state what Solace-AI implements per clinical
 > standards, where it deviates, and where clinician oversight is required.

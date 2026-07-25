@@ -1,5 +1,7 @@
 # Solace-AI API Handoff (for frontend team)
 
+> ⚠️ **STALE / CONTRACT MISMATCH (flagged 2026-07-21).** The 2026-07-21 review found this doc's contract does **not** match the running code: real chat route is `/api/v1/orchestrator/chat` (not `/api/v1/chat/message`), WS is `/ws/{session_id}?token=` with a **query-param** JWT (not a Bearer header), the `{status,data,meta}` response envelope is not applied, OAuth endpoints don't exist, WS replay is unimplemented, and rate limiting is absent. Do **not** integrate against this doc until it is reconciled — see `REV-21/22/23/24` in [BUG-BACKLOG.md](BUG-BACKLOG.md) and [ENTERPRISE-READINESS-REMEDIATION-PLAN.md §WS-7](ENTERPRISE-READINESS-REMEDIATION-PLAN.md).
+
 > **Audience**: The web + mobile frontend repo (separate codebase).
 > **Purpose**: Everything the frontend needs to integrate with the
 > Solace-AI backend: base URLs, auth flows, endpoint list, WebSocket

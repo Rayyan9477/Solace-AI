@@ -1,5 +1,7 @@
 # Solace-AI src/ Deep Audit Report
 
+> ⚠️ **SUPERSEDED — DO NOT USE STANDALONE (flagged 2026-07-21).** This April audit still presents retracted false positives (NEW-01/02/06) with "FIX" snippets, one of which (NEW-06) would *introduce* the bug it claims to fix. Ground truth is now [SYSTEM-REVIEW-2026-07-21.md](SYSTEM-REVIEW-2026-07-21.md) + the `REV-` appendix in [BUG-BACKLOG.md](BUG-BACKLOG.md). Kept for historical record only.
+
 > **Date**: 2026-04-11
 > **Scope**: `/home/rayyan9477/Data/Repo/Solace-AI/src/` -- 66 Python files, 22,542 lines, 5 packages
 > **Method**: Line-by-line code review of every file in all 5 shared library packages

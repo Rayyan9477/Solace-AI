@@ -1,5 +1,7 @@
 # Solace-AI MVP Issues Registry
 
+> ⚠️ **STALE SNAPSHOT (flagged 2026-07-21).** Statuses here reflect pre-sprint April and are no longer accurate: many items marked `[OPEN]` (C-12/C-15, NEW-03/04/05, …) are verified **fixed** in code, and some listed issues are retracted false positives. For current open work use the `REV-` appendix in [BUG-BACKLOG.md](BUG-BACKLOG.md) and [ENTERPRISE-READINESS-REMEDIATION-PLAN.md](ENTERPRISE-READINESS-REMEDIATION-PLAN.md).
+
 > **Generated**: 2026-03-20 | **Last Audit**: 2026-04-11
 > **Scope**: Full codebase review (10 parallel agents, ~270 Python files) + targeted `src/` deep audit
 > **Methodology**: Design-spec-aware deep code review against SYSTEM-DESIGN-SUMMARY.md

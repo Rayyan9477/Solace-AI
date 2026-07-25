@@ -1,5 +1,7 @@
 # Solace-AI Post-MVP Backlog
 
+> ℹ️ **Most-accurate legacy doc (confirmed 2026-07-21).** The 2026-07-21 review verified several items here as still-open (H-04-full escalation default, C-01-full Redis-in-prod). Note DISC-03 is partly misleading: `argon2-cffi` **is** in `services/user-service/requirements.txt`, missing only from root. Superset of open work now lives in [ENTERPRISE-READINESS-REMEDIATION-PLAN.md](ENTERPRISE-READINESS-REMEDIATION-PLAN.md) + the `REV-` appendix in [BUG-BACKLOG.md](BUG-BACKLOG.md).
+
 > **Date**: 2026-04-25
 > **Source**: every Critical/High/Medium/Low item from the MVP fix
 > plan that did not ship in Sprints 1-8, plus newly-discovered
