@@ -14,7 +14,9 @@ httpx==0.28.1
 clickhouse-connect==0.10.0
 
 # Security / Auth
-solace-security>=1.0.0
+# REV-10: solace_security is a LOCAL package copied into the image from repo-root src/
+# (see the Dockerfile) — do NOT pin it from a public index (dependency-confusion risk).
+# Its own runtime deps come from ../../requirements-runtime.txt.
 
 # Logging
 structlog==25.5.0

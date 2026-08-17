@@ -12,6 +12,20 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.12"
+  # Test-only CI secrets/config, inherited by all test jobs below.
+  AUTH_SECRET_KEY: ci-test-secret-key-minimum-32-characters-long!!
+  SECURITY_JWT_SECRET: ci-test-secret-key-minimum-32-characters-long!!
+  USER_SERVICE_JWT_SECRET_KEY: ci-test-secret-key-minimum-32-characters-long!!
+  ENCRYPTION_MASTER_KEY: ci-test-encrypt-key-exactly-32ch
+  USER_SERVICE_FIELD_ENCRYPTION_KEY: ci-test-encrypt-key-exactly-32ch
+  FERNET_TOKEN_KEY: sp1gRbNPAdgva1NX4vYC3gZDNu--cUiGM5H9xhtltN8=
+  FERNET_FIELD_KEY: aQyP7tOjb06jmhH0Ni3Y04CqcrzrnK_KnuurAOUWl4c=
+  POSTGRES_PASSWORD: ci_test_password
+  USER_DB_PASSWORD: ci_test_password
+  SERVICE_AUTH_SERVICE_SECRET: ci-test-service-secret-for-auth-32chars!!
+  ENVIRONMENT: test
+  KAFKA_ENABLED: "false"
+  LOG_LEVEL: WARNING
 
 jobs:
   lint:
@@ -37,29 +51,12 @@ jobs:
         continue-on-error: true
         run: ruff check . --statistics 2>&1 | tail -25
 
+  # Shared-library + cross-cutting suites. All steps HARD-GATED (no masking):
+  # a red step fails the job, which is the whole point of Phase 0.
   test:
-    name: Unit Tests
+    name: Core & Shared Tests
     runs-on: ubuntu-latest
     needs: lint
-    env:
-      # Auth / JWT
-      AUTH_SECRET_KEY: ci-test-secret-key-minimum-32-characters-long!!
-      SECURITY_JWT_SECRET: ci-test-secret-key-minimum-32-characters-long!!
-      USER_SERVICE_JWT_SECRET_KEY: ci-test-secret-key-minimum-32-characters-long!!
-      # Encryption
-      ENCRYPTION_MASTER_KEY: ci-test-encrypt-key-exactly-32ch
-      USER_SERVICE_FIELD_ENCRYPTION_KEY: ci-test-encrypt-key-exactly-32ch
-      FERNET_TOKEN_KEY: sp1gRbNPAdgva1NX4vYC3gZDNu--cUiGM5H9xhtltN8=
-      FERNET_FIELD_KEY: aQyP7tOjb06jmhH0Ni3Y04CqcrzrnK_KnuurAOUWl4c=
-      # Database
-      POSTGRES_PASSWORD: ci_test_password
-      USER_DB_PASSWORD: ci_test_password
-      # Service Auth
-      SERVICE_AUTH_SERVICE_SECRET: ci-test-service-secret-for-auth-32chars!!
-      # Runtime
-      ENVIRONMENT: test
-      KAFKA_ENABLED: "false"
-      LOG_LEVEL: WARNING
     steps:
       - uses: actions/checkout@v4
 
@@ -82,23 +79,71 @@ jobs:
         run: pytest tests/alignment/ -x -q --no-header
 
       - name: Run shared library tests
-        continue-on-error: true
         run: |
-          pytest tests/solace_common/ -x -q --no-header 2>&1 || true
-          pytest tests/solace_security/ -x -q --no-header 2>&1 || true
+          pytest tests/solace_common/ -q --no-header
+          pytest tests/solace_security/ -q --no-header
 
-      - name: Run service unit tests
-        continue-on-error: true
+  # Per-service unit tests, one matrix leg each. HARD-GATED, fail-fast off so
+  # every service reports independently. config_service has no tests dir yet.
+  service-tests:
+    name: Service Tests (${{ matrix.service.name }})
+    runs-on: ubuntu-latest
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - { dir: "safety_service", name: "safety" }
+          - { dir: "diagnosis_service", name: "diagnosis" }
+          - { dir: "therapy_service", name: "therapy" }
+          - { dir: "memory_service", name: "memory" }
+          - { dir: "personality_service", name: "personality" }
+          - { dir: "orchestrator_service", name: "orchestrator" }
+          - { dir: "user-service", name: "user" }
+          - { dir: "notification-service", name: "notification" }
+          - { dir: "analytics-service", name: "analytics" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
         run: |
-          pytest services/safety_service/tests/ -q --no-header --ignore=services/safety_service/tests/test_api.py 2>&1 || true
-          pytest services/diagnosis_service/tests/ -q --no-header 2>&1 || true
-          pytest services/therapy_service/tests/ -q --no-header 2>&1 || true
-          pytest services/memory_service/tests/ -q --no-header 2>&1 || true
-          pytest services/personality_service/tests/ -q --no-header 2>&1 || true
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install pytest-mock pytest-asyncio httpx
 
-      - name: Run integration tests
-        continue-on-error: true
-        run: pytest tests/integration/ -q --no-header 2>&1 || true
+      - name: Run ${{ matrix.service.name }} tests
+        run: pytest services/${{ matrix.service.dir }}/tests/ -q --no-header
+
+  # Integration suites that run against mocked/in-memory deps. HARD-GATED.
+  # The live-infra file needs real Postgres/Redis/Kafka/Weaviate and is deferred
+  # to Sprint B.3 (staging) rather than silently masked here.
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install pytest-mock pytest-asyncio httpx
+
+      - name: Run integration tests (mocked deps)
+        run: pytest tests/integration/ -q --no-header --ignore=tests/integration/test_service_integration.py
 
   docker-build:
     name: Docker Build

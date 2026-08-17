@@ -1,7 +1,14 @@
 # Solace-AI production override (Sprint 8).
 #
-# Applied on top of the base ``docker-compose.yml``:
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Applied on top of the base ``docker-compose.yml``. Deploy with --env-file so that
+# ${...} interpolation is sourced from .env.prod (NOT the shell / a dev .env), and so the
+# required-secret guards below actually read the prod values:
+#   docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# The dev debug UIs (mailhog, kafka-ui) are behind the "dev" profile in the base file, so
+# they are never started here (no --profile dev). Secrets below use the ${VAR:?msg} form:
+# compose FAILS FAST if a required secret is missing from .env.prod instead of silently
+# falling back to the base file's dev default (REV-11).
 #
 # Adds:
 #   - Caddy as the TLS-terminating reverse proxy (the only container with
@@ -32,6 +39,11 @@ x-logging: &default-logging
 
 x-restart: &default-restart
   restart: unless-stopped
+
+# Required secrets — override the base file's dev-default fallbacks so a missing value in
+# .env.prod fails the deploy instead of silently shipping the dev JWT key to prod (REV-11).
+x-app-secrets: &app-secrets
+  AUTH_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set in .env.prod}
 
 services:
   caddy:
@@ -64,6 +76,8 @@ services:
   orchestrator-service:
     ports: []  # Only reachable via Caddy
     env_file: .env.prod
+    environment:
+      <<: *app-secrets
     logging: *default-logging
     <<: *default-restart
     deploy:
@@ -74,6 +88,14 @@ services:
   user-service:
     ports: []
     env_file: .env.prod
+    environment:
+      <<: *app-secrets
+      USER_SERVICE_JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set in .env.prod}
+      SECURITY_JWT_SECRET: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set in .env.prod}
+      USER_SERVICE_FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:?FIELD_ENCRYPTION_KEY must be set in .env.prod}
+      FERNET_TOKEN_KEY: ${FERNET_TOKEN_KEY:?FERNET_TOKEN_KEY must be set in .env.prod}
+      FERNET_FIELD_KEY: ${FERNET_FIELD_KEY:?FERNET_FIELD_KEY must be set in .env.prod}
+      USER_DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env.prod}
     logging: *default-logging
     <<: *default-restart
     deploy:
@@ -84,6 +106,8 @@ services:
   safety-service:
     ports: []
     env_file: .env.prod
+    environment:
+      <<: *app-secrets
     logging: *default-logging
     <<: *default-restart
     deploy:
@@ -154,7 +178,7 @@ services:
   postgres:
     ports: []
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env.prod}
     logging: *default-logging
     <<: *default-restart
     deploy:

@@ -39,10 +39,13 @@ class TestEncryptionSettings:
         )
         assert settings.key_rotation_days == 30
 
-    def test_master_key_required(self):
+    def test_master_key_required(self, monkeypatch):
         """Test that master_key is required."""
+        # Isolate from the ambient environment: CI/dev sets ENCRYPTION_MASTER_KEY
+        # (and may have a .env), which would otherwise satisfy the required field.
+        monkeypatch.delenv("ENCRYPTION_MASTER_KEY", raising=False)
         with pytest.raises((ValidationError, ValueError)):  # ValidationError for missing required field
-            EncryptionSettings()
+            EncryptionSettings(_env_file=None)
 
     def test_master_key_exact_length(self):
         """Test that master_key must be exactly 32 bytes."""

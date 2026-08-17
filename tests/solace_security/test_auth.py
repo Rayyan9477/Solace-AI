@@ -43,10 +43,13 @@ class TestAuthSettings:
         assert settings.access_token_expire_minutes == 60
         assert settings.issuer == "custom-issuer"
 
-    def test_secret_key_required(self):
+    def test_secret_key_required(self, monkeypatch):
         """Test that secret_key is required and validates length."""
+        # Isolate from the ambient environment: CI/dev sets AUTH_SECRET_KEY (and
+        # may have a .env), which would otherwise satisfy the required field.
+        monkeypatch.delenv("AUTH_SECRET_KEY", raising=False)
         with pytest.raises((ValidationError, ValueError)):  # ValidationError for missing required field
-            AuthSettings()
+            AuthSettings(_env_file=None)
 
     def test_secret_key_minimum_length(self):
         """Test that secret_key must be at least 32 bytes."""

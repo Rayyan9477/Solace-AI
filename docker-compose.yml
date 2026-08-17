@@ -9,8 +9,6 @@
 #
 # Environment variables should be set in a .env file (see .env.example)
 
-version: '3.8'
-
 services:
   # =============================================================================
   # INFRASTRUCTURE SERVICES
@@ -108,7 +106,9 @@ services:
       - data
 
   weaviate:
-    image: semitechnologies/weaviate:1.22.4
+    # REV-11: 1.22.4 predates the gRPC API that weaviate-client 4.10 requires. Bumped to
+    # a 1.26.x server (gRPC on :50051) and the gRPC port is now exposed.
+    image: semitechnologies/weaviate:1.26.1
     container_name: solace-weaviate
     environment:
       QUERY_DEFAULTS_LIMIT: 25
@@ -121,8 +121,10 @@ services:
       DEFAULT_VECTORIZER_MODULE: "none"
       ENABLE_MODULES: ""
       CLUSTER_HOSTNAME: "node1"
+      GRPC_PORT: "50051"
     ports:
       - "${WEAVIATE_PORT:-8080}:8080"
+      - "${WEAVIATE_GRPC_PORT:-50051}:50051"   # gRPC (weaviate-client v4)
     volumes:
       - weaviate_data:/var/lib/weaviate
     healthcheck:
@@ -166,7 +168,11 @@ services:
       - prometheus_data:/prometheus
     restart: unless-stopped
     networks:
+      # REV-11: Prometheus must sit on the app networks to scrape the services'
+      # /metrics endpoints (it was on `monitoring` only and scraped nothing).
       - monitoring
+      - backend
+      - data
 
   grafana:
     image: grafana/grafana:10.1.0
@@ -193,8 +199,8 @@ services:
 
   user-service:
     build:
-      context: ./services/user-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/user-service/Dockerfile
     container_name: solace-user-service
     environment:
       USER_SERVICE_ENV: development
@@ -232,11 +238,11 @@ services:
 
   safety-service:
     build:
-      context: ./services/safety_service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/safety_service/Dockerfile
     container_name: solace-safety-service
     environment:
-      SAFETY_ENVIRONMENT: development
+      SAFETY_ENVIRONMENT: ${SAFETY_ENVIRONMENT:-development}
       SAFETY_PORT: 8002
       ESCALATION_NOTIFICATION_SERVICE_URL: http://notification-service:8003
       SAFETY_REPO_STORAGE_BACKEND: postgres
@@ -265,8 +271,8 @@ services:
 
   notification-service:
     build:
-      context: ./services/notification-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/notification-service/Dockerfile
     container_name: solace-notification-service
     environment:
       NOTIFICATION_SERVICE_ENV: development
@@ -280,7 +286,10 @@ services:
     ports:
       - "8003:8003"
     depends_on:
-      - mailhog
+      # Notification consumes crisis events from Kafka. mailhog is a DEV-only SMTP sink
+      # (dev profile); in prod, EMAIL_SMTP_HOST points at a real relay via .env.prod.
+      kafka:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
       interval: 30s
@@ -293,11 +302,11 @@ services:
 
   diagnosis-service:
     build:
-      context: ./services/diagnosis_service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/diagnosis_service/Dockerfile
     container_name: solace-diagnosis-service
     environment:
-      DIAGNOSIS_ENVIRONMENT: development
+      DIAGNOSIS_ENVIRONMENT: ${DIAGNOSIS_ENVIRONMENT:-development}
       DIAGNOSIS_PORT: 8004
       DIAGNOSIS_DB_HOST: postgres
       DIAGNOSIS_DB_PORT: 5432
@@ -324,8 +333,8 @@ services:
 
   memory-service:
     build:
-      context: ./services/memory_service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/memory_service/Dockerfile
     container_name: solace-memory-service
     environment:
       MEMORY_SERVICE_ENV: development
@@ -362,11 +371,11 @@ services:
 
   therapy-service:
     build:
-      context: ./services/therapy_service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/therapy_service/Dockerfile
     container_name: solace-therapy-service
     environment:
-      THERAPY_ENVIRONMENT: development
+      THERAPY_ENVIRONMENT: ${THERAPY_ENVIRONMENT:-development}
       THERAPY_PORT: 8006
       THERAPY_DB_HOST: postgres
       THERAPY_DB_PORT: 5432
@@ -395,11 +404,11 @@ services:
 
   personality-service:
     build:
-      context: ./services/personality_service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/personality_service/Dockerfile
     container_name: solace-personality-service
     environment:
-      PERSONALITY_ENVIRONMENT: development
+      PERSONALITY_ENVIRONMENT: ${PERSONALITY_ENVIRONMENT:-development}
       PERSONALITY_PORT: 8007
       PERSONALITY_DB_HOST: postgres
       PERSONALITY_DB_PORT: 5432
@@ -426,11 +435,11 @@ services:
 
   orchestrator-service:
     build:
-      context: ./services/orchestrator_service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/orchestrator_service/Dockerfile
     container_name: solace-orchestrator-service
     environment:
-      ORCHESTRATOR_ENVIRONMENT: development
+      ORCHESTRATOR_ENVIRONMENT: ${ORCHESTRATOR_ENVIRONMENT:-development}
       ORCHESTRATOR_PORT: 8000
       SERVICE_SAFETY_SERVICE_URL: http://safety-service:8002
       SERVICE_PERSONALITY_SERVICE_URL: http://personality-service:8007
@@ -460,8 +469,8 @@ services:
 
   analytics-service:
     build:
-      context: ./services/analytics-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/analytics-service/Dockerfile
     container_name: solace-analytics-service
     environment:
       ANALYTICS_SERVICE_ENV: development
@@ -486,11 +495,11 @@ services:
 
   config-service:
     build:
-      context: ./services/config_service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/config_service/Dockerfile
     container_name: solace-config-service
     environment:
-      CONFIG_ENVIRONMENT: development
+      CONFIG_ENVIRONMENT: ${CONFIG_ENVIRONMENT:-development}
       CONFIG_PORT: 8008
       CONFIG_REDIS_URL: redis://redis:6379/0
       AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
@@ -513,9 +522,12 @@ services:
   # DEVELOPMENT TOOLS
   # =============================================================================
 
+  # DEV-ONLY debug UIs. Guarded behind the "dev" profile so they are NOT started in
+  # production (REV-11). Start locally with: docker compose --profile dev up -d
   mailhog:
     image: mailhog/mailhog:v1.0.1
     container_name: solace-mailhog
+    profiles: ["dev"]
     ports:
       - "1025:1025"   # SMTP
       - "8025:8025"   # Web UI
@@ -523,10 +535,11 @@ services:
     networks:
       - backend
 
-  # Kafka UI for development
+  # Kafka UI for development (dev profile only)
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: solace-kafka-ui
+    profiles: ["dev"]
     environment:
       KAFKA_CLUSTERS_0_NAME: solace-local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
