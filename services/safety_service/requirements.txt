@@ -1,0 +1,3 @@
+# Safety Service — service-specific deps (installed on top of ../../requirements-runtime.txt).
+# Base covers everything the crisis pipeline needs at runtime. ML sentiment analysis
+# (transformers) is optional/guarded and lives in requirements-ml.txt.

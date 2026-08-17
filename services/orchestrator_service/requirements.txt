@@ -1,0 +1,6 @@
+# Orchestrator Service — service-specific deps (installed on top of ../../requirements-runtime.txt).
+# LangGraph multi-agent orchestration + Postgres checkpoint saver.
+langgraph~=0.2.76
+langgraph-checkpoint-postgres~=2.0.0
+langchain-core~=0.3.30
+langchain-anthropic~=0.3.3

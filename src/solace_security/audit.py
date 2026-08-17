@@ -200,6 +200,16 @@ class AuditStore(ABC):
         """Verify integrity of audit chain."""
         pass
 
+    def get_latest_hash(self) -> str | None:
+        """Return the most recent event's ``event_hash`` (the chain tip), or None.
+
+        REV-14: an AuditLogger rehydrates ``_last_hash`` from this on startup so
+        the tamper-evident chain continues across process restarts instead of
+        forking with ``previous_hash=None``. The default returns None (no
+        rehydration); durable stores override it.
+        """
+        return None
+
 
 class InMemoryAuditStore(AuditStore):
     """In-memory audit store for testing and development."""
@@ -254,6 +264,10 @@ class InMemoryAuditStore(AuditStore):
         with self._lock:
             return list(self._events)
 
+    def get_latest_hash(self) -> str | None:
+        with self._lock:
+            return self._events[-1].event_hash if self._events else None
+
     def clear(self) -> None:
         with self._lock:
             self._events.clear()
@@ -293,6 +307,14 @@ class AsyncAuditStore(ABC):
     async def close(self) -> None:
         """Close store connections."""
         pass
+
+    async def get_latest_hash(self) -> str | None:
+        """Return the most recent event's ``event_hash`` (the chain tip), or None.
+
+        REV-14: an AsyncAuditLogger rehydrates ``_last_hash`` from this in
+        ``initialize()`` so the chain survives restarts. Default: no rehydration.
+        """
+        return None
 
 
 class PostgresAuditStore(AsyncAuditStore):
@@ -435,6 +457,17 @@ class PostgresAuditStore(AsyncAuditStore):
                 event.event_hash,
             )
 
+    async def get_latest_hash(self) -> str | None:
+        """REV-14: fetch the chain tip (most recent event_hash) to survive restarts."""
+        if self._pool is None:
+            raise RuntimeError("PostgresAuditStore not initialized")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT event_hash FROM audit_events "
+                "ORDER BY timestamp DESC, created_at DESC LIMIT 1"
+            )
+        return row["event_hash"] if row else None
+
     async def query(self, filters: dict[str, Any], limit: int = 100,
                     offset: int = 0) -> list[AuditEvent]:
         """Query audit events with filters."""
@@ -571,8 +604,19 @@ class AuditLogger:
         self._store = store
         self._settings = settings or AuditSettings()
         self._settings.validate_hmac_key_for_environment()
-        self._last_hash: str | None = None
+        # REV-14: rehydrate the chain tip so a restart continues the tamper-evident
+        # chain instead of forking it with previous_hash=None.
+        self._last_hash: str | None = self._rehydrate_last_hash()
         self._lock = threading.Lock()
+
+    def _rehydrate_last_hash(self) -> str | None:
+        try:
+            return self._store.get_latest_hash()
+        except Exception as exc:  # durable store unreachable — start fresh, don't crash startup
+            # Elevated: this begins a NEW chain segment (previous_hash=None), a
+            # continuity gap a later verify_chain will flag. Alert on it.
+            logger.error("audit_chain_continuity_at_risk", reason="rehydrate_failed", error=str(exc))
+            return None
 
     def log(self, event_type: AuditEventType, action: str, outcome: AuditOutcome,
             actor: AuditActor, resource: AuditResource | None = None,
@@ -670,8 +714,13 @@ class AsyncAuditLogger:
         self._lock = asyncio.Lock()
 
     async def initialize(self) -> None:
-        """Initialize the underlying store."""
+        """Initialize the underlying store and rehydrate the chain tip (REV-14)."""
         await self._store.initialize()
+        try:
+            self._last_hash = await self._store.get_latest_hash()
+        except Exception as exc:  # durable store unreachable — start fresh, don't crash startup
+            # Elevated: begins a NEW chain segment (previous_hash=None) — alert on it.
+            logger.error("audit_chain_continuity_at_risk", reason="rehydrate_failed", error=str(exc))
 
     async def close(self) -> None:
         """Close the underlying store."""

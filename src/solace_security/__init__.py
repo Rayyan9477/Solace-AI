@@ -58,6 +58,12 @@ from solace_security.audit import (
     AuditLogger,
     get_audit_logger,
     create_audit_logger,
+    configure_audit_logger,
+    AsyncAuditStore,
+    PostgresAuditStore,
+    AsyncAuditLogger,
+    get_async_audit_logger,
+    configure_async_audit_logger,
 )
 from solace_security.phi_protection import (
     PHIType,
@@ -156,6 +162,12 @@ __all__ = [
     "AuditLogger",
     "get_audit_logger",
     "create_audit_logger",
+    "configure_audit_logger",
+    "AsyncAuditStore",
+    "PostgresAuditStore",
+    "AsyncAuditLogger",
+    "get_async_audit_logger",
+    "configure_async_audit_logger",
     # PHI Protection
     "PHIType",
     "PHISettings",

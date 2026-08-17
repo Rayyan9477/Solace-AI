@@ -1,0 +1,2 @@
+# Therapy Service — service-specific deps (installed on top of ../../requirements-runtime.txt).
+# Therapy needs nothing beyond the shared runtime base.

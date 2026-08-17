@@ -92,6 +92,22 @@ class LoginRequest(BaseModel):
     password: str = Field(..., description="Password")
 
 
+class ResendVerificationRequest(BaseModel):
+    """Request a new verification email by address (unauthenticated, REV-31)."""
+    email: str = Field(..., min_length=5, max_length=255, description="User email")
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        """Validate and normalize email."""
+        from email_validator import validate_email as _validate_email, EmailNotValidError
+        try:
+            result = _validate_email(v, check_deliverability=False)
+            return result.normalized
+        except EmailNotValidError as e:
+            raise ValueError(f"Invalid email: {e}")
+
+
 class TokenResponse(BaseModel):
     """JWT token response."""
     access_token: str = Field(..., description="JWT access token")
@@ -541,15 +557,26 @@ async def refresh_token(
     tags=["Authentication"],
 )
 async def logout(
+    request: Request,
     current_user: TokenPayload = Depends(get_current_user),
     session_manager: SessionManager = Depends(get_session_manager),
+    authorization: str | None = Header(None),
 ) -> None:
     """
-    Logout user by revoking all their sessions.
+    Logout user by revoking all their sessions AND blacklisting the presented
+    access token.
 
-    Since tokens don't contain session IDs, we revoke all sessions for the user.
+    REV-08: revoking sessions alone left the bearer access token valid until its
+    natural expiry (~15 min). Blacklisting its JTI makes it rejected immediately.
     """
     await session_manager.revoke_all_user_sessions(current_user.user_id)
+    if authorization:
+        try:
+            jwt_service = get_jwt_service(request)
+            token = jwt_service.extract_token_from_header(authorization)
+            await jwt_service.revoke_token(token)
+        except Exception as e:
+            logger.warning("logout_token_blacklist_failed", error=str(e))
     logger.info("user_logged_out", user_id=str(current_user.user_id))
     return None
 
@@ -809,7 +836,9 @@ async def record_consent(
 
 
 @router.get(
-    "/users/{user_id}",
+    # ':uuid' path convertor ensures this only matches real UUIDs, so static
+    # sibling routes like /users/on-call-clinicians are not shadowed (REV-03).
+    "/users/{user_id:uuid}",
     response_model=UserResponse,
     tags=["Admin"],
 )
@@ -895,24 +924,24 @@ async def verify_email(
     tags=["Authentication"],
 )
 async def resend_verification(
-    current_user: TokenPayload = Depends(get_current_user),
+    request_data: ResendVerificationRequest,
     user_service: UserService = Depends(get_user_service),
 ) -> None:
-    """Request new verification email."""
-    token, error = await user_service.resend_verification_email(current_user.user_id)
+    """Request a new verification email (UNAUTHENTICATED, enumeration-safe — REV-31).
 
-    if error:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error,
-        )
-
-    # Email is sent via notification service in the service layer
-    logger.info(
-        "verification_email_sent",
-        user_id=str(current_user.user_id),
-        token_generated=token is not None,
-    )
+    Always returns 204 regardless of whether the address is registered or already
+    verified: no account-enumeration signal is leaked. This breaks the deadlock
+    where an unverified production user (blocked from login until verified) could
+    not reach the previously auth-gated resend path to obtain a fresh verification
+    link if their initial email failed to send. Abuse (email bombing) is bounded by
+    the API gateway rate limiter, not by requiring a login the user cannot perform.
+    """
+    await user_service.resend_verification_email_by_email(request_data.email)
+    # Enumeration-safe: log nothing that distinguishes registered/verified/unknown
+    # addresses, and return 204 unconditionally. (The prior log referenced
+    # current_user/token, removed when this endpoint became unauthenticated — it
+    # raised NameError on every call, defeating the always-204 contract.)
+    logger.info("resend_verification_requested")
 
 
 # --- On-Call Clinician Endpoints ---
