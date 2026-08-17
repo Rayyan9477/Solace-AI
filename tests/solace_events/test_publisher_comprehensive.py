@@ -34,7 +34,8 @@ class TestOutboxStatus:
 
     def test_all_statuses_exist(self) -> None:
         """Ensure all expected statuses exist."""
-        expected = {"PENDING", "PUBLISHED", "FAILED"}
+        # PUBLISHING is the atomic-claim in-flight state (REV-39).
+        expected = {"PENDING", "PUBLISHING", "PUBLISHED", "FAILED"}
         actual = {s.value for s in OutboxStatus}
         assert actual == expected
 
@@ -467,22 +468,29 @@ class TestEventPublisher:
 
     @pytest.mark.asyncio
     async def test_flush_outbox_marks_failed_after_max_retries(self, outbox_store: InMemoryOutboxStore) -> None:
-        """Test record marked failed after max retries."""
+        """Record marked FAILED once retries are exhausted across flushes (REV-39).
+
+        Each flush atomically CLAIMS the record; a transient send failure releases
+        it back to PENDING for the next flush, and the flush that reaches
+        ``max_retries`` marks it terminally FAILED (never left stuck in PUBLISHING).
+        """
+        async def fail_send(*args):
+            raise Exception("Connection failed")
         failing_producer = MockKafkaProducerAdapter()
+        failing_producer.send = fail_send
         publisher = EventPublisher(failing_producer, outbox_store, max_retries=2)
         await publisher.start()
         event = SessionStartedEvent(user_id=uuid4(), session_number=1)
         await publisher.publish(event)
-        # Pre-increment retry count
-        record_id = (await outbox_store.get_pending())[0].id
-        await outbox_store.increment_retry(record_id)
-        await outbox_store.increment_retry(record_id)
-        # Make producer fail
-        async def fail_send(*args):
-            raise Exception("Connection failed")
-        failing_producer.send = fail_send
+        record_id = next(iter(outbox_store._records))
+
+        # First flush: send fails, retry_count 1 < 2 -> released to PENDING.
         await publisher.flush_outbox()
-        # Record should be marked failed
+        assert outbox_store._records[record_id].status == OutboxStatus.PENDING
+        assert outbox_store._records[record_id].retry_count == 1
+
+        # Second flush: retry_count hits 2 (>= max) -> terminal FAILED.
+        await publisher.flush_outbox()
         pending = await outbox_store.get_pending()
         assert len(pending) == 0
         assert outbox_store._records[record_id].status == OutboxStatus.FAILED

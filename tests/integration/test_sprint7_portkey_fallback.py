@@ -13,7 +13,9 @@ the config correctly.
 """
 from __future__ import annotations
 
+import asyncio
 import inspect
+import types
 
 import pytest
 from pydantic import SecretStr
@@ -22,6 +24,60 @@ from services.shared.infrastructure.llm_client import (
     LLMClientSettings,
     UnifiedLLMClient,
 )
+
+
+class TestLLMRequestTimeout:
+    """REV-31: the configured ``timeout_seconds`` must actually bound a request."""
+
+    @pytest.mark.asyncio
+    async def test_execute_completion_times_out_a_stalled_request(self) -> None:
+        settings = LLMClientSettings(
+            portkey_api_key=SecretStr("test-portkey-key"),
+            timeout_seconds=1,
+        )
+        client = UnifiedLLMClient(settings)
+
+        async def _hang(**kwargs):  # noqa: ANN003 - never completes within the timeout
+            await asyncio.sleep(30)
+
+        # Replace the Portkey client with a stalled ``chat.completions.create``.
+        client._client = types.SimpleNamespace(
+            chat=types.SimpleNamespace(
+                completions=types.SimpleNamespace(create=_hang)
+            )
+        )
+
+        with pytest.raises(asyncio.TimeoutError):
+            await client._execute_completion(
+                messages=[{"role": "user", "content": "hi"}],
+                service_name="test",
+                metadata=None,
+            )
+
+    @pytest.mark.asyncio
+    async def test_generate_returns_empty_on_timeout_not_hang(self) -> None:
+        """The public generate() path swallows the timeout into a safe empty result
+        (rather than hanging), so a stalled provider can't block the caller."""
+        settings = LLMClientSettings(
+            portkey_api_key=SecretStr("test-portkey-key"),
+            timeout_seconds=1,
+        )
+        client = UnifiedLLMClient(settings)
+
+        async def _hang(**kwargs):  # noqa: ANN003
+            await asyncio.sleep(30)
+
+        client._client = types.SimpleNamespace(
+            chat=types.SimpleNamespace(
+                completions=types.SimpleNamespace(create=_hang)
+            )
+        )
+        client._initialized = True  # bypass the not-installed guard for this test
+
+        result = await client.generate(
+            system_prompt="s", user_message="hi", service_name="test",
+        )
+        assert result == ""
 
 
 class TestPortkeyFallbackConfig:

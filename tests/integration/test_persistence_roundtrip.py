@@ -408,28 +408,37 @@ class TestSchemaRegistryIntegrity:
 class TestRepositoryFactoryPatterns:
     """Tests that repository factories create correct instances."""
 
-    def test_diagnosis_repository_factory_singleton(self):
-        """DiagnosisRepositoryFactory returns singleton."""
+    def test_diagnosis_repository_factory_rejects_test_env(self):
+        """get_default() refuses the production factory under ENVIRONMENT=test.
+
+        In-memory repositories are provided via test fixtures; the factory
+        guards against accidentally hitting Postgres in tests. (The former
+        `_singleton` assertion predated this guardrail and could never pass
+        with ENVIRONMENT=test.)
+        """
         from services.diagnosis_service.src.infrastructure.repository import (
             RepositoryFactory,
         )
 
         RepositoryFactory.reset()
-        f1 = RepositoryFactory.get_default()
-        f2 = RepositoryFactory.get_default()
-        assert f1 is f2
+        with pytest.raises(RuntimeError, match="InMemoryDiagnosisRepository"):
+            RepositoryFactory.get_default()
         RepositoryFactory.reset()
 
-    def test_personality_repository_factory_singleton(self):
-        """PersonalityRepositoryFactory returns singleton."""
+    def test_personality_repository_factory_rejects_test_env(self):
+        """get_default() refuses the production factory under ENVIRONMENT=test.
+
+        Personality mirrors the diagnosis guardrail: tests must use
+        InMemoryPersonalityRepository from fixtures rather than the Postgres
+        factory.
+        """
         from services.personality_service.src.infrastructure.repository import (
             RepositoryFactory,
         )
 
         RepositoryFactory.reset()
-        f1 = RepositoryFactory.get_default()
-        f2 = RepositoryFactory.get_default()
-        assert f1 is f2
+        with pytest.raises(RuntimeError, match="InMemoryPersonalityRepository"):
+            RepositoryFactory.get_default()
         RepositoryFactory.reset()
 
 

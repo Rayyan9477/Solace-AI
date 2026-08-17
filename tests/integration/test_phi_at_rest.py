@@ -229,3 +229,118 @@ class TestPhiAtRestWithoutGlobalEncryptor:
             "criteria_missing",
         ):
             assert f in Hypothesis.__phi_fields__, f"missing PHI field: {f}"
+
+
+class TestSafetyAndMemoryPhiFieldsWired:
+    """REV-14: safety + memory clinical entities must declare all PHI fields.
+
+    Before this fix, SafetyPlan only encrypted ``clinician_notes`` (leaving the
+    user's warning signs, coping strategies and emergency contacts in plaintext),
+    RiskFactor declared no PHI fields at all (``factor_description`` stored raw),
+    and MemoryUserProfile — an entire clinical profile of diagnoses, treatments,
+    triggers and safety info — had no ``__phi_fields__``, so every column was
+    written to the database in the clear.
+
+    The columns stay JSONB: the encrypt path serializes list/dict PHI to a
+    ``v1$`` ciphertext string that lives inside the JSONB envelope (the same
+    proven pattern as ``DiagnosisSession.messages``), so no migration is needed.
+    """
+
+    def test_safety_plan_encrypts_all_personal_content(self) -> None:
+        """Every user-authored safety-plan field is declared PHI, not just notes."""
+        from solace_infrastructure.database.entities.safety_entities import SafetyPlan
+
+        for f in (
+            "clinician_notes",
+            "warning_signs",
+            "coping_strategies",
+            "emergency_contacts",
+            "safe_environment_actions",
+            "reasons_to_live",
+            "professional_resources",
+        ):
+            assert f in SafetyPlan.__phi_fields__, f"SafetyPlan PHI field missing: {f}"
+
+    def test_risk_factor_encrypts_description(self) -> None:
+        """RiskFactor.factor_description holds clinical risk detail — must be PHI."""
+        from solace_infrastructure.database.entities.safety_entities import RiskFactor
+
+        assert "factor_description" in RiskFactor.__phi_fields__
+
+    def test_memory_user_profile_encrypts_clinical_profile(self) -> None:
+        """The whole longitudinal clinical profile must be encrypted at rest."""
+        from solace_infrastructure.database.entities.memory_entities import (
+            MemoryUserProfile,
+        )
+
+        for f in (
+            "personal_facts",
+            "therapeutic_context",
+            "communication_preferences",
+            "safety_information",
+            "diagnosed_conditions",
+            "current_treatments",
+            "support_network",
+            "triggers",
+            "coping_strategies",
+            "personality_traits",
+        ):
+            assert f in MemoryUserProfile.__phi_fields__, (
+                f"MemoryUserProfile PHI field missing: {f}"
+            )
+
+    def test_encrypted_string_columns_are_text_not_bounded(self) -> None:
+        """REV-13: encrypted PHI must live on TEXT columns, not String(N).
+
+        A ``v1$`` ciphertext envelope is far longer than its plaintext (nonce +
+        tag + base64), so a String(200/300/500) column silently truncates or
+        rejects the encrypted value at write time. Every encrypted PHI field
+        must be length-unbounded.
+        """
+        from sqlalchemy import Text
+
+        from solace_infrastructure.database.entities.diagnosis_entities import (
+            DiagnosisRecord,
+        )
+        from solace_infrastructure.database.entities.memory_entities import (
+            TherapeuticEvent,
+        )
+        from solace_infrastructure.database.entities.therapy_entities import (
+            TreatmentPlan,
+        )
+
+        bounded = [
+            (DiagnosisRecord, "primary_diagnosis"),
+            (TherapeuticEvent, "title"),
+            (TreatmentPlan, "primary_diagnosis"),
+            (TreatmentPlan, "termination_reason"),
+        ]
+        for entity, field in bounded:
+            assert field in entity.__phi_fields__, f"{entity.__name__}.{field} not PHI?"
+            col = entity.__table__.c[field]
+            assert isinstance(col.type, Text), (
+                f"{entity.__name__}.{field} is {col.type!r}; encrypted PHI needs Text "
+                f"or the ciphertext overflows the column"
+            )
+
+    def test_safety_plan_list_fields_encrypt_to_ciphertext(
+        self, field_encryptor: Any
+    ) -> None:
+        """A safety plan's warning signs must be ciphertext after the insert hook."""
+        from solace_infrastructure.database.entities.safety_entities import SafetyPlan
+
+        entity = _FakeClinical(
+            phi_fields=list(SafetyPlan.__phi_fields__),
+            warning_signs=["I stop answering my phone", "I skip meals"],
+            coping_strategies=["call my sister", "box breathing"],
+            emergency_contacts=[{"name": "Jane Doe", "phone": "555-0100"}],
+        )
+        _encrypt_phi_before_insert(mapper=None, connection=None, target=entity)
+        assert entity.warning_signs.startswith("v1$")
+        assert "skip meals" not in entity.warning_signs
+        assert entity.emergency_contacts.startswith("v1$")
+        assert "555-0100" not in entity.emergency_contacts
+
+        _decrypt_phi_after_load(target=entity, context=None)
+        assert entity.warning_signs == ["I stop answering my phone", "I skip meals"]
+        assert entity.emergency_contacts == [{"name": "Jane Doe", "phone": "555-0100"}]

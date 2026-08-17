@@ -61,6 +61,61 @@ class TestCrisisDetection:
 
         assert route_after_safety(merged) == "crisis_handler"
 
+    @pytest.mark.parametrize(
+        "message",
+        ["better off dead", "I can't go on", "take my life"],
+    )
+    def test_safety_service_critical_phrases_also_detected(self, message: str) -> None:
+        """M1 gate P1: the orchestrator precheck must catch every phrase the safety
+        service treats as CRITICAL. These three were absent from CRISIS_KEYWORDS, so
+        explicit suicidal statements routed to memory_retrieval (no crisis handling)
+        in the default config (use_safety_service_precheck=False)."""
+        state = create_initial_state(uuid4(), uuid4(), message)
+        result = safety_precheck_node(state)
+        merged = {**state, **result}
+        assert result["safety_flags"]["crisis_detected"] is True, (
+            f"{message!r} not detected as a crisis by the orchestrator precheck"
+        )
+        assert route_after_safety(merged) == "crisis_handler"
+
+    def test_hanging_myself_is_detected(self) -> None:
+        """M1 gate R2 (P1): 'hanging myself' (keywords.json CRITICAL / method disclosure)
+        was missing from CRISIS_KEYWORDS and routed to normal processing."""
+        state = create_initial_state(uuid4(), uuid4(), "I'm hanging myself tonight")
+        result = safety_precheck_node(state)
+        assert result["safety_flags"]["crisis_detected"] is True
+        assert route_after_safety({**state, **result}) == "crisis_handler"
+
+    def test_crisis_keywords_superset_of_keywords_json_critical(self) -> None:
+        """M1 gate R2 (P1): lock 3-way parity so critical-keyword drift can't recur.
+
+        CRISIS_KEYWORDS must cover every keywords.json CRITICAL phrase EXCEPT the
+        context-dependent ones the crude precheck intentionally defers to the safety
+        service's ML detector (adding them to the substring precheck would over-fire
+        on benign speech, e.g. 'I have a plan for our session', and — because crisis
+        routing short-circuits normal processing — would block legitimate responses).
+        """
+        import json
+        import pathlib
+
+        from services.orchestrator_service.src.langgraph.state_schema import CRISIS_KEYWORDS
+
+        repo_root = pathlib.Path(__file__).resolve().parents[2]
+        kw = json.loads(
+            (repo_root / "services/safety_service/config/keywords.json").read_text(encoding="utf-8")
+        )
+        critical: set[str] = set()
+        for words in kw["keywords"]["CRITICAL"].values():
+            critical.update(words)
+
+        # Context-dependent CRITICAL phrases deferred to the safety service ML detector.
+        CONTEXT_DEPENDENT_EXCLUSIONS = {"have a plan"}
+        required = critical - CONTEXT_DEPENDENT_EXCLUSIONS
+        missing = required - set(CRISIS_KEYWORDS)
+        assert not missing, (
+            f"CRISIS_KEYWORDS is not a superset of keywords.json CRITICAL; missing: {missing}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Crisis handler produces resources

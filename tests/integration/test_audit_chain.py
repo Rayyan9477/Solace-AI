@@ -300,3 +300,118 @@ class TestVerifyChainBoundaries:
         assert b.previous_hash == a.event_hash
         assert c.previous_hash == b.event_hash
         assert store.verify_chain(a.event_id, c.event_id) is True
+
+
+class TestAuditChainSurvivesRestart:
+    """REV-14: a restarted process must continue the hash chain, not reset it.
+
+    ``_last_hash`` was per-process in-memory, so the first event after a restart
+    got ``previous_hash=None`` — a fork in the chain that ``verify_chain`` can no
+    longer walk across. A new logger over the same durable store must rehydrate
+    the chain tip from storage.
+    """
+
+    def test_new_logger_over_same_store_continues_chain(
+        self,
+        settings_with_hmac: AuditSettings,
+        actor: AuditActor,
+        resource: AuditResource,
+    ) -> None:
+        store = InMemoryAuditStore()  # the durable store survives the "restart"
+        logger1 = AuditLogger(store, settings_with_hmac)
+        logger1.log(AuditEventType.DATA_ACCESS, "read:1", AuditOutcome.SUCCESS, actor, resource)
+        e2 = logger1.log(AuditEventType.DATA_ACCESS, "read:2", AuditOutcome.SUCCESS, actor, resource)
+
+        # Simulate a process restart: brand-new logger, same persisted store.
+        logger2 = AuditLogger(store, settings_with_hmac)
+        assert logger2._last_hash == e2.event_hash  # rehydrated the chain tip
+
+        e3 = logger2.log(AuditEventType.DATA_ACCESS, "read:3", AuditOutcome.SUCCESS, actor, resource)
+        assert e3.previous_hash == e2.event_hash  # chain continues, not None
+
+        # The whole chain (pre- and post-restart) verifies end to end.
+        all_events = store.get_all()
+        assert store.verify_chain(all_events[0].event_id, e3.event_id) is True
+
+    def test_get_latest_hash_none_on_empty_store(self) -> None:
+        """A fresh store has no tip, so a first-ever logger starts the chain."""
+        store = InMemoryAuditStore()
+        assert store.get_latest_hash() is None
+
+    def test_rehydrate_survives_store_read_error(
+        self, settings_with_hmac: AuditSettings
+    ) -> None:
+        """A transient store read failure must NOT crash startup (resilience).
+
+        A HIPAA service must still boot if the audit store is briefly unreachable;
+        the chain simply starts a fresh (alertable) segment rather than taking the
+        whole service down. Regression guard: if the try/except were removed the
+        constructor would propagate and this fails.
+        """
+        class _ExplodingStore(InMemoryAuditStore):
+            def get_latest_hash(self) -> str | None:
+                raise ConnectionError("audit store briefly unreachable")
+
+        logger = AuditLogger(_ExplodingStore(), settings_with_hmac)
+        assert logger._last_hash is None  # started fresh, did not crash
+
+
+class TestAuditLoggerExports:
+    def test_configure_audit_logger_is_exported(self) -> None:
+        """REV-14: services must be able to import configure_audit_logger from the package."""
+        import solace_security
+
+        assert hasattr(solace_security, "configure_audit_logger")
+        assert hasattr(solace_security, "configure_async_audit_logger")
+
+
+class TestAsyncAuditChainSurvivesRestart:
+    """REV-14 async path: AsyncAuditLogger.initialize must rehydrate the chain tip."""
+
+    def test_async_logger_rehydrates_last_hash_on_initialize(
+        self, settings_with_hmac: AuditSettings, actor: AuditActor
+    ) -> None:
+        import asyncio
+
+        from solace_security.audit import AsyncAuditLogger, AsyncAuditStore
+
+        class _FakeAsyncStore(AsyncAuditStore):
+            """Durable async store that already holds a prior chain tip."""
+
+            def __init__(self, tip: str) -> None:
+                self._tip = tip
+                self.stored: list[AuditEvent] = []
+
+            async def initialize(self) -> None:  # noqa: D401
+                return None
+
+            async def store(self, event: AuditEvent) -> None:
+                self.stored.append(event)
+
+            async def query(self, filters, limit=100, offset=0):
+                return self.stored[offset:offset + limit]
+
+            async def get_by_id(self, event_id):
+                return next((e for e in self.stored if e.event_id == event_id), None)
+
+            async def verify_chain(self, start_id, end_id):
+                return True
+
+            async def close(self) -> None:
+                return None
+
+            async def get_latest_hash(self) -> str | None:
+                return self._tip
+
+        async def _run() -> None:
+            store = _FakeAsyncStore(tip="prior-restart-tip-hash")
+            logger = AsyncAuditLogger(store, settings_with_hmac)
+            await logger.initialize()
+            assert logger._last_hash == "prior-restart-tip-hash"
+            ev = await logger.log(
+                AuditEventType.DATA_ACCESS, "read:post-restart",
+                AuditOutcome.SUCCESS, actor,
+            )
+            assert ev.previous_hash == "prior-restart-tip-hash"
+
+        asyncio.run(_run())
