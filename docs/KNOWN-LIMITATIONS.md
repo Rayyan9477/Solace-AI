@@ -94,6 +94,9 @@ covers the public boundary. mTLS via Istio is planned post-MVP.
 
 JWT signing uses HMAC-SHA256 with a shared secret. RS256 with
 asymmetric keys + JWKS rotation is planned post-MVP.
+> ⚠️ **UPDATED 2026-08-23:** RS256 issuer signing + JWKS is now **implemented and wired**, config-gated behind
+> the HS256 default (dual-accept). HS256 is still the shipping default; flipping validators to RS256-strict is a
+> staging rollout step. See `docs/PHASE-C-SECURITY-FINDINGS.md` P1-1.
 
 ### 3.5 Row-level security on 3 of ~15 tables
 
@@ -109,6 +112,23 @@ set, but falls back to `InMemoryTokenBlacklist` if Redis is
 unavailable. In multi-worker deployments without Redis, token
 revocation does not propagate. Configure a Redis instance for
 multi-worker correctness.
+
+### 3.7 Deployments MUST set the bare `ENVIRONMENT` var (REV-32)
+
+Three shared PHI controls key off the process-wide `ENVIRONMENT`
+variable: PostgreSQL SSL enforcement (`get_effective_ssl_mode`), the
+audit HMAC-key requirement (`AuditSettings`), and the encryption
+dev-key ban (`EncryptionSettings`). Services separately read a
+prefixed variant (e.g. `THERAPY_ENVIRONMENT`). If a prod/staging
+deployment sets only the prefixed var, these three controls silently
+stay in development mode — SSL off, audit degradable to plain SHA-256,
+insecure dev keys usable. **Until the env sources are unified (D.1),
+production/staging must set `ENVIRONMENT=production` (or `=staging`)
+explicitly.** Tracked as REV-32; a deploy-time assertion lands at B.3.
+> ⚠️ **UPDATED 2026-08-23:** the deploy-time guard `ProductionGuards.assert_environment_consistency` is now
+> implemented + unit-tested, but is **not yet invoked at service startup (dead code)** — so this limitation still
+> holds in full at runtime. Wiring the startup call + integration test is a launch-blocking follow-up, verified at
+> Stage 3. The base-compose `*_ENVIRONMENT` literals were made overridable (Wave 1).
 
 ---
 
@@ -208,8 +228,17 @@ To prevent confusion:
   openai fallback) — see Sprint 7 tests.
 - **PHI encryption at rest** is wired in all 8 services and
   exercised by `tests/integration/test_phi_at_rest.py`.
+  > ⚠️ **CORRECTED — see §9 (2026-07-21) and this note (2026-08-23).** This claim is an **overclaim**:
+  > `configure_phi_encryption()` is called in **6 clinical services** (diagnosis, memory, orchestrator,
+  > personality, safety, therapy), not "all 8". The other 4 (user, notification, analytics, config) persist
+  > **no** ClinicalBase PHI and are documented no-op exemptions. The accurate invariant is *persists ClinicalBase
+  > ⇒ calls `configure_phi_encryption` (6/6)*, locked by `test_phi_encryption_activation.py`.
 - **Audit chain integrity** (HMAC-signed) is exercised by
   `tests/integration/test_audit_chain.py`.
+  > ⚠️ **CORRECTED — see §9 (2026-07-21) and this note (2026-08-23).** As shipped this is **restart-continuity
+  > only**: `configure_audit_logger` rehydrates `_last_hash` from the durable store so the chain survives a
+  > restart, but **cross-worker/concurrent atomic chaining (DB-side row lock) and per-service PHI-access audit
+  > emission remain open** to Stage 3. Do not read this bullet as full runtime audit-chain coverage.
 - **Crisis detection** runs all 4 layers including Layer 1 regex even
   when ML keyword detection is active (C-12).
 - **Per-hypothesis Devil's Advocate** challenges (H-07) are applied
@@ -231,15 +260,34 @@ To prevent confusion:
   (diagnosis, memory, orchestrator, personality, safety, therapy). It
   is absent from user-service, notification-service,
   analytics-service, and config_service. Tracked as **REV-12**.
+  → **RESOLVED (A.6, 2026-07-24):** the 4 "missing" services persist
+  **no** ClinicalBase rows (user = own Fernet + non-ClinicalBase
+  models; notification = outbox-only; analytics = ClickHouse; config =
+  no PHI), so `configure_phi_encryption` there would be a no-op that
+  needlessly holds the PHI master key. They are now documented
+  exemptions, and the real invariant — *persists ClinicalBase ⇒ calls
+  `configure_phi_encryption`* — is locked by
+  `tests/integration/test_phi_encryption_activation.py`. The accurate
+  §8 claim is: **PHI encryption at rest is wired in every service that
+  persists ClinicalBase PHI (6/6).**
 - **The audit chain is NOT exercised at runtime.** No service calls
   `configure_audit_logger`; `test_audit_chain.py` exercises the
   primitive in isolation, and the per-process `_last_hash` breaks the
   chain across restarts/replicas. Tracked as **REV-14**.
+  → **PARTIALLY RESOLVED (A.6, 2026-07-24):** `configure_audit_logger`
+  is now exported and the loggers rehydrate `_last_hash` from the
+  durable store on startup, so the chain survives a **restart**
+  (`test_audit_chain.py::TestAuditChainSurvivesRestart`). Still open to
+  B.3/Phase C: cross-worker/concurrent atomic chaining (DB-side row
+  lock) and per-service emission of PHI-access audit events.
 - **Crisis 4-layer detection has an under-escalation gap.** Layer 1
   does run alongside ML keyword detection (C-12 holds), but a lone
   CRITICAL-tier keyword can score below the escalation threshold with
   no max-severity override. Tracked as **REV-02**.
+  → **RESOLVED (A.1, 2026-07-23):** a lone Layer-1 CRITICAL keyword now
+  floors the score at HIGH (max-severity clamp + active-signal-weight
+  normalization) in `crisis_detector.py`.
 
 The three §8 claims about multi-provider LLM fallback and the C-12
-Layer-1 regex remain accurate; only the encryption/audit/scoring
-claims are corrected above.
+Layer-1 regex remain accurate; the encryption/audit/scoring claims
+above are corrected, with A.1/A.6 resolution status appended.

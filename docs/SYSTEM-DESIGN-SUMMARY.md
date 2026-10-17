@@ -6,6 +6,19 @@
 > Purpose: Unified reference for comparing design intent vs. codebase implementation.
 > **Last updated**: 2026-04-11 (implementation status annotations added)
 
+> ### 🟢 2026-08-23 — CORRECTION STAMP (five stale design-vs-code claims; body below preserved as history)
+> Verified against current code + `docs/API-HANDOFF.md`:
+> 1. **Vector store is Weaviate, not ChromaDB.** ChromaDB is a design-doc inconsistency only (see §14.1); the
+>    codebase uses Weaviate. Any "or ChromaDB" phrasing below is historical.
+> 2. **RS256 JWT is now available (implemented + wired), config-gated behind the HS256 default.** The "HS256 today,
+>    upgrade post-MVP" gap (§Key Gaps #2, §Tech Stack, §12) is closed in code; flipping validators to RS256-strict
+>    is a staging rollout step. See `docs/PHASE-C-SECURITY-FINDINGS.md` P1-1.
+> 3. **The API response has NO `{status, data, meta}` envelope.** Per `docs/API-HANDOFF.md`, handlers return the
+>    resource directly (the §11 "Response Envelope Format" block below is aspirational design, not the shipped API).
+> 4. **Devil's Advocate emits 4 bias types, not 6.** The "implementation has 6" notes (§5, §14.8) were reconciled to
+>    the code count of **4** (REV-26).
+> 5. **Bayesian calibration uses N=3 samples**, not "N=3-5" (§5 Sample Consistency Method).
+
 ---
 
 ## Implementation Status (as of 2026-04-11)
@@ -30,7 +43,7 @@
 ### Key Design-vs-Reality Gaps
 
 1. **gRPC vs HTTP**: Design specifies gRPC + Protobuf. Reality uses HTTP/REST (FastAPI). Acceptable for MVP.
-2. **RS256 vs HS256**: Design specifies RS256 JWT. Reality uses HS256. Should upgrade post-MVP.
+2. **RS256 vs HS256**: Design specifies RS256 JWT. Reality uses HS256. Should upgrade post-MVP. — **[CORRECTED 2026-08-23: RS256 issuer signing is now implemented + wired, config-gated behind the HS256 default; flipping to RS256-strict is a staging rollout step, not new code.]**
 3. **mTLS**: Design specifies Istio mTLS. Reality uses service tokens over HTTP. Acceptable for MVP.
 4. **HashiCorp Vault**: Design specifies. Not implemented. Config service provides secret management.
 5. **Kubernetes**: Design specifies K8s. Docker Compose only. Acceptable for MVP.
@@ -70,7 +83,7 @@
 - Language: Python 3.12+ / FastAPI 0.115+ / Uvicorn 0.32+
 - Orchestration: LangGraph 0.2+ / LangChain 0.3+
 - Validation: Pydantic 2.10+
-- Databases: PostgreSQL 16+, Redis 7.4+, Weaviate (or ChromaDB — see §14)
+- Databases: PostgreSQL 16+, Redis 7.4+, Weaviate — **[CORRECTED 2026-08-23: Weaviate is the implemented vector store; "or ChromaDB" is a design-doc inconsistency only, see §14.1]**
 - Messaging: Kafka with Schema Registry
 - LLM: Multi-provider via abstract interface (Anthropic, OpenAI, Google, Deepseek, Groq, Ollama)
 - Infrastructure: Docker, Kubernetes 1.27+, Istio, Kong, Prometheus/Grafana/Jaeger
@@ -246,7 +259,7 @@ risk = L1(0.3) + L2(0.2) + L3(0.2) + L4(0.3)
 
 ### Devil's Advocate (Anti-Sycophancy)
 
-**3 Bias Types Specified in Design** (implementation has 6):
+**3 Bias Types Specified in Design** (implementation emits **4** — **[CORRECTED 2026-08-23: the code count is 4, not 6; the "6" in §14.8 was reconciled down per REV-26]**):
 
 | Bias | Detection | Penalty |
 |------|-----------|---------|
@@ -263,7 +276,7 @@ Prior = base_prevalence(age, sex) × risk_factor_multiplier
 Likelihood = criteria_coverage(0.4) + specificity(0.3) + exclusion_criteria(0.3)
 ```
 
-**Sample Consistency Method**: N=3-5 LLM samples, measure agreement:
+**Sample Consistency Method**: N=3 LLM samples **[CORRECTED 2026-08-23: implementation uses N=3, not "3-5"]**, measure agreement:
 - <60% agreement: "Uncertain" (wide CI)
 - 60-80%: Moderate confidence
 - >80%: High confidence (narrow CI)
@@ -615,6 +628,10 @@ GitHub Actions → Lint (Ruff/mypy/Black) → Unit Tests (>80%) → Docker Build
 
 ### Response Envelope Format
 
+> **[CORRECTED 2026-08-23: NOT the shipped API.** Per `docs/API-HANDOFF.md` the deployed handlers return the
+> resource object **directly** — there is no `{status, data, meta}` envelope. The block below is aspirational
+> design, retained for historical reference.]
+
 ```json
 {
   "status": "success|error",
@@ -750,7 +767,7 @@ During analysis, the following inconsistencies were found **within the design do
 
 - **Diagnosis design doc**: 3 bias types (Confirmation, Premature Closure, Anchoring)
 - **Codebase implementation**: 6 bias types (adds Availability, Base Rate Neglect, Attribution)
-- **Resolution**: Implementation exceeds design (positive deviation)
+- **Resolution**: Implementation exceeds design (positive deviation) — **[CORRECTED 2026-08-23: the code actually emits 4 bias types, not 6 (REV-26 reconciliation); this "6" is stale.]**
 
 ---
 

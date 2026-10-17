@@ -1,6 +1,6 @@
 # Solace-AI Clinical Validation
 
-> ℹ️ **Strongest doc, two attribution fixes (flagged 2026-07-21).** The clinical thresholds here are verified in code. Two corrections: the H-13 contextual crisis regexes live in the **therapy** service (`therapy_service/src/domain/service.py:333`), not the safety Layer-1 detector; and "ESCALATE blocks insight generation" references code that doesn't exist (ESCALATE is a label with no gating). Also see accuracy items REV-25/27/28/29/30 in [BUG-BACKLOG.md](BUG-BACKLOG.md) that need clinician reconciliation before sign-off.
+> ℹ️ **Strongest doc, two attribution fixes (flagged 2026-07-21).** The clinical thresholds here are verified in code. Two corrections: the H-13 contextual crisis regexes live in the **therapy** service (`therapy_service/src/domain/service.py:333`), not the safety Layer-1 detector; and "ESCALATE blocks insight generation" references code that doesn't exist (ESCALATE is a label with no gating). Accuracy items REV-25/26/27/28/29/30 + A4 are now **code-reconciled to the documented claims** (2026-07-30) and await clinician sign-off — see **§10** below.
 
 > **Audience**: Licensed clinicians evaluating the MVP.
 > **Purpose**: Explicitly state what Solace-AI implements per clinical
@@ -260,6 +260,61 @@ Technique selection uses the spec-weighted formula:
 | PCL-5 (§1.3) | 10-item halved screener | brevity for AI-mediated use; full PCL-5 required for formal dx |
 | ESCALATE tier (§4.5) | New confidence tier below LOW | prevent silent insight generation on dangerously uncertain cases |
 | Protective-factor floor (§3.3) | Never downgrade CRITICAL | patient safety conservatism |
+
+---
+
+## 10. Clinical-accuracy reconciliation (REV-25..30, A4) — code now matches claim, **pending D2 clinician sign-off**
+
+2026-07-30 (Stage 1 · A3/A4): the six clinical-accuracy drifts flagged in the
+header note were reconciled — the **code was changed to match the documented
+clinical claim** (each via a failing Prove-It test first, then to green). Every
+item below is a patient-facing clinical behavior change and **requires licensed-
+clinician sign-off (D2)** before launch. Each links its Prove-It test.
+
+| REV | Claim | Code before | Resolution (code now) | Clinician decision needed |
+|-----|-------|-------------|-----------------------|---------------------------|
+| **REV-25** | CRITICAL crisis threshold = 0.85; detection latency observable; Layer-1 keyword gate < 10 ms | Threshold 0.9 (0.85–0.899 scored HIGH, not CRITICAL); `detection_time_ms` hard-coded 0; no latency SLO | `critical_threshold` 0.9 → **0.85** (`value_objects.py` + runtime `crisis_detector.py`); lone non-negated critical keyword now floors to **CRITICAL** (`escalate_immediately`, was HIGH/`intervene`); `detection_time_ms` = real `perf_counter` ms; Layer-1 gate SLO test (measured median ~0.07 ms) | Confirm the more-sensitive threshold + lone-keyword→CRITICAL escalation match clinical intent and on-call load. `test_rev25_reconcile.py` |
+| **REV-26** | Devil's-Advocate detects 6 cognitive biases | Only 4 emitted; `base_rate_neglect` + `attribution_error` were dead metadata (no inputs to detect them) | Removed the 2 un-emittable biases so **advertised = emittable (4)**; docstring notes any re-add must ship with emission logic | Confirm base-rate-neglect / attribution-error are not required for MVP, or request real detectors. `test_rev26_reconcile.py` |
+| **REV-27** | Bayesian calibration N=3 samples; `< 60% agreement → Uncertain` label | N=5; no Uncertain label | `calibration_samples` 5 → **3**; added `Uncertain` (<0.60) / Moderate / High agreement label on `CalibrationResult`. **2026-08-24 follow-up: true N-sample sampling now wired** (see §10.1) — the agreement signal is no longer a consistency-score proxy | Confirm N=3 vs 5 and the 0.60/0.80 band boundaries. `test_rev27_reconcile.py`, `test_rev27_nsample.py` |
+| **REV-28** | Corrective RAG: `< 3 relevant docs → degraded/structured error` | SUCCESS returned with 1–2 relevant docs (FAILED only on zero) | Added `min_relevant_documents` (default 3, env-configurable) + `INSUFFICIENT_CONTEXT` status; <3 relevant → degraded result with only the relevant subset | Confirm the default minimum of 3 and that the degraded result should surface the partial docs. `test_rev28_reconcile.py` |
+| **REV-29** | Diagnoses / clinical memories **never decay** | `clinical` got only a 0.5 decay *modifier* and still decayed; `clinical`/`diagnosis` categories fell back to MEDIUM_TERM | `NEVER_DECAY_CATEGORIES = {permanent, clinical, diagnosis}` → zero decay in both DecayManager and the SQL batch path | Confirm which retention categories count as never-decay. `test_rev29_a4_reconcile.py` |
+| **A4** | SQL batch decay uses the **same per-category rates** as the in-process DecayManager, referenced from last access | SQL applied a flat ~0.05/day to all records (~2.5× drift from short-term 0.15) | SQL now builds a per-category `CASE` from one shared rate table (short 0.15 / medium 0.05 / long 0.02 /day; never-decay = 0), keyed off `accessed_at` | Confirm the per-category half-lives. `test_rev29_a4_reconcile.py` |
+| **REV-30** | Step-4 calibration integrates the **current message's** symptoms | Current-turn symptoms merged into `session.symptoms` only *after* the chain, so step-4 saw prior-turn symptoms only | Current-turn (step-1) symptoms merged into a deduped working set fed to step-4 calibration before it runs (session state untouched → no double-count) | Confirm the corrected current-turn weighting/timing matches intended diagnostic reasoning. `test_rev30_reconcile.py` |
+
+### 10.1 REV-27 follow-up — true N-sample calibration (2026-08-24, **pending D2 clinician sign-off**)
+
+**Patient-facing calibration behaviour change.** REV-27 had landed the N=3 /
+`Uncertain (<0.60)` label, but the agreement signal was a single-shot
+**consistency-score PROXY** — no independent samples were ever drawn. This
+follow-up wires **genuine N-sample calibration** in
+[`confidence.py`](../services/diagnosis_service/src/domain/confidence.py):
+
+- The calibrator now draws **N independent estimates** (N =
+  `calibration_samples`, **default 3**, unchanged) via an **injectable,
+  seedable sampler** (`ConsistencySampler`), and derives the agreement signal
+  from their **distribution** rather than a single value.
+- **How agreement is derived:** `agreement = mean × (1 − min(1, std × K))`
+  where `mean`/`std` are over the N drawn estimates and `K =
+  sample_spread_penalty` (default 2.0). Tightly-clustered high samples →
+  high agreement (**High** band); wide disagreement (large `std`) drives
+  agreement down into the **Uncertain** band. The result carries the full
+  distribution (`sample_count`, `sample_mean`, `sample_spread`,
+  `sample_agreement`).
+- **Cited thresholds are unchanged:** confidence tiers (HIGH ≥ 0.70 / MEDIUM /
+  LOW / ESCALATE < 0.30) and the agreement bands (`Uncertain` < 0.60 /
+  Moderate 0.60–0.80 / High > 0.80) are preserved exactly.
+- **OFF / inert by default:** with no sampler injected the calibrator uses a
+  **degenerate sampler** (N identical copies → `std = 0`), so `agreement ==
+  mean ==` the legacy consistency proxy. Existing behaviour and the degenerate
+  N=1 case are byte-for-byte backward-compatible; `DiagnosisService` continues
+  to construct the calibrator with the default (inert) sampler. A real
+  stochastic path is opt-in by injecting `SeededGaussianSampler` (deterministic
+  under a fixed seed for test/audit replay).
+
+Clinician decision needed: confirm the spread-penalty formulation (`K = 2.0`)
+and that deriving `Uncertain` from sample **disagreement** (not just a low
+point-estimate) matches clinical intent, and approve enabling a live
+stochastic sampler in production. Prove-It: `test_rev27_nsample.py`.
 
 ---
 
