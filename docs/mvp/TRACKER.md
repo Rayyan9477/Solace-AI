@@ -13,11 +13,11 @@ The register's statuses are derived from this file at each barrier (`fixed` when
 
 | Status | todo | in-progress | review | fixing | done | blocked | deferred | total |
 |---|---|---|---|---|---|---|---|---|
-| Tasks | 272 | 1 | 1 | 1 | 54 | 1 | 0 | 330 |
+| Tasks | 272 | 1 | 1 | 0 | 55 | 1 | 0 | 330 |
 
 | Wave | Phase A done / total | Phase B done / total | Active | Blocked |
 |---|---|---|---|---|
-| W0 | 35 / 39 | 13 / 16 | 3 | 1 |
+| W0 | 35 / 39 | 14 / 16 | 2 | 1 |
 | W1 | 0 / 34 | 0 / 35 | 0 | 0 |
 | W2 | 0 / 16 | 0 / 61 | 0 | 0 |
 | W3 | 0 / 24 | 0 / 40 | 0 | 0 |
@@ -42,7 +42,7 @@ The register's statuses are derived from this file at each barrier (`fixed` when
 | WS-14 | 1 / 22 |
 | WS-15 | 2 / 23 |
 | WS-16 | 1 / 22 |
-| WS-17 | 2 / 19 |
+| WS-17 | 3 / 19 |
 | WS-18 | 2 / 19 |
 
 **Register entries:** 50 of 345 covered entries fixed (all their tasks done); 12 partly done.
@@ -126,7 +126,7 @@ Filled at each wave barrier (master plan, section 5.5). The tree zip is the only
 | [WS-15.2](../superpowers/plans/2026-10-18-mvp-remediation/WS-15-therapy-service.md#task-ws-152-refuse-silent-in-memory-therapy-repositories-in-strict-environments) | Refuse silent in-memory therapy repositories in strict environments | medium | security-critical | Opus | no | WS-15.1 | MVP-191 | `done` | 1c22662 approved (spec + security, 0 findings) |
 | [WS-16.1](../superpowers/plans/2026-10-18-mvp-remediation/WS-16-diagnosis-service.md#task-ws-161-adopt-the-if-01-runtime-in-diagnosis-build-the-session-store-from-the-runtime-redis-client-and-keep-one-set-of-reasoning-knobs) | Adopt the IF-01 runtime in diagnosis, build the session store from the runtime Redis client and keep one set of reasoning knobs | low | standard | Sonnet | no | - | MVP-263 | `done` | head fc7b965 APPROVED (0 findings; scoring untouched) |
 | [WS-17.19](../superpowers/plans/2026-10-18-mvp-remediation/WS-17-memory-service.md#task-ws-1719-memory-publishes-the-canonical-therapy-to-memory-context-examples) | Memory publishes the canonical therapy-to-memory context examples | medium | standard | Sonnet | no | WS-17.1 | MVP-357 | `done` | f06a395 approved |
-| [WS-17.2](../superpowers/plans/2026-10-18-mvp-remediation/WS-17-memory-service.md#task-ws-172-run-postgresrepository-on-the-shared-connectionpoolmanager-pool-transport-only) | Run PostgresRepository on the shared ConnectionPoolManager pool (transport only) | high | security-critical | Opus | no | WS-17.1 | support | `fixing` | fix1: W172-SEC-1 |
+| [WS-17.2](../superpowers/plans/2026-10-18-mvp-remediation/WS-17-memory-service.md#task-ws-172-run-postgresrepository-on-the-shared-connectionpoolmanager-pool-transport-only) | Run PostgresRepository on the shared ConnectionPoolManager pool (transport only) | high | security-critical | Opus | no | WS-17.1 | support | `done` | fix1 5baf908 (W172-SEC-1 closed); barrier gate met |
 | [WS-18.1](../superpowers/plans/2026-10-18-mvp-remediation/WS-18-personality-analytics.md#task-ws-181-personality-adopts-the-if-01-runtime-and-boots-without-the-unused-redis-and-db-passwords) | Personality adopts the IF-01 runtime and boots without the unused Redis and DB passwords | blocker | standard | Sonnet | no | - | MVP-027 | `done` | fix1 e3543f6 (W181-SPE-1 closed) |
 | [WS-18.2](../superpowers/plans/2026-10-18-mvp-remediation/WS-18-personality-analytics.md#task-ws-182-analytics-adopts-the-if-01-runtime-a-dead-kafka-consumer-shows-in-ready-the-lint-gate-is-clean) | Analytics adopts the IF-01 runtime; a dead Kafka consumer shows in /ready; the lint gate is clean | medium | standard | Sonnet | no | - | MVP-110 | `done` | fix1 99a2e5a (W182-SPE-1, SPE-2 closed) |
 
