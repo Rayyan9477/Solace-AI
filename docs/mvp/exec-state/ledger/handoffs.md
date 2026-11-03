@@ -1,7 +1,7 @@
 # Pending hand-offs (carry into the named task's dispatch; tick when dispatched)
 
-- [ ] WS-03.3 (from WS-03.2): in strict, REDIS_URL is empty unless REDIS_PASSWORD is set -> make REDIS_PASSWORD required in strict and replace both REDIS_URL lines; REDIS_PASSWORD is registered secret / format urlsafe24, so WS-03.3's registry rows must match.
-- [ ] WS-03.3 (from WS-03.2, controller ruling): app images are unqualified `solace/<name>:dev`; set `pull_policy: build` on every service that has a `build:` so Compose never pulls a same-named image from Docker Hub.
+- [x] WS-03.3 (from WS-03.2): in strict, REDIS_URL is empty unless REDIS_PASSWORD is set -> make REDIS_PASSWORD required in strict and replace both REDIS_URL lines; REDIS_PASSWORD is registered secret / format urlsafe24, so WS-03.3's registry rows must match.
+- [x] WS-03.3 (from WS-03.2, controller ruling): app images are unqualified `solace/<name>:dev`; set `pull_policy: build` on every service that has a `build:` so Compose never pulls a same-named image from Docker Hub.
 - [x] WS-01.F4 (from WS-03.2): add `.gitattributes` with `*.sh text eol=lf` (and `docker/entrypoint.sh`, `scripts/db/pg_tls_entrypoint.sh` covered); a CRLF checkout breaks the bind-mounted strict Postgres entrypoint and the image entrypoint. Add a tests/build case that every tracked *.sh is LF in the index and the attribute is set.
 - [ ] W4 backup task (WS-03 backup sidecar, from WS-03.2): the strict hostssl-only pg_hba has no replication rule; the backup sidecar task must add a hostssl replication rule for its role.
 - [ ] WS-03.15 (from WS-03.2): staging docs are stale vs the new data plane (migrate job, solace_app, Kafka required in dev).
@@ -17,8 +17,8 @@
 - [x] WS-14.1 (dispatched) (from WS-05.4, ruling): user-service setting USER_EMAIL_ALLOW_SPECIAL_USE_TLDS (default empty, comma list) - the email validator accepts those special-use TLDs (the e2e overlay sets 'invalid'); unit test default rejects @test.invalid, setting accepts it, other special-use TLDs stay rejected.
 - [ ] WS-05.4 part 2: overlay adds USER_EMAIL_ALLOW_SPECIAL_USE_TLDS=invalid on user-service (+ OVERLAY_ALLOWED_KEYS).
 - [ ] CI (WS-01.8 owner, from WS-05.4): POSIX 0700/0600 e2e secrets dir may be unreadable by non-root container users on Linux CI - choose a group-readable mode or chown in the CI job.
-- [ ] W0 barrier gate (from WS-17.1 review): WS-17.2 (memory PostgresRepository on the default pool: TLS verify-full, role check, hide_parameters) must be done before the W0 barrier is declared.
-- [ ] WS-03.5 (from WS-11.1): strict compose must set CORS_ALLOWED_ORIGINS on orchestrator and user-service (edge services fail closed without it) before the W0 strict boot smoke (WS-05.5).
+- [x] W0 barrier gate (from WS-17.1 review): WS-17.2 (memory PostgresRepository on the default pool: TLS verify-full, role check, hide_parameters) must be done before the W0 barrier is declared.
+- [x] WS-03.5 (from WS-11.1): strict compose must set CORS_ALLOWED_ORIGINS on orchestrator and user-service (edge services fail closed without it) before the W0 strict boot smoke (WS-05.5).
 - [ ] WS-06 follow-up (from WS-12.1 + WS-15.1 reviews): KafkaEventBridge.start() leaks the producer on partial start and stop() is a no-op when _started is False; fix in solace_events/bridge code shared by all services; register the outbox poller as a runtime background task so /live shows it.
 - [ ] WS-12.8 / WS-12.9 (from WS-12.1 review CRI-2): escalation save failures swallowed (201 with unstored id), SafetyEventPublisher queue drops on shutdown, KafkaEventBridge.handle swallows outbox save failure; check WS-12.9 acceptance covers the shutdown-drain case.
 - [ ] WS-14 owner (from WS-14.1 review SPE-1): update_preferences existence check runs as caller - neither WS-14.8 nor WS-14.20 touches it; assign to the task that edits update_preferences.
