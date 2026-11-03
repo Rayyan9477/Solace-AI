@@ -39,3 +39,4 @@
 - [ ] Config adoption (after D-19 lifts, from W0 bug round A-4): config_service/src/main.py copies error['msg'] into 422 bodies and logs error=str(exc).
 - [ ] WS-09.13 (from W0 bug round A-1): add RED cases for top-level errors() spread, value_error msg/ctx strings, model repr holding error dicts, str(ValidationError) of hide_input_in_errors models.
 - [ ] Owner / W1 priority (from W0 bug round B-6): orchestrator SafetyServiceClient never authenticates to safety (always 401) and the keyword fallback can lower flags - WS-10.4; recommend scheduling first in W1.
+- [ ] WS-05.8 / W1 barrier (from WS-05.6 review profile ruling): widen tests/e2e/test_crisis_alert_e2e.py to profile('dev','strict') with observed strict hops so the production-like profile gates the crisis path.
