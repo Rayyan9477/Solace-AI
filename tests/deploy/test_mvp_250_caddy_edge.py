@@ -47,7 +47,12 @@ def test_adapted_config_blocks_metrics_before_proxying(caddy_adapt):
     assert text.index('"/metrics"') < text.index('"orchestrator-service:8000"')
 
 # --- WS-03.5 additions ------------------------------------------------------------------------------
-import secrets, shutil, subprocess, time, urllib.error, urllib.request  # noqa: E402,E401  (below the brief's verbatim block)
+import secrets  # noqa: E402,I001  (below the brief's verbatim block)
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+import time  # noqa: E402
+import urllib.error  # noqa: E402
+import urllib.request  # noqa: E402
 from tests.deploy.conftest import CADDY_IMAGE, _free_port  # noqa: E402
 
 API_SITE_ENV = {"CADDY_API_SITE": "http://api.example.test", "CADDY_AUTH_SITE": "http://auth.example.test",
@@ -90,7 +95,7 @@ def test_both_sites_import_never_routed_first_inside_a_route():
         assert m, upstream
 
 def test_no_dev_only_vhost_and_no_wildcard_trust():
-    code = "\n".join(l.split("#", 1)[0] for l in CADDYFILE.splitlines())
+    code = "\n".join(line.split("#", 1)[0] for line in CADDYFILE.splitlines())
     assert "kafka-ui" not in code and "kafka." not in code
     # Caddy must not trust a client's X-Forwarded-For: the app trusts exactly one hop (Caddy's)
     assert "trusted_proxies" not in code
@@ -172,7 +177,7 @@ def test_running_dev_edge_answers_404_for_internal_paths():
     for key, value in env.items():
         cmd += ["-e", f"{key}={value}"]
     # S603: a docker argv list (no shell) built from the test's own literals
-    subprocess.run(cmd + [CADDY_IMAGE], check=True, capture_output=True, timeout=120)  # noqa: S603
+    subprocess.run([*cmd, CADDY_IMAGE], check=True, capture_output=True, timeout=120)  # noqa: S603
 
     def status(host: str, path: str) -> int:
         req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", headers={"Host": f"{host}:8088"})
