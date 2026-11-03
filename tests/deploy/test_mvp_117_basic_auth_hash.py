@@ -24,8 +24,8 @@ def test_registry_marks_the_hash_bcrypt_secret_in_both_profiles(registry):
 
 def test_dev_file_escapes_every_dollar_of_the_default_hash():
     # an unescaped $2a in the base file would be interpolated away (MVP-117)
-    line = next(l for l in (REPO / "docker-compose.yml").read_text(encoding="utf-8").splitlines()
-                if l.strip().startswith("BASIC_AUTH_HASH:")), "")
+    line = next((l for l in (REPO / "docker-compose.yml").read_text(encoding="utf-8").splitlines()
+                 if l.strip().startswith("BASIC_AUTH_HASH:")), "")
     assert line, "docker-compose.yml sets no BASIC_AUTH_HASH"
     default = re.search(r"\$\{BASIC_AUTH_HASH:-(.*)\}", line).group(1)
     assert default.startswith("$$2") and default.count("$$") == 3 and "$" not in default.replace("$$", "")

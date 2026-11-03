@@ -27,3 +27,5 @@
 - [ ] W0 bug-finding round (from WS-04.F1 fix2 review WS04F1F2-PHI-2): validation input still renders via a top-level spread errors() dict, value_error msg in str(errors(include_input=False)), and a pydantic model repr holding error dicts.
 - [ ] WS-03 owner (from WS-15.2): deploy/env/env-contract.yaml still lists THERAPY_DB_* / THERAPY_REDIS_* as legacy for therapy-service; nothing reads them after config.py was deleted - drop the rows.
 - [ ] W0 bug-finding round (from WS-12.17): safety check_safety returns is_safe=False for 'Just a normal message' (test_events::test_no_events_emitted_without_publisher, red at base 16586ff) - find cause.
+- [ ] WS-18.9 (from WS-18.2 review W182-SEC-1): analytics DLQ wiring swallows get_pool failure and DLQ handler failure with no strict check - the replacement must fail closed in strict.
+- [ ] WS-17.5/17.6/17.11 (from WS-17.2 real-PG probe W172-REP-1): real-infra tests must cover therapeutic_events too; session_summaries, therapeutic_events and memory_user_profiles have no RLS at head (migration 006 deferral) - confirm an owner task enables it.

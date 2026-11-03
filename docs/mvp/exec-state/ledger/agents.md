@@ -103,3 +103,6 @@
 - aede0971b7a7e0a5a  Review WS-17.19
 - a24f71ecf9fd86947  Review WS-13.2 crisis-path
 - a9c9d0e7449dbe271  Review WS-13.2 spec+security
+- aa9413114b7ecb737  Skeptic 1 batch1
+- ab1d7065656f93e06  Skeptic 2 batch1
+- a3530e5db3e4b3d89  Skeptic 3 batch1

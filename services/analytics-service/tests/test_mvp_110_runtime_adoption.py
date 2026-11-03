@@ -64,3 +64,22 @@ async def test_mvp_110_consumer_failure_is_fatal_in_strict(monkeypatch) -> None:
     with pytest.raises(StartupDependencyError):
         await analytics_main.start_kafka_ingestion(
             runtime, AnalyticsConsumer(aggregator=AnalyticsAggregator()), _kafka_settings("staging"))
+
+
+def test_fix1_shutdown_runs_clean_and_clears_both_global_sets(monkeypatch) -> None:
+    from unittest.mock import MagicMock
+
+    import api as analytics_api
+    from solace_infrastructure.runtime import bootstrap
+
+    log = MagicMock()
+    monkeypatch.setattr(bootstrap, "_log", log)
+    with TestClient(analytics_main.app):
+        assert analytics_main._analytics_aggregator is not None
+        assert analytics_api._analytics_aggregator is not None
+    failed = [c for c in log.warning.call_args_list if c.args and c.args[0] == "runtime_shutdown_step_failed"]
+    assert failed == []
+    for module in (analytics_main, analytics_api):
+        assert module._analytics_aggregator is None
+        assert module._report_service is None
+        assert module._analytics_consumer is None
