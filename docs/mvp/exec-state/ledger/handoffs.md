@@ -26,3 +26,4 @@
 - [ ] W1 decision (D-26; WS-07/WS-14, from WS-11.1 fix1): RateLimitMiddleware now fails open on Redis errors for every service incl. user-service login routes - decide whether auth routes should fail closed (brute-force window during a Redis outage).
 - [ ] W0 bug-finding round (from WS-04.F1 fix2 review WS04F1F2-PHI-2): validation input still renders via a top-level spread errors() dict, value_error msg in str(errors(include_input=False)), and a pydantic model repr holding error dicts.
 - [ ] WS-03 owner (from WS-15.2): deploy/env/env-contract.yaml still lists THERAPY_DB_* / THERAPY_REDIS_* as legacy for therapy-service; nothing reads them after config.py was deleted - drop the rows.
+- [ ] W0 bug-finding round (from WS-12.17): safety check_safety returns is_safe=False for 'Just a normal message' (test_events::test_no_events_emitted_without_publisher, red at base 16586ff) - find cause.

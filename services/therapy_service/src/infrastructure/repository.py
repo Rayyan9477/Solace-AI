@@ -6,15 +6,23 @@ from __future__ import annotations
 import os
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone, timedelta
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 from uuid import UUID
 import structlog
+from solace_infrastructure.runtime import is_strict_environment
 
 from ..domain.entities import TreatmentPlanEntity, TherapySessionEntity
 from ..domain.value_objects import Technique, OutcomeMeasure
 
 logger = structlog.get_logger(__name__)
 T = TypeVar("T")
+RepositoryBackend = Literal["postgres", "memory"]
+
+
+def _refuse_in_strict_environment() -> None:
+    """In-memory repositories hold PHI in process memory and lose it on restart (MVP-191)."""
+    if is_strict_environment():
+        raise RuntimeError("In-memory repositories are not allowed in strict environments.")
 
 
 class Repository(ABC, Generic[T]):
@@ -34,8 +42,7 @@ class TreatmentPlanRepository(Repository[TreatmentPlanEntity]):
     """Repository for treatment plan persistence."""
 
     def __init__(self) -> None:
-        if os.getenv("ENVIRONMENT") == "production":
-            raise RuntimeError("In-memory repositories are not allowed in production.")
+        _refuse_in_strict_environment()
         self._storage: dict[UUID, TreatmentPlanEntity] = {}
         self._user_index: dict[UUID, list[UUID]] = {}
 
@@ -93,8 +100,7 @@ class TherapySessionRepository(Repository[TherapySessionEntity]):
     """Repository for therapy session persistence."""
 
     def __init__(self) -> None:
-        if os.getenv("ENVIRONMENT") == "production":
-            raise RuntimeError("In-memory repositories are not allowed in production.")
+        _refuse_in_strict_environment()
         self._storage: dict[UUID, TherapySessionEntity] = {}
         self._user_index: dict[UUID, list[UUID]] = {}
         self._plan_index: dict[UUID, list[UUID]] = {}
@@ -165,8 +171,7 @@ class TechniqueRepository:
     """Repository for therapeutic technique lookup."""
 
     def __init__(self) -> None:
-        if os.getenv("ENVIRONMENT") == "production":
-            raise RuntimeError("In-memory repositories are not allowed in production.")
+        _refuse_in_strict_environment()
         self._techniques: dict[UUID, Technique] = {}
         self._name_index: dict[str, UUID] = {}
         self._modality_index: dict[str, list[UUID]] = {}
@@ -229,8 +234,7 @@ class OutcomeMeasureRepository:
     """Repository for outcome measure persistence."""
 
     def __init__(self) -> None:
-        if os.getenv("ENVIRONMENT") == "production":
-            raise RuntimeError("In-memory repositories are not allowed in production.")
+        _refuse_in_strict_environment()
         self._measures: dict[UUID, OutcomeMeasure] = {}
         self._session_index: dict[UUID, list[UUID]] = {}
         self._user_instrument_index: dict[tuple[UUID, str], list[UUID]] = {}
@@ -287,7 +291,9 @@ class UnitOfWork:
     """Unit of Work pattern for coordinating repository transactions."""
 
     def __init__(self, treatment_plans: TreatmentPlanRepository, sessions: TherapySessionRepository,
-                 techniques: TechniqueRepository, outcomes: OutcomeMeasureRepository) -> None:
+                 techniques: TechniqueRepository, outcomes: OutcomeMeasureRepository,
+                 backend: RepositoryBackend = "memory") -> None:
+        self.backend: RepositoryBackend = backend
         self.treatment_plans, self.sessions = treatment_plans, sessions
         self.techniques, self.outcomes = techniques, outcomes
         self._committed = False
@@ -312,20 +318,30 @@ class UnitOfWork:
             await self.commit()
 
 
-def create_unit_of_work(backend: str | None = None, **kwargs: Any) -> UnitOfWork:
+def create_unit_of_work(backend: str | None = None, *, environment: str | None = None,
+                        **kwargs: Any) -> UnitOfWork:
     """Factory to create UnitOfWork with the configured backend.
 
     Args:
-        backend: Storage backend type ("memory" or "postgres").
-            If None, auto-detects: postgres for non-test environments, memory for test.
+        backend: Storage backend type ("memory" or "postgres"). If None: memory in a
+            test environment, postgres otherwise.
+        environment: The service's own environment. The service is strict if it OR the
+            bare ``ENVIRONMENT`` is staging/production (MVP-191).
         **kwargs: Backend-specific configuration (e.g., postgres_client for postgres).
 
-    Returns:
-        Configured UnitOfWork with appropriate repositories.
+    Raises:
+        RuntimeError: in a strict environment when the memory backend is requested or the
+            Postgres backend cannot be built; there is no silent in-memory fallback.
     """
+    strict = is_strict_environment(environment) or is_strict_environment()
     if backend is None:
-        env = os.getenv("ENVIRONMENT", "development")
-        backend = "memory" if env == "test" else "postgres"
+        bare = os.getenv("ENVIRONMENT", "development").strip().lower()
+        own = (environment or "").strip().lower()
+        backend = "memory" if not strict and "test" in (own, bare) else "postgres"
+    if backend not in ("postgres", "memory"):
+        raise ValueError(f"unknown therapy repository backend: {backend!r}")
+    if backend == "memory" and strict:
+        raise RuntimeError("In-memory repositories are not allowed in strict environments.")
 
     if backend == "postgres":
         logger.info("therapy_repository_backend", backend="postgres")
@@ -345,9 +361,14 @@ def create_unit_of_work(backend: str | None = None, **kwargs: Any) -> UnitOfWork
                 sessions=PostgresTherapySessionRepository(client),
                 techniques=PostgresTechniqueRepository(client),
                 outcomes=PostgresOutcomeMeasureRepository(client),
+                backend="postgres",
             )
         except (ImportError, KeyError) as e:
-            logger.warning("postgres_backend_unavailable", error=str(e), fallback="memory")
+            if strict:
+                raise RuntimeError(
+                    "therapy postgres repositories unavailable in strict environment"
+                ) from e
+            logger.warning("therapy_repository_memory_fallback", error_type=type(e).__name__)
 
     logger.info("therapy_repository_backend", backend="memory")
     return UnitOfWork(
@@ -355,4 +376,5 @@ def create_unit_of_work(backend: str | None = None, **kwargs: Any) -> UnitOfWork
         sessions=TherapySessionRepository(),
         techniques=TechniqueRepository(),
         outcomes=OutcomeMeasureRepository(),
+        backend="memory",
     )

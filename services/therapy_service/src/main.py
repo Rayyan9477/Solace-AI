@@ -136,7 +136,18 @@ async def build_therapy_components(
     except Exception as e:
         logger.warning("context_assembler_init_failed", error=str(e))
 
-    unit_of_work = create_unit_of_work()
+    # MVP-191: strict raises instead of falling back to in-memory repositories.
+    unit_of_work = create_unit_of_work(environment=settings.environment)
+    memory_not_ready = (
+        unit_of_work.backend == "memory" and settings.environment.strip().lower() != "test"
+    )
+
+    async def _repository_ready() -> tuple[bool, str]:
+        if memory_not_ready:
+            return False, "in-memory repositories"
+        return True, unit_of_work.backend
+
+    runtime.register_readiness_check("therapy_repository", _repository_ready, critical=True)
 
     # GDPR right-to-erasure (REV-17) across the Postgres tables and the durable Redis store.
     user_data_erasure = None
