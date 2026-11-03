@@ -1,0 +1,518 @@
+# IF-02 deployment environment contract (owner: WS-03).
+#
+# One row per container variable and service set. Fields (deploy/env/registry.py validates them):
+#   name                the variable the container sees
+#   source              the env-file / secrets-store key it is interpolated from; null = compose literal
+#   services            compose services that receive it
+#   profiles            dev (docker-compose.yml) and/or strict (+ docker-compose.prod.yml); default both
+#   secret              never committed; .env.example writes it blank; strict values are generated in tests
+#   format              text|int|bool|url|email|hostport|csv|json|urlsafe24|urlsafe48|hex64|fernet|bcrypt|pem
+#   required_in_strict  the strict overlay uses ${SOURCE:?...}, so a strict render fails while it is unset
+#   dev_default         the committed dev fallback (or the literal); null = empty unless supplied
+#   strict_default      the strict value when the source is unset; null + required = ${SOURCE:?...}
+#   example             placeholder for operator-supplied non-secrets (never for a secret)
+#   group               heading in .env.example; legacy = alias awaiting retirement
+#   notes, retired      a retired name must not be read by any code under src/ or services/
+#
+# The pseudo-service "compose" marks a compose interpolation source that no container sees (for
+# example SOLACE_SECRETS_DIR, the host directory of the file secrets); it is registered so the
+# strict render requires it and .env.example documents it.
+#
+# Rules (IF-02): every service gate variable is always ${ENVIRONMENT}; strict = ENVIRONMENT in
+# {staging, production} (D-14). .env.example is rendered from this file
+# (python -m deploy.env.render_env_example --write); tests/deploy/test_env_contract.py renders
+# both compose profiles and enforces this contract.
+
+version: 1
+
+service_sets:
+  app: &app
+    - orchestrator-service
+    - user-service
+    - safety-service
+    - notification-service
+    - diagnosis-service
+    - memory-service
+    - therapy-service
+    - personality-service
+    - analytics-service
+  # the nine app services and the migrate job: every database client
+  db_clients: &db_clients
+    - orchestrator-service
+    - user-service
+    - safety-service
+    - notification-service
+    - diagnosis-service
+    - memory-service
+    - therapy-service
+    - personality-service
+    - analytics-service
+    - migrate
+  llm: &llm
+    - orchestrator-service
+    - safety-service
+    - therapy-service
+    - diagnosis-service
+    - personality-service
+
+variables:
+  # --- environment and the per-service gates (MVP-004, MVP-247) ---------------------------
+  - name: ENVIRONMENT
+    source: ENVIRONMENT
+    services: *db_clients
+    required_in_strict: true
+    dev_default: development
+    group: environment
+    notes: development, test, staging or production; staging and production are strict (D-14).
+  - {name: ORCHESTRATOR_ENVIRONMENT, source: ENVIRONMENT, services: [orchestrator-service], required_in_strict: true, dev_default: development, group: environment, notes: "service gate; always ${ENVIRONMENT}"}
+  - {name: USER_SERVICE_ENV, source: ENVIRONMENT, services: [user-service], required_in_strict: true, dev_default: development, group: environment, notes: "service gate; always ${ENVIRONMENT}"}
+  - {name: SAFETY_ENVIRONMENT, source: ENVIRONMENT, services: [safety-service], required_in_strict: true, dev_default: development, group: environment, notes: "service gate; always ${ENVIRONMENT}"}
+  - {name: NOTIFICATION_SERVICE_ENV, source: ENVIRONMENT, services: [notification-service], required_in_strict: true, dev_default: development, group: environment, notes: "service gate; always ${ENVIRONMENT}"}
+  - {name: DIAGNOSIS_ENVIRONMENT, source: ENVIRONMENT, services: [diagnosis-service], required_in_strict: true, dev_default: development, group: environment, notes: "service gate; always ${ENVIRONMENT}"}
+  - {name: MEMORY_ENVIRONMENT, source: ENVIRONMENT, services: [memory-service], required_in_strict: true, dev_default: development, group: environment, notes: "service gate; always ${ENVIRONMENT}"}
+  - {name: THERAPY_ENVIRONMENT, source: ENVIRONMENT, services: [therapy-service], required_in_strict: true, dev_default: development, group: environment, notes: "service gate; always ${ENVIRONMENT}"}
+  - {name: PERSONALITY_ENVIRONMENT, source: ENVIRONMENT, services: [personality-service], required_in_strict: true, dev_default: development, group: environment, notes: "service gate; always ${ENVIRONMENT}"}
+  - {name: ANALYTICS_SERVICE_ENV, source: ENVIRONMENT, services: [analytics-service], required_in_strict: true, dev_default: development, group: environment, notes: "service gate; always ${ENVIRONMENT}"}
+
+  # --- auth (IF-02) ---------------------------------------------------------------------------
+  - name: AUTH_SECRET_KEY
+    source: AUTH_SECRET_KEY
+    services: *app
+    secret: true
+    format: urlsafe48
+    required_in_strict: true
+    dev_default: dev-jwt-secret-key-minimum-32-chars
+    group: auth
+    notes: HS256 key for service tokens and, until W4, user tokens; at least 32 characters. Replaces the JWT_SECRET_KEY interpolation name (IF-22).
+  - {name: USER_SERVICE_JWT_SECRET_KEY, source: AUTH_SECRET_KEY, services: [user-service], secret: true, format: urlsafe48, required_in_strict: true, dev_default: dev-jwt-secret-key-minimum-32-chars, group: auth, notes: equals AUTH_SECRET_KEY until W4}
+  - name: AUTH_ALGORITHM
+    source: AUTH_ALGORITHM
+    services: *app
+    dev_default: HS256
+    strict_default: HS256
+    group: auth
+    notes: HS256 until the W4 RS256 cut-over.
+  - name: AUTH_PUBLIC_KEYS_JSON
+    source: AUTH_PUBLIC_KEYS_JSON
+    services: *app
+    format: json
+    group: auth
+    notes: "JSON {kid: public PEM} verification keyset; unused while AUTH_ALGORITHM=HS256."
+  - name: AUTH_ACTIVE_KID
+    source: AUTH_ACTIVE_KID
+    services: *app
+    group: auth
+    notes: key id stamped into RS256 tokens; unused while AUTH_ALGORITHM=HS256.
+  - name: AUTH_ACCEPT_LEGACY_HS256
+    source: AUTH_ACCEPT_LEGACY_HS256
+    services: *app
+    format: bool
+    dev_default: "true"
+    strict_default: "true"
+    group: auth
+    notes: false from W4.
+  - name: AUTH_PRIVATE_KEY_PEM
+    source: AUTH_PRIVATE_KEY_PEM
+    services: [user-service]
+    secret: true
+    format: pem
+    group: auth
+    notes: RS256 issuer key (user-service only), one line with \n escapes; unused while AUTH_ALGORITHM=HS256.
+
+  # --- PHI and audit (IF-02) ------------------------------------------------------------------
+  - name: ENCRYPTION_MASTER_KEY
+    source: ENCRYPTION_MASTER_KEY
+    services: *app
+    secret: true
+    format: hex64
+    required_in_strict: true
+    group: phi-audit
+    notes: 'AES-256 master key, 64 hex characters (python -c "import secrets; print(secrets.token_hex(32))"); a raw 32-character value is development/test only (WS-09.1).'
+  - name: ENCRYPTION_SEARCH_HASH_SALT
+    source: ENCRYPTION_SEARCH_HASH_SALT
+    services: *app
+    secret: true
+    format: urlsafe48
+    required_in_strict: true
+    group: phi-audit
+    notes: salt for deterministic PHI search hashes.
+  - name: ENCRYPTION_KEY_ID
+    source: ENCRYPTION_KEY_ID
+    services: *app
+    dev_default: k1
+    strict_default: k1
+    group: phi-audit
+    notes: id of the active master key, ^[A-Za-z0-9_-]{1,32}$.
+  - name: ENCRYPTION_RETIRED_KEYS_JSON
+    source: ENCRYPTION_RETIRED_KEYS_JSON
+    services: *app
+    secret: true
+    format: json
+    group: phi-audit
+    notes: "JSON {key_id: key}, decrypt-only; empty means no retired key."
+  - name: AUDIT_HMAC_KEY
+    source: AUDIT_HMAC_KEY
+    services: *app
+    secret: true
+    format: urlsafe48
+    required_in_strict: true
+    group: phi-audit
+    notes: audit chain HMAC key (P1-8).
+  - {name: FERNET_TOKEN_KEY, source: FERNET_TOKEN_KEY, services: [user-service], secret: true, format: fernet, required_in_strict: true, dev_default: 8kTaL3nRf9xQpZmVwYdE7gHjKbNcSuW2A5iO0tP4rXs=, group: phi-audit, notes: user-service token encryption key until PHI codec adoption}
+  - {name: FERNET_FIELD_KEY, source: FERNET_FIELD_KEY, services: [user-service], secret: true, format: fernet, required_in_strict: true, dev_default: 3mBvN7xRtYfW0pLqKjH8dS5gC2eA9iZuO6wTrXnMaQs=, group: phi-audit, notes: user-service field encryption key until PHI codec adoption}
+  - name: USER_SERVICE_FIELD_ENCRYPTION_KEY
+    source: USER_SERVICE_FIELD_ENCRYPTION_KEY
+    services: [user-service]
+    secret: true
+    format: urlsafe48
+    required_in_strict: true
+    dev_default: dev-encryption-key-32-characters
+    group: phi-audit
+    notes: user-service field encryption key, at least 32 characters. Replaces the FIELD_ENCRYPTION_KEY interpolation name (IF-22).
+
+  # --- database (IF-02 Postgres block, IF-03 roles; D-02 one database, D-15 verified TLS) -----
+  - {name: POSTGRES_HOST, services: *app, dev_default: postgres, strict_default: postgres, group: database, notes: "the compose service; strict refuses a loopback or unset host (WS-02.5)"}
+  - {name: POSTGRES_PORT, services: *app, format: int, dev_default: "5432", strict_default: "5432", group: database}
+  - {name: POSTGRES_DATABASE, services: *app, dev_default: solace, strict_default: solace, group: database, notes: the one application database (D-02)}
+  - {name: POSTGRES_USER, services: *app, dev_default: solace_app, strict_default: solace_app, group: database, notes: "services connect only as solace_app (NOSUPERUSER NOBYPASSRLS, IF-03)"}
+  - name: POSTGRES_PASSWORD
+    source: POSTGRES_PASSWORD
+    services: *app
+    secret: true
+    format: urlsafe24
+    required_in_strict: true
+    dev_default: solace_app_dev_only
+    group: database
+    notes: solace_app's password; init-db creates the role with it. URL-safe, because SAFETY_REPO_POSTGRES_DSN carries it. ProductionGuards requires it on every service in strict.
+  - name: POSTGRES_SSL_MODE
+    source: POSTGRES_SSL_MODE
+    services: *db_clients
+    dev_default: prefer
+    strict_default: verify-full
+    group: database
+    notes: the development mode; the strict overlay always sets verify-full against host postgres (D-15).
+  - {name: POSTGRES_SSL_ROOT_CERT, services: *db_clients, profiles: [strict], strict_default: /run/secrets/postgres-ca.crt, group: database, notes: "the CA from scripts/db/gen_certs.py, mounted from the postgres-ca.crt file secret"}
+  - {name: POSTGRES_MIN_POOL_SIZE, services: *app, format: int, dev_default: "1", strict_default: "1", group: database}
+  - {name: POSTGRES_MAX_POOL_SIZE, services: *app, format: int, dev_default: "8", strict_default: "8", group: database}
+  - {name: POSTGRES_USER, services: [postgres], dev_default: postgres, strict_default: postgres, group: database, notes: "the image superuser: init, ops and backups only (D-02)"}
+  - {name: POSTGRES_DB, services: [postgres], dev_default: solace, strict_default: solace, group: database, notes: the one application database; init-db hands it to solace_migrator}
+  - name: POSTGRES_PASSWORD
+    source: POSTGRES_SUPERUSER_PASSWORD
+    services: [postgres]
+    secret: true
+    format: urlsafe24
+    required_in_strict: true
+    dev_default: solace_superuser_dev_only
+    group: database
+    notes: the image superuser's password (init, ops and backups); never given to a service.
+  - {name: SOLACE_APP_PASSWORD, source: POSTGRES_PASSWORD, services: [postgres], secret: true, format: urlsafe24, required_in_strict: true, dev_default: solace_app_dev_only, group: database, notes: "init-db (infrastructure/init-db/01-roles.sh) creates solace_app with it"}
+  - name: SOLACE_MIGRATOR_PASSWORD
+    source: POSTGRES_MIGRATOR_PASSWORD
+    services: [postgres]
+    secret: true
+    format: urlsafe24
+    required_in_strict: true
+    dev_default: solace_migrator_dev_only
+    group: database
+    notes: solace_migrator's password (the migrate job only); init-db creates the role with it. URL-safe, because DATABASE_URL carries it.
+  - name: DATABASE_URL
+    source: POSTGRES_MIGRATOR_PASSWORD
+    services: [migrate]
+    secret: true
+    format: urlsafe24
+    required_in_strict: true
+    dev_default: postgresql+asyncpg://solace_migrator:solace_migrator_dev_only@postgres:5432/solace
+    group: database
+    notes: the migrate job's solace_migrator URL; it carries no query string or fragment, TLS comes from POSTGRES_SSL_MODE and POSTGRES_SSL_ROOT_CERT (WS-02.4).
+  - {name: SOLACE_PG_TLS, services: [postgres], profiles: [strict], strict_default: required, group: database, notes: "scripts/db/pg_tls_entrypoint.sh: TCP clients must use TLS (hostssl only)"}
+  - name: SOLACE_SECRETS_DIR
+    source: SOLACE_SECRETS_DIR
+    services: [compose]
+    profiles: [strict]
+    required_in_strict: true
+    example: /run/solace/secrets
+    group: database
+    notes: "host directory holding one file per secret, mounted per service under /run/secrets/; W0 holds the Postgres TLS files from python -m scripts.db.gen_certs --out DIR --san postgres (postgres-ca.crt, server.crt, server.key). Compose interpolation only."
+
+  # --- redis (IF-02 Redis block; MVP-118: requirepass always on, one REDIS_PASSWORD source) -------
+  - name: REDIS_PASSWORD
+    source: REDIS_PASSWORD
+    services: [redis]
+    secret: true
+    format: urlsafe24
+    required_in_strict: true
+    dev_default: solace_redis_dev_only
+    group: redis
+    notes: the Redis server's requirepass and every client's password (one source, so a rotation reaches them all). URL-safe, because REDIS_URL carries it.
+  - name: REDIS_URL
+    source: REDIS_PASSWORD
+    services: *app
+    secret: true
+    format: urlsafe24
+    required_in_strict: true
+    dev_default: redis://:solace_redis_dev_only@redis:6379/0
+    group: redis
+    notes: "redis://:REDIS_PASSWORD@redis:6379/0; the runtime has no localhost fallback."
+
+  # --- kafka (IF-02) --------------------------------------------------------------------------------
+  - {name: KAFKA_BOOTSTRAP_SERVERS, services: *app, format: hostport, dev_default: "kafka:9092", strict_default: "kafka:9092", group: kafka}
+  - {name: EVENTS_ENABLED, services: *app, format: bool, dev_default: "true", strict_default: "true", group: kafka, notes: "false only in development/test; replaces the per-service Kafka flags in W1"}
+
+  # --- OAuth (user-service; strict-required flags are request R-12) --------------------------
+  - name: GOOGLE_OAUTH_CLIENT_ID
+    source: GOOGLE_OAUTH_CLIENT_ID
+    services: [user-service]
+    group: oauth
+    notes: Google sign-in is off unless both the client id and the client secret are set.
+  - name: GOOGLE_OAUTH_CLIENT_SECRET
+    source: GOOGLE_OAUTH_CLIENT_SECRET
+    services: [user-service]
+    secret: true
+    format: urlsafe24
+    group: oauth
+    notes: Google OAuth client secret.
+  - name: GOOGLE_OAUTH_REDIRECT_URI
+    source: GOOGLE_OAUTH_REDIRECT_URI
+    services: [user-service]
+    format: url
+    dev_default: http://localhost:8001/api/v1/auth/oauth/google/callback
+    example: https://auth.solace.example.invalid/api/v1/auth/oauth/google/callback
+    group: oauth
+    notes: the localhost default is development only; strict is empty unless set.
+  - {name: GOOGLE_OAUTH_ISSUER, services: [user-service], format: url, dev_default: "https://accounts.google.com", strict_default: "https://accounts.google.com", group: oauth, notes: the test overlay points it at the stub IdP}
+  - {name: GOOGLE_OAUTH_AUTHORIZE_URL, services: [user-service], format: url, dev_default: "https://accounts.google.com/o/oauth2/v2/auth", strict_default: "https://accounts.google.com/o/oauth2/v2/auth", group: oauth}
+  - {name: GOOGLE_OAUTH_TOKEN_URL, services: [user-service], format: url, dev_default: "https://oauth2.googleapis.com/token", strict_default: "https://oauth2.googleapis.com/token", group: oauth}
+  - {name: GOOGLE_OAUTH_JWKS_URL, services: [user-service], format: url, dev_default: "https://www.googleapis.com/oauth2/v3/certs", strict_default: "https://www.googleapis.com/oauth2/v3/certs", group: oauth}
+  - name: OAUTH_ALLOWED_REDIRECT_ORIGINS
+    source: OAUTH_ALLOWED_REDIRECT_ORIGINS
+    services: [user-service]
+    format: csv
+    dev_default: http://localhost:3000
+    example: https://app.solace.example.invalid
+    group: oauth
+    notes: origins the OAuth start redirect may return to; strict is empty unless set.
+
+  # --- LLM (the five LLM services, existing LLM_ prefix; D-04) -------------------------------
+  - name: LLM_PORTKEY_API_KEY
+    source: LLM_PORTKEY_API_KEY
+    services: *llm
+    secret: true
+    format: urlsafe48
+    group: llm
+    notes: Portkey gateway key; empty keeps the LLM off.
+  - name: LLM_PORTKEY_GATEWAY_URL
+    source: LLM_PORTKEY_GATEWAY_URL
+    services: *llm
+    format: url
+    dev_default: https://api.portkey.ai/v1
+    strict_default: https://api.portkey.ai/v1
+    group: llm
+    notes: the test harness points it at fake-llm.
+  - name: LLM_ANTHROPIC_API_KEY
+    source: LLM_ANTHROPIC_API_KEY
+    services: *llm
+    secret: true
+    format: urlsafe48
+    group: llm
+    notes: provider key passed through the gateway; empty keeps the LLM off.
+  - {name: LLM_ENABLE_CACHING, services: *llm, format: bool, dev_default: "false", strict_default: "false", group: llm, notes: never cache PHI-bearing prompts (D-04)}
+  - {name: LLM_TIMEOUT_SECONDS, services: *llm, format: int, dev_default: "30", strict_default: "30", group: llm, notes: the client default}
+  - name: LLM_PHI_EGRESS_APPROVED
+    source: LLM_PHI_EGRESS_APPROVED
+    services: *llm
+    format: bool
+    dev_default: "false"
+    strict_default: "false"
+    group: llm
+    notes: true only after the owner records the provider BAA (D-04).
+
+  # --- orchestrator (IF-02) -------------------------------------------------------------------
+  - {name: ORCHESTRATOR_TURN_TIMEOUT_SECONDS, services: [orchestrator-service], format: int, dev_default: "20", strict_default: "20", group: orchestrator}
+  - {name: ORCHESTRATOR_AGENT_TIMEOUT_SECONDS, services: [orchestrator-service], format: int, dev_default: "8", strict_default: "8", group: orchestrator}
+  - {name: ORCHESTRATOR_SAFETY_CHECK_TIMEOUT_SECONDS, services: [orchestrator-service], format: int, dev_default: "2", strict_default: "2", group: orchestrator}
+  - {name: ORCHESTRATOR_WS_MAX_PER_USER, services: [orchestrator-service], format: int, dev_default: "3", strict_default: "3", group: orchestrator}
+  - {name: ORCHESTRATOR_TRUSTED_PROXY_HOPS, services: [orchestrator-service], profiles: [strict], format: int, strict_default: "1", group: orchestrator, notes: Caddy appends exactly one X-Forwarded-For hop (P2-12)}
+  - {name: LANGGRAPH_STRICT_MSGPACK, services: [orchestrator-service], format: bool, dev_default: "true", strict_default: "true", group: orchestrator, notes: "langgraph's strict msgpack checkpoint decoding; the PYSEC-2026-83 fix is opt-in (WS-01.F2)"}
+
+  # --- memory and Weaviate (D-04: Weaviate is opt-in, compose profile vector; MVP-002) ----------
+  - name: WEAVIATE_ENABLED
+    source: WEAVIATE_ENABLED
+    services: [memory-service]
+    format: bool
+    dev_default: "false"
+    strict_default: "false"
+    group: memory
+    notes: Weaviate writes and vector retrieval (D-04); true needs the vector profile (docker compose --profile vector), otherwise retrieval stays keyword/BM25.
+  - {name: MEMORY_EMBEDDINGS_PROVIDER, services: [memory-service], dev_default: none, strict_default: none, group: memory, notes: no embeddings provider in the MVP (D-04)}
+  - {name: WEAVIATE_HOST, services: [memory-service], dev_default: weaviate, strict_default: weaviate, group: memory}
+  - {name: WEAVIATE_PORT, services: [memory-service], format: int, dev_default: "8080", strict_default: "8080", group: memory}
+  - {name: WEAVIATE_GRPC_PORT, services: [memory-service], format: int, dev_default: "50051", strict_default: "50051", group: memory}
+  - name: WEAVIATE_API_KEY
+    source: WEAVIATE_API_KEY
+    services: [memory-service]
+    secret: true
+    format: urlsafe48
+    required_in_strict: true
+    dev_default: solace-dev-key-change-in-production
+    group: memory
+    notes: Weaviate API key; Weaviate holds PHI-derived embeddings (P2-16).
+  - {name: AUTHENTICATION_APIKEY_ALLOWED_KEYS, source: WEAVIATE_API_KEY, services: [weaviate], secret: true, format: urlsafe48, required_in_strict: true, dev_default: solace-dev-key-change-in-production, group: memory, notes: the key the Weaviate server accepts}
+
+  # --- notification (the full IF-02 notification block lands in WS-03.6) ---------------------
+  - {name: EMAIL_ENABLED, services: [notification-service], format: bool, dev_default: "true", strict_default: "true", group: notification}
+  - name: EMAIL_SMTP_HOST
+    source: SMTP_HOST
+    services: [notification-service]
+    format: text
+    dev_default: mailhog
+    example: email-smtp.us-east-1.amazonaws.com
+    group: notification
+    notes: SMTP relay host; mailhog is the dev sink (WS-03.6 renames the source and requires it in strict).
+  - name: EMAIL_SMTP_PORT
+    source: SMTP_PORT
+    services: [notification-service]
+    format: int
+    dev_default: "1025"
+    example: "587"
+    group: notification
+    notes: SMTP relay port.
+  - {name: SMS_ENABLED, services: [notification-service], format: bool, dev_default: "false", strict_default: "false", group: notification}
+  - {name: PUSH_ENABLED, services: [notification-service], format: bool, dev_default: "false", strict_default: "false", group: notification}
+
+  # --- edge (Caddy gets only these three; caddy moves into both profiles in WS-03.5) ---------
+  - name: DOMAIN
+    source: DOMAIN
+    services: [caddy]
+    profiles: [strict]
+    required_in_strict: true
+    example: solace.example.invalid
+    group: edge
+    notes: primary domain; Caddy serves api.<DOMAIN> and auth.<DOMAIN>.
+  - name: CADDY_ADMIN_EMAIL
+    source: CADDY_ADMIN_EMAIL
+    services: [caddy]
+    profiles: [strict]
+    format: email
+    required_in_strict: true
+    example: ops@solace.example.invalid
+    group: edge
+    notes: ACME (Let's Encrypt) contact address.
+  - name: BASIC_AUTH_HASH
+    source: BASIC_AUTH_HASH
+    services: [caddy]
+    profiles: [strict]
+    secret: true
+    format: bcrypt
+    required_in_strict: true
+    group: edge
+    notes: bcrypt hash for the ops dashboards (caddy hash-password); single-quote it because it contains $.
+
+  # --- observability (MVP-040: no committed Grafana admin password; the GRAFANA_USER and
+  # GRAFANA_PASSWORD interpolation names are dropped for GRAFANA_ADMIN_USER/GRAFANA_ADMIN_PASSWORD) --
+  - {name: GF_SECURITY_ADMIN_USER, source: GRAFANA_ADMIN_USER, services: [grafana], dev_default: admin, strict_default: admin, group: observability, notes: the Grafana admin login}
+  - name: GF_SECURITY_ADMIN_PASSWORD
+    source: GRAFANA_ADMIN_PASSWORD
+    services: [grafana]
+    secret: true
+    format: urlsafe24
+    required_in_strict: true
+    group: observability
+    notes: the Grafana admin password; no committed default, and the strict render fails without it.
+  - {name: GF_USERS_ALLOW_SIGN_UP, services: [grafana], format: bool, dev_default: "false", strict_default: "false", group: observability}
+
+  # --- service ports and peers (compose literals) ---------------------------------------------
+  - {name: ORCHESTRATOR_PORT, services: [orchestrator-service], format: int, dev_default: "8000", strict_default: "8000", group: service}
+  - {name: USER_SERVICE_PORT, services: [user-service], format: int, dev_default: "8001", strict_default: "8001", group: service}
+  - {name: SAFETY_PORT, services: [safety-service], format: int, dev_default: "8002", strict_default: "8002", group: service}
+  - {name: NOTIFICATION_SERVICE_PORT, services: [notification-service], format: int, dev_default: "8003", strict_default: "8003", group: service}
+  - {name: DIAGNOSIS_PORT, services: [diagnosis-service], format: int, dev_default: "8004", strict_default: "8004", group: service}
+  - {name: MEMORY_SERVICE_PORT, services: [memory-service], format: int, dev_default: "8005", strict_default: "8005", group: service}
+  - {name: THERAPY_PORT, services: [therapy-service], format: int, dev_default: "8006", strict_default: "8006", group: service}
+  - {name: PERSONALITY_PORT, services: [personality-service], format: int, dev_default: "8007", strict_default: "8007", group: service}
+  - {name: ANALYTICS_SERVICE_PORT, services: [analytics-service], format: int, dev_default: "8009", strict_default: "8009", group: service}
+  - {name: SERVICE_SAFETY_SERVICE_URL, services: *app, format: url, dev_default: "http://safety-service:8002", strict_default: "http://safety-service:8002", group: peers}
+  - {name: SERVICE_NOTIFICATION_SERVICE_URL, services: *app, format: url, dev_default: "http://notification-service:8003", strict_default: "http://notification-service:8003", group: peers}
+  - {name: SERVICE_DIAGNOSIS_SERVICE_URL, services: *app, format: url, dev_default: "http://diagnosis-service:8004", strict_default: "http://diagnosis-service:8004", group: peers}
+  - {name: SERVICE_MEMORY_SERVICE_URL, services: *app, format: url, dev_default: "http://memory-service:8005", strict_default: "http://memory-service:8005", group: peers}
+  - {name: SERVICE_THERAPY_SERVICE_URL, services: *app, format: url, dev_default: "http://therapy-service:8006", strict_default: "http://therapy-service:8006", group: peers}
+  - {name: SERVICE_PERSONALITY_SERVICE_URL, services: *app, format: url, dev_default: "http://personality-service:8007", strict_default: "http://personality-service:8007", group: peers}
+  - {name: SERVICE_USER_SERVICE_URL, services: *app, format: url, dev_default: "http://user-service:8001", strict_default: "http://user-service:8001", group: peers}
+  - {name: SAFETY_REPO_STORAGE_BACKEND, services: [safety-service], dev_default: postgres, strict_default: postgres, group: service}
+
+  # --- legacy aliases (identical values until the owning lane stops reading them; IF-02) -----
+  # The compose files write each alias as a YAML alias of the IF-02 value it stands for.
+  - {name: SECURITY_JWT_SECRET, source: AUTH_SECRET_KEY, services: [user-service], secret: true, format: urlsafe48, required_in_strict: true, dev_default: dev-jwt-secret-key-minimum-32-chars, group: legacy, notes: user-service SecurityConfig alias of AUTH_SECRET_KEY}
+  - {name: ESCALATION_NOTIFICATION_SERVICE_URL, services: [safety-service], format: url, dev_default: "http://notification-service:8003", strict_default: "http://notification-service:8003", group: legacy}
+  - {name: CLINICIAN_REGISTRY_USER_SERVICE_URL, services: [safety-service], format: url, dev_default: "http://user-service:8001", strict_default: "http://user-service:8001", group: legacy}
+  - {name: NOTIFICATION_USER_SERVICE_URL, services: [notification-service], format: url, dev_default: "http://user-service:8001", strict_default: "http://user-service:8001", group: legacy}
+  - {name: THERAPY_CONTEXT_MEMORY_SERVICE_URL, services: [therapy-service], format: url, dev_default: "http://memory-service:8005", strict_default: "http://memory-service:8005", group: legacy}
+  - {name: USER_SERVICE_THERAPY_SERVICE_URL, services: [user-service], format: url, dev_default: "http://therapy-service:8006", strict_default: "http://therapy-service:8006", group: legacy}
+  - {name: USER_SERVICE_NOTIFICATION_SERVICE_URL, services: [user-service], format: url, dev_default: "http://notification-service:8003", strict_default: "http://notification-service:8003", group: legacy}
+  - {name: ORCHESTRATOR_SAFETY_AGENT_SERVICE_URL, services: [orchestrator-service], format: url, dev_default: "http://safety-service:8002", strict_default: "http://safety-service:8002", group: legacy}
+  - {name: ORCHESTRATOR_THERAPY_AGENT_SERVICE_URL, services: [orchestrator-service], format: url, dev_default: "http://therapy-service:8006", strict_default: "http://therapy-service:8006", group: legacy}
+  - {name: ORCHESTRATOR_DIAGNOSIS_AGENT_SERVICE_URL, services: [orchestrator-service], format: url, dev_default: "http://diagnosis-service:8004", strict_default: "http://diagnosis-service:8004", group: legacy}
+  - {name: ORCHESTRATOR_PERSONALITY_AGENT_SERVICE_URL, services: [orchestrator-service], format: url, dev_default: "http://personality-service:8007", strict_default: "http://personality-service:8007", group: legacy}
+  - {name: ORCHESTRATOR_ASSESSMENT_AGENT_SERVICE_URL, services: [orchestrator-service], format: url, dev_default: "http://diagnosis-service:8004", strict_default: "http://diagnosis-service:8004", group: legacy, notes: the assessment agent calls diagnosis-service}
+  - {name: SERVICE_TREATMENT_SERVICE_URL, services: [orchestrator-service], format: url, dev_default: "http://therapy-service:8006", strict_default: "http://therapy-service:8006", group: legacy, notes: the orchestrator's treatment client calls therapy-service}
+  - {name: SAFETY_REPO_POSTGRES_DSN, source: POSTGRES_PASSWORD, services: [safety-service], secret: true, format: urlsafe24, required_in_strict: true, dev_default: "postgresql+asyncpg://solace_app:solace_app_dev_only@postgres:5432/solace", group: legacy, notes: solace_app's DSN built from POSTGRES_PASSWORD}
+  - {name: SAFETY_REPO_REDIS_URL, source: REDIS_PASSWORD, services: [safety-service], secret: true, format: urlsafe24, required_in_strict: true, dev_default: "redis://:solace_redis_dev_only@redis:6379/0", group: legacy, notes: equals REDIS_URL}
+  - {name: SAFETY_KAFKA_ENABLED, services: [safety-service], format: bool, dev_default: "true", strict_default: "true", group: legacy}
+  - {name: SAFETY_KAFKA_BOOTSTRAP_SERVERS, services: [safety-service], format: hostport, dev_default: "kafka:9092", strict_default: "kafka:9092", group: legacy}
+  - {name: SAFETY_EVENTS_KAFKA_BOOTSTRAP_SERVERS, services: [safety-service], format: hostport, dev_default: "kafka:9092", strict_default: "kafka:9092", group: legacy}
+  - {name: THERAPY_KAFKA_ENABLED, services: [therapy-service], format: bool, dev_default: "true", strict_default: "true", group: legacy}
+  - {name: THERAPY_KAFKA_BOOTSTRAP_SERVERS, services: [therapy-service], format: hostport, dev_default: "kafka:9092", strict_default: "kafka:9092", group: legacy}
+  - {name: KAFKA_ENABLED, services: [notification-service], format: bool, dev_default: "true", strict_default: "true", group: legacy}
+  - {name: USER_KAFKA_ENABLE, services: [user-service], format: bool, dev_default: "true", strict_default: "true", group: legacy}
+  - {name: USER_KAFKA_BOOTSTRAP_SERVERS, services: [user-service], format: hostport, dev_default: "kafka:9092", strict_default: "kafka:9092", group: legacy}
+  - {name: MEMORY_KAFKA_BOOTSTRAP_SERVERS, services: [memory-service], format: hostport, dev_default: "kafka:9092", strict_default: "kafka:9092", group: legacy}
+  - {name: CONSUMER_KAFKA_ENABLED, services: [analytics-service], format: bool, dev_default: "true", strict_default: "true", group: legacy}
+  - {name: CONSUMER_KAFKA_BOOTSTRAP_SERVERS, services: [analytics-service], format: hostport, dev_default: "kafka:9092", strict_default: "kafka:9092", group: legacy}
+  - {name: USER_DB_HOST, services: [user-service], dev_default: postgres, strict_default: postgres, group: legacy}
+  - {name: USER_DB_PORT, services: [user-service], format: int, dev_default: "5432", strict_default: "5432", group: legacy}
+  - {name: USER_DB_NAME, services: [user-service], dev_default: solace, strict_default: solace, group: legacy}
+  - {name: USER_DB_USER, services: [user-service], dev_default: solace_app, strict_default: solace_app, group: legacy}
+  - {name: USER_DB_PASSWORD, source: POSTGRES_PASSWORD, services: [user-service], secret: true, format: urlsafe24, required_in_strict: true, dev_default: solace_app_dev_only, group: legacy}
+  - {name: DIAGNOSIS_DB_HOST, services: [diagnosis-service], dev_default: postgres, strict_default: postgres, group: legacy}
+  - {name: DIAGNOSIS_DB_PORT, services: [diagnosis-service], format: int, dev_default: "5432", strict_default: "5432", group: legacy}
+  - {name: DIAGNOSIS_DB_NAME, services: [diagnosis-service], dev_default: solace, strict_default: solace, group: legacy}
+  - {name: DIAGNOSIS_DB_USER, services: [diagnosis-service], dev_default: solace_app, strict_default: solace_app, group: legacy}
+  - {name: DIAGNOSIS_DB_PASSWORD, source: POSTGRES_PASSWORD, services: [diagnosis-service], secret: true, format: urlsafe24, required_in_strict: true, dev_default: solace_app_dev_only, group: legacy}
+  - {name: MEMORY_DB_HOST, services: [memory-service], dev_default: postgres, strict_default: postgres, group: legacy}
+  - {name: MEMORY_DB_PORT, services: [memory-service], format: int, dev_default: "5432", strict_default: "5432", group: legacy}
+  - {name: MEMORY_DB_DATABASE, services: [memory-service], dev_default: solace, strict_default: solace, group: legacy}
+  - {name: MEMORY_DB_USER, services: [memory-service], dev_default: solace_app, strict_default: solace_app, group: legacy}
+  - {name: MEMORY_DB_PASSWORD, source: POSTGRES_PASSWORD, services: [memory-service], secret: true, format: urlsafe24, required_in_strict: true, dev_default: solace_app_dev_only, group: legacy}
+  - {name: THERAPY_DB_HOST, services: [therapy-service], dev_default: postgres, strict_default: postgres, group: legacy}
+  - {name: THERAPY_DB_PORT, services: [therapy-service], format: int, dev_default: "5432", strict_default: "5432", group: legacy}
+  - {name: THERAPY_DB_DATABASE, services: [therapy-service], dev_default: solace, strict_default: solace, group: legacy}
+  - {name: THERAPY_DB_USER, services: [therapy-service], dev_default: solace_app, strict_default: solace_app, group: legacy}
+  - {name: THERAPY_DB_PASSWORD, source: POSTGRES_PASSWORD, services: [therapy-service], secret: true, format: urlsafe24, required_in_strict: true, dev_default: solace_app_dev_only, group: legacy}
+  - {name: PERSONALITY_DB_HOST, services: [personality-service], dev_default: postgres, strict_default: postgres, group: legacy}
+  - {name: PERSONALITY_DB_PORT, services: [personality-service], format: int, dev_default: "5432", strict_default: "5432", group: legacy}
+  - {name: PERSONALITY_DB_NAME, services: [personality-service], dev_default: solace, strict_default: solace, group: legacy}
+  - {name: PERSONALITY_DB_USER, services: [personality-service], dev_default: solace_app, strict_default: solace_app, group: legacy}
+  - {name: PERSONALITY_DB_PASSWORD, source: POSTGRES_PASSWORD, services: [personality-service], secret: true, format: urlsafe24, required_in_strict: true, dev_default: solace_app_dev_only, group: legacy}
+  - {name: USER_REDIS_HOST, services: [user-service], dev_default: redis, strict_default: redis, group: legacy}
+  - {name: USER_REDIS_PORT, services: [user-service], format: int, dev_default: "6379", strict_default: "6379", group: legacy}
+  - {name: USER_REDIS_PASSWORD, source: REDIS_PASSWORD, services: [user-service], secret: true, format: urlsafe24, required_in_strict: true, dev_default: solace_redis_dev_only, group: legacy}
+  - {name: DIAGNOSIS_REDIS_HOST, services: [diagnosis-service], dev_default: redis, strict_default: redis, group: legacy}
+  - {name: DIAGNOSIS_REDIS_PORT, services: [diagnosis-service], format: int, dev_default: "6379", strict_default: "6379", group: legacy}
+  - {name: DIAGNOSIS_REDIS_PASSWORD, source: REDIS_PASSWORD, services: [diagnosis-service], secret: true, format: urlsafe24, required_in_strict: true, dev_default: solace_redis_dev_only, group: legacy}
+  - {name: DIAGNOSIS_SESSION_REDIS_HOST, services: [diagnosis-service], dev_default: redis, strict_default: redis, group: legacy}
+  - {name: DIAGNOSIS_SESSION_REDIS_PORT, services: [diagnosis-service], format: int, dev_default: "6379", strict_default: "6379", group: legacy}
+  - {name: DIAGNOSIS_SESSION_REDIS_PASSWORD, source: REDIS_PASSWORD, services: [diagnosis-service], secret: true, format: urlsafe24, required_in_strict: true, dev_default: solace_redis_dev_only, group: legacy}
+  - {name: MEMORY_REDIS_HOST, services: [memory-service], dev_default: redis, strict_default: redis, group: legacy}
+  - {name: MEMORY_REDIS_PORT, services: [memory-service], format: int, dev_default: "6379", strict_default: "6379", group: legacy}
+  - {name: MEMORY_REDIS_PASSWORD, source: REDIS_PASSWORD, services: [memory-service], secret: true, format: urlsafe24, required_in_strict: true, dev_default: solace_redis_dev_only, group: legacy}
+  - {name: REDIS_HOST, services: [memory-service], dev_default: redis, strict_default: redis, group: legacy, notes: memory-service's Redis cache}
+  - {name: REDIS_PORT, services: [memory-service], format: int, dev_default: "6379", strict_default: "6379", group: legacy}
+  - {name: REDIS_PASSWORD, source: REDIS_PASSWORD, services: [memory-service], secret: true, format: urlsafe24, required_in_strict: true, dev_default: solace_redis_dev_only, group: legacy}
+  - {name: THERAPY_REDIS_HOST, services: [therapy-service], dev_default: redis, strict_default: redis, group: legacy}
+  - {name: THERAPY_REDIS_PORT, services: [therapy-service], format: int, dev_default: "6379", strict_default: "6379", group: legacy}
+  - {name: THERAPY_REDIS_PASSWORD, source: REDIS_PASSWORD, services: [therapy-service], secret: true, format: urlsafe24, required_in_strict: true, dev_default: solace_redis_dev_only, group: legacy}
+  - {name: THERAPY_SESSION_REDIS_HOST, services: [therapy-service], dev_default: redis, strict_default: redis, group: legacy}
+  - {name: THERAPY_SESSION_REDIS_PORT, services: [therapy-service], format: int, dev_default: "6379", strict_default: "6379", group: legacy}
+  - {name: THERAPY_SESSION_REDIS_PASSWORD, source: REDIS_PASSWORD, services: [therapy-service], secret: true, format: urlsafe24, required_in_strict: true, dev_default: solace_redis_dev_only, group: legacy}
+  - {name: PERSONALITY_REDIS_HOST, services: [personality-service], dev_default: redis, strict_default: redis, group: legacy}
+  - {name: PERSONALITY_REDIS_PORT, services: [personality-service], format: int, dev_default: "6379", strict_default: "6379", group: legacy}
+  - {name: PERSONALITY_REDIS_PASSWORD, source: REDIS_PASSWORD, services: [personality-service], secret: true, format: urlsafe24, required_in_strict: true, dev_default: solace_redis_dev_only, group: legacy}

@@ -1,10 +1,20 @@
 name: CI
 
+# CI mirrors the local runner (make ci-local): the suite and image lists come from
+# scripts/ci/run_suites.py and scripts/ci/build_images.py, so nothing is hand-listed
+# or ignored here. Test jobs do not wait for lint; every job reports independently.
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -12,22 +22,32 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.12"
-  # Test-only CI secrets/config, inherited by all test jobs below.
-  AUTH_SECRET_KEY: ci-test-secret-key-minimum-32-characters-long!!
-  SECURITY_JWT_SECRET: ci-test-secret-key-minimum-32-characters-long!!
-  USER_SERVICE_JWT_SECRET_KEY: ci-test-secret-key-minimum-32-characters-long!!
-  ENCRYPTION_MASTER_KEY: ci-test-encrypt-key-exactly-32ch
-  USER_SERVICE_FIELD_ENCRYPTION_KEY: ci-test-encrypt-key-exactly-32ch
-  FERNET_TOKEN_KEY: sp1gRbNPAdgva1NX4vYC3gZDNu--cUiGM5H9xhtltN8=
-  FERNET_FIELD_KEY: aQyP7tOjb06jmhH0Ni3Y04CqcrzrnK_KnuurAOUWl4c=
-  POSTGRES_PASSWORD: ci_test_password
-  USER_DB_PASSWORD: ci_test_password
-  SERVICE_AUTH_SERVICE_SECRET: ci-test-service-secret-for-auth-32chars!!
+  UV_VERSION: "0.8.2"
   ENVIRONMENT: test
   KAFKA_ENABLED: "false"
   LOG_LEVEL: WARNING
 
 jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    outputs:
+      suites: ${{ steps.plan.outputs.suites }}
+      images: ${{ steps.plan.outputs.images }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: List suites and images from the registries
+        id: plan
+        run: |
+          echo "suites=$(python scripts/ci/run_suites.py --list-json)" >> "$GITHUB_OUTPUT"
+          echo "images=$(python scripts/ci/build_images.py --list-json --all | python -c "import json,sys;print(json.dumps([i['name'] for i in json.load(sys.stdin)]))")" >> "$GITHUB_OUTPUT"
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -39,69 +59,22 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install ruff
-        run: pip install ruff
-
-      - name: Run ruff (syntax and critical errors only)
+      - name: Install dependencies from the hashed lock
         run: |
-          ruff check . --select E9,F63,F7,F82 --no-fix
-          echo "Syntax and critical error check: PASS"
+          python -m pip install "uv==${UV_VERSION}"
+          uv pip sync --system --require-hashes requirements-dev.lock
 
-      - name: Run ruff full check (informational)
-        continue-on-error: true
-        run: ruff check . --statistics 2>&1 | tail -25
+      - name: Run ruff (syntax and critical errors, hard gate)
+        run: ruff check . --select E9,F63,F7,F82 --no-fix --no-cache
 
-  # Shared-library + cross-cutting suites. All steps HARD-GATED (no masking):
-  # a red step fails the job, which is the whole point of Phase 0.
-  test:
-    name: Core & Shared Tests
+  unit:
+    name: Unit (${{ matrix.suite }})
     runs-on: ubuntu-latest
-    needs: lint
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-          pip install pytest-mock pytest-asyncio httpx
-
-      - name: Verify imports and syntax
-        run: pytest tests/test_syntax_and_imports.py -x -q --no-header
-
-      - name: Run alignment tests
-        run: pytest tests/alignment/ -x -q --no-header
-
-      - name: Run shared library tests
-        run: |
-          pytest tests/solace_common/ -q --no-header
-          pytest tests/solace_security/ -q --no-header
-
-  # Per-service unit tests, one matrix leg each. HARD-GATED, fail-fast off so
-  # every service reports independently. config_service has no tests dir yet.
-  service-tests:
-    name: Service Tests (${{ matrix.service.name }})
-    runs-on: ubuntu-latest
-    needs: lint
+    needs: [plan]
     strategy:
       fail-fast: false
       matrix:
-        service:
-          - { dir: "safety_service", name: "safety" }
-          - { dir: "diagnosis_service", name: "diagnosis" }
-          - { dir: "therapy_service", name: "therapy" }
-          - { dir: "memory_service", name: "memory" }
-          - { dir: "personality_service", name: "personality" }
-          - { dir: "orchestrator_service", name: "orchestrator" }
-          - { dir: "user-service", name: "user" }
-          - { dir: "notification-service", name: "notification" }
-          - { dir: "analytics-service", name: "analytics" }
+        suite: ${{ fromJSON(needs.plan.outputs.suites) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -109,24 +82,23 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
 
-      - name: Install dependencies
+      - name: Install dependencies from the hashed lock
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-          pip install pytest-mock pytest-asyncio httpx
+          python -m pip install "uv==${UV_VERSION}"
+          uv pip sync --system --require-hashes requirements-dev.lock
 
-      - name: Run ${{ matrix.service.name }} tests
-        run: pytest services/${{ matrix.service.dir }}/tests/ -q --no-header
+      - name: Generate throwaway test secrets
+        run: |
+          python -c "import base64,os,secrets;e=lambda k,v:open(os.environ['GITHUB_ENV'],'a').write(k+'='+v+'\n');long=lambda:secrets.token_urlsafe(48);fern=lambda:base64.urlsafe_b64encode(secrets.token_bytes(32)).decode();[e(k,long()) for k in ('AUTH_SECRET_KEY','SECURITY_JWT_SECRET','USER_SERVICE_JWT_SECRET_KEY','SERVICE_AUTH_SERVICE_SECRET','POSTGRES_PASSWORD','USER_DB_PASSWORD')];[e(k,secrets.token_urlsafe(24)) for k in ('ENCRYPTION_MASTER_KEY','USER_SERVICE_FIELD_ENCRYPTION_KEY')];[e(k,fern()) for k in ('FERNET_TOKEN_KEY','FERNET_FIELD_KEY')]"
 
-  # Integration suites that run against mocked/in-memory deps. HARD-GATED.
-  # The live-infra file needs real Postgres/Redis/Kafka/Weaviate and is deferred
-  # to Sprint B.3 (staging) rather than silently masked here.
-  integration-tests:
-    name: Integration Tests
+      - name: Run suite
+        run: python scripts/ci/run_suites.py --tier unit --suite "${{ matrix.suite }}"
+
+  realinfra:
+    name: Real infrastructure
     runs-on: ubuntu-latest
-    needs: lint
+    needs: [plan]
     steps:
       - uses: actions/checkout@v4
 
@@ -134,51 +106,69 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
 
-      - name: Install dependencies
+      - name: Install dependencies from the hashed lock
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-          pip install pytest-mock pytest-asyncio httpx
+          python -m pip install "uv==${UV_VERSION}"
+          uv pip sync --system --require-hashes requirements-dev.lock
 
-      - name: Run integration tests (mocked deps)
-        run: pytest tests/integration/ -q --no-header --ignore=tests/integration/test_service_integration.py
+      - name: Generate throwaway test secrets
+        run: |
+          python -c "import os,secrets;e=lambda k,v:open(os.environ['GITHUB_ENV'],'a').write(k+'='+v+'\n');[e(k,secrets.token_urlsafe(48)) for k in ('POSTGRES_PASSWORD','USER_DB_PASSWORD','SECURITY_JWT_SECRET')]"
 
-  docker-build:
-    name: Docker Build
+      - name: Run real-infrastructure suites
+        run: python scripts/ci/run_suites.py --tier realinfra --require-realinfra
+
+  images:
+    name: Image (${{ matrix.image }})
     runs-on: ubuntu-latest
-    needs: lint
+    needs: [plan]
     strategy:
       fail-fast: false
       matrix:
-        service:
-          - { context: "./services/user-service", name: "user-service" }
-          - { context: "./services/safety_service", name: "safety-service" }
-          - { context: "./services/notification-service", name: "notification-service" }
-          - { context: "./services/diagnosis_service", name: "diagnosis-service" }
-          - { context: "./services/memory_service", name: "memory-service" }
-          - { context: "./services/therapy_service", name: "therapy-service" }
-          - { context: "./services/personality_service", name: "personality-service" }
-          - { context: "./services/orchestrator_service", name: "orchestrator-service" }
-          - { context: "./services/analytics-service", name: "analytics-service" }
-          - { context: "./services/config_service", name: "config-service" }
+        image: ${{ fromJSON(needs.plan.outputs.images) }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check Dockerfile exists
-        id: check
-        run: |
-          if [ -f "${{ matrix.service.context }}/Dockerfile" ]; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::No Dockerfile found for ${{ matrix.service.name }}"
-          fi
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Build Docker image
-        if: steps.check.outputs.exists == 'true'
+      - name: Install dependencies from the hashed lock
         run: |
-          docker build \
-            --tag solace-ai/${{ matrix.service.name }}:ci \
-            ${{ matrix.service.context }}
+          python -m pip install "uv==${UV_VERSION}"
+          uv pip sync --system --require-hashes requirements-dev.lock
+
+      - name: Build from the repo root and probe
+        run: python scripts/ci/build_images.py --image "${{ matrix.image }}" --tag ci --probe
+
+  # On-demand and nightly end-to-end run (WS-05); not part of push or pull_request.
+  e2e:
+    name: E2E (${{ matrix.profile }})
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    needs: [plan]
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [dev, strict]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies from the hashed lock
+        run: |
+          python -m pip install "uv==${UV_VERSION}"
+          uv pip sync --system --require-hashes requirements-dev.lock
+
+      - name: Generate throwaway test secrets
+        run: |
+          python -c "import os,secrets;e=lambda k,v:open(os.environ['GITHUB_ENV'],'a').write(k+'='+v+'\n');[e(k,secrets.token_urlsafe(48)) for k in ('POSTGRES_PASSWORD','USER_DB_PASSWORD','SECURITY_JWT_SECRET','AUTH_SECRET_KEY')]"
+
+      - name: Run e2e suites
+        run: python scripts/ci/run_suites.py --tier e2e --profile ${{ matrix.profile }}

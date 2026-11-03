@@ -1,32 +1,44 @@
-.PHONY: dev test lint migrate clean docker-up docker-down help
+PYTHON ?= python
+PROFILE ?= dev
+TAG ?= dev
+TREE ?=
 
-help:  ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+.PHONY: help lint test test-unit test-realinfra test-e2e test-clinical test-contract images clean-checkout release-gate-closure migrate ci-local
 
-dev: docker-up  ## Start development environment
-	@echo "Development environment started"
+help:
+	$(PYTHON) -c "import re;[print(m) for m in re.findall(r'^[a-z-]+:', open('Makefile').read(), re.M)]"
 
-test:  ## Run all tests
-	python -m pytest tests/ services/ -x --timeout=60 -q
+lint:
+	$(PYTHON) -m ruff check . --select E9,F63,F7,F82 --no-fix --no-cache
 
-lint:  ## Run linting
-	python -m ruff check . --fix
-	python -m ruff format .
+test: test-unit
 
-typecheck:  ## Run type checking
-	python -m mypy src/ --ignore-missing-imports
+test-unit:
+	$(PYTHON) scripts/ci/run_suites.py --tier unit
 
-migrate:  ## Run database migrations
-	alembic upgrade head
+test-realinfra:
+	$(PYTHON) scripts/ci/run_suites.py --tier realinfra --require-realinfra
 
-docker-up:  ## Start Docker services
-	docker-compose up -d
+test-e2e:
+	$(PYTHON) scripts/ci/run_suites.py --tier e2e --profile $(PROFILE)
 
-docker-down:  ## Stop Docker services
-	docker-compose down
+test-clinical:
+	$(PYTHON) scripts/ci/run_suites.py --tier clinical
 
-clean:  ## Clean up caches and build artifacts
-	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name .mypy_cache -exec rm -rf {} + 2>/dev/null || true
-	find . -name "*.pyc" -delete 2>/dev/null || true
+test-contract:
+	$(PYTHON) scripts/ci/run_suites.py --tier contract
+
+images:
+	$(PYTHON) -m scripts.build.images --tag $(TAG)
+
+clean-checkout:
+	$(PYTHON) scripts/ci/clean_checkout.py --tree $(TREE) --require-registry-match
+
+release-gate-closure:
+	$(PYTHON) scripts/ci/check_tracked_closure.py --strict
+
+migrate:
+	$(PYTHON) -m scripts.db.migrate upgrade head
+
+ci-local:
+	$(PYTHON) scripts/ci/ci_local.py

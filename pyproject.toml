@@ -19,31 +19,9 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
 ]
-dependencies = [
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.32.0",
-    "pydantic>=2.10.0",
-    "pydantic-settings>=2.0.0",
-    "structlog>=24.0.0",
-    "httpx>=0.27.0",
-    "asyncpg>=0.29.0",
-    "redis>=5.0.0",
-    "aiokafka>=0.10.0",
-    "cryptography>=42.0.0",
-    "PyJWT>=2.8.0",
-]
-
-[project.optional-dependencies]
-dev = [
-    "black>=24.1.0",
-    "isort>=5.13.2",
-    "mypy>=1.8.0",
-    "ruff>=0.2.0",
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
-    "pytest-cov>=4.1.0",
-    "pre-commit>=3.6.0",
-]
+# Dependencies are declared ONLY in requirements.in (runtime) and requirements-dev.in (dev/test),
+# compiled into the hash-pinned requirements.lock / requirements-dev.lock (WS-01.2, D-16).
+dependencies = []
 
 [tool.black]
 line-length = 100
@@ -139,22 +117,8 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["services", "src", "solace_security", "solace_common", "solace_infrastructure"]
-
-[tool.pytest.ini_options]
-minversion = "8.0"
-testpaths = ["tests", "services"]
-python_files = ["test_*.py", "*_test.py"]
-python_functions = ["test_*"]
-asyncio_mode = "auto"
-import_mode = "importlib"
-filterwarnings = [
-    "ignore::DeprecationWarning",
-]
-addopts = [
-    "-ra",
-    "-q",
-    "--strict-markers",
-]
+# The repo-root docker/ directory (entrypoint) must not make the docker SDK look first-party.
+known-third-party = ["docker"]
 
 [tool.coverage.run]
 source = ["src", "services"]

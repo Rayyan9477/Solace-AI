@@ -1,14 +1,23 @@
-# Solace-AI production override (Sprint 8).
+# Solace-AI strict overlay (staging and production).
 #
-# Applied on top of the base ``docker-compose.yml``. Deploy with --env-file so that
-# ${...} interpolation is sourced from .env.prod (NOT the shell / a dev .env), and so the
-# required-secret guards below actually read the prod values:
+# Applied on top of the base ``docker-compose.yml``. ${...} interpolation reads the file named by
+# --env-file instead of a dev .env, but a variable already set in the shell that runs compose
+# OVERRIDES that file, so run it from a clean environment:
 #   docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
-# The dev debug UIs (mailhog, kafka-ui) are behind the "dev" profile in the base file, so
-# they are never started here (no --profile dev). Secrets below use the ${VAR:?msg} form:
-# compose FAILS FAST if a required secret is missing from .env.prod instead of silently
-# falling back to the base file's dev default (REV-11).
+# The env contract lives in deploy/env/env-contract.yaml (IF-02); .env.example is rendered from
+# it and tests/deploy/test_env_contract.py renders this overlay to enforce it.
+#
+# Derivation rule (IF-02, D-14): every service gate (ORCHESTRATOR_ENVIRONMENT, USER_SERVICE_ENV,
+# SAFETY_ENVIRONMENT, NOTIFICATION_SERVICE_ENV, DIAGNOSIS_ENVIRONMENT, MEMORY_ENVIRONMENT,
+# THERAPY_ENVIRONMENT, PERSONALITY_ENVIRONMENT, ANALYTICS_SERVICE_ENV) is ${ENVIRONMENT:?...},
+# never a literal. ${VAR:?...} only checks that a variable is set and non-empty; compose does not
+# check that ENVIRONMENT is staging or production, so that must be enforced before compose runs.
+#
+# No service reads an env_file: each container receives only the variables listed for it here
+# and in the base file. Every source the registry marks required_in_strict uses ${SOURCE:?...},
+# so compose FAILS FAST when it is unset instead of falling back to a base-file dev default.
+# Caddy receives only DOMAIN, CADDY_ADMIN_EMAIL and BASIC_AUTH_HASH.
 #
 # Adds:
 #   - Caddy as the TLS-terminating reverse proxy (the only container with
@@ -16,26 +25,30 @@
 #   - Restart policies so services come back after host reboot.
 #   - Log rotation (json-file driver, 10 MB x 3) to avoid runaway disk use.
 #   - Resource limits to prevent any one service from starving the VPS.
-#   - Closes the public ports on internal services — Caddy reaches them
-#     via the shared docker network, but the host no longer exposes them.
+#   - Closes the public ports on internal services; Caddy reaches them
+#     via the shared docker network. MVP-040: every service except caddy uses `ports: !reset []`
+#     (Compose 2.24+), because a plain `ports: []` merges with the base file's list instead of
+#     replacing it, so only caddy publishes host ports.
 #
-# Required env (via ``.env.prod`` on the VPS):
-#   ENVIRONMENT=production  REQUIRED — global gate for SSL/audit-HMAC/encryption fail-loud
-#                        layers (os.getenv('ENVIRONMENT')); this override ALSO derives the
-#                        memory/notification/analytics per-service gates from it (P1-8/P1-9).
-#   AUDIT_HMAC_KEY       32+ byte key; without it audit hashes fall back to non-HMAC (P1-8).
-#   DOMAIN               primary domain (e.g. solace-demo.example)
-#   CADDY_ADMIN_EMAIL    letsencrypt contact
-#   BASIC_AUTH_HASH      bcrypt hash for Grafana/Jaeger (use `caddy hash-password`)
-#   POSTGRES_PASSWORD    overrides the dev default
-#   ENCRYPTION_MASTER_KEY 32-byte key from secrets.token_bytes(32).hex()
-#   ENCRYPTION_SEARCH_HASH_SALT  32+ byte salt
-#   JWT_SECRET_KEY       32+ byte JWT signing key (maps to AUTH_SECRET_KEY)
-#   WEAVIATE_API_KEY     REQUIRED — else Weaviate boots on the public dev default key (P2-16)
-#   GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET
-#   PORTKEY_API_KEY      https://portkey.ai dashboard
-#   ORCHESTRATOR_TRUSTED_PROXY_HOPS=1  Caddy appends exactly one XFF hop (P2-12); defaults to 1
-#                        here so per-IP rate-limit keying is not collapsed behind the proxy.
+# Required sources (see .env.example for format and notes):
+#   ENVIRONMENT, AUTH_SECRET_KEY, ENCRYPTION_MASTER_KEY, ENCRYPTION_SEARCH_HASH_SALT,
+#   AUDIT_HMAC_KEY, POSTGRES_PASSWORD, POSTGRES_MIGRATOR_PASSWORD, POSTGRES_SUPERUSER_PASSWORD,
+#   REDIS_PASSWORD, USER_SERVICE_FIELD_ENCRYPTION_KEY, FERNET_TOKEN_KEY, FERNET_FIELD_KEY,
+#   WEAVIATE_API_KEY, GRAFANA_ADMIN_PASSWORD, DOMAIN, CADDY_ADMIN_EMAIL, BASIC_AUTH_HASH,
+#   SOLACE_SECRETS_DIR.
+# REDIS_PASSWORD must be URL-safe (for example python -c "import secrets; print(secrets.token_urlsafe(24))"):
+# it is written into REDIS_URL and SAFETY_REPO_REDIS_URL, and into the server's config file.
+#
+# Postgres TLS (D-15): SOLACE_SECRETS_DIR is a host directory holding one file per secret; compose
+# mounts each one under /run/secrets/ only in the services that need it. Generate the three TLS
+# files into it once per environment (rotate: regenerate with --force and restart the stack):
+#   python -m scripts.db.gen_certs --out "$SOLACE_SECRETS_DIR" --san postgres
+# (add --san localhost --ip 127.0.0.1 only for a host-side verify-full client that reaches Postgres
+# through a published port). postgres-ca.crt goes to every database client, server.crt and
+# server.key to postgres only. Postgres starts through scripts/db/pg_tls_entrypoint.sh with
+# SOLACE_PG_TLS=required, so TCP clients must use TLS, and every client (the nine app services and
+# the migrate job) uses verify-full against host postgres. A strict service refuses a loopback or
+# unset POSTGRES_HOST (WS-02.5).
 
 x-logging: &default-logging
   driver: json-file
@@ -46,25 +59,41 @@ x-logging: &default-logging
 x-restart: &default-restart
   restart: unless-stopped
 
-# Required secrets — override the base file's dev-default fallbacks so a missing value in
-# .env.prod fails the deploy instead of silently shipping the dev JWT key to prod (REV-11).
-# P1-8: ENVIRONMENT and AUDIT_HMAC_KEY are guarded here too, so every app container gets the
-# global production gate (SSL/audit-HMAC/encryption fail-loud) and the deploy fails fast if
-# either is missing from .env.prod (they otherwise silently no-op into non-HMAC/plain hashing).
-x-app-secrets: &app-secrets
-  AUTH_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set in .env.prod}
-  ENVIRONMENT: ${ENVIRONMENT:?ENVIRONMENT must be set to production in .env.prod}
-  AUDIT_HMAC_KEY: ${AUDIT_HMAC_KEY:?AUDIT_HMAC_KEY must be set in .env.prod}
+# Every database client (the nine app services and migrate): the CA that verifies postgres.
+x-strict-db-client: &strict-db-client
+  secrets:
+    - postgres-ca.crt
+
+# Every app service: the strict gate source and the secrets all nine read
+# (ProductionGuards.DEFAULT_REQUIRED_IN_STRICT plus the audit chain key, P1-8).
+x-app-strict-environment: &app-strict-env
+  ENVIRONMENT: ${ENVIRONMENT:?ENVIRONMENT must be set}
+  AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:?AUTH_SECRET_KEY must be set}
+  ENCRYPTION_MASTER_KEY: ${ENCRYPTION_MASTER_KEY:?ENCRYPTION_MASTER_KEY must be set}
+  ENCRYPTION_SEARCH_HASH_SALT: ${ENCRYPTION_SEARCH_HASH_SALT:?ENCRYPTION_SEARCH_HASH_SALT must be set}
+  AUDIT_HMAC_KEY: ${AUDIT_HMAC_KEY:?AUDIT_HMAC_KEY must be set}
+  POSTGRES_PASSWORD: &strict-app-db-password ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+  # D-15: literals, so no env file can weaken the TLS of any database client.
+  POSTGRES_SSL_MODE: &strict-ssl-mode verify-full
+  POSTGRES_SSL_ROOT_CERT: &strict-ssl-root-cert /run/secrets/postgres-ca.crt
+  # MVP-118: the one REDIS_PASSWORD source, required in strict (no base-file dev default survives).
+  REDIS_URL: &strict-redis-url redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
+
+# The Redis password in strict; every legacy *_REDIS_PASSWORD below is an alias of it.
+x-strict-redis:
+  password: &strict-redis-password ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
 
 services:
   caddy:
     image: caddy:2.8-alpine
-    container_name: solace-caddy
     ports:
       - "80:80"
       - "443:443"
       - "443:443/udp"
-    env_file: .env.prod
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN must be set}
+      CADDY_ADMIN_EMAIL: ${CADDY_ADMIN_EMAIL:?CADDY_ADMIN_EMAIL must be set}
+      BASIC_AUTH_HASH: ${BASIC_AUTH_HASH:?BASIC_AUTH_HASH must be set}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -85,97 +114,116 @@ services:
 
   # ---- App services: close host ports, add restart + log rotation ----
   orchestrator-service:
-    ports: []  # Only reachable via Caddy
-    env_file: .env.prod
+    ports: !reset []  # Only reachable via Caddy
     environment:
-      <<: *app-secrets
+      <<: *app-strict-env
+      ORCHESTRATOR_ENVIRONMENT: ${ENVIRONMENT:?ENVIRONMENT must be set}
       # P2-12: Caddy appends exactly one X-Forwarded-For hop. With hops=0 the orchestrator
       # keys every anonymous request on Caddy's internal IP (one shared rate-limit bucket).
       ORCHESTRATOR_TRUSTED_PROXY_HOPS: "1"
+      # PYSEC-2026-83: langgraph's strict msgpack checkpoint decoding is opt-in (WS-01.F2).
+      LANGGRAPH_STRICT_MSGPACK: "true"
     logging: *default-logging
-    <<: *default-restart
+    <<: [*default-restart, *strict-db-client]
     deploy:
       resources:
         limits:
           memory: 768M
 
   user-service:
-    ports: []
-    env_file: .env.prod
+    ports: !reset []
     environment:
-      <<: *app-secrets
-      USER_SERVICE_JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set in .env.prod}
-      SECURITY_JWT_SECRET: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set in .env.prod}
-      USER_SERVICE_FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:?FIELD_ENCRYPTION_KEY must be set in .env.prod}
-      FERNET_TOKEN_KEY: ${FERNET_TOKEN_KEY:?FERNET_TOKEN_KEY must be set in .env.prod}
-      FERNET_FIELD_KEY: ${FERNET_FIELD_KEY:?FERNET_FIELD_KEY must be set in .env.prod}
-      USER_DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env.prod}
+      <<: *app-strict-env
+      USER_SERVICE_ENV: ${ENVIRONMENT:?ENVIRONMENT must be set}
+      USER_SERVICE_JWT_SECRET_KEY: ${AUTH_SECRET_KEY:?AUTH_SECRET_KEY must be set}
+      SECURITY_JWT_SECRET: ${AUTH_SECRET_KEY:?AUTH_SECRET_KEY must be set}
+      USER_SERVICE_FIELD_ENCRYPTION_KEY: ${USER_SERVICE_FIELD_ENCRYPTION_KEY:?USER_SERVICE_FIELD_ENCRYPTION_KEY must be set}
+      FERNET_TOKEN_KEY: ${FERNET_TOKEN_KEY:?FERNET_TOKEN_KEY must be set}
+      FERNET_FIELD_KEY: ${FERNET_FIELD_KEY:?FERNET_FIELD_KEY must be set}
+      USER_DB_PASSWORD: *strict-app-db-password
+      USER_REDIS_PASSWORD: *strict-redis-password
+      # The localhost OAuth defaults are development only; strict is empty unless set.
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-}
+      OAUTH_ALLOWED_REDIRECT_ORIGINS: ${OAUTH_ALLOWED_REDIRECT_ORIGINS:-}
     logging: *default-logging
-    <<: *default-restart
+    <<: [*default-restart, *strict-db-client]
     deploy:
       resources:
         limits:
           memory: 512M
 
   safety-service:
-    ports: []
-    env_file: .env.prod
+    ports: !reset []
     environment:
-      <<: *app-secrets
+      <<: *app-strict-env
+      SAFETY_ENVIRONMENT: ${ENVIRONMENT:?ENVIRONMENT must be set}
+      SAFETY_REPO_POSTGRES_DSN: postgresql+asyncpg://solace_app:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/solace
+      SAFETY_REPO_REDIS_URL: *strict-redis-url
     logging: *default-logging
-    <<: *default-restart
+    <<: [*default-restart, *strict-db-client]
     deploy:
       resources:
         limits:
           memory: 512M
 
   diagnosis-service:
-    ports: []
-    env_file: .env.prod
+    ports: !reset []
     environment:
-      <<: *app-secrets
+      <<: *app-strict-env
+      DIAGNOSIS_ENVIRONMENT: ${ENVIRONMENT:?ENVIRONMENT must be set}
+      DIAGNOSIS_DB_PASSWORD: *strict-app-db-password
+      DIAGNOSIS_REDIS_PASSWORD: *strict-redis-password
+      DIAGNOSIS_SESSION_REDIS_PASSWORD: *strict-redis-password
     logging: *default-logging
-    <<: *default-restart
+    <<: [*default-restart, *strict-db-client]
     deploy:
       resources:
         limits:
           memory: 768M
 
   therapy-service:
-    ports: []
-    env_file: .env.prod
+    ports: !reset []
     environment:
-      <<: *app-secrets
+      <<: *app-strict-env
+      THERAPY_ENVIRONMENT: ${ENVIRONMENT:?ENVIRONMENT must be set}
+      THERAPY_DB_PASSWORD: *strict-app-db-password
+      THERAPY_REDIS_PASSWORD: *strict-redis-password
+      THERAPY_SESSION_REDIS_PASSWORD: *strict-redis-password
     logging: *default-logging
-    <<: *default-restart
+    <<: [*default-restart, *strict-db-client]
     deploy:
       resources:
         limits:
           memory: 768M
 
   memory-service:
-    ports: []
-    env_file: .env.prod
+    ports: !reset []
     environment:
-      <<: *app-secrets
-      # P1-9: derive the memory runtime gate (MemoryServiceAppSettings.environment, bound from
-      # MEMORY_ENVIRONMENT) from the global ENVIRONMENT so a single ENVIRONMENT=production makes
-      # the production PHI-encryption / PHI-log-sanitizer guards reachable. :? fails fast.
-      MEMORY_ENVIRONMENT: ${ENVIRONMENT:?ENVIRONMENT must be set to production in .env.prod}
+      <<: *app-strict-env
+      # P1-9: the memory runtime gate (MemoryServiceAppSettings.environment) follows ENVIRONMENT
+      # so the production PHI-encryption / PHI-log-sanitizer guards are reachable.
+      MEMORY_ENVIRONMENT: ${ENVIRONMENT:?ENVIRONMENT must be set}
+      MEMORY_DB_PASSWORD: *strict-app-db-password
+      MEMORY_REDIS_PASSWORD: *strict-redis-password
+      REDIS_PASSWORD: *strict-redis-password
+      # P2-16: Weaviate holds PHI-derived embeddings; never the public dev key.
+      WEAVIATE_API_KEY: ${WEAVIATE_API_KEY:?WEAVIATE_API_KEY must be set}
     logging: *default-logging
-    <<: *default-restart
+    <<: [*default-restart, *strict-db-client]
     deploy:
       resources:
         limits:
           memory: 768M
 
   personality-service:
-    ports: []
-    env_file: .env.prod
+    ports: !reset []
     environment:
-      <<: *app-secrets
+      <<: *app-strict-env
+      PERSONALITY_ENVIRONMENT: ${ENVIRONMENT:?ENVIRONMENT must be set}
+      PERSONALITY_DB_PASSWORD: *strict-app-db-password
+      PERSONALITY_REDIS_PASSWORD: *strict-redis-password
     logging: *default-logging
-    <<: *default-restart
+    <<: [*default-restart, *strict-db-client]
     deploy:
       resources:
         # RoBERTa model inflates memory footprint
@@ -183,42 +231,54 @@ services:
           memory: 1.5G
 
   notification-service:
-    ports: []
-    env_file: .env.prod
+    ports: !reset []
     environment:
-      <<: *app-secrets
-      # P1-9: derive the notification runtime gate (ServiceConfig.env, bound from
-      # NOTIFICATION_SERVICE_ENV) from the global ENVIRONMENT so the crisis-consumer-required
-      # and PHI-log-sanitizer production guards actually fire. :? fails fast.
-      NOTIFICATION_SERVICE_ENV: ${ENVIRONMENT:?ENVIRONMENT must be set to production in .env.prod}
+      <<: *app-strict-env
+      # P1-9: the notification runtime gate (ServiceConfig.env) follows ENVIRONMENT so the
+      # crisis-consumer-required and PHI-log-sanitizer production guards fire.
+      NOTIFICATION_SERVICE_ENV: ${ENVIRONMENT:?ENVIRONMENT must be set}
     logging: *default-logging
-    <<: *default-restart
+    <<: [*default-restart, *strict-db-client]
 
   analytics-service:
-    ports: []
-    env_file: .env.prod
+    ports: !reset []
     environment:
-      <<: *app-secrets
-      # P1-9: derive the analytics runtime gate (ServiceConfig.env, bound from
-      # ANALYTICS_SERVICE_ENV) from the global ENVIRONMENT so docs/CORS lockdown and the
-      # PHI-log-sanitizer production guard actually fire. :? fails fast.
-      ANALYTICS_SERVICE_ENV: ${ENVIRONMENT:?ENVIRONMENT must be set to production in .env.prod}
+      <<: *app-strict-env
+      # P1-9: the analytics runtime gate (ServiceConfig.env) follows ENVIRONMENT so docs/CORS
+      # lockdown and the PHI-log-sanitizer production guard fire.
+      ANALYTICS_SERVICE_ENV: ${ENVIRONMENT:?ENVIRONMENT must be set}
     logging: *default-logging
-    <<: *default-restart
+    <<: [*default-restart, *strict-db-client]
 
-  config-service:
-    ports: []
-    env_file: .env.prod
+  # The schema job: solace_migrator over verified TLS (the base file holds its command and image).
+  migrate:
+    ports: !reset []
     environment:
-      <<: *app-secrets
+      ENVIRONMENT: ${ENVIRONMENT:?ENVIRONMENT must be set}
+      DATABASE_URL: postgresql+asyncpg://solace_migrator:${POSTGRES_MIGRATOR_PASSWORD:?POSTGRES_MIGRATOR_PASSWORD must be set}@postgres:5432/solace
+      POSTGRES_SSL_MODE: *strict-ssl-mode
+      POSTGRES_SSL_ROOT_CERT: *strict-ssl-root-cert
     logging: *default-logging
-    <<: *default-restart
+    <<: *strict-db-client
 
   # ---- Infra services: keep internal-only (no host port publication) ----
   postgres:
-    ports: []
+    ports: !reset []
+    # D-15: the wrapper copies /run/secrets/server.crt and server.key (owner postgres, key mode
+    # 0600) into /var/lib/postgresql/tls, writes a hostssl-only pg_hba.conf (SOLACE_PG_TLS=required)
+    # and execs the image's docker-entrypoint.sh.
+    entrypoint: ["sh", "/usr/local/bin/solace-pg-entrypoint.sh"]
+    command: ["postgres", "-c", "ssl=on", "-c", "ssl_cert_file=/var/lib/postgresql/tls/server.crt", "-c", "ssl_key_file=/var/lib/postgresql/tls/server.key"]
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env.prod}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?POSTGRES_SUPERUSER_PASSWORD must be set}
+      SOLACE_APP_PASSWORD: *strict-app-db-password
+      SOLACE_MIGRATOR_PASSWORD: ${POSTGRES_MIGRATOR_PASSWORD:?POSTGRES_MIGRATOR_PASSWORD must be set}
+      SOLACE_PG_TLS: required
+    volumes:
+      - ./scripts/db/pg_tls_entrypoint.sh:/usr/local/bin/solace-pg-entrypoint.sh:ro
+    secrets:
+      - server.crt
+      - server.key
     logging: *default-logging
     <<: *default-restart
     deploy:
@@ -227,7 +287,9 @@ services:
           memory: 1G
 
   redis:
-    ports: []
+    ports: !reset []
+    environment:
+      REDIS_PASSWORD: *strict-redis-password
     logging: *default-logging
     <<: *default-restart
     deploy:
@@ -236,14 +298,11 @@ services:
           memory: 512M
 
   weaviate:
-    ports: []
+    ports: !reset []
     environment:
-      # P2-16: Weaviate holds PHI-derived embeddings. The base file falls back to the
-      # publicly-known dev key (solace-dev-key-change-in-production). Guard WEAVIATE_API_KEY
-      # with :? and re-declare the allowed key without the dev fallback so a missing/default
-      # key fails the prod deploy instead of booting with an anonymous-equivalent key.
-      WEAVIATE_API_KEY: ${WEAVIATE_API_KEY:?WEAVIATE_API_KEY must be set in .env.prod}
-      AUTHENTICATION_APIKEY_ALLOWED_KEYS: ${WEAVIATE_API_KEY:?WEAVIATE_API_KEY must be set in .env.prod}
+      # P2-16: the base file falls back to the publicly known dev key; the server's allowed key
+      # has no fallback here, so a missing key fails the deploy.
+      AUTHENTICATION_APIKEY_ALLOWED_KEYS: ${WEAVIATE_API_KEY:?WEAVIATE_API_KEY must be set}
     logging: *default-logging
     <<: *default-restart
     deploy:
@@ -251,35 +310,56 @@ services:
         limits:
           memory: 1G
 
+  # MVP-045: the broker's 512m heap (KAFKA_HEAP_OPTS in the base file) plus JVM overhead and the
+  # healthcheck's 96m probe JVM fit 1g; zookeeper's 256m heap fits 512m.
   kafka:
-    ports: []
+    ports: !reset []
     logging: *default-logging
     <<: *default-restart
     deploy:
       resources:
         limits:
-          memory: 768M
+          memory: 1g
 
   zookeeper:
-    ports: []
+    ports: !reset []
     logging: *default-logging
     <<: *default-restart
+    deploy:
+      resources:
+        limits:
+          memory: 512m
 
   # ---- Observability: only reachable via Caddy's basic-auth frontend ----
   grafana:
-    ports: []
+    ports: !reset []
+    # MVP-040: Grafana applies GF_SECURITY_ADMIN_PASSWORD only when it first creates grafana.db, so a
+    # reused (dev-seeded) grafana_data volume would keep admin/admin. On every start the wrapper resets
+    # the admin password from the variable, on stdin (never argv; grafana 10.1.0 supports
+    # --password-from-stdin), stops the container if that fails, then execs the image's /run.sh.
+    entrypoint: ["sh", "-c", "printf '%s' \"$$GF_SECURITY_ADMIN_PASSWORD\" | grafana cli --homepath \"$$GF_PATHS_HOME\" --config \"$$GF_PATHS_CONFIG\" admin reset-admin-password --password-from-stdin >/dev/null 2>&1 || { echo 'grafana: resetting the admin password from GF_SECURITY_ADMIN_PASSWORD failed' >&2; exit 1; }; exec /run.sh"]
+    environment:
+      # MVP-040: Grafana never boots on admin/admin; there is no default in strict.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set}
     logging: *default-logging
     <<: *default-restart
 
   jaeger:
-    ports: []
+    ports: !reset []
     logging: *default-logging
     <<: *default-restart
 
   prometheus:
-    ports: []
+    ports: !reset []
     logging: *default-logging
     <<: *default-restart
+
+  # ---- Dev-profile tools: never published, even if a strict run adds --profile dev ----
+  mailhog:
+    ports: !reset []
+
+  kafka-ui:
+    ports: !reset []
 
 volumes:
   caddy_data:
@@ -288,3 +368,13 @@ volumes:
 networks:
   frontend:
     driver: bridge
+
+# File secrets (D-15): one file per secret in the SOLACE_SECRETS_DIR host directory, mounted at
+# /run/secrets/<name> only in the services that list it.
+secrets:
+  postgres-ca.crt:
+    file: ${SOLACE_SECRETS_DIR:?SOLACE_SECRETS_DIR must be set}/postgres-ca.crt
+  server.crt:
+    file: ${SOLACE_SECRETS_DIR:?SOLACE_SECRETS_DIR must be set}/server.crt
+  server.key:
+    file: ${SOLACE_SECRETS_DIR:?SOLACE_SECRETS_DIR must be set}/server.key

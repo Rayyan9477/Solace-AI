@@ -1,5 +1,7 @@
 # Solace-AI MVP Bug Review (2026-10-17)
 
+> **Update 2026-10-18:** the owner confirmed the scope as "Pilot + enterprise basics". The current severities, merged duplicates, added entries and statuses now live in [`docs/MVP-ISSUE-REGISTER.md`](MVP-ISSUE-REGISTER.md), which is the list to work from. This document remains the verification record.
+
 This review replaces `docs/READINESS-REVIEW-FABLE.md` for MVP triage. It covers **identification only**; fix planning comes later.
 
 **How it was produced**

@@ -1,0 +1,226 @@
+# Solace-AI end-to-end test overlay (MVP-039; owner WS-05). TEST ONLY: never deploy it.
+#
+# Applied last, over the dev files or the strict files, by src/solace_testing/e2e.py (the e2e_stack fixture and
+# scripts/test/e2e_stack.ps1):
+#   docker compose -p solace-e2e-<lane> --env-file <run dir>/e2e.env \
+#       -f docker-compose.yml [-f docker-compose.prod.yml] -f docker-compose.test.yml up -d --build
+# <run dir>/e2e.env and <run dir>/secrets/ come from python -m scripts.test.gen_e2e_env (fresh per-run secrets,
+# never committed, never printed). Compose reads only that env file, from a cleaned shell environment.
+#
+# What it changes, and nothing else (tests/e2e/test_mvp_039_stack_selftest.py renders the strict profile with
+# and without it; solace_testing.e2e.OVERLAY_ALLOWED_KEYS lists the keys it may add or change):
+#   - adds fake-llm (the D-04 test double; W0 reaches it through the Portkey gateway URL) and mailpit;
+#   - every service of the base and prod files: no fixed container name, no published port, no env_file, so
+#     several lanes run side by side and no internal port reaches the host;
+#   - caddy: published only on ephemeral 127.0.0.1 ports, as plain-HTTP sites :8080 (api) and :8081 (auth);
+#   - every app service: mail to mailpit (STARTTLS with the per-run CA in strict), no SMS or push, the fake LLM,
+#     test-only notification addresses, Weaviate off, and the per-run CA mounted at /run/secrets/e2e-ca.crt
+#     (the file SSL_CERT_FILE names in strict; mounted in both profiles, unused in dev).
+# It never touches build or image of a base service, nor any other strict setting.
+#
+# Ports are written "127.0.0.1::<container port>": Docker picks the host port; the harness reads it with
+# docker compose port. `ports: []` would not clear the base file's ports (compose appends lists), hence !reset.
+
+# Every app service (WS-05.21 replaces the LLM block with the D-04 Bedrock wiring in W1).
+x-e2e-app-environment: &e2e-app-env
+  # mail: mailpit; the TLS mode is none in dev and starttls in strict (IF-02 allows none only in development/test)
+  EMAIL_ENABLED: "true"
+  EMAIL_SMTP_HOST: mailpit
+  EMAIL_SMTP_PORT: "1025"
+  EMAIL_SMTP_TLS_MODE: ${E2E_SMTP_TLS_MODE:?E2E_SMTP_TLS_MODE must be set (python -m scripts.test.gen_e2e_env)}
+  # strict: the per-run CA that signed mailpit's certificate; empty in dev
+  SSL_CERT_FILE: ${E2E_SSL_CERT_FILE:-}
+  # channels
+  SMS_ENABLED: "false"
+  PUSH_ENABLED: "false"
+  # LLM (W0): the fake LLM only, so nothing reaches a real provider
+  LLM_PORTKEY_GATEWAY_URL: http://fake-llm:8080/v1
+  LLM_PHI_EGRESS_APPROVED: "true"
+  LLM_ANTHROPIC_API_KEY: ""
+  LLM_ENABLE_CACHING: "false"
+  # notification
+  NOTIFICATION_FALLBACK_ONCALL_EMAIL: fallback-oncall@test.invalid
+  NOTIFICATION_ACK_BASE_URL: http://api.e2e.invalid
+  # memory
+  WEAVIATE_ENABLED: "false"
+
+services:
+  # ===========================================================================================================
+  # Test doubles (overlay only)
+  # ===========================================================================================================
+
+  fake-llm:
+    build: ./infrastructure/test/fake-llm
+    ports: ["127.0.0.1::8080"]
+    networks:
+      - backend
+
+  # axllent/mailpit:v1.32.0 (resolved with docker buildx imagetools inspect axllent/mailpit:v1.32.0).
+  # SMTP 1025 stays internal; only the HTTP API (8025) is published. Recipients outside the allow-list
+  # (reject-* and anything not @test.invalid) are refused at RCPT time. In strict (E2E_SSL_CERT_FILE set)
+  # it offers and requires STARTTLS with the per-run certificate for "mailpit".
+  mailpit:
+    image: axllent/mailpit@sha256:0790692be935ea4420d085694f7985b1f692ca6a8771ab0e0bd8ba75ac180498
+    environment:
+      MP_SMTP_ALLOWED_RECIPIENTS: '^(user|clin|fallback|ops)-[A-Za-z0-9.-]*@test\.invalid$$'
+      MP_SMTP_TLS_CERT: ${E2E_SSL_CERT_FILE:+/run/secrets/mailpit.crt}
+      MP_SMTP_TLS_KEY: ${E2E_SSL_CERT_FILE:+/run/secrets/mailpit.key}
+      MP_SMTP_REQUIRE_STARTTLS: ${E2E_SSL_CERT_FILE:+true}
+    secrets:
+      - source: e2e-mailpit.crt
+        target: mailpit.crt
+      - source: e2e-mailpit.key
+        target: mailpit.key
+    ports: ["127.0.0.1::8025"]
+    networks:
+      - backend
+      - monitoring
+
+  # ===========================================================================================================
+  # The edge: plain HTTP on two ephemeral loopback ports (CADDY_API_SITE / CADDY_AUTH_SITE, WS-03.5)
+  # ===========================================================================================================
+
+  caddy:
+    container_name: !reset null
+    env_file: !reset []
+    ports: !override ["127.0.0.1::8080", "127.0.0.1::8081"]
+    environment:
+      CADDY_API_SITE: ":8080"
+      CADDY_AUTH_SITE: ":8081"
+
+  # ===========================================================================================================
+  # App services
+  # ===========================================================================================================
+
+  orchestrator-service:
+    container_name: !reset null
+    ports: !reset []
+    env_file: !reset []
+    environment: *e2e-app-env
+    secrets: [e2e-ca.crt]
+
+  user-service:
+    container_name: !reset null
+    ports: !reset []
+    env_file: !reset []
+    environment: *e2e-app-env
+    secrets: [e2e-ca.crt]
+
+  safety-service:
+    container_name: !reset null
+    ports: !reset []
+    env_file: !reset []
+    environment: *e2e-app-env
+    secrets: [e2e-ca.crt]
+
+  notification-service:
+    container_name: !reset null
+    ports: !reset []
+    env_file: !reset []
+    environment: *e2e-app-env
+    secrets: [e2e-ca.crt]
+
+  diagnosis-service:
+    container_name: !reset null
+    ports: !reset []
+    env_file: !reset []
+    environment: *e2e-app-env
+    secrets: [e2e-ca.crt]
+
+  memory-service:
+    container_name: !reset null
+    ports: !reset []
+    env_file: !reset []
+    environment: *e2e-app-env
+    secrets: [e2e-ca.crt]
+
+  therapy-service:
+    container_name: !reset null
+    ports: !reset []
+    env_file: !reset []
+    environment: *e2e-app-env
+    secrets: [e2e-ca.crt]
+
+  personality-service:
+    container_name: !reset null
+    ports: !reset []
+    env_file: !reset []
+    environment: *e2e-app-env
+    secrets: [e2e-ca.crt]
+
+  analytics-service:
+    container_name: !reset null
+    ports: !reset []
+    env_file: !reset []
+    environment: *e2e-app-env
+    secrets: [e2e-ca.crt]
+
+  # ===========================================================================================================
+  # Every other service of the base and prod files: no fixed name, no published port, no env_file
+  # ===========================================================================================================
+
+  migrate:
+    container_name: !reset null
+    ports: !reset []
+    env_file: !reset []
+
+  postgres:
+    container_name: !reset null
+    ports: !reset []
+    env_file: !reset []
+
+  redis:
+    container_name: !reset null
+    ports: !reset []
+    env_file: !reset []
+
+  zookeeper:
+    container_name: !reset null
+    ports: !reset []
+    env_file: !reset []
+
+  kafka:
+    container_name: !reset null
+    ports: !reset []
+    env_file: !reset []
+
+  weaviate:
+    container_name: !reset null
+    ports: !reset []
+    env_file: !reset []
+
+  jaeger:
+    container_name: !reset null
+    ports: !reset []
+    env_file: !reset []
+
+  prometheus:
+    container_name: !reset null
+    ports: !reset []
+    env_file: !reset []
+
+  grafana:
+    container_name: !reset null
+    ports: !reset []
+    env_file: !reset []
+
+  mailhog:
+    container_name: !reset null
+    ports: !reset []
+    env_file: !reset []
+
+  kafka-ui:
+    container_name: !reset null
+    ports: !reset []
+    env_file: !reset []
+
+# From <run dir>/secrets/ (gen_e2e_env writes all three in both profiles, so this resolves in both): the per-run CA
+# every app service trusts for mailpit's STARTTLS in strict, and mailpit's certificate and key (dev mailpit does
+# not use them).
+secrets:
+  e2e-ca.crt:
+    file: ${SOLACE_SECRETS_DIR:?SOLACE_SECRETS_DIR must be set (python -m scripts.test.gen_e2e_env)}/e2e-ca.crt
+  e2e-mailpit.crt:
+    file: ${SOLACE_SECRETS_DIR:?SOLACE_SECRETS_DIR must be set (python -m scripts.test.gen_e2e_env)}/mailpit.crt
+  e2e-mailpit.key:
+    file: ${SOLACE_SECRETS_DIR:?SOLACE_SECRETS_DIR must be set (python -m scripts.test.gen_e2e_env)}/mailpit.key

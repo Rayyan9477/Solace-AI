@@ -2,12 +2,119 @@
 # Local development environment with all infrastructure components
 #
 # Usage:
-#   docker-compose up -d                    # Start all services
-#   docker-compose up -d postgres redis     # Start only infrastructure
-#   docker-compose logs -f kafka            # View Kafka logs
-#   docker-compose down -v                  # Stop and remove volumes
+#   docker compose up -d                    # Start all services (postgres, the migrate job, then the apps)
+#   docker compose up -d postgres redis     # Start only infrastructure
+#   docker compose run --rm migrate         # Apply the migrations by hand
+#   docker compose logs -f kafka            # View Kafka logs
+#   docker compose down -v                  # Stop and remove volumes
 #
 # Environment variables should be set in a .env file (see .env.example)
+#
+# Every app-service variable (and the postgres, weaviate and Caddy secrets) is registered in
+# deploy/env/env-contract.yaml (IF-02); .env.example is rendered from it and
+# tests/deploy/test_env_contract.py renders this file to enforce it.
+# Every service gate (*_ENVIRONMENT, *_SERVICE_ENV) is always ${ENVIRONMENT}, never a literal.
+# No service sets container_name, so containers are scoped by the compose project.
+#
+# Data plane (IF-02, IF-03, D-02): one database, solace. On an empty data directory init-db
+# (infrastructure/init-db/01-roles.sh) creates the two platform roles: solace_app, the only role the
+# app services connect as (POSTGRES_PASSWORD), and solace_migrator, the migrate job's role
+# (POSTGRES_MIGRATOR_PASSWORD). The image superuser postgres (POSTGRES_SUPERUSER_PASSWORD) is for
+# init, ops and backups only. App services start only after the migrate job has exited 0. A
+# postgres_data volume created before the platform roles existed never turns healthy: recreate it
+# with `docker compose down -v`.
+#
+# Every built service (the nine app services and migrate) is tagged solace/<service>:<tag>, the
+# reference WS-01's image builder uses (scripts/ci/build_images.py image_ref); SOLACE_IMAGE_TAG is a
+# compose interpolation variable only (default dev). Each has pull_policy build, so Compose never
+# asks a registry for that unqualified reference.
+#
+# Exposure (MVP-040): every published dev port binds 127.0.0.1 only. Redis always requires
+# REDIS_PASSWORD (MVP-118), and every client gets it from that one source.
+
+# Shared by the nine app services (IF-02 environment, auth, PHI and audit).
+x-app-environment: &app-env
+  ENVIRONMENT: ${ENVIRONMENT:-development}
+  AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+  AUTH_ALGORITHM: ${AUTH_ALGORITHM:-HS256}
+  AUTH_PUBLIC_KEYS_JSON: ${AUTH_PUBLIC_KEYS_JSON:-}
+  AUTH_ACTIVE_KID: ${AUTH_ACTIVE_KID:-}
+  AUTH_ACCEPT_LEGACY_HS256: ${AUTH_ACCEPT_LEGACY_HS256:-true}
+  ENCRYPTION_MASTER_KEY: ${ENCRYPTION_MASTER_KEY:-}
+  ENCRYPTION_SEARCH_HASH_SALT: ${ENCRYPTION_SEARCH_HASH_SALT:-}
+  ENCRYPTION_KEY_ID: ${ENCRYPTION_KEY_ID:-k1}
+  ENCRYPTION_RETIRED_KEYS_JSON: ${ENCRYPTION_RETIRED_KEYS_JSON:-}
+  AUDIT_HMAC_KEY: ${AUDIT_HMAC_KEY:-}
+
+# The Redis values every client gets (MVP-118). One REDIS_PASSWORD source reaches the server and
+# every client, so a rotation cannot leave one behind; it must be URL-safe, because REDIS_URL carries
+# it. The legacy *_REDIS_HOST/PORT/PASSWORD names below are aliases of these anchors.
+x-redis-values:
+  host: &redis-host redis
+  port: &redis-port "6379"
+  password: &redis-password ${REDIS_PASSWORD:-solace_redis_dev_only}
+
+# Shared by the nine app services: the IF-02 data plane (Postgres as solace_app, Redis, Kafka and the
+# seven peers). Each value is anchored here once and every legacy alias below is an alias of its
+# anchor, so an alias can never diverge from the IF-02 name it stands for.
+x-data-plane-environment: &data-plane-env
+  POSTGRES_HOST: &pg-host postgres
+  POSTGRES_PORT: &pg-port "5432"
+  POSTGRES_DATABASE: &pg-database solace
+  POSTGRES_USER: &pg-app-user solace_app
+  # solace_app's password; URL-safe, because SAFETY_REPO_POSTGRES_DSN carries it too.
+  POSTGRES_PASSWORD: &pg-app-password ${POSTGRES_PASSWORD:-solace_app_dev_only}
+  POSTGRES_SSL_MODE: ${POSTGRES_SSL_MODE:-prefer}
+  POSTGRES_MIN_POOL_SIZE: "1"
+  POSTGRES_MAX_POOL_SIZE: "8"
+  # IF-02: the runtime has no localhost fallback for Redis, and the server always requires the password.
+  REDIS_URL: &redis-url redis://:${REDIS_PASSWORD:-solace_redis_dev_only}@redis:6379/0
+  KAFKA_BOOTSTRAP_SERVERS: &kafka-bootstrap kafka:9092
+  # false is allowed only in development/test; replaces the per-service Kafka flags in W1 (IF-02).
+  EVENTS_ENABLED: "true"
+  SERVICE_SAFETY_SERVICE_URL: &safety-url http://safety-service:8002
+  SERVICE_NOTIFICATION_SERVICE_URL: &notification-url http://notification-service:8003
+  SERVICE_DIAGNOSIS_SERVICE_URL: &diagnosis-url http://diagnosis-service:8004
+  SERVICE_MEMORY_SERVICE_URL: &memory-url http://memory-service:8005
+  SERVICE_THERAPY_SERVICE_URL: &therapy-url http://therapy-service:8006
+  SERVICE_PERSONALITY_SERVICE_URL: &personality-url http://personality-service:8007
+  SERVICE_USER_SERVICE_URL: &user-url http://user-service:8001
+
+# Every app service waits for the schema (the migrate job exited 0) and for Kafka.
+x-app-depends-on: &app-depends-on
+  migrate:
+    condition: service_completed_successfully
+  kafka:
+    condition: service_healthy
+
+# Every app service: restart, and a stop grace sized for the runtime's ordered shutdown (WS-04.4).
+# On SIGTERM uvicorn first drains in-flight requests (an orchestrator turn is bounded by
+# ORCHESTRATOR_TURN_TIMEOUT_SECONDS=20), then the runtime runs its closers last-registered first, each
+# bounded by SHUTDOWN_STEP_TIMEOUT_SECONDS=5 (W0 registers three: readiness refresher, redis, postgres;
+# W1 adds the event plane). Budget six closers: 20 s + 6 x 5 s = 50 s, so Docker waits 60 s before
+# it sends SIGKILL.
+# pull_policy build: solace/<service>:<tag> is an unqualified (Docker Hub) reference, so a service that
+# builds its image never asks a registry for it (controller ruling, WS-03.3).
+x-app-service: &app-service
+  restart: unless-stopped
+  stop_grace_period: 60s
+  pull_policy: build
+
+# IF-18: app healthchecks probe /live (liveness only; /ready gates traffic, not restarts).
+x-live-healthcheck: &live-healthcheck
+  interval: 15s
+  timeout: 5s
+  retries: 3
+  start_period: 60s
+
+# Shared by the five LLM services (orchestrator, safety, therapy, diagnosis, personality; D-04).
+x-llm-environment: &llm-env
+  LLM_PORTKEY_API_KEY: ${LLM_PORTKEY_API_KEY:-}
+  LLM_PORTKEY_GATEWAY_URL: ${LLM_PORTKEY_GATEWAY_URL:-https://api.portkey.ai/v1}
+  LLM_ANTHROPIC_API_KEY: ${LLM_ANTHROPIC_API_KEY:-}
+  LLM_ENABLE_CACHING: "false"
+  LLM_TIMEOUT_SECONDS: "30"
+  LLM_PHI_EGRESS_APPROVED: ${LLM_PHI_EGRESS_APPROVED:-false}
 
 services:
   # =============================================================================
@@ -16,18 +123,27 @@ services:
 
   postgres:
     image: postgres:16-alpine
-    container_name: solace-postgres
     environment:
-      POSTGRES_DB: ${POSTGRES_DATABASE:-solace}
-      POSTGRES_USER: ${POSTGRES_USER:-solace}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-solace_dev_password}
+      # The image superuser (init, ops and backups only; D-02) and the one application database.
+      # init-db creates solace_app and solace_migrator with these two passwords and fails closed
+      # without them (infrastructure/init-db/01-roles.sh).
+      POSTGRES_USER: postgres
+      POSTGRES_DB: solace
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:-solace_superuser_dev_only}
+      SOLACE_APP_PASSWORD: *pg-app-password
+      SOLACE_MIGRATOR_PASSWORD: ${POSTGRES_MIGRATOR_PASSWORD:-solace_migrator_dev_only}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./infrastructure/init-db:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-solace} -d ${POSTGRES_DATABASE:-solace}"]
+      # Healthy only when the server accepts TCP AND both platform roles exist. The entrypoint's
+      # temporary init server listens on the unix socket only, so the TCP probe keeps the check from
+      # passing before the real server is up (pg_isready needs no password, so it also works under
+      # the strict hostssl-only hba). A first init that fails part-way leaves a data directory, so
+      # init-db never runs again; pg_isready alone would then report the role-less server healthy.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d solace && psql -X -U postgres -d solace -tAc \"select 1/(count(*)=2)::int from pg_roles where rolname in ('solace_app','solace_migrator')\""]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -35,16 +151,45 @@ services:
     networks:
       - data
 
+  # One-shot schema job (IF-03): python -m scripts.db.migrate upgrade head as solace_migrator, under
+  # the migration advisory lock; it refuses any other login. DATABASE_URL carries no query string or
+  # fragment: TLS comes only from POSTGRES_SSL_MODE and POSTGRES_SSL_ROOT_CERT (WS-02.4, WS-02.5).
+  # The image puts the repository root and src/ on PYTHONPATH (docker/migrate.Dockerfile).
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/migrate.Dockerfile
+    image: solace/migrate:${SOLACE_IMAGE_TAG:-dev}
+    pull_policy: build
+    command: ["python", "-m", "scripts.db.migrate", "upgrade", "head"]
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      DATABASE_URL: postgresql+asyncpg://solace_migrator:${POSTGRES_MIGRATOR_PASSWORD:-solace_migrator_dev_only}@postgres:5432/solace
+      POSTGRES_SSL_MODE: ${POSTGRES_SSL_MODE:-prefer}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - data
+
   redis:
     image: redis:7-alpine
-    container_name: solace-redis
-    command: redis-server --appendonly yes ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
+    environment:
+      REDIS_PASSWORD: *redis-password
+    # requirepass is always on and the password never reaches argv: the shell writes it into a
+    # private config file, then hands redis-server to the image's entrypoint, which drops root and
+    # runs it as the redis user (a bare `exec redis-server` here would keep it running as root).
+    # It first refuses a password that is not URL-safe, without echoing it: redis-server would print
+    # a bad requirepass line (password included) and a '/' or '+' breaks every client's REDIS_URL.
+    command: ["sh", "-c", "case \"$$REDIS_PASSWORD\" in ''|*[!A-Za-z0-9_-]*) echo 'REDIS_PASSWORD must be URL-safe [A-Za-z0-9_-]' >&2; exit 1;; esac; umask 077; printf 'appendonly yes\\nrequirepass %s\\n' \"$$REDIS_PASSWORD\" > /tmp/redis.conf && chown redis:redis /tmp/redis.conf && exec docker-entrypoint.sh redis-server /tmp/redis.conf"]
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # healthy only when the server answers PONG to the configured password (NOAUTH or WRONGPASS fail)
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -qx PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -54,12 +199,13 @@ services:
 
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
-    container_name: solace-zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+      # MVP-045: an explicit heap inside the strict 512m limit (the image default is larger).
+      KAFKA_HEAP_OPTS: "-Xms128m -Xmx256m"
     ports:
-      - "2181:2181"
+      - "127.0.0.1:2181:2181"
     volumes:
       - zookeeper_data:/var/lib/zookeeper/data
       - zookeeper_logs:/var/lib/zookeeper/log
@@ -74,7 +220,6 @@ services:
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
-    container_name: solace-kafka
     depends_on:
       zookeeper:
         condition: service_healthy
@@ -89,18 +234,24 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      # MVP-045: without it the broker starts with -Xmx1G, more than its strict limit; 512m heap plus
+      # JVM overhead fits the strict 1g limit.
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
     ports:
-      - "29092:29092"
+      - "127.0.0.1:29092:29092"
       # 9092 is the internal broker port — only expose to host if external clients need it.
       # Services on solace-network reach Kafka via kafka:9092 without host port mapping.
       # - "9092:9092"
     volumes:
       - kafka_data:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
-      interval: 10s
-      timeout: 10s
+      # The probe is a JVM too: it sets its own small heap inline so it never inherits the broker's
+      # KAFKA_HEAP_OPTS (two 512m JVMs would not fit the limit).
+      test: ["CMD-SHELL", "KAFKA_HEAP_OPTS='-Xms32m -Xmx96m' kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null"]
+      interval: 30s
+      timeout: 20s
       retries: 5
+      start_period: 60s
     restart: unless-stopped
     networks:
       - data
@@ -108,8 +259,10 @@ services:
   weaviate:
     # REV-11: 1.22.4 predates the gRPC API that weaviate-client 4.10 requires. Bumped to
     # a 1.26.x server (gRPC on :50051) and the gRPC port is now exposed.
+    # D-04: opt-in (docker compose --profile vector ...). Weaviate writes are off by default
+    # (WEAVIATE_ENABLED=false) and retrieval stays keyword/BM25, so nothing on the chat path waits for it.
     image: semitechnologies/weaviate:1.26.1
-    container_name: solace-weaviate
+    profiles: ["vector"]
     environment:
       QUERY_DEFAULTS_LIMIT: 25
       # SECURITY: Anonymous access disabled. Use API key authentication.
@@ -123,15 +276,17 @@ services:
       CLUSTER_HOSTNAME: "node1"
       GRPC_PORT: "50051"
     ports:
-      - "${WEAVIATE_PORT:-8080}:8080"
-      - "${WEAVIATE_GRPC_PORT:-50051}:50051"   # gRPC (weaviate-client v4)
+      - "127.0.0.1:${WEAVIATE_PORT:-8080}:8080"
+      - "127.0.0.1:${WEAVIATE_GRPC_PORT:-50051}:50051"   # gRPC (weaviate-client v4)
     volumes:
       - weaviate_data:/var/lib/weaviate
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/.well-known/ready"]
+      # MVP-002: the image has wget but no curl, so a curl check never passed
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/v1/.well-known/ready || exit 1"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 60s
     restart: unless-stopped
     networks:
       - data
@@ -142,27 +297,25 @@ services:
 
   jaeger:
     image: jaegertracing/all-in-one:1.51
-    container_name: solace-jaeger
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
     ports:
-      - "16686:16686"   # Jaeger UI
-      - "4317:4317"     # OTLP gRPC
-      - "4318:4318"     # OTLP HTTP
-      - "6831:6831/udp" # Thrift compact
+      - "127.0.0.1:16686:16686"   # Jaeger UI
+      - "127.0.0.1:4317:4317"     # OTLP gRPC
+      - "127.0.0.1:4318:4318"     # OTLP HTTP
+      - "127.0.0.1:6831:6831/udp" # Thrift compact
     restart: unless-stopped
     networks:
       - monitoring
 
   prometheus:
     image: prom/prometheus:v2.47.0
-    container_name: solace-prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--web.enable-lifecycle'
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -176,14 +329,13 @@ services:
 
   grafana:
     image: grafana/grafana:10.1.0
-    container_name: solace-grafana
     environment:
-      # SECURITY: Change default admin credentials in production via GRAFANA_USER / GRAFANA_PASSWORD env vars.
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      # MVP-040: no committed admin password; the strict overlay requires GRAFANA_ADMIN_PASSWORD.
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
       GF_USERS_ALLOW_SIGN_UP: "false"
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning:ro
@@ -201,37 +353,49 @@ services:
     build:
       context: .
       dockerfile: services/user-service/Dockerfile
-    container_name: solace-user-service
+    image: solace/user-service:${SOLACE_IMAGE_TAG:-dev}
     environment:
-      USER_SERVICE_ENV: development
+      <<: [*app-env, *data-plane-env]
+      USER_SERVICE_ENV: ${ENVIRONMENT:-development}
       USER_SERVICE_PORT: 8001
-      USER_SERVICE_JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
-      USER_SERVICE_FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:-dev-encryption-key-32-characters}
-      AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+      USER_SERVICE_JWT_SECRET_KEY: ${AUTH_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+      USER_SERVICE_FIELD_ENCRYPTION_KEY: ${USER_SERVICE_FIELD_ENCRYPTION_KEY:-dev-encryption-key-32-characters}
+      AUTH_PRIVATE_KEY_PEM: ${AUTH_PRIVATE_KEY_PEM:-}
       FERNET_TOKEN_KEY: "${FERNET_TOKEN_KEY:-8kTaL3nRf9xQpZmVwYdE7gHjKbNcSuW2A5iO0tP4rXs=}"
       FERNET_FIELD_KEY: "${FERNET_FIELD_KEY:-3mBvN7xRtYfW0pLqKjH8dS5gC2eA9iZuO6wTrXnMaQs=}"
-      USER_DB_HOST: postgres
-      USER_DB_PORT: 5432
-      USER_DB_NAME: solace
-      USER_DB_USER: ${POSTGRES_USER:-solace}
-      USER_DB_PASSWORD: ${POSTGRES_PASSWORD:-solace_dev_password}
-      USER_REDIS_HOST: redis
-      USER_REDIS_PORT: 6379
-      USER_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      SECURITY_JWT_SECRET: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+      # legacy aliases (IF-02): the data-plane anchors until user-service stops reading them
+      USER_DB_HOST: *pg-host
+      USER_DB_PORT: *pg-port
+      USER_DB_NAME: *pg-database
+      USER_DB_USER: *pg-app-user
+      USER_DB_PASSWORD: *pg-app-password
+      USER_REDIS_HOST: *redis-host
+      USER_REDIS_PORT: *redis-port
+      USER_REDIS_PASSWORD: *redis-password
+      USER_KAFKA_ENABLE: "true"
+      USER_KAFKA_BOOTSTRAP_SERVERS: *kafka-bootstrap
+      USER_SERVICE_THERAPY_SERVICE_URL: *therapy-url
+      USER_SERVICE_NOTIFICATION_SERVICE_URL: *notification-url
+      SECURITY_JWT_SECRET: ${AUTH_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+      # OAuth is off unless both the client id and secret are set (IF-02, IF-17).
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-http://localhost:8001/api/v1/auth/oauth/google/callback}
+      GOOGLE_OAUTH_ISSUER: https://accounts.google.com
+      GOOGLE_OAUTH_AUTHORIZE_URL: https://accounts.google.com/o/oauth2/v2/auth
+      GOOGLE_OAUTH_TOKEN_URL: https://oauth2.googleapis.com/token
+      GOOGLE_OAUTH_JWKS_URL: https://www.googleapis.com/oauth2/v3/certs
+      OAUTH_ALLOWED_REDIRECT_ORIGINS: ${OAUTH_ALLOWED_REDIRECT_ORIGINS:-http://localhost:3000}
     ports:
-      - "8001:8001"
+      - "127.0.0.1:8001:8001"
     depends_on:
-      postgres:
-        condition: service_healthy
+      <<: *app-depends-on
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
+      <<: *live-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/live', timeout=3)"]
+    <<: *app-service
     networks:
       - backend
       - data
@@ -240,31 +404,30 @@ services:
     build:
       context: .
       dockerfile: services/safety_service/Dockerfile
-    container_name: solace-safety-service
+    image: solace/safety-service:${SOLACE_IMAGE_TAG:-dev}
     environment:
-      SAFETY_ENVIRONMENT: ${SAFETY_ENVIRONMENT:-development}
+      <<: [*app-env, *data-plane-env, *llm-env]
+      SAFETY_ENVIRONMENT: ${ENVIRONMENT:-development}
       SAFETY_PORT: 8002
-      ESCALATION_NOTIFICATION_SERVICE_URL: http://notification-service:8003
       SAFETY_REPO_STORAGE_BACKEND: postgres
-      SAFETY_REPO_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-solace}:${POSTGRES_PASSWORD:-solace_dev_password}@postgres:5432/solace
-      SAFETY_REPO_REDIS_URL: redis://redis:6379/0
-      SAFETY_EVENTS_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+      # legacy aliases (IF-02): the DSN is built from the same POSTGRES_PASSWORD source as solace_app's
+      SAFETY_REPO_POSTGRES_DSN: postgresql+asyncpg://solace_app:${POSTGRES_PASSWORD:-solace_app_dev_only}@postgres:5432/solace
+      SAFETY_REPO_REDIS_URL: *redis-url
+      SAFETY_KAFKA_ENABLED: "true"
+      SAFETY_KAFKA_BOOTSTRAP_SERVERS: *kafka-bootstrap
+      SAFETY_EVENTS_KAFKA_BOOTSTRAP_SERVERS: *kafka-bootstrap
+      ESCALATION_NOTIFICATION_SERVICE_URL: *notification-url
+      CLINICIAN_REGISTRY_USER_SERVICE_URL: *user-url
     ports:
-      - "8002:8002"
+      - "127.0.0.1:8002:8002"
     depends_on:
-      postgres:
-        condition: service_healthy
+      <<: *app-depends-on
       redis:
         condition: service_healthy
-      kafka:
-        condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
+      <<: *live-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/live', timeout=3)"]
+    <<: *app-service
     networks:
       - backend
       - data
@@ -273,33 +436,30 @@ services:
     build:
       context: .
       dockerfile: services/notification-service/Dockerfile
-    container_name: solace-notification-service
+    image: solace/notification-service:${SOLACE_IMAGE_TAG:-dev}
     environment:
+      <<: [*app-env, *data-plane-env]
       # P1-9: runtime gate is ServiceConfig(env_prefix="NOTIFICATION_SERVICE_").env, so the
-      # binding var is NOTIFICATION_SERVICE_ENV. Made overridable so .env.prod/global
-      # ENVIRONMENT can lift it above the dev default (a bare literal here would win over
-      # env_file and pin the service to development in prod).
-      NOTIFICATION_SERVICE_ENV: ${NOTIFICATION_SERVICE_ENV:-development}
+      # binding var is NOTIFICATION_SERVICE_ENV; MVP-004: derived from ENVIRONMENT.
+      NOTIFICATION_SERVICE_ENV: ${ENVIRONMENT:-development}
       NOTIFICATION_SERVICE_PORT: 8003
       EMAIL_ENABLED: "true"
       EMAIL_SMTP_HOST: ${SMTP_HOST:-mailhog}
       EMAIL_SMTP_PORT: ${SMTP_PORT:-1025}
       SMS_ENABLED: "false"
       PUSH_ENABLED: "false"
-      AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+      # legacy aliases (IF-02)
+      KAFKA_ENABLED: "true"
+      NOTIFICATION_USER_SERVICE_URL: *user-url
     ports:
-      - "8003:8003"
-    depends_on:
-      # Notification consumes crisis events from Kafka. mailhog is a DEV-only SMTP sink
-      # (dev profile); in prod, EMAIL_SMTP_HOST points at a real relay via .env.prod.
-      kafka:
-        condition: service_healthy
+      - "127.0.0.1:8003:8003"
+    # Notification consumes crisis events from Kafka. mailhog is a DEV-only SMTP sink
+    # (dev profile); a real relay is set through the SMTP_HOST interpolation source.
+    depends_on: *app-depends-on
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
+      <<: *live-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/live', timeout=3)"]
+    <<: *app-service
     networks:
       - backend
       - data
@@ -308,29 +468,34 @@ services:
     build:
       context: .
       dockerfile: services/diagnosis_service/Dockerfile
-    container_name: solace-diagnosis-service
+    image: solace/diagnosis-service:${SOLACE_IMAGE_TAG:-dev}
     environment:
-      DIAGNOSIS_ENVIRONMENT: ${DIAGNOSIS_ENVIRONMENT:-development}
+      <<: [*app-env, *data-plane-env, *llm-env]
+      DIAGNOSIS_ENVIRONMENT: ${ENVIRONMENT:-development}
       DIAGNOSIS_PORT: 8004
-      DIAGNOSIS_DB_HOST: postgres
-      DIAGNOSIS_DB_PORT: 5432
-      DIAGNOSIS_DB_NAME: solace
-      DIAGNOSIS_DB_USER: ${POSTGRES_USER:-solace}
-      DIAGNOSIS_DB_PASSWORD: ${POSTGRES_PASSWORD:-solace_dev_password}
-      DIAGNOSIS_REDIS_HOST: redis
-      DIAGNOSIS_REDIS_PORT: 6379
-      AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+      # legacy aliases (IF-02)
+      DIAGNOSIS_DB_HOST: *pg-host
+      DIAGNOSIS_DB_PORT: *pg-port
+      DIAGNOSIS_DB_NAME: *pg-database
+      DIAGNOSIS_DB_USER: *pg-app-user
+      DIAGNOSIS_DB_PASSWORD: *pg-app-password
+      DIAGNOSIS_REDIS_HOST: *redis-host
+      DIAGNOSIS_REDIS_PORT: *redis-port
+      DIAGNOSIS_REDIS_PASSWORD: *redis-password
+      DIAGNOSIS_SESSION_REDIS_HOST: *redis-host
+      DIAGNOSIS_SESSION_REDIS_PORT: *redis-port
+      DIAGNOSIS_SESSION_REDIS_PASSWORD: *redis-password
     ports:
-      - "8004:8004"
+      - "127.0.0.1:8004:8004"
     depends_on:
-      postgres:
+      <<: *app-depends-on
+      # DiagnosisSessionStore.initialize() pings Redis at startup
+      redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
+      <<: *live-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/live', timeout=3)"]
+    <<: *app-service
     networks:
       - backend
       - data
@@ -339,40 +504,45 @@ services:
     build:
       context: .
       dockerfile: services/memory_service/Dockerfile
-    container_name: solace-memory-service
+    image: solace/memory-service:${SOLACE_IMAGE_TAG:-dev}
     environment:
+      <<: [*app-env, *data-plane-env]
       # P1-9: the runtime gate is MemoryServiceAppSettings(env_prefix="MEMORY_").environment,
-      # which binds MEMORY_ENVIRONMENT. The previous MEMORY_SERVICE_ENV bound nothing, pinning
-      # settings.environment to the 'development' default in every environment (so the
-      # production PHI-encryption / PHI-log-sanitizer guards were permanently unreachable).
-      MEMORY_ENVIRONMENT: ${MEMORY_ENVIRONMENT:-development}
+      # which binds MEMORY_ENVIRONMENT (MEMORY_SERVICE_ENV bound nothing); MVP-004: derived
+      # from ENVIRONMENT so the production PHI guards are reachable.
+      MEMORY_ENVIRONMENT: ${ENVIRONMENT:-development}
       MEMORY_SERVICE_PORT: 8005
-      MEMORY_DB_HOST: postgres
-      MEMORY_DB_PORT: 5432
-      MEMORY_DB_DATABASE: solace
-      MEMORY_DB_USER: ${POSTGRES_USER:-solace}
-      MEMORY_DB_PASSWORD: ${POSTGRES_PASSWORD:-solace_dev_password}
-      MEMORY_REDIS_HOST: redis
-      MEMORY_REDIS_PORT: 6379
+      # legacy aliases (IF-02)
+      MEMORY_DB_HOST: *pg-host
+      MEMORY_DB_PORT: *pg-port
+      MEMORY_DB_DATABASE: *pg-database
+      MEMORY_DB_USER: *pg-app-user
+      MEMORY_DB_PASSWORD: *pg-app-password
+      MEMORY_REDIS_HOST: *redis-host
+      MEMORY_REDIS_PORT: *redis-port
+      MEMORY_REDIS_PASSWORD: *redis-password
+      REDIS_HOST: *redis-host
+      REDIS_PORT: *redis-port
+      REDIS_PASSWORD: *redis-password
+      # D-04: Weaviate is opt-in (profile vector); off, memory-service serves keyword/BM25 retrieval.
+      WEAVIATE_ENABLED: ${WEAVIATE_ENABLED:-false}
+      MEMORY_EMBEDDINGS_PROVIDER: none
       WEAVIATE_HOST: weaviate
       WEAVIATE_PORT: 8080
-      MEMORY_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+      WEAVIATE_GRPC_PORT: 50051
+      WEAVIATE_API_KEY: ${WEAVIATE_API_KEY:-solace-dev-key-change-in-production}
+      MEMORY_KAFKA_BOOTSTRAP_SERVERS: *kafka-bootstrap
     ports:
-      - "8005:8005"
+      - "127.0.0.1:8005:8005"
+    # MVP-002: never waits for Weaviate (opt-in, and the service degrades without it).
     depends_on:
-      postgres:
-        condition: service_healthy
+      <<: *app-depends-on
       redis:
         condition: service_healthy
-      weaviate:
-        condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
+      <<: *live-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8005/live', timeout=3)"]
+    <<: *app-service
     networks:
       - backend
       - data
@@ -381,31 +551,36 @@ services:
     build:
       context: .
       dockerfile: services/therapy_service/Dockerfile
-    container_name: solace-therapy-service
+    image: solace/therapy-service:${SOLACE_IMAGE_TAG:-dev}
     environment:
-      THERAPY_ENVIRONMENT: ${THERAPY_ENVIRONMENT:-development}
+      <<: [*app-env, *data-plane-env, *llm-env]
+      THERAPY_ENVIRONMENT: ${ENVIRONMENT:-development}
       THERAPY_PORT: 8006
-      THERAPY_DB_HOST: postgres
-      THERAPY_DB_PORT: 5432
-      THERAPY_DB_DATABASE: solace
-      THERAPY_DB_USER: ${POSTGRES_USER:-solace}
-      THERAPY_DB_PASSWORD: ${POSTGRES_PASSWORD:-solace_dev_password}
-      THERAPY_REDIS_HOST: redis
-      THERAPY_REDIS_PORT: 6379
-      AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+      # legacy aliases (IF-02)
+      THERAPY_DB_HOST: *pg-host
+      THERAPY_DB_PORT: *pg-port
+      THERAPY_DB_DATABASE: *pg-database
+      THERAPY_DB_USER: *pg-app-user
+      THERAPY_DB_PASSWORD: *pg-app-password
+      THERAPY_REDIS_HOST: *redis-host
+      THERAPY_REDIS_PORT: *redis-port
+      THERAPY_REDIS_PASSWORD: *redis-password
+      THERAPY_SESSION_REDIS_HOST: *redis-host
+      THERAPY_SESSION_REDIS_PORT: *redis-port
+      THERAPY_SESSION_REDIS_PASSWORD: *redis-password
+      THERAPY_KAFKA_ENABLED: "true"
+      THERAPY_KAFKA_BOOTSTRAP_SERVERS: *kafka-bootstrap
+      THERAPY_CONTEXT_MEMORY_SERVICE_URL: *memory-url
     ports:
-      - "8006:8006"
+      - "127.0.0.1:8006:8006"
     depends_on:
-      postgres:
-        condition: service_healthy
+      <<: *app-depends-on
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
+      <<: *live-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8006/live', timeout=3)"]
+    <<: *app-service
     networks:
       - backend
       - data
@@ -414,29 +589,27 @@ services:
     build:
       context: .
       dockerfile: services/personality_service/Dockerfile
-    container_name: solace-personality-service
+    image: solace/personality-service:${SOLACE_IMAGE_TAG:-dev}
     environment:
-      PERSONALITY_ENVIRONMENT: ${PERSONALITY_ENVIRONMENT:-development}
+      <<: [*app-env, *data-plane-env, *llm-env]
+      PERSONALITY_ENVIRONMENT: ${ENVIRONMENT:-development}
       PERSONALITY_PORT: 8007
-      PERSONALITY_DB_HOST: postgres
-      PERSONALITY_DB_PORT: 5432
-      PERSONALITY_DB_NAME: solace
-      PERSONALITY_DB_USER: ${POSTGRES_USER:-solace}
-      PERSONALITY_DB_PASSWORD: ${POSTGRES_PASSWORD:-solace_dev_password}
-      PERSONALITY_REDIS_HOST: redis
-      PERSONALITY_REDIS_PORT: 6379
-      AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+      # legacy aliases (IF-02)
+      PERSONALITY_DB_HOST: *pg-host
+      PERSONALITY_DB_PORT: *pg-port
+      PERSONALITY_DB_NAME: *pg-database
+      PERSONALITY_DB_USER: *pg-app-user
+      PERSONALITY_DB_PASSWORD: *pg-app-password
+      PERSONALITY_REDIS_HOST: *redis-host
+      PERSONALITY_REDIS_PORT: *redis-port
+      PERSONALITY_REDIS_PASSWORD: *redis-password
     ports:
-      - "8007:8007"
-    depends_on:
-      postgres:
-        condition: service_healthy
+      - "127.0.0.1:8007:8007"
+    depends_on: *app-depends-on
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
+      <<: *live-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8007/live', timeout=3)"]
+    <<: *app-service
     networks:
       - backend
       - data
@@ -445,89 +618,83 @@ services:
     build:
       context: .
       dockerfile: services/orchestrator_service/Dockerfile
-    container_name: solace-orchestrator-service
+    image: solace/orchestrator-service:${SOLACE_IMAGE_TAG:-dev}
     environment:
-      ORCHESTRATOR_ENVIRONMENT: ${ORCHESTRATOR_ENVIRONMENT:-development}
+      <<: [*app-env, *data-plane-env, *llm-env]
+      ORCHESTRATOR_ENVIRONMENT: ${ENVIRONMENT:-development}
       ORCHESTRATOR_PORT: 8000
-      SERVICE_SAFETY_SERVICE_URL: http://safety-service:8002
-      SERVICE_PERSONALITY_SERVICE_URL: http://personality-service:8007
-      SERVICE_DIAGNOSIS_SERVICE_URL: http://diagnosis-service:8004
-      SERVICE_THERAPY_SERVICE_URL: http://therapy-service:8006
-      SERVICE_MEMORY_SERVICE_URL: http://memory-service:8005
-      SERVICE_USER_SERVICE_URL: http://user-service:8001
-      SERVICE_NOTIFICATION_SERVICE_URL: http://notification-service:8003
-      AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+      # PYSEC-2026-83: langgraph's strict msgpack checkpoint decoding is opt-in (WS-01.F2).
+      LANGGRAPH_STRICT_MSGPACK: "true"
+      ORCHESTRATOR_TURN_TIMEOUT_SECONDS: "20"
+      ORCHESTRATOR_AGENT_TIMEOUT_SECONDS: "8"
+      ORCHESTRATOR_SAFETY_CHECK_TIMEOUT_SECONDS: "2"
+      ORCHESTRATOR_WS_MAX_PER_USER: "3"
+      # legacy aliases (IF-02): the agents' and the treatment client's peer names
+      ORCHESTRATOR_SAFETY_AGENT_SERVICE_URL: *safety-url
+      ORCHESTRATOR_THERAPY_AGENT_SERVICE_URL: *therapy-url
+      ORCHESTRATOR_DIAGNOSIS_AGENT_SERVICE_URL: *diagnosis-url
+      ORCHESTRATOR_PERSONALITY_AGENT_SERVICE_URL: *personality-url
+      ORCHESTRATOR_ASSESSMENT_AGENT_SERVICE_URL: *diagnosis-url
+      SERVICE_TREATMENT_SERVICE_URL: *therapy-url
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
-      - safety-service
-      - memory-service
-      - therapy-service
-      - diagnosis-service
-      - personality-service
+      <<: *app-depends-on
+      # IF-01 SPEC uses_redis=True: the runtime pings REDIS_URL (and its rate limiter uses it) at startup
+      redis:
+        condition: service_healthy
+      # Peers start first when they are part of the run; the orchestrator degrades without them.
+      safety-service:
+        condition: service_started
+        required: false
+      memory-service:
+        condition: service_started
+        required: false
+      therapy-service:
+        condition: service_started
+        required: false
+      diagnosis-service:
+        condition: service_started
+        required: false
+      personality-service:
+        condition: service_started
+        required: false
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
+      <<: *live-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/live', timeout=3)"]
+    <<: *app-service
     networks:
       - backend
       - frontend
+      - data
 
   analytics-service:
     build:
       context: .
       dockerfile: services/analytics-service/Dockerfile
-    container_name: solace-analytics-service
+    image: solace/analytics-service:${SOLACE_IMAGE_TAG:-dev}
     environment:
+      <<: [*app-env, *data-plane-env]
       # P1-9: runtime gate is ServiceConfig(env_prefix="ANALYTICS_SERVICE_").env, so the
-      # binding var is ANALYTICS_SERVICE_ENV. Made overridable so a bare literal does not win
-      # over env_file and pin the service to development in prod.
-      ANALYTICS_SERVICE_ENV: ${ANALYTICS_SERVICE_ENV:-development}
+      # binding var is ANALYTICS_SERVICE_ENV; MVP-004: derived from ENVIRONMENT.
+      ANALYTICS_SERVICE_ENV: ${ENVIRONMENT:-development}
       ANALYTICS_SERVICE_PORT: 8009
+      # legacy aliases (IF-02)
       CONSUMER_KAFKA_ENABLED: "true"
-      CONSUMER_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
+      CONSUMER_KAFKA_BOOTSTRAP_SERVERS: *kafka-bootstrap
     ports:
-      - "8009:8009"
-    depends_on:
-      kafka:
-        condition: service_healthy
+      - "127.0.0.1:8009:8009"
+    depends_on: *app-depends-on
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8009/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
+      <<: *live-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8009/live', timeout=3)"]
+    <<: *app-service
     networks:
       - backend
       - data
 
-  config-service:
-    build:
-      context: .
-      dockerfile: services/config_service/Dockerfile
-    container_name: solace-config-service
-    environment:
-      CONFIG_ENVIRONMENT: ${CONFIG_ENVIRONMENT:-development}
-      CONFIG_PORT: 8008
-      CONFIG_REDIS_URL: redis://redis:6379/0
-      AUTH_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-key-minimum-32-chars}
-    ports:
-      - "8008:8008"
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8008/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
-    networks:
-      - backend
-      - data
+  # config-service is not deployed in the MVP profiles (MVP-231, D-19: zero consumers, code
+  # frozen under services/config_service).
 
   # =============================================================================
   # DEVELOPMENT TOOLS
@@ -537,26 +704,24 @@ services:
   # production (REV-11). Start locally with: docker compose --profile dev up -d
   mailhog:
     image: mailhog/mailhog:v1.0.1
-    container_name: solace-mailhog
     profiles: ["dev"]
     ports:
-      - "1025:1025"   # SMTP
-      - "8025:8025"   # Web UI
+      - "127.0.0.1:1025:1025"   # SMTP
+      - "127.0.0.1:8025:8025"   # Web UI
     restart: unless-stopped
     networks:
       - backend
 
   # Kafka UI for development (dev profile only)
   kafka-ui:
-    image: provectuslabs/kafka-ui:latest
-    container_name: solace-kafka-ui
+    image: provectuslabs/kafka-ui:v0.7.2   # pinned, never :latest (MVP-045)
     profiles: ["dev"]
     environment:
       KAFKA_CLUSTERS_0_NAME: solace-local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
       KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
     ports:
-      - "8081:8080"
+      - "127.0.0.1:8081:8080"
     depends_on:
       kafka:
         condition: service_healthy
