@@ -90,9 +90,10 @@ def test_both_sites_import_never_routed_first_inside_a_route():
         assert m, upstream
 
 def test_no_dev_only_vhost_and_no_wildcard_trust():
-    assert "kafka-ui" not in CADDYFILE
+    code = "\n".join(l.split("#", 1)[0] for l in CADDYFILE.splitlines())
+    assert "kafka-ui" not in code and "kafka." not in code
     # Caddy must not trust a client's X-Forwarded-For: the app trusts exactly one hop (Caddy's)
-    assert "trusted_proxies" not in CADDYFILE
+    assert "trusted_proxies" not in code
 
 def test_dev_edge_listens_on_loopback_8088_with_http_sites(render):
     caddy = render("dev").services["caddy"]

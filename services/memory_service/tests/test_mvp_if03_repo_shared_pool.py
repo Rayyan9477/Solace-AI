@@ -32,3 +32,31 @@ async def test_if03_initialize_probes_and_close_leaves_the_runtime_pool_open(rec
     await repo.close()
     assert recording_cpm.connection.fetched[0][0] == "SELECT 1"
     assert recording_cpm.closed == []
+
+
+async def test_if03_bind_errors_never_carry_bound_values(recording_cpm) -> None:
+    """W172-SEC-1: asyncpg's DataError embeds repr(value)[:40]; the repository must not surface it."""
+    import asyncpg
+
+    marker = "SYNTHETIC-PHI-MARKER-7f3a"
+
+    async def _raise_data_error(sql: str, *args: object) -> str:
+        raise asyncpg.exceptions.DataError(
+            f"invalid input for query argument $4: '{marker}...' (expected str, got dict)"
+        )
+
+    recording_cpm.connection.execute = _raise_data_error
+    record = MemoryRecord(user_id=uuid4(), session_id=uuid4(), content=marker)
+    try:
+        await PostgresRepository().store_memory_record(record)
+    except Exception as exc:  # the whole chain is inspected below
+        raised = exc
+    else:
+        raise AssertionError("expected the bind error to propagate")
+    chain, seen = [], raised
+    while seen is not None and len(chain) < 10:
+        chain.append(seen)
+        seen = seen.__cause__ or seen.__context__
+    for err in chain:
+        assert marker not in str(err) and marker not in repr(err.args)
+    assert "$4" in str(raised) and "DataError" in str(raised)

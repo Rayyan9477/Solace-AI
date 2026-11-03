@@ -90,7 +90,7 @@ services:
   # into http:// addresses) and requires every Caddy source. BASIC_AUTH_HASH contains $: the env
   # file must single-quote it (MVP-117).
   caddy:
-    ports: !reset
+    ports: !override
       - "80:80"
       - "443:443"
       - "443:443/udp"

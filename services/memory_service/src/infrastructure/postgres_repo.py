@@ -6,6 +6,7 @@ service's shared ConnectionPoolManager pool (IF-03).
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -15,6 +16,7 @@ from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 import structlog
+from asyncpg.exceptions import DataError
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -164,17 +166,45 @@ def _rowcount(status: Any) -> int:
         return 0
 
 
+_ARG_POSITION = re.compile(r"query argument \$(\d+)")
+
+
+def _sanitized_data_error(exc: DataError, stmt: Any) -> DataError:
+    """A DataError naming only the argument position, statement kind and original type (W172-SEC-1).
+
+    asyncpg's client-side encode error embeds ``repr(value)[:40]`` and server-side data errors
+    (e.g. invalid text representation) quote the input, so the original message may carry PHI.
+    """
+    match = _ARG_POSITION.search(str(exc))
+    position = f"${match.group(1)}" if match else "unknown"
+    return DataError(
+        f"memory repository {type(stmt).__name__} statement rejected bound argument "
+        f"{position} ({type(exc).__name__})"
+    )
+
+
 class _CoreSession:
     """Runs SQLAlchemy Core statements on one shared-pool asyncpg connection.
 
     Statements compile with the asyncpg dialect to ``$n`` placeholders; values travel only as
-    bound arguments (never rendered into SQL or logged). JSON values go to the pool's own codecs.
+    bound arguments and are never rendered into the SQL. JSON values go to the pool's own codecs.
+    A ``DataError`` (whose asyncpg message can quote a bound value) is re-raised sanitized, with
+    no chained cause or context, so callers that log the exception cannot log the value.
     """
 
     def __init__(self, conn: Any) -> None:
         self._conn = conn
 
     async def execute(self, stmt: Any) -> _CoreResult:
+        sanitized: DataError | None = None
+        try:
+            return await self._execute(stmt)
+        except DataError as exc:
+            sanitized = _sanitized_data_error(exc, stmt)
+        # Raised outside the except block so neither __cause__ nor __context__ holds the original.
+        raise sanitized
+
+    async def _execute(self, stmt: Any) -> _CoreResult:
         compiled = stmt.compile(dialect=_DIALECT, compile_kwargs={"render_postcompile": True})
         params = dict(compiled.params)
         if isinstance(stmt, Insert):

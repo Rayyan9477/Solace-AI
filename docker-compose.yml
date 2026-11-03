@@ -459,7 +459,11 @@ services:
       - "127.0.0.1:8003:8003"
     # Notification consumes crisis events from Kafka. mailhog is a DEV-only SMTP sink
     # (dev profile); a real relay is set through the SMTP_HOST interpolation source.
-    depends_on: *app-depends-on
+    depends_on:
+      <<: *app-depends-on
+      # IF-01 SPEC uses_redis=True: the runtime pings REDIS_URL at startup
+      redis:
+        condition: service_healthy
     healthcheck:
       <<: *live-healthcheck
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/live', timeout=3)"]
@@ -609,7 +613,11 @@ services:
       PERSONALITY_REDIS_PASSWORD: *redis-password
     ports:
       - "127.0.0.1:8007:8007"
-    depends_on: *app-depends-on
+    depends_on:
+      <<: *app-depends-on
+      # IF-01 SPEC uses_redis=True: the runtime pings REDIS_URL at startup
+      redis:
+        condition: service_healthy
     healthcheck:
       <<: *live-healthcheck
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8007/live', timeout=3)"]
@@ -693,7 +701,11 @@ services:
       CONSUMER_KAFKA_BOOTSTRAP_SERVERS: *kafka-bootstrap
     ports:
       - "127.0.0.1:8009:8009"
-    depends_on: *app-depends-on
+    depends_on:
+      <<: *app-depends-on
+      # IF-01 SPEC uses_redis=True: the runtime pings REDIS_URL at startup
+      redis:
+        condition: service_healthy
     healthcheck:
       <<: *live-healthcheck
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8009/live', timeout=3)"]
