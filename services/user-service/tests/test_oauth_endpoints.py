@@ -17,7 +17,8 @@ from fastapi.testclient import TestClient
 
 from src.main import ServiceState
 from src.api import router as api_router
-from src.oauth import oauth_router, InMemoryOAuthStateStore
+from src.api_auth import auth_router
+from src.oauth import InMemoryOAuthStateStore
 from src.infrastructure.jwt_service import (
     JWTService, JWTConfig, InMemoryTokenBlacklist,
 )
@@ -117,7 +118,7 @@ def _build_oauth_app(
 
     app = FastAPI(lifespan=test_lifespan)
     app.include_router(api_router, prefix="/api/v1")
-    app.include_router(oauth_router, prefix="/api/v1")
+    app.include_router(auth_router)
     # stash for test introspection
     app.state._test_store = _store
     app.state._test_client_obj = _client

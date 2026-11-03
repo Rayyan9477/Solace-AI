@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import pytest
 
-from src.api import get_current_user
+from src.api_deps import get_current_user
 from src.infrastructure.jwt_service import JWTConfig, JWTService
 from solace_common.request_context import get_current_user_id
 

@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from src.main import ServiceState
 from src.api import router as api_router
+from src.api_auth import auth_router
 from src.infrastructure.jwt_service import (
     JWTService, JWTConfig, TokenExpiredError, TokenInvalidError, InMemoryTokenBlacklist,
 )
@@ -103,6 +104,7 @@ def _build_test_app() -> FastAPI:
             "statistics": svc_state.stats,
         }
 
+    app.include_router(auth_router)
     app.include_router(api_router, prefix="/api/v1")
     return app
 

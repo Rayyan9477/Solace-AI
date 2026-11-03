@@ -29,17 +29,17 @@ import structlog
 
 from solace_infrastructure.runtime import (
     ServiceRuntimeSpec,
-    StartupDependencyError,
     create_service_app,
-    is_strict_environment,
     service_runtime,
 )
 
 from .config import ServiceConfig, UserServiceSettings, allow_special_use_tlds
 from .api import router as api_router
-from .oauth import oauth_router
-from .infrastructure.jwt_service import JWTService, JWTConfig
-from .infrastructure.password_service import PasswordService, PasswordConfig
+from .api_auth import auth_router
+from .internal_api import internal_router
+from .identity_wiring import _is_strict, start_identity, stop_identity
+from .infrastructure.jwt_service import JWTService
+from .infrastructure.password_service import PasswordService
 from .infrastructure.token_service import TokenService, create_token_service
 from .infrastructure.encryption_service import EncryptionService, create_encryption_service
 from .infrastructure.repository import (
@@ -51,7 +51,7 @@ from .infrastructure.repository import (
     reset_repositories,
 )
 from .domain.service import UserService
-from .auth import SessionManager, RedisSessionManager, SessionConfig, AuthenticationService
+from .auth import SessionManager, AuthenticationService
 
 logger = structlog.get_logger(__name__)
 
@@ -69,11 +69,6 @@ SPEC = ServiceRuntimeSpec(
     rate_limited=True,
     edge=True,
 )
-
-
-def _is_strict(environment: str | None) -> bool:
-    """Strict when the service's own environment OR the bare ``ENVIRONMENT`` is staging/production."""
-    return is_strict_environment(environment or "") or is_strict_environment()
 
 
 # The readiness check that reports a user event bridge that failed to start (outside strict).
@@ -174,9 +169,10 @@ _state: ServiceState | None = None
 async def build_user_service_state(runtime: Any, app: FastAPI) -> ServiceState:
     """Compose the user service from the runtime's datastores and store it on ``app.state.service``.
 
-    The token blacklist, the session manager and the OAuth state store all share the runtime's
-    one Redis client. Without it (no ``REDIS_URL``), a strict environment refuses to start; dev
-    and test log one ``identity_redis_unavailable`` warning and use in-memory stores.
+    The identity half (JWT, password, sessions, auth, OAuth state) is composed by
+    ``identity_wiring.start_identity`` on the runtime's one Redis client. Without it (no
+    ``REDIS_URL``), a strict environment refuses to start; dev and test log one
+    ``identity_redis_unavailable`` warning and use in-memory stores.
 
     Raises:
         StartupDependencyError: in a strict environment when ``runtime.redis`` is None.
@@ -193,16 +189,14 @@ async def build_user_service_state(runtime: Any, app: FastAPI) -> ServiceState:
     # a special-use name fails startup here, before any I/O.
     allow_special_use_tlds(settings.email_validation.allow_special_use_tlds)
 
-    # MVP-107: identity stores (blacklist, sessions, OAuth state) never silently fall back to
-    # process memory in strict: a revoked token or a session must hold across every instance.
-    redis_client = runtime.redis
-    if redis_client is None:
-        if _is_strict(runtime.spec.environment):
-            raise StartupDependencyError("redis", "user-service identity stores require REDIS_URL")
-        logger.warning(
-            "identity_redis_unavailable",
-            hint="Using in-memory token blacklist, sessions and OAuth state (dev/test only)",
-        )
+    # MVP-107: the identity stores (blacklist, sessions, OAuth state) and the JWT, password, session
+    # and auth services are composed by identity_wiring (WS-14.3) on the runtime's Redis client;
+    # a strict boot without Redis raises StartupDependencyError there.
+    state = ServiceState()
+    state.settings = settings
+    app.state.service = state
+    await start_identity(runtime, app)
+    password_service = state.password_service
 
     # REV-12: PHI-encryption exemption (documented). This service persists no
     # ClinicalBase entities — its User/Preferences/Consent models are its own and
@@ -212,71 +206,6 @@ async def build_user_service_state(runtime: Any, app: FastAPI) -> ServiceState:
     # Enforced by tests/integration/test_phi_encryption_activation.py.
 
     # --- 2. Infrastructure Layer ---
-
-    # JWT Service.
-    # P1-1 (RS256 issuer migration): user-service is the token ISSUER. When RS256 signing
-    # material is provisioned via the shared AUTH_* env (AUTH_ALGORITHM=RS256 +
-    # AUTH_PRIVATE_KEY_PEM + AUTH_ACTIVE_KID + AUTH_PUBLIC_KEYS_JSON), the issuer signs user
-    # tokens with an RS256 key ONLY it holds — so a compromised peer container can no longer
-    # forge user/admin tokens with the shared symmetric secret. Verification stays
-    # dual-accept (legacy HS256 accepted while AUTH_ACCEPT_LEGACY_HS256 is on) so a rollout
-    # can flip the issuer before flipping validators to strict. Absent RS256 material (the
-    # dev/test default), signing stays HS256 exactly as before.
-    key_manager: Any = None
-    jwt_algorithm = settings.jwt_algorithm
-    accept_legacy_hs256 = True
-    rs256_public_keys: dict[str, str] | None = None
-    rs256_active_kid: str | None = None
-    try:
-        from solace_security.auth import AuthSettings as _SharedAuthSettings
-        from solace_security.keys import KeyManager as _KeyManager
-
-        _shared_auth = _SharedAuthSettings()
-        if getattr(_shared_auth, "algorithm", "HS256") == "RS256":
-            _km = _KeyManager.from_settings(_shared_auth)
-            if _km.can_sign:
-                key_manager = _km
-                jwt_algorithm = "RS256"
-                accept_legacy_hs256 = bool(getattr(_shared_auth, "accept_legacy_hs256", True))
-                rs256_public_keys = _km.public_keys()
-                rs256_active_kid = _km.active_kid
-                logger.info(
-                    "jwt_issuer_rs256_enabled",
-                    active_kid=rs256_active_kid,
-                    accept_legacy_hs256=accept_legacy_hs256,
-                )
-    except Exception as rs_err:
-        logger.warning(
-            "jwt_issuer_rs256_unavailable",
-            error=str(rs_err),
-            hint="Falling back to HS256 issuer signing (set AUTH_ALGORITHM=RS256 + keys to enable).",
-        )
-
-    jwt_config = JWTConfig(
-        secret_key=settings.jwt_secret_key,
-        algorithm=jwt_algorithm,
-        access_token_expire_minutes=settings.access_token_expire_minutes,
-        refresh_token_expire_days=settings.refresh_token_expire_days,
-        active_kid=rs256_active_kid,
-        public_keys=rs256_public_keys,
-        accept_legacy_hs256=accept_legacy_hs256,
-    )
-    # Token blacklist on the runtime's Redis client (in-memory only outside strict).
-    from .infrastructure.jwt_service import RedisTokenBlacklist, InMemoryTokenBlacklist
-    token_blacklist: Any
-    if redis_client is not None:
-        token_blacklist = RedisTokenBlacklist(redis_client)
-    else:
-        token_blacklist = InMemoryTokenBlacklist()
-
-    jwt_service = JWTService(jwt_config, blacklist=token_blacklist, key_manager=key_manager)
-
-    # Password Service
-    password_config = PasswordConfig(
-        argon2_time_cost=settings.argon2_time_cost,
-        argon2_memory_cost=settings.argon2_memory_cost,
-    )
-    password_service = PasswordService(password_config)
 
     # Load Fernet keys from environment (MUST be set — keys are persistent across restarts)
     token_encryption_key = os.environ.get("FERNET_TOKEN_KEY")
@@ -316,30 +245,7 @@ async def build_user_service_state(runtime: Any, app: FastAPI) -> ServiceState:
         verification_token_expiry_hours=settings.service.email_verification_expiry_hours,
     )
 
-    # --- 5. Application Layer ---
-    session_config = SessionConfig(
-        secret_key=settings.jwt_secret_key,
-        access_token_expire_minutes=settings.access_token_expire_minutes,
-        refresh_token_expire_days=settings.refresh_token_expire_days,
-        session_timeout_minutes=settings.service.session_timeout_minutes,
-    )
-    session_manager: SessionManager | RedisSessionManager
-    if redis_client is not None:
-        session_manager = RedisSessionManager(redis_client, session_config)
-    else:
-        session_manager = SessionManager(session_config)
-
-    auth_service = AuthenticationService(
-        session_manager=session_manager,
-        jwt_service=jwt_service,
-        password_service=password_service,
-    )
-
     # --- Store in App State ---
-    state = ServiceState()
-    state.settings = settings
-    state.jwt_service = jwt_service
-    state.password_service = password_service
     state.token_service = token_service
     state.encryption_service = encryption_service
     state.repository_factory = repository_factory
@@ -347,29 +253,6 @@ async def build_user_service_state(runtime: Any, app: FastAPI) -> ServiceState:
     state.preferences_repository = preferences_repository
     state.consent_repository = consent_repository
     state.user_service = user_service
-    state.session_manager = session_manager
-    state.auth_service = auth_service
-
-    # OAuth (REV-22, config-gated). Feature is OFF unless GOOGLE_OAUTH_CLIENT_ID +
-    # GOOGLE_OAUTH_CLIENT_SECRET are set — otherwise oauth_settings stays None and the
-    # /auth/oauth/google/* routes 404. The state store uses the runtime's Redis client
-    # (multi-instance callbacks land on any worker); in-memory only outside strict.
-    from .oauth import (
-        google_oauth_settings_from_env,
-        default_httpx_client_factory,
-        InMemoryOAuthStateStore,
-        RedisOAuthStateStore,
-    )
-    from .infrastructure.oauth_google import verify_id_token as _verify_google_id_token
-
-    state.oauth_settings = google_oauth_settings_from_env()
-    if state.oauth_settings is not None:
-        state.oauth_state_store = (
-            RedisOAuthStateStore(redis_client) if redis_client is not None else InMemoryOAuthStateStore()
-        )
-        state.oauth_http_client_factory = default_httpx_client_factory
-        state.oauth_id_token_verifier = _verify_google_id_token
-        logger.info("google_oauth_enabled")
 
     state.initialized = True
     app.state.service = state
@@ -377,8 +260,8 @@ async def build_user_service_state(runtime: Any, app: FastAPI) -> ServiceState:
 
     logger.info(
         "user_service_initialized",
-        identity_store_backend="redis" if redis_client is not None else "memory",
-        jwt_algorithm=jwt_algorithm,
+        identity_store_backend="redis" if runtime.redis is not None else "memory",
+        jwt_algorithm=state.jwt_service.config.algorithm,
         access_token_minutes=settings.access_token_expire_minutes,
         refresh_token_days=settings.refresh_token_expire_days,
         session_timeout_minutes=settings.service.session_timeout_minutes,
@@ -400,6 +283,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
         # Registered first so it runs last (closers run in reverse registration order).
         runtime.register_shutdown("user_service_state", _release_state)
+        runtime.register_shutdown("identity", stop_identity)
 
         # Kafka event bridge for cross-service publishing, on the runtime's pool (durable outbox).
         # Strict: a start failure stops the service (user lifecycle and consent events, incl.
@@ -423,33 +307,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
 
 
-jwks_router = APIRouter()
-
-
-@jwks_router.get("/.well-known/jwks.json", tags=["Auth"], include_in_schema=False)
-async def jwks() -> dict[str, Any]:
-    """Publish the RS256 public verification keyset (JWKS) for token validation (C.3).
-
-    user-service is the token issuer, so it publishes its public keys here for external
-    consumers (frontend, OAuth). Internal services load the same keyset from
-    AUTH_PUBLIC_KEYS_JSON. Empty ({"keys": []}) while running in HS256 mode.
-    """
-    from solace_security.auth import AuthSettings
-    from solace_security.keys import KeyManager
-
-    try:
-        return KeyManager.from_settings(AuthSettings()).jwks()
-    except Exception as e:  # never let key config take down the endpoint
-        logger.warning("jwks_unavailable", error=str(e))
-        return {"keys": []}
-
-
-# The OAuth router (REV-22) is always registered; its handlers config-gate themselves
-# (404 when oauth_settings is None), so it is inert unless Google OAuth is set.
+# Identity (auth, OAuth, JWKS) is one router built by api_auth (WS-14.3); WS-08 extends it in place.
 ROUTERS: list[tuple[APIRouter, str]] = [
+    (auth_router, ""),
     (api_router, "/api/v1"),
-    (oauth_router, "/api/v1"),
-    (jwks_router, ""),
+    (internal_router, "/api/v1/internal"),
 ]
 
 

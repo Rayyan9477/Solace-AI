@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 import src.main as main
 from src import config as user_config
-from src.api import RegisterRequest
+from src.api_auth import RegisterRequest
 
 SETTING = "USER_EMAIL_ALLOW_SPECIAL_USE_TLDS"
 _PASSWORD = "Harness-Passw0rd"

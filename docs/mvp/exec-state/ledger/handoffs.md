@@ -34,3 +34,4 @@
 - [ ] WS-14.7 / WS-04.6 (from WS-14.2 review W142-SPE-1/SPE-2): user-service RateLimitMiddleware sits outside CORS and RequestContextMiddleware (429 has no ACAO / X-Request-ID; OPTIONS preflights to /auth/login counted); _register_rate_limiting opens a second Redis client with no closer - install_rate_limiting must sit inside CORS and use runtime.redis.
 - [x] (dispatched) WS-14.3 (from WS-14.2 fix1): revoke-token now catches TokenInvalidError locally in api.py - the verbatim split into api_auth must keep it.
 - [ ] WS-14 owner (from WS-14.2 fix1): revoke-token answers a well-formed 'Bearer <garbage>' with 503 'revocation service unavailable' instead of 401 (pre-existing).
+- [ ] WS-07 (W1, from WS-03.5 security review): in strict, user-service's limiter keys on the socket peer (hops 0) so all anonymous users behind Caddy share one IP bucket; TRUSTED_PROXY_HOPS is set in compose but nothing reads it yet (orchestrator reads ORCHESTRATOR_TRUSTED_PROXY_HOPS).
