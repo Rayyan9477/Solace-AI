@@ -331,7 +331,7 @@ variables:
   - {name: ORCHESTRATOR_AGENT_TIMEOUT_SECONDS, services: [orchestrator-service], format: int, dev_default: "8", strict_default: "8", group: orchestrator}
   - {name: ORCHESTRATOR_SAFETY_CHECK_TIMEOUT_SECONDS, services: [orchestrator-service], format: int, dev_default: "2", strict_default: "2", group: orchestrator}
   - {name: ORCHESTRATOR_WS_MAX_PER_USER, services: [orchestrator-service], format: int, dev_default: "3", strict_default: "3", group: orchestrator}
-  - {name: ORCHESTRATOR_TRUSTED_PROXY_HOPS, services: [orchestrator-service], profiles: [strict], format: int, strict_default: "1", group: orchestrator, notes: Caddy appends exactly one X-Forwarded-For hop (P2-12)}
+  - {name: ORCHESTRATOR_TRUSTED_PROXY_HOPS, services: [orchestrator-service], format: int, dev_default: "0", strict_default: "1", group: legacy, notes: "equals TRUSTED_PROXY_HOPS; Caddy appends exactly one X-Forwarded-For hop (P2-12)"}
   - {name: LANGGRAPH_STRICT_MSGPACK, services: [orchestrator-service], format: bool, dev_default: "true", strict_default: "true", group: orchestrator, notes: "langgraph's strict msgpack checkpoint decoding; the PYSEC-2026-83 fix is opt-in (WS-01.F2)"}
 
   # --- memory and Weaviate (D-04: Weaviate is opt-in, compose profile vector; MVP-002) ----------
@@ -379,33 +379,49 @@ variables:
   - {name: SMS_ENABLED, services: [notification-service], format: bool, dev_default: "false", strict_default: "false", group: notification}
   - {name: PUSH_ENABLED, services: [notification-service], format: bool, dev_default: "false", strict_default: "false", group: notification}
 
-  # --- edge (Caddy gets only these three; caddy moves into both profiles in WS-03.5) ---------
+  # --- edge (WS-03.5: Caddy runs in both profiles and gets only its five variables; the two edge
+  # services get the CORS origins and the trusted proxy hop count, MVP-225, D-26) ---------------
   - name: DOMAIN
     source: DOMAIN
     services: [caddy]
-    profiles: [strict]
     required_in_strict: true
+    dev_default: localhost
     example: solace.example.invalid
     group: edge
-    notes: primary domain; Caddy serves api.<DOMAIN> and auth.<DOMAIN>.
+    notes: primary domain; strict Caddy serves api.<DOMAIN> and auth.<DOMAIN> with automatic HTTPS.
   - name: CADDY_ADMIN_EMAIL
     source: CADDY_ADMIN_EMAIL
     services: [caddy]
-    profiles: [strict]
     format: email
     required_in_strict: true
+    dev_default: dev-ops@example.invalid
     example: ops@solace.example.invalid
     group: edge
     notes: ACME (Let's Encrypt) contact address.
   - name: BASIC_AUTH_HASH
     source: BASIC_AUTH_HASH
     services: [caddy]
-    profiles: [strict]
     secret: true
     format: bcrypt
     required_in_strict: true
+    dev_default: "$2a$14$/Jn6FNBQkYv/3QutdDyzjeg3AhRwCVGXSzsk.okBdnbT06rOAApZ6"
     group: edge
-    notes: bcrypt hash for the ops dashboards (caddy hash-password); single-quote it because it contains $.
+    notes: "bcrypt hash for the ops dashboards (caddy hash-password). Write it single-quoted in the env file (BASIC_AUTH_HASH='$2a$14$...'), because unquoted every $ starts an interpolation and the hash arrives mangled (MVP-117). The dev default is the hash of a discarded random password."
+  - {name: CADDY_API_SITE, source: DOMAIN, services: [caddy], required_in_strict: true, dev_default: "http://api.localhost:8088", group: edge, notes: "the orchestrator site address. Strict: always api.<DOMAIN> (a plain host, so automatic HTTPS applies; the env file cannot change it). Dev: CADDY_API_SITE, default http://api.localhost:8088"}
+  - {name: CADDY_AUTH_SITE, source: DOMAIN, services: [caddy], required_in_strict: true, dev_default: "http://auth.localhost:8088", group: edge, notes: "the user-service site address. Strict: always auth.<DOMAIN>. Dev: CADDY_AUTH_SITE, default http://auth.localhost:8088"}
+  - {name: CADDY_API_SITE, source: CADDY_API_SITE, services: [compose], profiles: [dev], dev_default: "http://api.localhost:8088", group: edge, notes: "dev and test only: Caddy's orchestrator site address (an explicit http:// address); strict ignores it and uses api.<DOMAIN>"}
+  - {name: CADDY_AUTH_SITE, source: CADDY_AUTH_SITE, services: [compose], profiles: [dev], dev_default: "http://auth.localhost:8088", group: edge, notes: "dev and test only: Caddy's user-service site address; strict ignores it and uses auth.<DOMAIN>"}
+  - name: CORS_ALLOWED_ORIGINS
+    source: CORS_ALLOWED_ORIGINS
+    services: [orchestrator-service, user-service]
+    format: csv
+    required_in_strict: true
+    dev_default: http://localhost:3000
+    example: https://app.solace.example.invalid
+    group: edge
+    notes: "comma-separated browser origins the edge services allow. Strict requires it (an edge service refuses to start with none, '*' or 'null')."
+  - {name: ORCHESTRATOR_CORS_ORIGINS, source: CORS_ALLOWED_ORIGINS, services: [orchestrator-service], format: csv, required_in_strict: true, dev_default: http://localhost:3000, group: legacy, notes: equals CORS_ALLOWED_ORIGINS}
+  - {name: TRUSTED_PROXY_HOPS, services: [orchestrator-service, user-service], format: int, dev_default: "0", strict_default: "1", group: edge, notes: "X-Forwarded-For hops to trust: 0 in dev (no proxy), 1 in strict (Caddy appends exactly one hop; D-26)"}
 
   # --- observability (MVP-040: no committed Grafana admin password; the GRAFANA_USER and
   # GRAFANA_PASSWORD interpolation names are dropped for GRAFANA_ADMIN_USER/GRAFANA_ADMIN_PASSWORD) --
