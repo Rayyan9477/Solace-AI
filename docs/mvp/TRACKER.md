@@ -13,11 +13,11 @@ The register's statuses are derived from this file at each barrier (`fixed` when
 
 | Status | todo | in-progress | review | fixing | done | blocked | deferred | total |
 |---|---|---|---|---|---|---|---|---|
-| Tasks | 271 | 1 | 1 | 0 | 57 | 0 | 0 | 330 |
+| Tasks | 271 | 1 | 0 | 0 | 58 | 0 | 0 | 330 |
 
 | Wave | Phase A done / total | Phase B done / total | Active | Blocked |
 |---|---|---|---|---|
-| W0 | 36 / 39 | 15 / 16 | 2 | 0 |
+| W0 | 36 / 39 | 16 / 16 | 1 | 0 |
 | W1 | 0 / 34 | 0 / 35 | 0 | 0 |
 | W2 | 0 / 16 | 0 / 61 | 0 | 0 |
 | W3 | 0 / 24 | 0 / 40 | 0 | 0 |
@@ -39,7 +39,7 @@ The register's statuses are derived from this file at each barrier (`fixed` when
 | WS-11 | 1 / 21 |
 | WS-12 | 2 / 19 |
 | WS-13 | 2 / 18 |
-| WS-14 | 2 / 22 |
+| WS-14 | 3 / 22 |
 | WS-15 | 2 / 23 |
 | WS-16 | 1 / 22 |
 | WS-17 | 3 / 19 |
@@ -122,7 +122,7 @@ Filled at each wave barrier (master plan, section 5.5). The tree zip is the only
 | [WS-12.1](../superpowers/plans/2026-10-18-mvp-remediation/WS-12-safety-detection-lexicon.md#task-ws-121-safety-runtime-adoption-if-01-and-a-strict-only-postgres-escalation-store) | Safety runtime adoption (IF-01) and a strict-only Postgres escalation store | high | safety-critical | Opus | no | - | MVP-088 | `done` | fix2 6706725 APPROVED (strictness = own env OR bare ENVIRONMENT; mock producer refused in strict; 48-combination equivalence with runtime); crisis path proven end to end; CRI-2 swallows -> WS-12.8/12.9 |
 | [WS-12.17](../superpowers/plans/2026-10-18-mvp-remediation/WS-12-safety-detection-lexicon.md#task-ws-1217-no-private-postgres-pool-in-safety-the-contraindication-repository-takes-an-injected-pool-w0) | No private Postgres pool in safety: the contraindication repository takes an injected pool (W0) | low | security-critical | Sonnet | no | - | MVP-271 | `done` | fix1 8020dc9 (W1217-1 closed) |
 | [WS-13.2](../superpowers/plans/2026-10-18-mvp-remediation/WS-13-notification-alert-delivery.md#task-ws-132-if-01-runtime-adoption-a-strict-crisis-consumer-guard-and-a-safe-legacy-consumer-lifecycle) | IF-01 runtime adoption, a strict crisis-consumer guard and a safe legacy consumer lifecycle | medium | safety-critical | Opus | no | WS-13.1 | MVP-155, MVP-287 | `done` | 8d8defa approved (crisis-path + spec/security, 0 findings) |
-| [WS-14.3](../superpowers/plans/2026-10-18-mvp-remediation/WS-14-accounts-roster-consent-erasure.md#task-ws-143-verbatim-split-of-identity-code-into-api_auth-api_deps-and-identity_wiring) | Verbatim split of identity code into api_auth, api_deps and identity_wiring | high | security-critical | Opus | no | WS-14.2 | MVP-107 | `review` | impl 252ddb2 |
+| [WS-14.3](../superpowers/plans/2026-10-18-mvp-remediation/WS-14-accounts-roster-consent-erasure.md#task-ws-143-verbatim-split-of-identity-code-into-api_auth-api_deps-and-identity_wiring) | Verbatim split of identity code into api_auth, api_deps and identity_wiring | high | security-critical | Opus | no | WS-14.2 | MVP-107 | `done` | 252ddb2 approved (verbatim+security, spec; 0 findings) |
 | [WS-15.2](../superpowers/plans/2026-10-18-mvp-remediation/WS-15-therapy-service.md#task-ws-152-refuse-silent-in-memory-therapy-repositories-in-strict-environments) | Refuse silent in-memory therapy repositories in strict environments | medium | security-critical | Opus | no | WS-15.1 | MVP-191 | `done` | 1c22662 approved (spec + security, 0 findings) |
 | [WS-16.1](../superpowers/plans/2026-10-18-mvp-remediation/WS-16-diagnosis-service.md#task-ws-161-adopt-the-if-01-runtime-in-diagnosis-build-the-session-store-from-the-runtime-redis-client-and-keep-one-set-of-reasoning-knobs) | Adopt the IF-01 runtime in diagnosis, build the session store from the runtime Redis client and keep one set of reasoning knobs | low | standard | Sonnet | no | - | MVP-263 | `done` | head fc7b965 APPROVED (0 findings; scoring untouched) |
 | [WS-17.19](../superpowers/plans/2026-10-18-mvp-remediation/WS-17-memory-service.md#task-ws-1719-memory-publishes-the-canonical-therapy-to-memory-context-examples) | Memory publishes the canonical therapy-to-memory context examples | medium | standard | Sonnet | no | WS-17.1 | MVP-357 | `done` | f06a395 approved |
