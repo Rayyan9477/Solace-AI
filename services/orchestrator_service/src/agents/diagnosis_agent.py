@@ -156,7 +156,9 @@ class DiagnosisServiceClient:
         current_phase: str | None = None,
     ) -> AssessmentResult:
         """Perform full diagnostic assessment."""
-        url = f"{self._base_url}/assess"
+        # REV-31: diagnosis service mounts under /api/v1/diagnosis (main.py). The
+        # bare /assess path 404'd (sibling assessment_agent already used the prefix).
+        url = f"{self._base_url}/api/v1/diagnosis/assess"
         payload = {
             "user_id": user_id,
             "session_id": session_id,
@@ -195,7 +197,7 @@ class DiagnosisServiceClient:
         conversation_history: list[dict[str, Any]],
     ) -> list[SymptomDTO]:
         """Extract symptoms from message without full assessment."""
-        url = f"{self._base_url}/extract-symptoms"
+        url = f"{self._base_url}/api/v1/diagnosis/extract-symptoms"
         payload = {
             "message": message,
             "conversation_history": conversation_history,

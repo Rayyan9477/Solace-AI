@@ -1368,6 +1368,31 @@ def test_fix2_phi1_the_marker_matches_every_escaping(text):
     assert runtime_logging._quotes_validation_input(text)
 
 
+@pytest.mark.parametrize("payload", [
+    "\\" * 65536,                      # one long backslash run (quadratic with an unbounded quantifier)
+    "\\" * 65536 + "'inpu",            # a run that almost reaches a marker
+    ("\\" * 64 + "'") * 1000,          # many shorter runs, each ending in a quote
+], ids=["backslash-run", "run-then-near-marker", "short-runs-with-quotes"])
+def test_fix2_review_marker_is_linear_on_long_backslash_runs(payload):
+    """WS04F1F2-PHI-1: the escape-tolerant marker must not be quadratic (one request body could
+    otherwise block a service's event loop while its log line is checked)."""
+    import time
+
+    from solace_infrastructure.runtime import logging as runtime_logging
+    from solace_infrastructure.runtime.logging import redact_credentials
+
+    started = time.perf_counter()
+    runtime_logging._quotes_validation_input(payload)
+    redact_credentials(None, "info", {"event": "x", "query": payload})
+    assert time.perf_counter() - started < 0.5
+
+
+def test_fix2_review_marker_still_matches_four_levels_of_escaping():
+    from solace_infrastructure.runtime import logging as runtime_logging
+
+    assert runtime_logging._quotes_validation_input("\\\\\\\\\\\\\\'input\\\\\\\\\\\\\\': 'x'")
+
+
 @pytest.mark.parametrize("text", ["user input was empty", "inputs: 3", "'inputs': 2", "input_type"])
 def test_fix2_phi1_the_marker_ignores_ordinary_text(text):
     from solace_infrastructure.runtime import logging as runtime_logging

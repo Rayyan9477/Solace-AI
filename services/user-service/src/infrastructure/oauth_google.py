@@ -24,7 +24,7 @@ import base64
 import hashlib
 import secrets
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlencode
 
 import structlog
@@ -203,3 +203,55 @@ def identity_from_id_token_payload(payload: dict[str, Any]) -> GoogleIdentity:
         name=payload.get("name"),
         picture_url=payload.get("picture"),
     )
+
+
+# Google's OIDC signing keys (JWKS). Stable endpoint; keys rotate ~daily.
+GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs"
+
+
+def _google_signing_key(id_token: str) -> Any:
+    """Resolve Google's current signing key for the token's kid (production path)."""
+    from jwt import PyJWKClient
+
+    client = PyJWKClient(GOOGLE_JWKS_URL)
+    return client.get_signing_key_from_jwt(id_token).key
+
+
+def verify_id_token(
+    id_token: str,
+    settings: GoogleOAuthSettings,
+    *,
+    signing_key_resolver: Callable[[str], Any] | None = None,
+    leeway_seconds: int = 30,
+) -> GoogleIdentity:
+    """Verify a Google id_token's SIGNATURE and claims, then return the identity (REV-22).
+
+    Replaces the prior unsafe path that decoded the payload without verifying the
+    signature. Verifies RS256 against Google's JWKS (keyed by ``kid``) and enforces
+    audience (our ``client_id``), issuer (accounts.google.com), expiry, and a verified
+    email. ``signing_key_resolver`` is injectable so unit tests supply a public key
+    without a network call; production uses Google's JWKS endpoint.
+    """
+    import jwt
+
+    resolver = signing_key_resolver or _google_signing_key
+    try:
+        key = resolver(id_token)
+    except Exception as e:  # network / unknown-kid / malformed
+        logger.warning("google_jwks_resolve_failed", error=str(e))
+        raise ValueError("could not resolve Google signing key for id_token") from e
+
+    claims = jwt.decode(
+        id_token,
+        key,
+        algorithms=["RS256"],
+        audience=settings.client_id,
+        leeway=leeway_seconds,
+        options={"require": ["exp", "iat", "aud", "iss", "sub"]},
+    )
+    # Google issues either the bare host or the https form; accept both, reject anything else.
+    if claims.get("iss") not in (GOOGLE_ISSUER, "accounts.google.com"):
+        raise ValueError(f"unexpected id_token issuer: {claims.get('iss')}")
+    if not claims.get("email_verified", False):
+        raise ValueError("google id_token email is not verified")
+    return identity_from_id_token_payload(claims)

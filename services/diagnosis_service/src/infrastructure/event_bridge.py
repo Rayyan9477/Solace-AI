@@ -10,19 +10,11 @@ import structlog
 
 from ..events import DiagnosisEvent, to_kafka_event
 
-import os
+from solace_events.publisher import EventPublisher, OutboxPoller, create_publisher
+from solace_events.config import KafkaSettings
 
-try:
-    from src.solace_events.publisher import EventPublisher, create_publisher
-    from src.solace_events.config import KafkaSettings
-    _KAFKA_AVAILABLE = True
-except ImportError:
-    _KAFKA_AVAILABLE = False
-    _logger = structlog.get_logger(__name__)
-    _logger.error("kafka_import_failed", package="solace_events",
-                  hint="Install solace_events or set KAFKA_BOOTSTRAP_SERVERS")
-    if os.environ.get("ENVIRONMENT", "").lower() == "production":
-        raise RuntimeError("solace_events package required in production")
+# MVP-133: a missing package is now an ImportError in every environment.
+_KAFKA_AVAILABLE = True
 
 logger = structlog.get_logger(__name__)
 
@@ -36,27 +28,35 @@ class KafkaEventBridge:
         use_mock: bool = False,
         postgres_pool: Any = None,
     ) -> None:
+        self._started = False
+        self._poller = None
         if not _KAFKA_AVAILABLE:
             logger.info("kafka_bridge_disabled", reason="solace_events not installed")
             self._publisher = None
             return
         self._publisher = create_publisher(
             kafka_settings=kafka_settings, use_outbox=True, use_mock=use_mock,
-            postgres_pool=postgres_pool,
+            postgres_pool=postgres_pool, source_service="diagnosis-service",
         )
-        self._started = False
         logger.info("diagnosis_kafka_bridge_initialized")
 
     async def start(self) -> None:
-        """Start the Kafka publisher."""
+        """Start the Kafka publisher and the outbox drain poller."""
         if self._publisher and not self._started:
             await self._publisher.start()
+            # REV-01: drain the outbox to Kafka (without a poller events are
+            # saved but never sent).
+            self._poller = OutboxPoller(self._publisher)
+            await self._poller.start()
             self._started = True
             logger.info("diagnosis_kafka_bridge_started")
 
     async def stop(self) -> None:
-        """Stop the Kafka publisher."""
+        """Stop the outbox poller and Kafka publisher."""
         if self._publisher and self._started:
+            if self._poller:
+                await self._poller.stop()
+                self._poller = None
             await self._publisher.stop()
             self._started = False
             logger.info("diagnosis_kafka_bridge_stopped")

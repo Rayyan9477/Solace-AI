@@ -140,7 +140,9 @@ class ConnectionManager:
             logger.warning("websocket_jwt_manager_not_configured")
             return None
         try:
-            result = self._jwt_manager.decode_token(token)
+            # REV-06 (M1 gate): use the async validator so the Redis token
+            # blacklist is consulted — the sync path can't see revocations.
+            result = await self._jwt_manager.decode_token_async(token)
             if result.success and result.payload:
                 return {"sub": result.payload.sub, "user_id": result.payload.sub}
             logger.warning("websocket_auth_failed", error=result.error_message)

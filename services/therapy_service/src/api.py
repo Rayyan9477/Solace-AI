@@ -349,6 +349,7 @@ async def assign_homework(
         success = await orchestrator.assign_homework(
             session_id=session_id,
             homework=homework,
+            user_id=current_user.user_id,
         )
 
         if not success:
@@ -442,9 +443,63 @@ async def delete_session(
         )
 
 
+@router.delete("/users/{user_id}", response_model=dict[str, Any], status_code=status.HTTP_200_OK)
+async def erase_user_data(
+    user_id: UUID,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    orchestrator: TherapyOrchestrator = Depends(get_therapy_orchestrator),
+) -> dict[str, Any]:
+    """
+    GDPR right-to-erasure (REV-17): erase ALL of a user's therapy data.
+
+    Deletes every treatment plan, therapy session, outcome measure, and durable
+    Redis session state for the user. Self-or-admin gated. Fail-loud: if any
+    store fails, a partial erasure is reported as 409 (never as success).
+    """
+    logger.info("user_data_erasure_requested", user_id=str(user_id))
+    # Enforce ownership: a user may erase only their own data, unless admin.
+    if str(user_id) != current_user.user_id and not current_user.has_any_role(
+        ["admin", "superadmin"]
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot erase another user's data",
+        )
+
+    try:
+        report = await orchestrator.erase_user_data(user_id=user_id)
+    except RuntimeError as e:
+        logger.error("user_data_erasure_unconfigured", user_id=str(user_id), error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Data erasure is not available",
+        )
+    except Exception as e:  # ErasureIncomplete and any other failure
+        # A partial erasure must NEVER be reported as a successful erasure.
+        logger.error("user_data_erasure_incomplete", user_id=str(user_id), error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User data erasure incomplete; some stores failed",
+        )
+
+    logger.info(
+        "user_data_erased",
+        user_id=str(user_id),
+        total_deleted=report.total_deleted,
+        stores=list(report.deleted),
+    )
+    return {
+        "user_id": str(user_id),
+        "complete": report.complete,
+        "deleted": report.deleted,
+        "total_deleted": report.total_deleted,
+    }
+
+
 @router.get("/status", response_model=dict[str, Any], status_code=status.HTTP_200_OK)
 async def get_service_status(
     orchestrator: TherapyOrchestrator = Depends(get_therapy_orchestrator),
+    _service: AuthenticatedService = Depends(get_current_service),
 ) -> dict[str, Any]:
     """
     Get therapy service status and statistics.

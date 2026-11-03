@@ -138,7 +138,7 @@ def to_kafka_event(event: DiagnosisEvent) -> Any:
     """
     try:
         from decimal import Decimal as _Decimal
-        from src.solace_events.schemas import (
+        from solace_events.schemas import (
             EventMetadata as KafkaMetadata,
             DiagnosisCompletedEvent as KafkaDiagnosisCompleted,
             CrisisDetectedEvent as KafkaCrisisDetected,

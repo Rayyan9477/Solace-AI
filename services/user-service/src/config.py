@@ -11,11 +11,18 @@ from __future__ import annotations
 
 from typing import Literal
 
+import email_validator
+import structlog
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import structlog
 
 logger = structlog.get_logger(__name__)
+
+ALLOW_SPECIAL_USE_TLDS_ENV = "USER_EMAIL_ALLOW_SPECIAL_USE_TLDS"
+
+# email_validator's special-use domain names as the library ships them, captured before any is removed.
+# USER_EMAIL_ALLOW_SPECIAL_USE_TLDS may list only these names.
+SPECIAL_USE_TLDS: frozenset[str] = frozenset(email_validator.SPECIAL_USE_DOMAIN_NAMES)
 
 # Known unsafe default values that should be rejected
 _UNSAFE_SECRET_PATTERNS = [
@@ -241,6 +248,51 @@ class ServiceConfig(BaseSettings):
         return self.env == "development"
 
 
+class EmailValidationConfig(BaseSettings):
+    """
+    Email address validation.
+
+    Environment Variables:
+        USER_EMAIL_ALLOW_SPECIAL_USE_TLDS: Comma-separated special-use TLDs that email addresses may use
+            (default: empty). Test-only: the e2e harness registers users at @test.invalid, which
+            email_validator (and pydantic EmailStr, which calls it) rejects. Every name must be one of
+            email_validator's special-use domain names; any other value fails startup.
+    """
+
+    allow_special_use_tlds: str = Field(
+        default="",
+        description="Test-only comma list of special-use TLDs allowed in email addresses",
+    )
+
+    model_config = SettingsConfigDict(env_prefix="USER_EMAIL_", env_file=".env", extra="ignore")
+
+
+def allow_special_use_tlds(value: str) -> tuple[str, ...]:
+    """Let email addresses use the special-use TLDs listed in ``value`` (USER_EMAIL_ALLOW_SPECIAL_USE_TLDS).
+
+    ``value`` is a comma list; whitespace around a name and case are ignored. Empty (the default) changes
+    nothing. Every name must be one of :data:`SPECIAL_USE_TLDS`, else ``ValueError`` naming the setting is
+    raised and nothing is changed. Otherwise exactly those names are removed from
+    ``email_validator.SPECIAL_USE_DOMAIN_NAMES`` (a library setting that the validator reads on every call,
+    so the API's validators and pydantic ``EmailStr`` follow it). Idempotent. Returns the allowed names.
+    """
+    names = tuple(dict.fromkeys(part.strip().lower() for part in value.split(",") if part.strip()))
+    if not names:
+        return ()
+    unknown = [name for name in names if name not in SPECIAL_USE_TLDS]
+    if unknown:
+        raise ValueError(
+            f"{ALLOW_SPECIAL_USE_TLDS_ENV} may list only special-use domain names "
+            f"({', '.join(sorted(SPECIAL_USE_TLDS))}); not one: {', '.join(repr(name) for name in unknown)}"
+        )
+    special_use = email_validator.SPECIAL_USE_DOMAIN_NAMES
+    for name in names:
+        while name in special_use:
+            special_use.remove(name)
+    logger.warning("email_special_use_tlds_allowed", setting=ALLOW_SPECIAL_USE_TLDS_ENV, tlds=list(names))
+    return names
+
+
 class KafkaConfig(BaseSettings):
     """
     Kafka configuration for event publishing.
@@ -311,6 +363,7 @@ class UserServiceSettings(BaseSettings):
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     service: ServiceConfig = Field(default_factory=ServiceConfig)
     kafka: KafkaConfig = Field(default_factory=KafkaConfig)
+    email_validation: EmailValidationConfig = Field(default_factory=EmailValidationConfig)
 
     model_config = SettingsConfigDict(
         env_prefix="USER_SERVICE_",

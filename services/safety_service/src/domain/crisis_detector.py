@@ -4,6 +4,7 @@ Implements 4-layer detection: Input Gate, Processing Guard, Output Filter, Conti
 """
 
 from __future__ import annotations
+import math
 import re
 import time
 from dataclasses import dataclass, field
@@ -46,7 +47,8 @@ def _crisis_level_from_score(
     score: Decimal, settings: CrisisDetectorSettings | None = None
 ) -> CrisisLevel:
     """Determine crisis level from risk score using configurable thresholds."""
-    critical_threshold = settings.critical_threshold if settings else Decimal("0.9")
+    # REV-25: default CRITICAL floor reconciled to 0.85 (see CrisisDetectorSettings).
+    critical_threshold = settings.critical_threshold if settings else Decimal("0.85")
     high_threshold = settings.high_threshold if settings else Decimal("0.7")
     elevated_threshold = settings.elevated_threshold if settings else Decimal("0.5")
     low_threshold = settings.low_threshold if settings else Decimal("0.3")
@@ -112,8 +114,11 @@ class CrisisDetectorSettings(BaseSettings):
         default=Decimal("0.5"), description="Threshold for ELEVATED risk"
     )
     high_threshold: Decimal = Field(default=Decimal("0.7"), description="Threshold for HIGH risk")
+    # REV-25 clinical reconciliation: CRITICAL floor is 0.85 per the clinical doc
+    # (docs/CLINICAL-VALIDATION.md), not 0.9. Lower = more sensitive = safer for
+    # crisis detection. Overridable via CRISIS_CRITICAL_THRESHOLD. Clinician review.
     critical_threshold: Decimal = Field(
-        default=Decimal("0.9"), description="Threshold for CRITICAL risk"
+        default=Decimal("0.85"), description="Threshold for CRITICAL risk"
     )
     enable_layer_1: bool = Field(default=True, description="Enable input gate layer")
     enable_layer_2: bool = Field(default=True, description="Enable processing guard layer")
@@ -683,12 +688,24 @@ class CrisisDetector:
         user_id: UUID | None = None,
     ) -> DetectionResult:
         """Perform multi-layer crisis detection with ML enhancement."""
+        # REV-25: measure real end-to-end detection latency so DetectionResult
+        # .detection_time_ms is observable (was hard-coded to 0 on this path).
+        start_time = time.perf_counter()
         context = context or {}
 
+        has_layer1_critical_keyword = False
         if self._settings.enable_layer_1:
             # Always run Layer1 regex-based detection
             layer1_result = self._layer1.detect(content, user_risk_history)
             keyword_score = layer1_result.risk_score
+            # M1-gate P0: capture whether a raw, non-negated critical-tier keyword
+            # fired here. The Layer-1 gate normalizes a lone critical keyword down
+            # to ~0.475, so the fused keyword_score alone can't trigger the floor;
+            # the granular "critical_keyword" risk factor is the reliable signal.
+            has_layer1_critical_keyword = any(
+                getattr(rf, "factor_type", None) == "critical_keyword"
+                for rf in layer1_result.risk_factors
+            )
             if self._keyword_detector:
                 # Also run ML keyword detection and take the higher score
                 keyword_matches = self._keyword_detector.detect(content, user_id)
@@ -724,13 +741,16 @@ class CrisisDetector:
             + pattern_score * self._settings.pattern_weight
             + history_score * self._settings.history_weight
         )
-        total_weight = (
-            self._settings.keyword_weight
-            + self._settings.sentiment_weight
-            + self._settings.pattern_weight
-            + self._settings.history_weight
+        # REV-02: normalize by the weight of ACTIVE signals only, so absent
+        # signals (no sentiment/pattern/history) do not dilute a strong keyword.
+        # A lone 0.95 keyword yields 0.95, not 0.95 * keyword_weight (~0.38).
+        active_weight = (
+            (self._settings.keyword_weight if keyword_score > Decimal("0") else Decimal("0"))
+            + (self._settings.sentiment_weight if sentiment_score > Decimal("0") else Decimal("0"))
+            + (self._settings.pattern_weight if pattern_score > Decimal("0") else Decimal("0"))
+            + (self._settings.history_weight if history_score > Decimal("0") else Decimal("0"))
         )
-        normalized_score = base_score / total_weight if total_weight > 0 else base_score
+        normalized_score = base_score / active_weight if active_weight > 0 else base_score
 
         active_signals = sum(
             1 for s in [keyword_score, sentiment_score, pattern_score] if s > Decimal("0")
@@ -818,12 +838,37 @@ class CrisisDetector:
                 if 4 not in detection_layers:
                     detection_layers.append(4)
 
+        # REV-02 / REV-25: a critical-tier keyword must never be diluted or
+        # averaged below the CRITICAL floor. Floor the score after all adjustments
+        # (fusion, LLM averaging, context/trajectory) so an explicit critical-tier
+        # utterance always escalates to CRITICAL. Layer1's contextual regexes keep
+        # benign phrases (e.g. "harm reduction") below critical_threshold, so this
+        # does not over-fire.
+        #
+        # M1-gate P0 fix: guard on the PRESENCE of a non-negated critical-tier
+        # Layer-1 keyword (captured above), not on the fused ``keyword_score``.
+        # The Layer-1 gate normalizes a lone critical keyword down to ~0.475, so
+        # ``keyword_score >= critical_threshold`` never fired on the always-on
+        # regex path — e.g. "I can't go on" (a critical keyword absent from
+        # keywords.json, so the ML detector misses it too) scored LOW / safe.
+        #
+        # REV-25 clinical reconciliation: raise the floor from HIGH to
+        # critical_threshold (0.85). A lone explicit critical keyword (e.g.
+        # "better off dead") is a direct crisis signal and must land at CRITICAL,
+        # not HIGH — the more sensitive, safer behavior. Flagged for clinician review.
+        if keyword_score >= self._settings.critical_threshold or has_layer1_critical_keyword:
+            total_score = max(total_score, self._settings.critical_threshold)
+
         crisis_level = _crisis_level_from_score(total_score, self._settings)
         confidence = (
             min(sum(rf.confidence for rf in risk_factors) / len(risk_factors), Decimal("1.0"))
             if risk_factors
             else Decimal("0.0")
         )
+
+        # REV-25: real end-to-end latency (whole ms, ceiling) so a sub-millisecond
+        # detection is still observable as >= 1 rather than a hard-coded 0.
+        detection_time_ms = math.ceil((time.perf_counter() - start_time) * 1000)
 
         result = DetectionResult(
             crisis_detected=crisis_level != CrisisLevel.NONE,
@@ -833,6 +878,7 @@ class CrisisDetector:
             trigger_indicators=trigger_indicators,
             confidence=confidence,
             detection_layers_triggered=detection_layers,
+            detection_time_ms=detection_time_ms,
             recommended_action=self._layer1._get_recommended_action(crisis_level),
         )
 

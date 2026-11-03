@@ -169,6 +169,8 @@ def to_kafka_event(event: OrchestratorEvent) -> Any:
             MessageReceivedEvent as KafkaMessageReceived,
             ResponseGeneratedEvent as KafkaResponseGenerated,
             ErrorOccurredEvent as KafkaErrorOccurred,
+            CrisisDetectedEvent as KafkaCrisisDetected,
+            CrisisLevel as KafkaCrisisLevel,
         )
     except ImportError:
         logger.debug("solace_events_not_available_for_bridge")
@@ -214,6 +216,26 @@ def to_kafka_event(event: OrchestratorEvent) -> Any:
             **base, error_code=event.payload.get("error_type", "UNKNOWN"),
             error_category="application", severity="HIGH",
             message=event.payload.get("error_message", "Unknown error"),
+        )
+
+    if event.event_type == EventType.CRISIS_DETECTED:
+        # M1-gate R2 (P0): forward orchestrator-detected crises onto the shared
+        # safety.crisis.detected topic so the notification consumer alerts a clinician.
+        from decimal import Decimal
+        risk = str(event.payload.get("risk_level", "HIGH")).upper()
+        valid = {level.value for level in KafkaCrisisLevel}
+        level = KafkaCrisisLevel(risk) if risk in valid else KafkaCrisisLevel.HIGH
+        indicators = event.payload.get("trigger_indicators") or (
+            [event.payload["crisis_type"]] if event.payload.get("crisis_type") else []
+        )
+        return KafkaCrisisDetected(
+            **base,
+            crisis_level=level,
+            trigger_indicators=indicators,
+            detection_layer=1,
+            confidence=Decimal("0.9"),
+            escalation_action="notify_on_call_clinician",
+            requires_human_review=True,
         )
 
     return None

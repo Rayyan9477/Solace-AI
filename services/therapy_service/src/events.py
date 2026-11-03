@@ -183,7 +183,7 @@ def to_kafka_event(event: DomainEvent) -> Any:
     """
     try:
         from decimal import Decimal
-        from src.solace_events.schemas import (
+        from solace_events.schemas import (
             EventMetadata as KafkaMetadata,
             TherapySessionStartedEvent as KafkaTherapyStarted,
             InterventionDeliveredEvent as KafkaInterventionDelivered,

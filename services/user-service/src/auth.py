@@ -476,7 +476,7 @@ class RedisSessionManager:
         await self._redis.set(
             self._session_key(session.session_id),
             session.model_dump_json(),
-            ttl=ttl_seconds,
+            ex=ttl_seconds,
         )
         # Track session IDs per user
         user_key = self._user_key(user.user_id)
@@ -487,7 +487,7 @@ class RedisSessionManager:
             oldest_id = session_ids.pop(0)
             await self._redis.delete(f"{self._prefix}{oldest_id}")
         session_ids.append(str(session.session_id))
-        await self._redis.set(user_key, json.dumps(session_ids), ttl=ttl_seconds)
+        await self._redis.set(user_key, json.dumps(session_ids), ex=ttl_seconds)
         self._stats["sessions_created"] += 1
         logger.info("session_created", session_id=str(session.session_id), user_id=str(user.user_id))
         return session
@@ -513,7 +513,7 @@ class RedisSessionManager:
             await self._redis.set(
                 self._session_key(session_id),
                 session.model_dump_json(),
-                ttl=ttl_seconds,
+                ex=ttl_seconds,
             )
 
     async def get_user_sessions(self, user_id: UUID, active_only: bool = True) -> list[UserSession]:
@@ -543,7 +543,10 @@ class RedisSessionManager:
             session_ids = json.loads(existing)
             session_ids = [s for s in session_ids if s != str(session_id)]
             if session_ids:
-                await self._redis.set(user_key, json.dumps(session_ids))
+                # M1-gate P2: preserve the index TTL (a bare SET clears it, leaking
+                # the user_sessions key forever) — same ex= fix as the other writes.
+                ttl_seconds = self._config.session_timeout_minutes * 60
+                await self._redis.set(user_key, json.dumps(session_ids), ex=ttl_seconds)
             else:
                 await self._redis.delete(user_key)
         self._stats["sessions_revoked"] += 1

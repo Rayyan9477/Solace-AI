@@ -260,8 +260,12 @@ async def get_user_profile(
 @router.get("/status", response_model=dict[str, Any], status_code=status.HTTP_200_OK)
 async def get_service_status(
     memory_service: MemoryService = Depends(get_memory_service),
+    _service: AuthenticatedService = Depends(get_current_service),
 ) -> dict[str, Any]:
-    """Get memory service status and statistics."""
+    """Get memory service status and statistics.
+
+    REV-09: gated behind service auth (no unauthenticated operational leak).
+    """
     return await memory_service.get_status()
 
 

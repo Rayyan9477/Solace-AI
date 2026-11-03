@@ -1,0 +1,6 @@
+# Memory Service: service extras, bare names only (WS-01.2, D-16).
+# Versions and hashes come from ../../requirements.lock; requirements.in includes this file.
+# Vector store + lexical search for hybrid retrieval, SQLAlchemy async for the Postgres store.
+weaviate-client
+bm25s
+sqlalchemy[asyncio]

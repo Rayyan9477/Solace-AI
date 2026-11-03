@@ -79,6 +79,12 @@ def configure_logging(settings: PersonalityServiceAppSettings) -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan manager for startup/shutdown."""
     settings = PersonalityServiceAppSettings()
+    # REV-32: fail loud at startup if this service's resolved environment disagrees with the
+    # deployment's bare ENVIRONMENT (a misnamed/unset PERSONALITY_ENVIRONMENT would silently
+    # pin the service to the development default, disabling the production fail-loud guards).
+    # Also runs the broader production-secret validation (self-skips outside prod/staging).
+    from solace_security.production_guards import ProductionGuards
+    ProductionGuards.assert_startup(settings.environment, service_name="personality-service")
     configure_logging(settings)
     from .config import get_config
     config = get_config()

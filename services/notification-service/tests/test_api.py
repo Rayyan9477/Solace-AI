@@ -3,39 +3,24 @@ Unit tests for notification API endpoints.
 
 Tests the FastAPI endpoints using test client with dependency overrides.
 """
-import sys
-from pathlib import Path
-_src_path = str(Path(__file__).parent.parent / "src")
-if _src_path not in sys.path:
-    sys.path.insert(0, _src_path)
-
 import pytest
 from uuid import uuid4
 from unittest.mock import MagicMock, AsyncMock
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
 
-from domain.service import (
+from src.domain.service import (
     NotificationResult,
     NotificationStatus,
     NotificationRecipient,
 )
-from domain.templates import TemplateType, TemplateRegistry
-from domain.channels import ChannelType
+from src.domain.templates import TemplateType, TemplateRegistry
+from src.domain.channels import ChannelType
 
 from solace_security.middleware import get_current_user, get_current_service, AuthenticatedUser, AuthenticatedService
 from solace_security.auth import TokenType
 
-# Force-import the notification api module to avoid sys.modules contamination
-# when running in the full test suite (another service's api.py may be cached)
-import importlib
-if "api" in sys.modules:
-    _cached_api = sys.modules.pop("api")
-else:
-    _cached_api = None
-import api as _notification_api
-if _cached_api is not None:
-    sys.modules["api"] = _cached_api
+from src import api as _notification_api
 
 
 @pytest.mark.integration

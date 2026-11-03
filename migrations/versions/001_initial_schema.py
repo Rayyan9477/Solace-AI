@@ -747,7 +747,6 @@ def upgrade() -> None:
         sa.Column("tags", JSONB, nullable=False, server_default="[]"),
         sa.Column("related_records", JSONB, nullable=False, server_default="[]"),
         sa.Column("retention_strength", sa.Float, nullable=False, server_default="1.0"),
-        sa.Column("access_count", sa.Integer, nullable=False, server_default="0"),
         sa.Column("accessed_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True, index=True),
         sa.Column("is_archived", sa.Boolean, nullable=False, server_default="false", index=True),

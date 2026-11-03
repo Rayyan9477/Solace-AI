@@ -27,6 +27,11 @@ class SessionState:
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     reasoning_history: list[ReasoningStepResultDTO] = field(default_factory=list)
     safety_flags: list[str] = field(default_factory=list)
+    # REV-16 durability: optimistic-concurrency version (bumped on each durable
+    # save) + last-write timestamp, used by the Redis write-through CAS to detect
+    # and merge concurrent updates to the load-bearing safety_flags.
+    version: int = 0
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass

@@ -177,6 +177,26 @@ class PostgresTreatmentPlanRepository(Repository[TreatmentPlanEntity]):
                 logger.debug("treatment_plan_deleted_postgres", plan_id=str(plan_id))
             return deleted
 
+    async def delete_user_data(self, user_id: UUID) -> int:
+        """GDPR right-to-erasure (REV-17): delete ALL of a user's treatment plans.
+
+        Removes every row for ``user_id`` (not a single ``plan_id``) and returns
+        the number of rows deleted, parsed from the asyncpg command tag
+        (``DELETE <n>``). Same ``WHERE user_id = $1`` predicate as get_by_user.
+        """
+        query = f"DELETE FROM {self._table} WHERE user_id = $1"
+        async with self._acquire() as conn:
+            result = await conn.execute(query, user_id)
+            try:
+                deleted = int(result.split()[-1])
+            except (ValueError, IndexError, AttributeError):
+                deleted = 0
+            logger.info(
+                "treatment_plans_user_data_deleted_postgres",
+                user_id=str(user_id), deleted=deleted,
+            )
+            return deleted
+
     async def get_by_user(self, user_id: UUID) -> list[TreatmentPlanEntity]:
         """Get all treatment plans for a user."""
         query = f"""
@@ -434,6 +454,26 @@ class PostgresTherapySessionRepository(Repository[TherapySessionEntity]):
             deleted = result.split()[-1] != "0"
             if deleted:
                 logger.debug("therapy_session_deleted_postgres", session_id=str(session_id))
+            return deleted
+
+    async def delete_user_data(self, user_id: UUID) -> int:
+        """GDPR right-to-erasure (REV-17): delete ALL of a user's therapy sessions.
+
+        Removes every row for ``user_id`` (not a single ``session_id``) and
+        returns the number of rows deleted, parsed from the asyncpg command tag
+        (``DELETE <n>``). Same ``WHERE user_id = $1`` predicate as get_by_user.
+        """
+        query = f"DELETE FROM {self._table} WHERE user_id = $1"
+        async with self._acquire() as conn:
+            result = await conn.execute(query, user_id)
+            try:
+                deleted = int(result.split()[-1])
+            except (ValueError, IndexError, AttributeError):
+                deleted = 0
+            logger.info(
+                "therapy_sessions_user_data_deleted_postgres",
+                user_id=str(user_id), deleted=deleted,
+            )
             return deleted
 
     async def get_by_user(
@@ -886,6 +926,26 @@ class PostgresOutcomeMeasureRepository:
             deleted = result.split()[-1] != "0"
             if deleted:
                 logger.debug("outcome_measure_deleted_postgres", measure_id=str(measure_id))
+            return deleted
+
+    async def delete_user_data(self, user_id: UUID) -> int:
+        """GDPR right-to-erasure (REV-17): delete ALL of a user's outcome measures.
+
+        Removes every row for ``user_id`` (not a single ``measure_id``) and
+        returns the number of rows deleted, parsed from the asyncpg command tag
+        (``DELETE <n>``). Same ``WHERE user_id = $1`` predicate as get_history.
+        """
+        query = f"DELETE FROM {self._table} WHERE user_id = $1"
+        async with self._acquire() as conn:
+            result = await conn.execute(query, user_id)
+            try:
+                deleted = int(result.split()[-1])
+            except (ValueError, IndexError, AttributeError):
+                deleted = 0
+            logger.info(
+                "outcome_measures_user_data_deleted_postgres",
+                user_id=str(user_id), deleted=deleted,
+            )
             return deleted
 
     async def get_by_session(self, session_id: UUID) -> list[OutcomeMeasure]:

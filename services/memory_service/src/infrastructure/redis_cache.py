@@ -87,14 +87,23 @@ class CachedSessionState:
 class RedisCache:
     """Redis cache for working memory and session state."""
 
-    def __init__(self, settings: RedisSettings | None = None) -> None:
+    def __init__(self, settings: RedisSettings | None = None, *, client: Any = None) -> None:
         self._settings = settings or RedisSettings()
-        self._client: Any = None
+        self._client: Any = client
+        self._injected = client is not None
         self._initialized = False
         self._stats = {"hits": 0, "misses": 0, "sets": 0, "deletes": 0}
 
     async def initialize(self, max_retries: int = 3) -> None:
-        """Initialize Redis connection with exponential backoff retry."""
+        """Initialize Redis connection with exponential backoff retry.
+
+        An injected client (the IF-01 runtime's) is only pinged: its owner closes it.
+        """
+        if self._injected:
+            await self._client.ping()
+            self._initialized = True
+            logger.info("redis_initialized", source="runtime")
+            return
         try:
             import redis.asyncio as redis
         except ImportError:
@@ -126,7 +135,8 @@ class RedisCache:
     async def close(self) -> None:
         """Close Redis connection."""
         if self._client:
-            await self._client.aclose()
+            if not self._injected:
+                await self._client.aclose()
             self._client = None
             self._initialized = False
         logger.info("redis_closed")

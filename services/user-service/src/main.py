@@ -24,7 +24,7 @@ import structlog
 
 from cryptography.fernet import Fernet
 
-from .config import UserServiceSettings
+from .config import UserServiceSettings, allow_special_use_tlds
 from .api import router as api_router
 from .infrastructure.jwt_service import JWTService, JWTConfig, TokenInvalidError, TokenExpiredError
 from .infrastructure.password_service import PasswordService, PasswordConfig
@@ -69,6 +69,13 @@ class ServiceState:
         # Application Services
         self.session_manager: SessionManager | None = None
         self.auth_service: AuthenticationService | None = None
+
+        # OAuth (REV-22) — inert unless Google OAuth is configured. When
+        # oauth_settings is None the /auth/oauth/google/* routes return 404.
+        self.oauth_settings: Any = None
+        self.oauth_state_store: Any = None
+        self.oauth_http_client_factory: Any = None
+        self.oauth_id_token_verifier: Any = None
 
         # State tracking
         self.initialized: bool = False
@@ -140,6 +147,18 @@ async def lifespan(app: FastAPI):
     # --- 1. Configuration ---
     settings = UserServiceSettings()
 
+    # REV-32: fail loud at startup if this service's resolved environment disagrees with the
+    # deployment's bare ENVIRONMENT (a misnamed/unset USER_SERVICE_ENV would silently pin the
+    # service to the development default, disabling the production fail-loud guards).
+    # Also runs the broader production-secret validation (self-skips outside prod/staging).
+    from solace_security.production_guards import ProductionGuards
+    ProductionGuards.assert_startup(settings.service.env, service_name="user-service")
+
+    # Test-only (WS-05.4): USER_EMAIL_ALLOW_SPECIAL_USE_TLDS lets email addresses use the listed
+    # special-use TLDs (the e2e harness registers at @test.invalid). Empty by default; a name that is not
+    # a special-use name fails startup here, before any I/O.
+    allow_special_use_tlds(settings.email_validation.allow_special_use_tlds)
+
     # Configure structured logging with PHI sanitizer
     import logging as _logging
     try:
@@ -173,14 +192,62 @@ async def lifespan(app: FastAPI):
 
     logger.info("user_service_starting")
 
+    # REV-12: PHI-encryption exemption (documented). This service persists no
+    # ClinicalBase entities — its User/Preferences/Consent models are its own and
+    # its sensitive fields are protected by the dedicated Fernet EncryptionService
+    # below. The global configure_phi_encryption() only affects ClinicalBase, so
+    # it is intentionally NOT configured here (least privilege: no PHI master key).
+    # Enforced by tests/integration/test_phi_encryption_activation.py.
+
     # --- 2. Infrastructure Layer ---
 
-    # JWT Service
+    # JWT Service.
+    # P1-1 (RS256 issuer migration): user-service is the token ISSUER. When RS256 signing
+    # material is provisioned via the shared AUTH_* env (AUTH_ALGORITHM=RS256 +
+    # AUTH_PRIVATE_KEY_PEM + AUTH_ACTIVE_KID + AUTH_PUBLIC_KEYS_JSON), the issuer signs user
+    # tokens with an RS256 key ONLY it holds — so a compromised peer container can no longer
+    # forge user/admin tokens with the shared symmetric secret. Verification stays
+    # dual-accept (legacy HS256 accepted while AUTH_ACCEPT_LEGACY_HS256 is on) so a rollout
+    # can flip the issuer before flipping validators to strict. Absent RS256 material (the
+    # dev/test default), signing stays HS256 exactly as before.
+    key_manager: Any = None
+    jwt_algorithm = settings.jwt_algorithm
+    accept_legacy_hs256 = True
+    rs256_public_keys: dict[str, str] | None = None
+    rs256_active_kid: str | None = None
+    try:
+        from solace_security.auth import AuthSettings as _SharedAuthSettings
+        from solace_security.keys import KeyManager as _KeyManager
+
+        _shared_auth = _SharedAuthSettings()
+        if getattr(_shared_auth, "algorithm", "HS256") == "RS256":
+            _km = _KeyManager.from_settings(_shared_auth)
+            if _km.can_sign:
+                key_manager = _km
+                jwt_algorithm = "RS256"
+                accept_legacy_hs256 = bool(getattr(_shared_auth, "accept_legacy_hs256", True))
+                rs256_public_keys = _km.public_keys()
+                rs256_active_kid = _km.active_kid
+                logger.info(
+                    "jwt_issuer_rs256_enabled",
+                    active_kid=rs256_active_kid,
+                    accept_legacy_hs256=accept_legacy_hs256,
+                )
+    except Exception as rs_err:
+        logger.warning(
+            "jwt_issuer_rs256_unavailable",
+            error=str(rs_err),
+            hint="Falling back to HS256 issuer signing (set AUTH_ALGORITHM=RS256 + keys to enable).",
+        )
+
     jwt_config = JWTConfig(
         secret_key=settings.jwt_secret_key,
-        algorithm=settings.jwt_algorithm,
+        algorithm=jwt_algorithm,
         access_token_expire_minutes=settings.access_token_expire_minutes,
         refresh_token_expire_days=settings.refresh_token_expire_days,
+        active_kid=rs256_active_kid,
+        public_keys=rs256_public_keys,
+        accept_legacy_hs256=accept_legacy_hs256,
     )
     # Token blacklist (Redis-backed for production, in-memory fallback)
     from .infrastructure.jwt_service import RedisTokenBlacklist, InMemoryTokenBlacklist
@@ -199,7 +266,7 @@ async def lifespan(app: FastAPI):
         logger.warning("redis_blacklist_unavailable", error=str(bl_err), hint="Using in-memory blacklist")
         token_blacklist = InMemoryTokenBlacklist()
 
-    jwt_service = JWTService(jwt_config, blacklist=token_blacklist)
+    jwt_service = JWTService(jwt_config, blacklist=token_blacklist, key_manager=key_manager)
 
     # Password Service
     password_config = PasswordConfig(
@@ -230,25 +297,9 @@ async def lifespan(app: FastAPI):
     )
 
     # --- 3. Repository Layer ---
-    # Connect to PostgreSQL for repository persistence
-    pg_client = None
-    try:
-        from solace_infrastructure.postgres import PostgresClient, PostgresSettings
-        pg_settings = PostgresSettings(
-            host=settings.database.host,
-            port=settings.database.port,
-            database=settings.database.name,
-            user=settings.database.user,
-            password=settings.database.password,
-        )
-        pg_client = PostgresClient(pg_settings)
-        await pg_client.connect()
-        logger.info("postgres_client_connected", host=settings.database.host, database=settings.database.name)
-    except Exception as pg_err:
-        logger.warning("postgres_client_unavailable", error=str(pg_err), hint="Repositories require PostgreSQL")
-
-    repository_config = RepositoryConfig(use_postgres=True)
-    repository_factory = RepositoryFactory(repository_config, postgres_client=pg_client)
+    # The repositories share the service's one "default" pool (ConnectionPoolManager, built from
+    # POSTGRES_* as solace_app; R-02.8). There is no private USER_DB_* client.
+    repository_factory = RepositoryFactory(RepositoryConfig(use_postgres=True))
 
     user_repository = repository_factory.get_user_repository()
     preferences_repository = repository_factory.get_preferences_repository()
@@ -319,6 +370,42 @@ async def lifespan(app: FastAPI):
     state.session_manager = session_manager
     state.auth_service = auth_service
 
+    # OAuth (REV-22, config-gated). Feature is OFF unless GOOGLE_OAUTH_CLIENT_ID +
+    # GOOGLE_OAUTH_CLIENT_SECRET are set — otherwise oauth_settings stays None and the
+    # /auth/oauth/google/* routes 404. The state store prefers Redis (multi-instance
+    # callbacks land on any worker) and falls back to in-memory.
+    from .oauth import (
+        google_oauth_settings_from_env,
+        default_httpx_client_factory,
+        InMemoryOAuthStateStore,
+        RedisOAuthStateStore,
+    )
+    from .infrastructure.oauth_google import verify_id_token as _verify_google_id_token
+
+    state.oauth_settings = google_oauth_settings_from_env()
+    if state.oauth_settings is not None:
+        oauth_store: Any = InMemoryOAuthStateStore()
+        try:
+            import redis.asyncio as _oauth_aioredis
+            _oauth_redis = _oauth_aioredis.from_url(
+                settings.redis.url,
+                decode_responses=True,
+                socket_timeout=settings.redis.timeout,
+            )
+            await _oauth_redis.ping()
+            oauth_store = RedisOAuthStateStore(_oauth_redis)
+            logger.info("oauth_state_store_initialized", backend="redis")
+        except Exception as _oauth_redis_err:
+            logger.warning(
+                "oauth_state_store_redis_unavailable",
+                error=str(_oauth_redis_err),
+                hint="Using in-memory OAuth state store",
+            )
+        state.oauth_state_store = oauth_store
+        state.oauth_http_client_factory = default_httpx_client_factory
+        state.oauth_id_token_verifier = _verify_google_id_token
+        logger.info("google_oauth_enabled")
+
     state.initialized = True
     app.state.service = state
 
@@ -355,11 +442,101 @@ async def lifespan(app: FastAPI):
     # --- Cleanup ---
     if event_bridge:
         await event_bridge.stop()
-    if pg_client is not None:
-        await pg_client.disconnect()
     logger.info("user_service_shutting_down", stats=state.stats)
     state.initialized = False
     _state = None
+
+
+def _rate_limiting_disabled() -> bool:
+    """Disable rate limiting only under a test harness — never in production.
+
+    Production ALWAYS enforces (and fails loud below), regardless of a stray process-level
+    ENVIRONMENT. Outside production, a test context is detected from EITHER the service env
+    (USER_SERVICE_ENV) OR the process env (ENVIRONMENT, which the pytest harness sets),
+    accepting any value that starts with "test".
+    """
+    import os
+
+    service_env = os.getenv("USER_SERVICE_ENV", "development")
+    if service_env.lower() == "production":
+        return False
+    candidates = (service_env, os.getenv("ENVIRONMENT", ""))
+    return any(str(v).lower().startswith("test") for v in candidates)
+
+
+def _register_rate_limiting(app: FastAPI, redis_url: str) -> None:
+    """P1-7 / P2-4: wire per-IP rate limiting, with tight buckets on the auth routes.
+
+    Mirrors the orchestrator's _register_rate_limiting: disabled only under a test harness
+    (so the shared sliding-window counter cannot bleed across tests), enforced everywhere
+    else, and FAIL-LOUD in production if it cannot be configured. The user-service auth
+    endpoints (/auth/login, /auth/resend-verification) had NO rate limiting, leaving
+    password-spray and email-bomb surfaces unbounded — these get their own tight per-IP
+    policies below.
+    """
+    import os
+
+    if _rate_limiting_disabled():
+        return
+
+    is_production = os.getenv("USER_SERVICE_ENV", "development").lower() == "production"
+    try:
+        from infrastructure.api_gateway.rate_limiting import (
+            create_solace_rate_limiter,
+            RateLimitPolicy,
+            RateLimitScope,
+            RateLimitWindow,
+        )
+        from solace_security.rate_limit import RateLimitMiddleware, client_ip
+
+        # Shared async Redis client so multi-instance limits are enforced in Redis, not
+        # per-process memory. create_solace_rate_limiter fails loud in production if None.
+        rl_redis = None
+        try:
+            import redis.asyncio as _redis
+
+            rl_redis = _redis.from_url(redis_url, decode_responses=True)
+        except Exception:  # noqa: BLE001 - prod fail-loud below handles None
+            rl_redis = None
+
+        limiter = create_solace_rate_limiter(redis_client=rl_redis)
+        # Tight per-IP auth policies (P2-4). auth-login (20/min) already ships in the shared
+        # factory; add a tighter resend-verification bucket to bound email bombing.
+        limiter.add_policy(
+            RateLimitPolicy(
+                name="auth-resend-per-ip",
+                limit=5,
+                window=RateLimitWindow.MINUTE,
+                scope=RateLimitScope.IP,
+                route_name="auth-resend",
+                tags=["solace", "auth"],
+            )
+        )
+
+        def _route_resolver(request: Request) -> str | None:
+            path = request.url.path
+            if path.endswith("/auth/login"):
+                return "auth-login"
+            if path.endswith("/auth/resend-verification"):
+                return "auth-resend"
+            return None
+
+        def _principal(request: Request) -> str:
+            # Unauthenticated auth routes are the target surface; key on client IP.
+            return f"ip:{client_ip(request)}"
+
+        app.add_middleware(
+            RateLimitMiddleware,
+            limiter=limiter,
+            service_name="user-service",
+            principal_resolver=_principal,
+            route_resolver=_route_resolver,
+        )
+        logger.info("rate_limiting_enabled", service="user-service")
+    except Exception as e:
+        if is_production:
+            raise RuntimeError(f"Rate limiting is required in production: {e}") from e
+        logger.warning("rate_limiting_not_configured", error=str(e))
 
 
 def create_app() -> FastAPI:
@@ -393,6 +570,15 @@ def create_app() -> FastAPI:
                     "Falling back to localhost only."
         )
         allowed_origins = ["http://localhost:3000", "http://localhost:8080"]
+
+    # Rate limiting is registered BEFORE CORS so CORS ends up the OUTERMOST middleware and
+    # its headers are attached even to the limiter's 429 short-circuit (readable cross-origin).
+    try:
+        _redis_url = UserServiceSettings().redis.url
+    except Exception:
+        from .config import RedisConfig
+        _redis_url = RedisConfig().url
+    _register_rate_limiting(app, _redis_url)
 
     app.add_middleware(
         CORSMiddleware,
@@ -474,8 +660,30 @@ def create_app() -> FastAPI:
             },
         }
 
+    @app.get("/.well-known/jwks.json", tags=["Auth"], include_in_schema=False)
+    async def jwks() -> dict[str, Any]:
+        """Publish the RS256 public verification keyset (JWKS) for token validation (C.3).
+
+        user-service is the token issuer, so it publishes its public keys here for external
+        consumers (frontend, OAuth). Internal services load the same keyset from
+        AUTH_PUBLIC_KEYS_JSON. Empty ({"keys": []}) while running in HS256 mode.
+        """
+        from solace_security.auth import AuthSettings
+        from solace_security.keys import KeyManager
+
+        try:
+            return KeyManager.from_settings(AuthSettings()).jwks()
+        except Exception as e:  # never let key config take down the endpoint
+            logger.warning("jwks_unavailable", error=str(e))
+            return {"keys": []}
+
     # Include API router
     app.include_router(api_router, prefix="/api/v1")
+
+    # OAuth router (REV-22). Always registered; the handlers config-gate themselves
+    # (404 when oauth_settings is None), so this is inert unless Google OAuth is set.
+    from .oauth import oauth_router
+    app.include_router(oauth_router, prefix="/api/v1")
 
     return app
 

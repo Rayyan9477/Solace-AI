@@ -451,6 +451,22 @@ class PostgresSafetyAssessmentRepository(SafetyAssessmentRepository):
             count = await conn.fetchval(query, user_id, crisis_level)
             return count or 0
 
+    async def delete_user_data(self, user_id: UUID) -> int:
+        """Delete ALL of a user's safety assessments (GDPR / REV-17).
+
+        Keyed on ``user_id`` (these rows are written under service-auth, so the
+        delete does not depend on the request GUC). Accepts either a ``UUID`` or
+        the ``str`` form the erasure orchestrator passes, and returns the number
+        of rows removed as parsed from the asyncpg ``DELETE N`` command tag.
+        """
+        uid = user_id if isinstance(user_id, UUID) else UUID(str(user_id))
+        query = f"DELETE FROM {self._table} WHERE user_id = $1"
+        async with self._acquire() as conn:
+            result = await conn.execute(query, uid)
+            deleted = int(result.split()[-1])
+        logger.info("safety_assessments_user_data_deleted", user_id=str(uid), deleted=deleted)
+        return deleted
+
     def _row_to_entity(self, row: dict[str, Any]) -> SafetyAssessment:
         """Convert a database row to a SafetyAssessment entity."""
         import json
@@ -602,6 +618,21 @@ class PostgresSafetyPlanRepository(SafetyPlanRepository):
         async with self._acquire() as conn:
             result = await conn.execute(query, plan_id)
             return result == "DELETE 1"
+
+    async def delete_user_data(self, user_id: UUID) -> int:
+        """Delete ALL of a user's safety plans (GDPR / REV-17).
+
+        Distinct from :meth:`delete`, which removes a single plan by id. Keyed on
+        ``user_id`` (written under service-auth, so independent of the request
+        GUC). Returns the number of rows removed from the asyncpg command tag.
+        """
+        uid = user_id if isinstance(user_id, UUID) else UUID(str(user_id))
+        query = f"DELETE FROM {self._table} WHERE user_id = $1"
+        async with self._acquire() as conn:
+            result = await conn.execute(query, uid)
+            deleted = int(result.split()[-1])
+        logger.info("safety_plans_user_data_deleted", user_id=str(uid), deleted=deleted)
+        return deleted
 
     def _row_to_entity(self, row: dict[str, Any]) -> SafetyPlan:
         """Convert a database row to a SafetyPlan entity."""
@@ -772,6 +803,21 @@ class PostgresSafetyIncidentRepository(SafetyIncidentRepository):
         """Update an existing incident."""
         return await self.save(incident)
 
+    async def delete_user_data(self, user_id: UUID) -> int:
+        """Delete ALL of a user's safety incidents (GDPR / REV-17).
+
+        Keyed on ``user_id`` (written under service-auth, so independent of the
+        request GUC). Returns the number of rows removed from the asyncpg
+        ``DELETE N`` command tag.
+        """
+        uid = user_id if isinstance(user_id, UUID) else UUID(str(user_id))
+        query = f"DELETE FROM {self._table} WHERE user_id = $1"
+        async with self._acquire() as conn:
+            result = await conn.execute(query, uid)
+            deleted = int(result.split()[-1])
+        logger.info("safety_incidents_user_data_deleted", user_id=str(uid), deleted=deleted)
+        return deleted
+
     def _row_to_entity(self, row: dict[str, Any]) -> SafetyIncident:
         """Convert a database row to a SafetyIncident entity."""
         import json
@@ -911,6 +957,22 @@ class PostgresUserRiskProfileRepository(UserRiskProfileRepository):
         async with self._acquire() as conn:
             rows = await conn.fetch(query)
             return [self._row_to_entity(dict(row)) for row in rows]
+
+    async def delete_user_data(self, user_id: UUID) -> int:
+        """Delete a user's risk profile (GDPR / REV-17).
+
+        The ``user_risk_profiles`` table is unique on ``user_id`` (see the
+        ``ON CONFLICT (user_id)`` upsert), so this removes at most one row. Keyed
+        on ``user_id`` (written under service-auth, independent of the request
+        GUC). Returns the number of rows removed from the asyncpg command tag.
+        """
+        uid = user_id if isinstance(user_id, UUID) else UUID(str(user_id))
+        query = f"DELETE FROM {self._table} WHERE user_id = $1"
+        async with self._acquire() as conn:
+            result = await conn.execute(query, uid)
+            deleted = int(result.split()[-1])
+        logger.info("user_risk_profile_user_data_deleted", user_id=str(uid), deleted=deleted)
+        return deleted
 
     def _row_to_entity(self, row: dict[str, Any]) -> UserRiskProfile:
         """Convert a database row to a UserRiskProfile entity."""

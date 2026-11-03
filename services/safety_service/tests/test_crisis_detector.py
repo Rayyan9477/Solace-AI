@@ -200,11 +200,11 @@ class TestLayer1InputGate:
     def test_recommended_action_for_levels(self, layer1: Layer1InputGate) -> None:
         """Test recommended actions match crisis levels.
 
-        'I want to kill myself tonight' scores ~0.867 (HIGH level) due to weighted
-        normalization + multi-signal boost, so recommended_action is 'intervene'.
+        'I want to kill myself tonight' scores ~0.867, which is CRITICAL level once
+        the threshold is 0.85 (REV-25), so recommended_action is 'escalate_immediately'.
         """
-        high_result = layer1.detect("I want to kill myself tonight")
-        assert high_result.recommended_action == "intervene"
+        critical_result = layer1.detect("I want to kill myself tonight")
+        assert critical_result.recommended_action == "escalate_immediately"
         normal = layer1.detect("I'm doing well")
         assert normal.recommended_action == "continue"
 
@@ -328,6 +328,35 @@ class TestCrisisDetector:
         assert result.risk_score >= Decimal("0.7")
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "utterance",
+        [
+            "I can't go on",       # in Layer-1 critical_keywords, NOT in keywords.json
+            "better off dead",
+            "take my life",
+            "I have no reason to live",
+        ],
+    )
+    async def test_lone_layer1_critical_keyword_floors_to_high(
+        self, detector: CrisisDetector, utterance: str
+    ) -> None:
+        """REV-02 (M1 gate P0): an explicit critical-tier Layer-1 keyword must
+        never score below HIGH, even when the ML KeywordDetector doesn't know it.
+
+        The floor previously guarded on the *fused* keyword_score, which the
+        Layer-1 gate had already diluted (~0.475) for a lone critical keyword, so
+        the floor never fired on the always-on regex path — 'I can't go on' scored
+        LOW / is_safe=True with no escalation.
+        """
+        result = await detector.detect(utterance)
+        assert result.crisis_detected is True
+        assert result.crisis_level in (CrisisLevel.HIGH, CrisisLevel.CRITICAL), (
+            f"{utterance!r} scored {result.crisis_level.value} "
+            f"(score {float(result.risk_score):.3f}) — a critical keyword must floor to HIGH+"
+        )
+        assert result.risk_score >= Decimal("0.7")
+
+    @pytest.mark.asyncio
     async def test_detect_no_crisis(self, detector: CrisisDetector) -> None:
         """Test no crisis in safe content."""
         result = await detector.detect("I'm feeling great today!")
@@ -371,7 +400,8 @@ class TestCrisisDetectorSettings:
         assert settings.enable_layer_2 is True
         assert settings.enable_layer_3 is True
         assert settings.enable_layer_4 is True
-        assert settings.critical_threshold == Decimal("0.9")
+        # REV-25: CRITICAL threshold lowered 0.9 -> 0.85 (clinical spec; D2 sign-off).
+        assert settings.critical_threshold == Decimal("0.85")
 
     def test_custom_thresholds(self) -> None:
         """Test custom threshold settings."""

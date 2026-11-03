@@ -4,8 +4,12 @@ Sprint 0 verification confirmed each of these was already fixed in
 source. These tests prevent silent regressions in a future refactor:
 
   - H-20 Assessment + Emotion agent files present in orchestrator.
-  - H-21 / H-22 Personality TraitDetector instantiates RoBERTa and
-         uses the spec ensemble weights (RoBERTa=0.5, LLM=0.3, LIWC=0.2).
+  - H-21 / H-22 Personality TraitDetector instantiates RoBERTa and uses
+         the corrected ensemble weights. NOTE: the original H-22 "spec"
+         (RoBERTa=0.5) was itself the bug — the RoBERTa head is a
+         seeded-random STUB, so weighting it highest diluted the real
+         LLM+LIWC signal. Phase-B B-4 dropped RoBERTa to 0.0 until a real
+         checkpoint ships (LLM=0.6, LIWC=0.4). See REV-15/B-4.
   - H-25 Personality agent calls the ``/api/v1/personality/...`` prefix.
   - H-43 Orchestrator safety check payload uses the lowercase
          ``full_assessment`` value so the safety service's API
@@ -52,18 +56,20 @@ class TestH21H22PersonalityEnsembleWeights:
         )
 
     def test_ensemble_weights_match_spec(self) -> None:
-        """Spec: RoBERTa=0.5, LLM=0.3, LIWC=0.2."""
+        """Corrected weights (B-4): RoBERTa=0.0 (seeded-random stub, excluded until a
+        real checkpoint ships), LLM=0.6, LIWC=0.4. The original 0.5/0.3/0.2 "spec"
+        weighted a random stub highest and was the bug REV-15/B-4 fixed."""
         from services.personality_service.src.domain import trait_detector
 
         src = inspect.getsource(trait_detector)
-        assert "ensemble_weights_roberta: float = Field(default=0.5" in src, (
-            "H-22: RoBERTa ensemble weight must default to 0.5 per spec"
+        assert "ensemble_weights_roberta: float = Field(default=0.0" in src, (
+            "B-4: RoBERTa stub must default to weight 0.0 until a real checkpoint ships"
         )
-        assert "ensemble_weights_llm: float = Field(default=0.3" in src, (
-            "H-22: LLM ensemble weight must default to 0.3 per spec"
+        assert "ensemble_weights_llm: float = Field(default=0.6" in src, (
+            "B-4: LLM ensemble weight must default to 0.6"
         )
-        assert "ensemble_weights_liwc: float = Field(default=0.2" in src, (
-            "H-22: LIWC ensemble weight must default to 0.2 per spec"
+        assert "ensemble_weights_liwc: float = Field(default=0.4" in src, (
+            "B-4: LIWC ensemble weight must default to 0.4"
         )
 
 

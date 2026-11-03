@@ -1,20 +1,34 @@
 """
 Solace-AI Therapy Service - FastAPI Application Entry Point.
 Evidence-based hybrid (rules+LLM) therapeutic intervention service with CBT/DBT/ACT/MI modalities.
+
+The app is built by the IF-01 runtime (``create_service_app``): logging, exception handlers,
+middleware, ``/live`` ``/ready`` ``/health`` ``/metrics`` and the Postgres and Redis clients come
+from ``solace_infrastructure.runtime``. This module composes the therapy service on top of them.
 """
 from __future__ import annotations
-import logging
-import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
-from uuid import uuid4
-from fastapi import FastAPI, Request, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from dataclasses import dataclass
+from typing import Any
+
 import structlog
+from fastapi import FastAPI
+from pydantic import AliasChoices, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from solace_infrastructure.runtime import (
+    ServiceRuntime,
+    ServiceRuntimeSpec,
+    StartupDependencyError,
+    create_service_app,
+    is_strict_environment,
+    service_runtime,
+)
+
+from .domain.service import TherapyOrchestrator
+from .events import EventBus
+from .infrastructure.redis_session_repository import RedisSessionRepository
 
 logger = structlog.get_logger(__name__)
 
@@ -35,11 +49,15 @@ class TherapyServiceAppSettings(BaseSettings):
     enable_tracing: bool = Field(default=True)
     hybrid_mode: bool = Field(default=True)
     enable_stepped_care: bool = Field(default=True)
-    # Kafka event publishing configuration
-    kafka_enabled: bool = Field(default=False)
-    kafka_bootstrap_servers: str = Field(default="localhost:29092")
+    # Event plane: Kafka bootstrap servers come from KAFKA_BOOTSTRAP_SERVERS (KafkaSettings).
+    events_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("EVENTS_ENABLED", "THERAPY_KAFKA_ENABLED", "events_enabled"),
+    )
     kafka_use_mock: bool = Field(default=False)
-    model_config = SettingsConfigDict(env_prefix="THERAPY_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="THERAPY_", env_file=".env", extra="ignore", populate_by_name=True
+    )
 
     @property
     def cors_origins_list(self) -> list[str]:
@@ -49,79 +67,66 @@ class TherapyServiceAppSettings(BaseSettings):
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
 
-def configure_logging(settings: TherapyServiceAppSettings) -> None:
-    """Configure structured logging for the therapy service."""
-    try:
-        from solace_security.phi_protection import phi_sanitizer_processor
-        _phi_processor = phi_sanitizer_processor
-    except ImportError:
-        if settings.environment == "production":
-            raise RuntimeError("PHI log sanitizer required in production - install solace_security")
-        _phi_processor = None
-    processors = [
-        structlog.contextvars.merge_contextvars,
-        structlog.processors.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-    ]
-    if _phi_processor:
-        processors.append(_phi_processor)
-    if settings.debug:
-        processors.append(structlog.dev.ConsoleRenderer())
-    else:
-        processors.append(structlog.processors.JSONRenderer())
-    log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
-    structlog.configure(
-        processors=processors,
-        wrapper_class=structlog.make_filtering_bound_logger(log_level),
-        context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
+_SETTINGS = TherapyServiceAppSettings()
+
+SPEC = ServiceRuntimeSpec(
+    service_name="therapy-service",
+    environment=_SETTINGS.environment,
+    version=_SETTINGS.version,
+    log_level=_SETTINGS.log_level,
+    debug=_SETTINGS.debug,
+    uses_postgres=True,
+    uses_redis=True,
+    event_plane="publish_consume",
+    handles_phi=True,
+    audited=True,
+    rate_limited=False,
+    edge=False,
+)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Application lifespan manager for startup/shutdown."""
-    settings = TherapyServiceAppSettings()
-    configure_logging(settings)
-    logger.info("therapy_service_starting", environment=settings.environment,
-                host=settings.host, port=settings.port, version=settings.version,
-                kafka_enabled=settings.kafka_enabled)
-    # Activate PHI encryption for ClinicalBase entities
-    try:
-        from solace_security.encryption import EncryptionSettings, Encryptor, FieldEncryptor
-        from solace_infrastructure.database.base_models import configure_phi_encryption
-        encryption_settings = EncryptionSettings()
-        encryptor = Encryptor(encryption_settings)
-        field_encryptor = FieldEncryptor(encryptor, encryption_settings)
-        configure_phi_encryption(field_encryptor)
-        logger.info("phi_encryption_activated")
-    except Exception as e:
-        if settings.environment == "production":
-            raise RuntimeError(f"PHI encryption is required in production: {e}") from e
-        logger.warning("phi_encryption_not_configured", error=str(e))
+@dataclass
+class TherapyComponents:
+    """What the therapy lifespan composes on top of the runtime."""
+    orchestrator: TherapyOrchestrator
+    event_bus: EventBus
+    llm_client: Any
+    session_store: RedisSessionRepository | None
+    unit_of_work: Any
+    user_data_erasure: Any | None
 
-    from .domain.service import TherapyOrchestrator, TherapyOrchestratorSettings
-    from .domain.technique_selector import TechniqueSelector, TechniqueSelectorSettings
-    from .domain.session_manager import SessionManager, SessionManagerSettings
-    from .domain.treatment_planner import TreatmentPlanner, TreatmentPlannerSettings
+
+async def build_therapy_components(
+    runtime: ServiceRuntime, settings: TherapyServiceAppSettings
+) -> TherapyComponents:
+    """Compose the therapy service from the runtime's clients and register its checks and stops.
+
+    The session store is built on ``runtime.redis`` and never owns a connection: the runtime
+    closes Redis. In a strict environment a missing Redis client or erasure wiring is fatal.
+    """
     from .domain.homework import HomeworkManager, HomeworkManagerSettings
     from .domain.progress import ProgressTracker, ProgressTrackerSettings
-    from .events import EventBus
-    from services.shared.infrastructure import UnifiedLLMClient, LLMClientSettings
-    technique_selector = TechniqueSelector(TechniqueSelectorSettings())
-    session_manager = SessionManager(SessionManagerSettings())
-    treatment_planner = TreatmentPlanner(TreatmentPlannerSettings())
-    homework_manager = HomeworkManager(HomeworkManagerSettings())
-    progress_tracker = ProgressTracker(ProgressTrackerSettings())
+    from .domain.service import TherapyOrchestratorSettings
+    from .domain.session_manager import SessionManager, SessionManagerSettings
+    from .domain.technique_selector import TechniqueSelector, TechniqueSelectorSettings
+    from .domain.treatment_planner import TreatmentPlanner, TreatmentPlannerSettings
+    from .infrastructure.gdpr import build_user_data_erasure
+    from .infrastructure.redis_session_repository import build_session_store
+    from .infrastructure.repository import create_unit_of_work
+    from services.shared.infrastructure import LLMClientSettings, UnifiedLLMClient
+
+    strict = is_strict_environment(settings.environment)
+    session_store = build_session_store(runtime.redis)
+    if session_store is None and strict:
+        raise StartupDependencyError(
+            "redis", "therapy session store requires REDIS_URL in strict environments"
+        )
+
     llm_client = UnifiedLLMClient(LLMClientSettings())
     await llm_client.initialize()
-
-    # Create event bus for domain events
+    runtime.register_shutdown("therapy_llm_client", llm_client.shutdown)
     event_bus = EventBus()
 
-    # Initialize context assembler for Memory Service integration
     context_assembler = None
     try:
         from .infrastructure.context_assembler import ContextAssembler, ContextAssemblerSettings
@@ -131,170 +136,108 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as e:
         logger.warning("context_assembler_init_failed", error=str(e))
 
-    # Initialize persistent repository via UnitOfWork
-    unit_of_work = None
-    try:
-        from .infrastructure.repository import create_unit_of_work
-        unit_of_work = create_unit_of_work()
-        logger.info("therapy_unit_of_work_initialized")
-    except Exception as e:
-        if settings.environment == "production":
-            raise RuntimeError(f"PostgreSQL repository required in production: {e}") from e
-        logger.warning("therapy_unit_of_work_fallback", error=str(e), fallback="in_memory")
+    unit_of_work = create_unit_of_work()
 
-    therapy_orchestrator = TherapyOrchestrator(
+    # GDPR right-to-erasure (REV-17) across the Postgres tables and the durable Redis store.
+    user_data_erasure = None
+    repos = (unit_of_work.treatment_plans, unit_of_work.sessions, unit_of_work.outcomes)
+    if session_store is not None and all(hasattr(r, "delete_user_data") for r in repos):
+        user_data_erasure = build_user_data_erasure(
+            treatment_plan_repo=unit_of_work.treatment_plans,
+            session_repo=unit_of_work.sessions,
+            outcome_repo=unit_of_work.outcomes,
+            redis_session_repo=session_store,
+        )
+        logger.info("therapy_user_data_erasure_wired", stores=list(user_data_erasure.store_names))
+    elif strict:
+        raise StartupDependencyError(
+            "gdpr_erasure", "therapy erasure needs Postgres-backed repositories and the session store"
+        )
+    else:
+        logger.warning("therapy_user_data_erasure_unavailable")
+
+    orchestrator = TherapyOrchestrator(
         settings=TherapyOrchestratorSettings(),
-        technique_selector=technique_selector,
-        session_manager=session_manager,
+        technique_selector=TechniqueSelector(TechniqueSelectorSettings()),
+        session_manager=SessionManager(SessionManagerSettings()),
         llm_client=llm_client,
         event_bus=event_bus,
         context_assembler=context_assembler,
         unit_of_work=unit_of_work,
-        treatment_planner=treatment_planner,
-        homework_manager=homework_manager,
-        progress_tracker=progress_tracker,
+        treatment_planner=TreatmentPlanner(TreatmentPlannerSettings()),
+        homework_manager=HomeworkManager(HomeworkManagerSettings()),
+        progress_tracker=ProgressTracker(ProgressTrackerSettings()),
+        user_data_erasure=user_data_erasure,
+        # REV-16: durable live-session store; None when Redis is unavailable outside strict
+        # (the orchestrator then keeps sessions in memory and /ready reports not ready).
+        session_store=session_store,
     )
-    await therapy_orchestrator.initialize()
-    app.state.settings = settings
-    app.state.therapy_orchestrator = therapy_orchestrator
-    app.state.technique_selector = technique_selector
-    app.state.session_manager = session_manager
-    app.state.llm_client = llm_client
-    app.state.event_bus = event_bus
+    await orchestrator.initialize()
+    runtime.register_shutdown("therapy_orchestrator", orchestrator.shutdown)
 
-    # Initialize Kafka event bridge if enabled
-    event_bridge = None
-    if settings.kafka_enabled:
-        try:
-            from .infrastructure.event_bridge import initialize_event_bridge
-            # Build Kafka settings if solace_events is available
-            kafka_settings = None
-            try:
-                from solace_events.config import KafkaSettings
-                kafka_settings = KafkaSettings(
-                    bootstrap_servers=settings.kafka_bootstrap_servers,
-                )
-            except ImportError:
-                logger.warning("solace_events_not_available", reason="Cannot configure Kafka settings")
+    async def _orchestrator_ready() -> tuple[bool, str]:
+        return bool(orchestrator._initialized), "initialized" if orchestrator._initialized else "not initialized"
 
-            # Get postgres pool for durable event outbox
-            _event_pool = None
-            try:
-                from solace_infrastructure.database.connection_manager import ConnectionPoolManager
-                _event_pool = await ConnectionPoolManager.get_pool()
-            except Exception:
-                logger.debug("event_outbox_pool_not_available", hint="Using in-memory outbox")
+    async def _session_store_ready() -> tuple[bool, str]:
+        if session_store is None:
+            return False, "redis unavailable"
+        await runtime.redis.ping()
+        return True, "ok"
 
-            event_bridge = await initialize_event_bridge(
-                event_bus=event_bus,
-                kafka_settings=kafka_settings,
+    runtime.register_readiness_check("therapy_orchestrator", _orchestrator_ready, critical=True)
+    runtime.register_readiness_check("therapy_session_store", _session_store_ready, critical=True)
+
+    return TherapyComponents(
+        orchestrator=orchestrator,
+        event_bus=event_bus,
+        llm_client=llm_client,
+        session_store=session_store,
+        unit_of_work=unit_of_work,
+        user_data_erasure=user_data_erasure,
+    )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Application lifespan: the runtime brackets it; this composes the therapy service."""
+    async with service_runtime(app, SPEC) as runtime:
+        settings = TherapyServiceAppSettings()
+        components = await build_therapy_components(runtime, settings)
+        app.state.settings = settings
+        app.state.therapy_orchestrator = components.orchestrator
+        app.state.llm_client = components.llm_client
+        app.state.event_bus = components.event_bus
+        app.state.session_store = components.session_store
+
+        if settings.events_enabled:
+            from solace_events.config import KafkaSettings
+            from .infrastructure.event_bridge import initialize_event_bridge, shutdown_event_bridge
+            app.state.event_bridge = await initialize_event_bridge(
+                event_bus=components.event_bus,
+                kafka_settings=KafkaSettings(),
                 use_mock=settings.kafka_use_mock,
-                postgres_pool=_event_pool,
+                postgres_pool=runtime.pg_pool,
             )
-            app.state.event_bridge = event_bridge
+            runtime.register_shutdown("therapy_event_bridge", shutdown_event_bridge)
             logger.info("kafka_event_bridge_started")
-        except Exception as e:
-            logger.error("kafka_event_bridge_start_failed", error=str(e))
-
-    logger.info("therapy_service_started", environment=settings.environment,
-                hybrid_mode=settings.hybrid_mode, stepped_care=settings.enable_stepped_care)
-    yield
-    logger.info("therapy_service_stopping")
-
-    # Shutdown event bridge
-    if event_bridge:
-        try:
-            from .infrastructure.event_bridge import shutdown_event_bridge
-            await shutdown_event_bridge()
-            logger.info("kafka_event_bridge_stopped")
-        except Exception as e:
-            logger.error("kafka_event_bridge_stop_failed", error=str(e))
-
-    await therapy_orchestrator.shutdown()
-    await llm_client.shutdown()
-    logger.info("therapy_service_stopped")
+        elif is_strict_environment(settings.environment):
+            raise StartupDependencyError(
+                "events", "therapy events cannot be disabled in strict environments"
+            )
+        logger.info("therapy_service_started", environment=settings.environment,
+                    hybrid_mode=settings.hybrid_mode, stepped_care=settings.enable_stepped_care)
+        yield
 
 
 def create_application() -> FastAPI:
-    """Create and configure FastAPI application."""
-    settings = TherapyServiceAppSettings()
-    app = FastAPI(
-        title="Solace-AI Therapy Service",
-        description="Evidence-based hybrid therapeutic intervention with CBT/DBT/ACT/MI modalities",
-        version=settings.version,
-        docs_url="/docs" if settings.environment != "production" else None,
-        redoc_url="/redoc" if settings.environment != "production" else None,
-        openapi_url="/openapi.json" if settings.environment != "production" else None,
-        lifespan=lifespan,
-    )
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins_list,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["*"],
-        expose_headers=["X-Request-ID", "X-Correlation-ID", "X-Session-Time-Ms", "X-Technique-ID"],
-    )
+    """Create the therapy FastAPI application on the shared runtime."""
     from .api import router
-    app.include_router(router, prefix="/api/v1/therapy")
-    _register_middleware(app)
-    _register_exception_handlers(app)
-    return app
-
-
-def _register_middleware(app: FastAPI) -> None:
-    """Register custom middleware for therapy service."""
-    @app.middleware("http")
-    async def request_tracking_middleware(request: Request, call_next):
-        request_id = request.headers.get("X-Request-ID", str(uuid4()))
-        correlation_id = request.headers.get("X-Correlation-ID", str(uuid4()))
-        structlog.contextvars.clear_contextvars()
-        structlog.contextvars.bind_contextvars(
-            request_id=request_id,
-            correlation_id=correlation_id,
-            path=request.url.path,
-            method=request.method,
-        )
-        start_time = time.perf_counter()
-        response = await call_next(request)
-        process_time_ms = (time.perf_counter() - start_time) * 1000
-        response.headers["X-Request-ID"] = request_id
-        response.headers["X-Correlation-ID"] = correlation_id
-        response.headers["X-Process-Time-Ms"] = f"{process_time_ms:.2f}"
-        logger.info("request_completed", status_code=response.status_code,
-                    process_time_ms=round(process_time_ms, 2))
-        return response
-
-
-def _register_exception_handlers(app: FastAPI) -> None:
-    """Register global exception handlers."""
-    @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(request: Request, exc: RequestValidationError):
-        errors = []
-        for error in exc.errors():
-            loc = ".".join(str(x) for x in error["loc"])
-            errors.append({"field": loc, "message": error["msg"], "type": error["type"]})
-        logger.warning("validation_error", path=request.url.path, errors=errors)
-        return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content={"error": {"code": "VALIDATION_ERROR", "message": "Request validation failed", "details": errors}},
-        )
-
-    @app.exception_handler(ValueError)
-    async def value_error_handler(request: Request, exc: ValueError):
-        logger.warning("value_error", path=request.url.path, error=str(exc))
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={"error": {"code": "BAD_REQUEST", "message": str(exc)}},
-        )
-
-    @app.exception_handler(Exception)
-    async def global_exception_handler(request: Request, exc: Exception):
-        logger.error("unhandled_exception", path=request.url.path, error=str(exc), exc_type=type(exc).__name__)
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"error": {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred"}},
-        )
+    return create_service_app(
+        SPEC,
+        lifespan=lifespan,
+        routers=[(router, "/api/v1/therapy")],
+        title="Solace-AI Therapy Service",
+    )
 
 
 app = create_application()
@@ -304,33 +247,6 @@ app = create_application()
 async def root() -> dict[str, str]:
     """Root endpoint with service info."""
     return {"service": "therapy-service", "status": "operational", "version": "1.0.0"}
-
-
-@app.get("/ready", include_in_schema=False)
-async def readiness() -> JSONResponse:
-    """Kubernetes readiness probe."""
-    if not hasattr(app.state, "therapy_orchestrator") or not app.state.therapy_orchestrator._initialized:
-        return JSONResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content={"status": "not_ready"})
-    return JSONResponse(status_code=status.HTTP_200_OK, content={"status": "ready"})
-
-
-@app.get("/live", include_in_schema=False)
-async def liveness() -> dict[str, str]:
-    """Kubernetes liveness probe."""
-    return {"status": "alive"}
-
-
-@app.get("/health", include_in_schema=False)
-async def health_check() -> dict:
-    """Health check endpoint with service status details."""
-    return {
-        "status": "healthy",
-        "service": "therapy-service",
-        "version": "1.0.0",
-        "modalities": ["CBT", "DBT", "ACT", "MI", "MINDFULNESS"],
-        "technique_selector": "active",
-        "session_manager": "active",
-    }
 
 
 def run_server() -> None:

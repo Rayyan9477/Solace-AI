@@ -13,7 +13,6 @@ from services.orchestrator_service.src.api import (
     ChatMessageResponse,
     SessionCreateRequest,
     SessionCreateResponse,
-    HealthResponse,
     ConversationHistoryResponse,
     router,
 )
@@ -113,21 +112,6 @@ class TestSessionCreateResponse:
         )
         assert response.session_id == "session-123"
         assert response.thread_id == "thread-456"
-
-
-class TestHealthResponse:
-    """Tests for HealthResponse model."""
-
-    def test_valid_response(self) -> None:
-        """Test creating valid health response."""
-        response = HealthResponse(
-            status="healthy",
-            graph_ready=True,
-            active_sessions=5,
-            uptime_seconds=3600.0,
-        )
-        assert response.status == "healthy"
-        assert response.graph_ready is True
 
 
 class TestConversationHistoryResponse:

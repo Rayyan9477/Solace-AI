@@ -20,6 +20,8 @@ import structlog
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from solace_common.request_context import acting_as_user
+
 from .entities import User, UserPreferences
 from .value_objects import AccountStatus, ConsentRecord, ConsentType, UserRole
 
@@ -30,6 +32,8 @@ except ImportError:
     _SERVICE_AUTH_AVAILABLE = False
 
 if TYPE_CHECKING:
+    from solace_infrastructure.gdpr.erasure import UserDataErasure
+
     from ..infrastructure.repository import (
         ConsentRepository,
         UserPreferencesRepository,
@@ -203,6 +207,9 @@ class UserService:
         self._lockout_duration_minutes = lockout_duration_minutes
         self._verification_token_expiry_hours = verification_token_expiry_hours
 
+        # GDPR right-to-erasure orchestrator (REV-17), built lazily on first use.
+        self._user_data_erasure: UserDataErasure | None = None
+
         # Service auth for inter-service calls
         self._token_manager: ServiceTokenManager | None = None
         if _SERVICE_AUTH_AVAILABLE:
@@ -294,9 +301,11 @@ class UserService:
             # Persist user
             saved_user = await self._user_repo.save(user)
 
-            # Create default preferences
+            # Create default preferences. Registration has no authenticated request, and
+            # user_preferences is under per-user RLS, so the row is written as the new user (MVP-034).
             preferences = UserPreferences(user_id=saved_user.user_id)
-            await self._prefs_repo.save(preferences)
+            with acting_as_user(saved_user.user_id):
+                await self._prefs_repo.save(preferences)
 
             # Update statistics
             self._stats["users_created"] += 1
@@ -422,19 +431,37 @@ class UserService:
                 error_code="UPDATE_FAILED",
             )
 
+    def _get_user_data_erasure(self) -> "UserDataErasure":
+        """Lazily build the service's GDPR right-to-erasure orchestrator (REV-17).
+
+        The orchestrator registers this service's PHI stores (``user_profile``
+        soft-delete/anonymize + ``user_preferences`` hard delete) once and is
+        reused across calls; each :meth:`UserDataErasure.erase` run is stateless.
+        """
+        if self._user_data_erasure is None:
+            from .erasure import build_user_data_erasure
+
+            self._user_data_erasure = build_user_data_erasure(
+                self._user_repo,
+                self._prefs_repo,
+            )
+        return self._user_data_erasure
+
     async def delete_user(
         self,
         user_id: UUID,
         reason: str | None = None,
     ) -> DeleteUserResult:
         """
-        Soft delete user account (GDPR compliance).
+        Erase a user account under the GDPR right-to-erasure contract (REV-17).
 
         Business Rules:
-        - Uses soft delete to preserve audit trail
-        - Email is anonymized
-        - Account status set to INACTIVE
-        - All sessions should be revoked by caller
+        - Drives ALL of the user's PHI stores through the shared
+          ``UserDataErasure`` orchestrator (fail-loud: a partial erasure is
+          NEVER reported as success).
+        - The users row is soft-deleted/anonymized (RETAINED for FK integrity +
+          legal/audit retention); ``user_preferences`` is hard-deleted.
+        - All sessions should be revoked by caller.
 
         Args:
             user_id: User identifier
@@ -444,6 +471,7 @@ class UserService:
             DeleteUserResult indicating success or error
         """
         try:
+            # Preserve the existing 404/not-found contract before erasing.
             user = await self._user_repo.get_by_id(user_id)
             if not user:
                 return DeleteUserResult(
@@ -451,11 +479,20 @@ class UserService:
                     error_code="USER_NOT_FOUND",
                 )
 
-            # Perform soft delete using entity method
-            user.soft_delete()
+            def _audit_emit(report: Any) -> None:
+                logger.info(
+                    "gdpr_erasure_audit",
+                    user_id=str(user_id),
+                    reason=reason,
+                    stores=report.deleted,
+                    total_deleted=report.total_deleted,
+                )
 
-            # Persist changes
-            await self._user_repo.update(user)
+            # Drive every registered PHI store. On partial failure the shared
+            # contract raises ErasureIncomplete (caught below) so we never
+            # report a partial erasure as a successful deletion.
+            erasure = self._get_user_data_erasure()
+            await erasure.erase(str(user_id), audit_emit=_audit_emit)
 
             # Update statistics
             self._stats["users_deleted"] += 1
@@ -674,6 +711,28 @@ class UserService:
             logger.error("verification_resend_failed", user_id=str(user_id), error=str(e))
             return None, str(e)
 
+    async def resend_verification_email_by_email(self, email: str) -> None:
+        """Resend a verification email by ADDRESS, enumeration-safe (REV-31).
+
+        Breaks the production deadlock where an unverified user whose initial
+        verification email failed to send cannot log in (prod blocks unverified
+        login) and therefore cannot reach the authenticated resend path. Looks the
+        user up by email and, only if they exist AND are not already verified,
+        regenerates the token and re-sends. Logs nothing that distinguishes
+        "unknown email" from "already verified", so the endpoint can always answer
+        204 without leaking which addresses are registered. Never raises — the
+        underlying per-user resend collects its own errors.
+        """
+        user = await self._user_repo.get_by_email(email.lower())
+        if user is None:
+            logger.info("resend_verification_unknown_email")  # no enumeration signal
+            return
+        if user.email_verified:
+            logger.info("resend_verification_already_verified", user_id=str(user.user_id))
+            return
+        # Delegate to the per-user regenerate+send; ignore its (token, error) tuple.
+        await self.resend_verification_email(user.user_id)
+
     async def _send_verification_email(
         self,
         email: str,
@@ -810,9 +869,10 @@ class UserService:
         try:
             preferences = await self._prefs_repo.get_by_user_id(user_id)
             if not preferences:
-                # Create default preferences if not exists
+                # Create default preferences if not exists, as their owner (per-user RLS, MVP-034).
                 preferences = UserPreferences(user_id=user_id)
-                await self._prefs_repo.save(preferences)
+                with acting_as_user(user_id):
+                    await self._prefs_repo.save(preferences)
 
             # Apply updates
             filtered_updates = {k: v for k, v in updates.items() if v is not None}

@@ -11,12 +11,11 @@ pool — which let two replicas' pollers claim the same rows and double-publish.
 The claim + stale-claim reclaim need a ``claimed_at`` column and a supporting
 index (see ``src/solace_events/postgres_stores.py``).
 
-The ``event_outbox`` table is provisioned by the application at startup
-(``PostgresOutboxStore.ensure_table`` / ``OUTBOX_TABLE_DDL``), NOT by Alembic, so:
-  - fresh deployments get ``claimed_at`` from the updated DDL directly;
-  - existing deployments get it from this idempotent ``ALTER ... IF EXISTS ... ADD
-    COLUMN IF NOT EXISTS`` (a no-op if the app has not created the table yet — the
-    updated DDL will include the column when it does).
+The ``event_outbox`` table is created by slot ``010_event_plane``, which also creates
+the ``claimed_at`` column and ``idx_outbox_publishing_claimed`` on fresh databases. So
+this revision only touches the table when it already exists (a database that predates
+the chain): one guarded ``DO`` block holding the idempotent ``ADD COLUMN IF NOT
+EXISTS`` and ``CREATE INDEX IF NOT EXISTS``. On a fresh database it is a no-op.
 
 Postgres-only; a no-op on SQLite (the outbox uses the in-memory store there).
 """
@@ -40,12 +39,12 @@ def upgrade() -> None:
     if not _is_postgres():
         return
     op.execute(
-        "ALTER TABLE IF EXISTS event_outbox "
-        "ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ;"
-    )
-    op.execute(
+        "DO $$ BEGIN "
+        "IF to_regclass('public.event_outbox') IS NOT NULL THEN "
+        "ALTER TABLE event_outbox ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ; "
         "CREATE INDEX IF NOT EXISTS idx_outbox_publishing_claimed "
-        "ON event_outbox (claimed_at) WHERE status = 'PUBLISHING';"
+        "ON event_outbox (claimed_at) WHERE status = 'PUBLISHING'; "
+        "END IF; END $$;"
     )
 
 

@@ -218,9 +218,11 @@ class TestTraitDetectorSettings:
         assert settings.min_text_length == 50
         assert settings.max_text_length == 10000
         assert settings.enable_llm_detection is True
-        assert settings.ensemble_weights_roberta == 0.5
-        assert settings.ensemble_weights_llm == 0.3
-        assert settings.ensemble_weights_liwc == 0.2
+        # B-4: RoBERTa is a seeded-random stub → weight 0 until a real checkpoint;
+        # LLM+LIWC carry the ensemble.
+        assert settings.ensemble_weights_roberta == 0.0
+        assert settings.ensemble_weights_llm == 0.6
+        assert settings.ensemble_weights_liwc == 0.4
 
     def test_custom_settings(self) -> None:
         """Test custom settings."""
@@ -238,11 +240,11 @@ class TestEnsembleWeights:
     """Tests verifying ensemble weight configuration matches spec."""
 
     def test_default_weights_match_spec(self) -> None:
-        """Default weights should be RoBERTa=0.5, LLM=0.3, LIWC=0.2."""
+        """B-4: default weights are RoBERTa=0.0 (stub excluded), LLM=0.6, LIWC=0.4."""
         settings = TraitDetectorSettings()
-        assert settings.ensemble_weights_roberta == 0.5
-        assert settings.ensemble_weights_llm == 0.3
-        assert settings.ensemble_weights_liwc == 0.2
+        assert settings.ensemble_weights_roberta == 0.0
+        assert settings.ensemble_weights_llm == 0.6
+        assert settings.ensemble_weights_liwc == 0.4
 
     def test_weights_sum_to_one(self) -> None:
         """The three primary ensemble weights must sum to 1.0."""
@@ -256,21 +258,23 @@ class TestEnsembleWeights:
             f"Ensemble weights should sum to 1.0, got {total}"
         )
 
-    def test_roberta_has_highest_weight(self) -> None:
-        """RoBERTa should have the highest default weight."""
+    def test_roberta_stub_excluded_until_real_checkpoint(self) -> None:
+        """B-4: the seeded-random RoBERTa stub must NOT carry weight (was highest at 0.5)."""
         settings = TraitDetectorSettings()
-        assert settings.ensemble_weights_roberta > settings.ensemble_weights_llm
-        assert settings.ensemble_weights_roberta > settings.ensemble_weights_liwc
+        assert settings.ensemble_weights_roberta == 0.0
+        # LLM is now the highest-weighted source.
+        assert settings.ensemble_weights_llm > settings.ensemble_weights_liwc
+        assert settings.ensemble_weights_llm > settings.ensemble_weights_roberta
 
     def test_llm_weight_greater_than_liwc(self) -> None:
         """LLM weight should be greater than LIWC weight."""
         settings = TraitDetectorSettings()
         assert settings.ensemble_weights_llm > settings.ensemble_weights_liwc
 
-    def test_all_weights_positive(self) -> None:
-        """All ensemble weights must be positive."""
+    def test_active_weights_positive(self) -> None:
+        """The active ensemble sources (LLM, LIWC) must be positive; RoBERTa stub may be 0."""
         settings = TraitDetectorSettings()
-        assert settings.ensemble_weights_roberta > 0.0
+        assert settings.ensemble_weights_roberta >= 0.0
         assert settings.ensemble_weights_llm > 0.0
         assert settings.ensemble_weights_liwc > 0.0
 

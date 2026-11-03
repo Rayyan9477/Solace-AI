@@ -165,7 +165,7 @@ def to_kafka_event(event: NotificationEvent) -> Any:
     Returns None for internal events or if solace_events is not available.
     """
     try:
-        from src.solace_events.schemas import (
+        from solace_events.schemas import (
             EventMetadata as KafkaMetadata,
             NotificationSentKafkaEvent,
             NotificationDeliveredKafkaEvent,

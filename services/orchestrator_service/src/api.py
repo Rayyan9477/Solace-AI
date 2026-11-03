@@ -73,14 +73,6 @@ class SessionCreateResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict, description="Session metadata")
 
 
-class HealthResponse(BaseModel):
-    """Response model for health status."""
-    status: str = Field(..., description="Service health status")
-    graph_ready: bool = Field(..., description="Whether the orchestration graph is ready")
-    active_sessions: int = Field(..., description="Number of active sessions")
-    uptime_seconds: float = Field(..., description="Service uptime in seconds")
-
-
 class ConversationHistoryResponse(BaseModel):
     """Response model for conversation history."""
     thread_id: str = Field(..., description="Thread identifier")
@@ -210,17 +202,27 @@ async def get_conversation_history(
     messages: list[dict[str, Any]] = []
     last_activity: str | None = None
     if checkpointer:
+        checkpoint = None
         try:
             config = {"configurable": {"thread_id": thread_id}}
             checkpoint = await asyncio.to_thread(checkpointer.get, config)
-            if checkpoint:
-                channel_values = checkpoint.get("channel_values", {})
-                messages = channel_values.get("messages", [])[-limit:]
-                if messages:
-                    last_msg = messages[-1]
-                    last_activity = last_msg.get("timestamp")
         except Exception as e:
             logger.warning("history_retrieval_error", thread_id=thread_id, error=str(e))
+        # Ownership/IDOR guard (REV-07) is OUTSIDE the try so the 403 is not
+        # swallowed by the retrieval except handler. The conversation owner is
+        # recorded in the graph state (channel_values.user_id).
+        if checkpoint:
+            channel_values = checkpoint.get("channel_values", {})
+            owner_id = channel_values.get("user_id")
+            if str(owner_id) != str(current_user.user_id):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not authorized to access this conversation",
+                )
+            messages = channel_values.get("messages", [])[-limit:]
+            if messages:
+                last_msg = messages[-1]
+                last_activity = last_msg.get("timestamp")
     return ConversationHistoryResponse(
         thread_id=thread_id,
         messages=messages,
@@ -229,21 +231,16 @@ async def get_conversation_history(
     )
 
 
-@router.get("/health/detailed", response_model=HealthResponse, summary="Detailed health check")
-async def detailed_health_check(request: Request) -> HealthResponse:
-    """Get detailed health status of the orchestrator service."""
-    import time as _time
-    graph_ready = hasattr(request.app.state, "compiled_graph") and request.app.state.compiled_graph is not None
-    active_connections = getattr(request.app.state, "active_connections", {})
-    active_sessions = sum(len(conns) for conns in active_connections.values())
-    startup = getattr(request.app.state, "startup_time", None)
-    uptime = _time.monotonic() - startup if startup else 0.0
-    return HealthResponse(
-        status="healthy" if graph_ready else "degraded",
-        graph_ready=graph_ready,
-        active_sessions=active_sessions,
-        uptime_seconds=uptime,
-    )
+def _ws_thread_id(user_id: str, session_id: str) -> str:
+    """API-1: derive a STABLE, user-scoped LangGraph thread id for a WS session.
+
+    A fresh uuid per connection destroyed conversation continuity on every reconnect
+    (LangGraph checkpoints by thread_id). Keying on (user_id, session_id) makes
+    reconnects resume the same thread, while scoping to the authenticated user keeps
+    a different user presenting the same session_id from resuming someone else's
+    conversation (the isolation the fresh uuid used to provide).
+    """
+    return f"{user_id}:{session_id}"
 
 
 @router.websocket("/ws/{session_id}")
@@ -251,25 +248,42 @@ async def websocket_chat_endpoint(
     websocket: WebSocket,
     session_id: str,
     token: str = Query(..., description="Bearer JWT access token"),
+    last_seq: int | None = Query(
+        default=None,
+        description="REV-23: last outbound seq the client saw; the server replays "
+        "buffered messages with seq > last_seq before resuming live streaming.",
+    ),
 ) -> None:
     """
     WebSocket endpoint for real-time chat interaction.
 
     Requires a valid JWT access token passed as a query parameter.
     Provides streaming responses and maintains persistent connection.
+
+    REV-23 (message-tail replay): if a replay buffer is configured on
+    ``app.state.replay_buffer`` and the client presents a cursor (``?last_seq=<n>``
+    or a ``Last-Event-ID`` header), any buffered OUTBOUND messages the client
+    missed while disconnected are replayed (in order, exactly once) before live
+    streaming resumes. Each outbound response carries its ``seq`` so the client can
+    advance its cursor. When the cursor is older than the retained window the server
+    emits a ``resync`` signal instead of silently dropping messages. The feature is
+    inert when no replay buffer is wired (OFF by default).
     """
     # Authenticate before accepting the WebSocket connection
     from solace_security.middleware import _get_jwt_manager
 
     jwt_manager = _get_jwt_manager()
-    auth_result = jwt_manager.validate_access_token(token)
+    # REV-06 (M1 gate): async validator so a revoked/logged-out token (Redis
+    # blacklist) is rejected here too — the sync path silently misses revocations.
+    auth_result = await jwt_manager.validate_access_token_async(token)
     if not auth_result.success or not auth_result.payload:
         await websocket.close(code=4001, reason="Authentication failed")
         return
     user_id = auth_result.user_id
 
     await websocket.accept()
-    thread_id = str(uuid4())
+    # API-1: stable per (user, session) so reconnects resume the same conversation.
+    thread_id = _ws_thread_id(str(user_id), str(session_id))
     connection_id = str(uuid4())
     active_connections: dict[str, set] = getattr(websocket.app.state, "active_connections", {})
     if session_id not in active_connections:
@@ -289,6 +303,10 @@ async def websocket_chat_endpoint(
         return
     # Timeout for receiving messages — close zombie connections after 5 min idle
     ws_receive_timeout = 300.0  # seconds
+    # REV-23: per-session outbound replay buffer (inert / OFF when not wired).
+    # Keyed on thread_id so it inherits the (user, session) scoping of continuity.
+    replay_buffer = getattr(websocket.app.state, "replay_buffer", None)
+    replay_key = thread_id
     try:
         await websocket.send_json({
             "type": "connected",
@@ -296,6 +314,32 @@ async def websocket_chat_endpoint(
             "thread_id": thread_id,
             "connection_id": connection_id,
         })
+        # REV-23: on reconnect, replay the outbound tail the client missed BEFORE
+        # resuming live streaming. Cursor comes from ?last_seq or the Last-Event-ID
+        # header (SSE-style). Absent cursor => normal live behaviour (no replay).
+        if replay_buffer is not None:
+            cursor = last_seq
+            if cursor is None:
+                _hdr = websocket.headers.get("last-event-id")
+                if _hdr:
+                    try:
+                        cursor = int(_hdr)
+                    except (TypeError, ValueError):
+                        cursor = None
+            if cursor is not None:
+                replay = replay_buffer.get_replay(replay_key, cursor)
+                if replay.gap:
+                    # Cursor older than the retained window: some messages were
+                    # evicted. Signal a resync rather than silently dropping them.
+                    await websocket.send_json({
+                        "type": "resync",
+                        "reason": "cursor_too_old",
+                        "last_seq": cursor,
+                        "oldest_seq": replay.oldest_seq,
+                        "latest_seq": replay.latest_seq,
+                    })
+                for buffered in replay.messages:
+                    await websocket.send_json(buffered)
         while True:
             try:
                 raw_data = await asyncio.wait_for(
@@ -336,7 +380,7 @@ async def websocket_chat_endpoint(
                 try:
                     result_state = await graph_builder.invoke(initial_state, thread_id=thread_id)
                     processing_time_ms = (time.perf_counter() - start_time) * 1000
-                    await websocket.send_json({
+                    response_msg = {
                         "type": "response",
                         "response": result_state.get("final_response", ""),
                         "intent": result_state.get("intent", "general_chat"),
@@ -344,7 +388,13 @@ async def websocket_chat_endpoint(
                         "safety_flags": result_state.get("safety_flags", {}),
                         "processing_time_ms": round(processing_time_ms, 2),
                         "thread_id": thread_id,
-                    })
+                    }
+                    # REV-23: buffer + seq-tag the outbound response so a client that
+                    # reconnects can replay anything it missed. append returns the
+                    # stored copy (with seq) — we send exactly what was buffered.
+                    if replay_buffer is not None:
+                        response_msg = replay_buffer.append(replay_key, response_msg)
+                    await websocket.send_json(response_msg)
                 except Exception as e:
                     logger.error("websocket_processing_error", error=str(e), session_id=session_id)
                     await websocket.send_json({"type": "error", "message": "Processing error occurred"})

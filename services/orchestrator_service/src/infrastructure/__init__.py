@@ -1,6 +1,6 @@
 """
 Solace-AI Orchestrator Service - Infrastructure Module.
-Service clients and state persistence components.
+Service clients and the event bridge. Conversation state is checkpointed by LangGraph.
 """
 from .clients import (
     BaseServiceClient,
@@ -13,14 +13,6 @@ from .clients import (
     ServiceClientFactory,
     ServiceResponse,
     TreatmentServiceClient,
-)
-from .state import (
-    Checkpoint,
-    CheckpointMetadata,
-    MemoryStateStore,
-    StatePersistenceManager,
-    StateStore,
-    get_persistence_manager,
 )
 
 __all__ = [
@@ -35,11 +27,4 @@ __all__ = [
     "ServiceClientFactory",
     "ServiceResponse",
     "TreatmentServiceClient",
-    # State Persistence
-    "Checkpoint",
-    "CheckpointMetadata",
-    "MemoryStateStore",
-    "StatePersistenceManager",
-    "StateStore",
-    "get_persistence_manager",
 ]

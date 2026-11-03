@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
 import httpx
@@ -36,6 +36,7 @@ try:
     )
     from solace_events.consumer import EventConsumer, create_consumer
     from solace_events.config import KafkaSettings, ConsumerSettings, SolaceTopic
+    from solace_events.dead_letter import DeadLetterRecord, DeadLetterStore
     _KAFKA_AVAILABLE = True
 except ImportError:
     _KAFKA_AVAILABLE = False
@@ -49,26 +50,30 @@ except ImportError:
         raise RuntimeError("solace_events package required in production")
 
 # Import domain service
-try:
-    from .domain import (
-        NotificationService,
-        NotificationRequest,
-        NotificationRecipient,
-        NotificationPriority,
-        ChannelType,
-        TemplateType,
-    )
-except ImportError:
-    from domain import (
-        NotificationService,
-        NotificationRequest,
-        NotificationRecipient,
-        NotificationPriority,
-        ChannelType,
-        TemplateType,
-    )
+from .domain import (
+    NotificationService,
+    NotificationRequest,
+    NotificationRecipient,
+    NotificationPriority,
+    ChannelType,
+    TemplateType,
+)
 
 logger = structlog.get_logger(__name__)
+
+
+@runtime_checkable
+class DeadLetterStoreSeam(Protocol):
+    """Durable-persistence seam for failed (dead-lettered) events.
+
+    Deliberately structural so the shared ``PostgresDLQStore`` (from
+    ``solace_events.postgres_stores``) — whose ``save(DeadLetterRecord)`` matches
+    this shape — can be injected for staging/production WITHOUT any consumer code
+    change. The default is the in-memory ``DeadLetterStore``, so existing tests
+    and dev keep working unchanged.
+    """
+
+    async def save(self, record: "DeadLetterRecord") -> None: ...
 
 
 class UserServiceSettings(BaseSettings):
@@ -111,12 +116,14 @@ class SafetyEventConsumer:
         consumer_settings: "ConsumerSettings | None" = None,
         use_mock: bool = False,
         user_service_settings: UserServiceSettings | None = None,
+        dlq_store: "DeadLetterStoreSeam | None" = None,
     ) -> None:
         self._user_service_settings = user_service_settings or UserServiceSettings()
 
         if not _KAFKA_AVAILABLE:
             logger.warning("kafka_not_available", reason="solace_events not installed")
             self._consumer = None
+            self._dlq_store: "DeadLetterStoreSeam | None" = dlq_store
             return
 
         self._notification_service = notification_service
@@ -133,6 +140,19 @@ class SafetyEventConsumer:
         self._consumer.register_handler("safety.crisis.detected", self._handle_crisis_detected)
         self._consumer.register_handler("safety.escalation.triggered", self._handle_escalation_triggered)
         self._consumer.register_handler("safety.assessment.completed", self._handle_assessment_completed)
+
+        # M1-gate R2 (P0): without a dead-letter handler, a handler that raises (e.g.
+        # a crisis alert that failed on every channel, REV-35) is marked FAILED and its
+        # offset is COMMITTED — the event is silently dropped, not retried. Capture
+        # failed events durably so a crisis alert is never lost without a trace.
+        self._failed_events: list[dict[str, Any]] = []
+        # Durable DLQ seam: a failed crisis/escalation alert that only lives in the
+        # in-memory list above is LOST on a worker restart. Persist each failure
+        # through an injectable store so a durable PostgresDLQStore CAN be wired in
+        # staging/prod without code change; the default in-memory store keeps dev
+        # and existing tests behaving exactly as before.
+        self._dlq_store = dlq_store if dlq_store is not None else DeadLetterStore()
+        self._consumer.set_dead_letter_handler(self._handle_dead_letter)
 
         # Service auth for inter-service calls
         self._token_manager: ServiceTokenManager | None = None
@@ -253,6 +273,59 @@ class SafetyEventConsumer:
                 error=str(e),
             )
             raise
+
+    async def _handle_dead_letter(self, event: Any, error: str) -> None:
+        """Durably capture an event whose handler failed, so it is never silently lost.
+
+        M1-gate R2 (P0): a crisis/escalation alert that fails delivery on every channel
+        (REV-35 raise) lands here instead of being committed-and-dropped. For crisis
+        and escalation events this is a CRITICAL, alertable condition — a clinician was
+        NOT notified. The captured record is available for retry/recovery (a durable
+        DLQ topic / Postgres store is wired at B.3 on real Kafka).
+        """
+        event_type = getattr(event, "event_type", None) or type(event).__name__
+        event_id = str(getattr(getattr(event, "metadata", None), "event_id", "unknown"))
+        record = {"event_type": event_type, "event_id": event_id, "error": error}
+        self._failed_events.append(record)
+        # Durable persistence: write the failure through the injected DLQ store so it
+        # survives a worker restart. A durable PostgresDLQStore keeps the record; the
+        # in-memory default keeps existing behavior. Best-effort — persistence must
+        # never mask the CRITICAL alert below.
+        await self._persist_dead_letter(event, error)
+        is_crisis = "crisis" in str(event_type).lower() or "escalation" in str(event_type).lower()
+        (logger.critical if is_crisis else logger.error)(
+            "notification_dead_letter",
+            event_type=event_type,
+            event_id=event_id,
+            error=error,
+            clinician_alerted=False,
+        )
+
+    async def _persist_dead_letter(self, event: Any, error: str) -> None:
+        """Persist a failed event to the durable DLQ store (best-effort).
+
+        Builds a ``DeadLetterRecord`` from the failed event and hands it to the
+        injected store (``PostgresDLQStore`` in staging/prod, in-memory default in
+        dev/tests). Any persistence failure is logged but never propagated — the
+        crisis/escalation CRITICAL log must still fire.
+        """
+        store = getattr(self, "_dlq_store", None)
+        if store is None:
+            return
+        try:
+            dlq_record = DeadLetterRecord.from_failed_event(
+                event=event,
+                original_topic=SolaceTopic.SAFETY.value,
+                consumer_group="notification-service-safety-consumer",
+                error=error if isinstance(error, Exception) else RuntimeError(str(error)),
+            )
+            await store.save(dlq_record)
+        except Exception as persist_err:
+            logger.error(
+                "dead_letter_persist_failed",
+                event_type=getattr(event, "event_type", None) or type(event).__name__,
+                error=str(persist_err),
+            )
 
     async def _handle_escalation_triggered(self, event: "EscalationTriggeredEvent") -> None:
         """Handle escalation triggered event by notifying assigned clinician."""
@@ -379,6 +452,14 @@ class SafetyEventConsumer:
             successful=result.successful_deliveries,
             failed=result.failed_deliveries,
         )
+        # M1-gate P0: a crisis alert that reached NO channel must not be silently
+        # committed. Raise so the Kafka consumer marks the message FAILED and it
+        # goes to the DLQ / retry path — a crisis notification must never be dropped.
+        if result.successful_deliveries == 0:
+            raise RuntimeError(
+                f"Crisis notification for event {event_id} failed on all channels "
+                f"({result.failed_deliveries} failed) — surfacing for DLQ/retry"
+            )
 
     async def _send_escalation_notification(
         self,
@@ -431,6 +512,13 @@ class SafetyEventConsumer:
             successful=result.successful_deliveries,
             failed=result.failed_deliveries,
         )
+        # M1-gate P0: an escalation that reached no channel must go to DLQ/retry,
+        # not be silently committed — a clinician escalation must not be dropped.
+        if result.successful_deliveries == 0:
+            raise RuntimeError(
+                f"Escalation notification for event {event_id} failed on all channels "
+                f"({result.failed_deliveries} failed) — surfacing for DLQ/retry"
+            )
 
     async def _send_monitoring_notification(
         self,
@@ -608,14 +696,21 @@ async def initialize_safety_consumer(
     kafka_settings: "KafkaSettings | None" = None,
     use_mock: bool = False,
     user_service_settings: UserServiceSettings | None = None,
+    dlq_store: "DeadLetterStoreSeam | None" = None,
 ) -> SafetyEventConsumer:
-    """Initialize and start the safety event consumer."""
+    """Initialize and start the safety event consumer.
+
+    Pass ``dlq_store`` (e.g. a ``PostgresDLQStore``) to durably persist failed
+    crisis/escalation alerts across worker restarts; omit it to keep the
+    in-memory default used in dev and tests.
+    """
     global _safety_consumer
     _safety_consumer = SafetyEventConsumer(
         notification_service=notification_service,
         kafka_settings=kafka_settings,
         use_mock=use_mock,
         user_service_settings=user_service_settings,
+        dlq_store=dlq_store,
     )
     await _safety_consumer.start()
     return _safety_consumer

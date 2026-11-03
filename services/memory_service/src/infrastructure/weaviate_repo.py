@@ -18,7 +18,8 @@ logger = structlog.get_logger(__name__)
 
 
 class WeaviateSettings(BaseSettings):
-    """Weaviate connection configuration."""
+    """Weaviate connection configuration (D-04: opt-in, WEAVIATE_ENABLED=false by default)."""
+    enabled: bool = Field(default=False)
     host: str = Field(default="localhost")
     port: int = Field(default=8080)
     grpc_port: int = Field(default=50051)

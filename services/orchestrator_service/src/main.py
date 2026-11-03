@@ -1,346 +1,300 @@
 """
 Solace-AI Orchestrator Service - FastAPI Application Entry Point.
 LangGraph-based multi-agent orchestration with WebSocket support.
+
+The app is built by the IF-01 runtime (``create_service_app``): logging, the strict start-up
+guards, the uniform error bodies, ``/live`` ``/ready`` ``/health`` ``/metrics``, the request
+context and, because the orchestrator is an edge service, CORS from ``CORS_ALLOWED_ORIGINS``.
+The lifespan is bracketed by ``service_runtime`` and registers every service-owned stop with
+``runtime.register_shutdown``.
 """
 
 from __future__ import annotations
-import logging
-import time
+
+import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
-from uuid import uuid4
-from fastapi import FastAPI, Request, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
+
+import structlog
+from fastapi import FastAPI, Request
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import structlog
+from starlette.middleware import Middleware
+
+from services.shared.infrastructure.llm_client import LLMClientSettings, UnifiedLLMClient
+from solace_infrastructure.runtime import (
+    ServiceRuntimeSpec,
+    StartupDependencyError,
+    create_service_app,
+    is_strict_environment,
+    service_runtime,
+)
+from solace_infrastructure.runtime.http import RequestContextMiddleware
+
+from .agents.chat_agent import configure_chat_agent_llm
+from .api import router
+from .events import get_event_bus
+from .infrastructure.event_bridge import initialize_event_bridge
+from .langgraph import OrchestratorGraphBuilder
+from .langgraph.graph_builder import GraphBuilderSettings
+from .langgraph.supervisor import configure_supervisor_llm
 
 logger = structlog.get_logger(__name__)
+
+SERVICE_NAME = "orchestrator-service"
+API_PREFIX = "/api/v1/orchestrator"
+# The W0 limiter's Redis connect and command timeouts (WS111-SPE-1): the limiter sits in front
+# of every non-exempt route, so a hung Redis costs a request at most this before the limiter
+# fails open (RateLimitMiddleware), instead of an unbounded wait.
+RATE_LIMIT_REDIS_TIMEOUT_SECONDS = 0.5
 
 
 class OrchestratorAppSettings(BaseSettings):
     """Orchestrator service application configuration."""
 
-    service_name: str = Field(default="orchestrator-service")
+    service_name: str = Field(default=SERVICE_NAME)
     version: str = Field(default="1.0.0")
     environment: str = Field(default="development")
     debug: bool = Field(default=False)
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=8000)
     log_level: str = Field(default="INFO")
-    cors_origins: str = Field(default="", description="Comma-separated allowed CORS origins")
     request_timeout_ms: int = Field(default=60000)
     websocket_timeout_ms: int = Field(default=300000)
     max_connections: int = Field(default=1000)
     enable_metrics: bool = Field(default=True)
     enable_tracing: bool = Field(default=True)
     enable_checkpointing: bool = Field(default=True)
+    # REV-23: server-side replay of the outbound WS message tail on reconnect.
+    # OFF by default (feature is inert unless a replay buffer is wired). In-memory
+    # store only for now — durable replay is infra-gated.
+    enable_ws_replay: bool = Field(default=False)
+    ws_replay_buffer_size: int = Field(default=100, ge=1)
     model_config = SettingsConfigDict(env_prefix="ORCHESTRATOR_", env_file=".env", extra="ignore")
 
-    @property
-    def cors_origins_list(self) -> list[str]:
-        """Parse CORS origins from comma-separated string."""
-        if self.cors_origins == "*":
-            return ["*"]
-        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
+_SETTINGS = OrchestratorAppSettings()
 
-def configure_logging(settings: OrchestratorAppSettings) -> None:
-    """Configure structured logging for the orchestrator service."""
-    try:
-        from solace_security.phi_protection import phi_sanitizer_processor
-        _phi_processor = phi_sanitizer_processor
-    except ImportError:
-        if settings.environment == "production":
-            raise RuntimeError("PHI log sanitizer required in production - install solace_security")
-        _phi_processor = None
-    processors = [
-        structlog.contextvars.merge_contextvars,
-        structlog.processors.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-    ]
-    if _phi_processor:
-        processors.append(_phi_processor)
-    if settings.debug:
-        processors.append(structlog.dev.ConsoleRenderer())
-    else:
-        processors.append(structlog.processors.JSONRenderer())
-    log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
-    structlog.configure(
-        processors=processors,
-        wrapper_class=structlog.make_filtering_bound_logger(log_level),
-        context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
+SPEC = ServiceRuntimeSpec(
+    service_name=SERVICE_NAME,
+    environment=_SETTINGS.environment,
+    version=_SETTINGS.version,
+    log_level=_SETTINGS.log_level,
+    debug=_SETTINGS.debug,
+    uses_postgres=True,
+    uses_redis=True,
+    event_plane="publish_consume",
+    handles_phi=True,
+    audited=True,
+    rate_limited=True,
+    edge=True,
+)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Application lifespan manager for startup/shutdown."""
-    settings = OrchestratorAppSettings()
-    configure_logging(settings)
-    logger.info(
-        "orchestrator_service_starting",
-        environment=settings.environment,
-        host=settings.host,
-        port=settings.port,
-        version=settings.version,
-    )
-    # Activate PHI encryption for ClinicalBase entities
-    try:
-        from solace_security.encryption import EncryptionSettings, Encryptor, FieldEncryptor
-        from solace_infrastructure.database.base_models import configure_phi_encryption
-        encryption_settings = EncryptionSettings()
-        encryptor = Encryptor(encryption_settings)
-        field_encryptor = FieldEncryptor(encryptor, encryption_settings)
-        configure_phi_encryption(field_encryptor)
-        logger.info("phi_encryption_activated")
-    except Exception as e:
-        if settings.environment == "production":
-            raise RuntimeError(f"PHI encryption is required in production: {e}") from e
-        logger.warning("phi_encryption_not_configured", error=str(e))
+    """Compose the orchestrator inside the IF-01 runtime; every stop is a registered closer."""
+    async with service_runtime(app, SPEC) as runtime:
+        settings = OrchestratorAppSettings()
+        # The limiter's Redis client is built with the app (W0, until WS-11.3); close it last.
+        rate_limit_redis = getattr(app.state, "rate_limit_redis", None)
+        if rate_limit_redis is not None:
+            runtime.register_shutdown("rate_limit_redis", rate_limit_redis.aclose)
 
-    # Initialize service-to-service authentication
-    service_token_manager = None
-    service_client_factory = None
-    try:
-        from solace_security.service_auth import ServiceTokenManager, ServiceAuthSettings
-        from .infrastructure.clients import ServiceClientFactory
-        service_auth_settings = ServiceAuthSettings(service_name="orchestrator-service")
-        service_token_manager = ServiceTokenManager(service_settings=service_auth_settings)
-        service_client_factory = ServiceClientFactory(token_manager=service_token_manager)
-        logger.info("service_auth_initialized", service_name="orchestrator-service")
-    except Exception as e:
-        if settings.environment == "production":
-            raise RuntimeError(f"Service authentication required in production: {e}") from e
-        logger.warning("service_auth_not_configured", error=str(e))
-        try:
-            from .infrastructure.clients import ServiceClientFactory
-            service_client_factory = ServiceClientFactory()
-            logger.info("service_client_factory_initialized", auth="disabled")
-        except Exception as e2:
-            logger.warning("service_client_factory_failed", error=str(e2))
-
-    # Initialize shared LLM client for agent nodes
-    llm_client = None
-    try:
-        from services.shared.infrastructure.llm_client import UnifiedLLMClient, LLMClientSettings
+        # Missing provider keys disable the LLM outside strict; in strict, initialize raises.
         llm_client = UnifiedLLMClient(LLMClientSettings())
         await llm_client.initialize()
-        logger.info("orchestrator_llm_client_initialized", available=llm_client.is_available)
-    except Exception as e:
-        if settings.environment == "production":
-            raise RuntimeError(f"LLM client required in production: {e}") from e
-        logger.warning("orchestrator_llm_client_not_configured", error=str(e))
+        runtime.register_shutdown("llm_client", llm_client.shutdown)
+        configure_chat_agent_llm(llm_client)
+        configure_supervisor_llm(llm_client)
 
-    # Configure agent nodes with LLM client
-    from .agents.chat_agent import configure_chat_agent_llm
-    from .langgraph.supervisor import configure_supervisor_llm
-    configure_chat_agent_llm(llm_client)
-    configure_supervisor_llm(llm_client)
+        graph_builder = OrchestratorGraphBuilder(
+            GraphBuilderSettings(enable_checkpointing=settings.enable_checkpointing)
+        )
+        graph_builder.build()
+        app.state.graph_builder = graph_builder
+        app.state.compiled_graph = graph_builder.compile()
+        app.state.llm_client = llm_client
+        app.state.active_connections = {}
+        # REV-23: attach the outbound-tail replay buffer only when enabled, so the WS
+        # handler stays inert (existing behaviour) by default.
+        app.state.replay_buffer = _replay_buffer(settings)
 
-    from .langgraph import OrchestratorGraphBuilder
-    from .langgraph.graph_builder import GraphBuilderSettings
-
-    graph_settings = GraphBuilderSettings(enable_checkpointing=settings.enable_checkpointing)
-    graph_builder = OrchestratorGraphBuilder(graph_settings)
-    graph_builder.build()
-    compiled_graph = graph_builder.compile()
-    app.state.settings = settings
-    app.state.graph_builder = graph_builder
-    app.state.compiled_graph = compiled_graph
-    app.state.service_token_manager = service_token_manager
-    app.state.service_client_factory = service_client_factory
-    app.state.llm_client = llm_client
-    app.state.active_connections: dict[str, set] = {}
-
-    # Initialize Kafka event bridge for cross-service event publishing
-    event_bridge = None
-    try:
-        from .events import get_event_bus
-        from .infrastructure.event_bridge import initialize_event_bridge
-        # Get postgres pool for durable event outbox
-        _event_pool = None
-        try:
-            from solace_infrastructure.database.connection_manager import ConnectionPoolManager
-            _event_pool = await ConnectionPoolManager.get_pool()
-        except Exception:
-            logger.debug("event_outbox_pool_not_available", hint="Using in-memory outbox")
-        event_bus = get_event_bus()
-        event_bridge = await initialize_event_bridge(event_bus=event_bus, postgres_pool=_event_pool)
+        event_bridge = await initialize_event_bridge(
+            event_bus=get_event_bus(), postgres_pool=runtime.pg_pool
+        )
         app.state.event_bridge = event_bridge
-        logger.info("orchestrator_kafka_bridge_started")
-    except Exception as e:
-        logger.warning("orchestrator_kafka_bridge_not_configured", error=str(e))
+        runtime.register_shutdown("event_bridge", event_bridge.stop)
 
-    app.state.startup_time = time.monotonic()
-    logger.info(
-        "orchestrator_service_started",
-        environment=settings.environment,
-        checkpointing=settings.enable_checkpointing,
-        service_auth=service_token_manager is not None,
-        llm_available=llm_client is not None and llm_client.is_available,
-    )
-    yield
-    logger.info("orchestrator_service_stopping")
-    if event_bridge:
-        await event_bridge.stop()
-    if llm_client:
-        await llm_client.shutdown()
-    if service_client_factory:
-        await service_client_factory.close_all()
-    app.state.active_connections.clear()
-    logger.info("orchestrator_service_stopped")
+        logger.info(
+            "orchestrator_service_started",
+            checkpointing=settings.enable_checkpointing,
+            llm_available=llm_client.is_available,
+            ws_replay=app.state.replay_buffer is not None,
+        )
+        yield
+
+
+def _replay_buffer(settings: OrchestratorAppSettings):
+    """The in-memory WS replay buffer when ``ORCHESTRATOR_ENABLE_WS_REPLAY`` is on, else None."""
+    if not settings.enable_ws_replay:
+        return None
+    from .replay_buffer import InMemoryReplayBufferStore
+
+    return InMemoryReplayBufferStore(max_per_session=settings.ws_replay_buffer_size)
 
 
 def create_application() -> FastAPI:
-    """Create and configure FastAPI application."""
-    settings = OrchestratorAppSettings()
-    app = FastAPI(
-        title="Solace-AI Orchestrator Service",
-        description="LangGraph-based multi-agent orchestration for mental health AI",
-        version=settings.version,
-        docs_url="/docs" if settings.environment != "production" else None,
-        redoc_url="/redoc" if settings.environment != "production" else None,
-        openapi_url="/openapi.json" if settings.environment != "production" else None,
+    """Build the orchestrator app on the IF-01 runtime, plus the W0 rate limiter."""
+    app = create_service_app(
+        SPEC,
         lifespan=lifespan,
+        routers=[(router, API_PREFIX)],
+        title="Solace-AI Orchestrator Service",
     )
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins_list,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["*"],
-        expose_headers=["X-Request-ID", "X-Correlation-ID", "X-Session-ID", "X-Thread-ID"],
-    )
-    from .api import router
-
-    app.include_router(router, prefix="/api/v1/orchestrator")
-    _register_middleware(app)
-    _register_exception_handlers(app)
+    _register_rate_limiting(app)
     return app
 
 
-def _register_middleware(app: FastAPI) -> None:
-    """Register custom middleware for orchestrator service."""
+def _trusted_proxy_hops() -> int:
+    """Number of trusted reverse-proxy hops in front of this service.
 
-    @app.middleware("http")
-    async def request_tracking_middleware(request: Request, call_next):
-        request_id = request.headers.get("X-Request-ID", str(uuid4()))
-        correlation_id = request.headers.get("X-Correlation-ID", str(uuid4()))
-        structlog.contextvars.clear_contextvars()
-        structlog.contextvars.bind_contextvars(
-            request_id=request_id,
-            correlation_id=correlation_id,
-            path=request.url.path,
-            method=request.method,
-        )
-        start_time = time.perf_counter()
-        response = await call_next(request)
-        process_time_ms = (time.perf_counter() - start_time) * 1000
-        response.headers["X-Request-ID"] = request_id
-        response.headers["X-Correlation-ID"] = correlation_id
-        response.headers["X-Process-Time-Ms"] = f"{process_time_ms:.2f}"
-        logger.info(
-            "request_completed",
-            status_code=response.status_code,
-            process_time_ms=round(process_time_ms, 2),
-        )
-        return response
+    0 => trust only the real socket peer for IP keying (X-Forwarded-For is ignored, as
+    it is client-spoofable). n>0 => the genuine client is n positions from the right of XFF.
+
+    P2-12: in production/staging this service sits behind Caddy, which appends exactly one
+    XFF hop. If we defaulted to 0 there, every real client would collapse into a single
+    rate-limit bucket (the proxy's IP), letting one abuser exhaust the shared limit for all.
+    So the EFFECTIVE default is 1 in strict environments and 0 in dev/test (no proxy). An
+    explicit ORCHESTRATOR_TRUSTED_PROXY_HOPS always wins so non-Caddy deployments can override.
+    """
+    explicit = os.getenv("ORCHESTRATOR_TRUSTED_PROXY_HOPS")
+    if explicit is not None:
+        try:
+            return max(0, int(explicit))
+        except ValueError:
+            return 0
+
+    # No explicit override: default to 1 behind a trusted proxy in strict environments.
+    env = os.getenv("ORCHESTRATOR_ENVIRONMENT") or os.getenv("ENVIRONMENT") or ""
+    return 1 if is_strict_environment(env) else 0
 
 
-def _register_exception_handlers(app: FastAPI) -> None:
-    """Register global exception handlers."""
+def _make_principal_resolver(trusted_proxy_hops: int):
+    """Rate-limit key: per-user when a valid bearer token is present, else client IP.
 
-    @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(request: Request, exc: RequestValidationError):
-        errors = []
-        for error in exc.errors():
-            loc = ".".join(str(x) for x in error["loc"])
-            errors.append({"field": loc, "message": error["msg"], "type": error["type"]})
-        logger.warning("validation_error", path=request.url.path, errors=errors)
-        return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content={
-                "error": {
-                    "code": "VALIDATION_ERROR",
-                    "message": "Request validation failed",
-                    "details": errors,
-                }
-            },
-        )
+    Keys on the signature-verified token subject so a forged/expired token cannot share
+    or exhaust another user's bucket (it degrades to IP scope). The route's own auth
+    dependency still performs the authoritative (revocation-aware) check.
+    """
+    from solace_security.rate_limit import client_ip
 
-    @app.exception_handler(ValueError)
-    async def value_error_handler(request: Request, exc: ValueError):
-        logger.warning("value_error", path=request.url.path, error=str(exc))
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={"error": {"code": "BAD_REQUEST", "message": str(exc)}},
-        )
+    def resolve(request: Request) -> str:
+        auth = request.headers.get("authorization", "")
+        if auth.lower().startswith("bearer "):
+            token = auth[7:].strip()
+            try:
+                from solace_security.middleware import _get_jwt_manager
+                result = _get_jwt_manager().validate_access_token(token)
+                if getattr(result, "success", False) and getattr(result, "user_id", None):
+                    return f"user:{result.user_id}"
+            except Exception:
+                pass
+        return f"ip:{client_ip(request, trusted_proxy_hops)}"
 
-    @app.exception_handler(Exception)
-    async def global_exception_handler(request: Request, exc: Exception):
-        logger.error(
-            "unhandled_exception",
-            path=request.url.path,
-            error=str(exc),
-            exc_type=type(exc).__name__,
+    return resolve
+
+
+def _strict() -> bool:
+    """The runtime's strictness rule: the service's environment or the bare ENVIRONMENT (D-14)."""
+    return is_strict_environment(SPEC.environment) or is_strict_environment()
+
+
+def _rate_limiting_disabled() -> bool:
+    """Disable rate limiting only under a test harness, never in a strict environment.
+
+    Strict environments (staging, production) ALWAYS enforce, so a stray ENVIRONMENT=test in a
+    strict image cannot silently disable it. Outside strict, a test context is detected from
+    EITHER the service env (ORCHESTRATOR_ENVIRONMENT) OR the process env (ENVIRONMENT),
+    accepting any value that starts with "test".
+    """
+    service_environment = OrchestratorAppSettings().environment
+    if _strict() or is_strict_environment(service_environment):
+        return False
+    candidates = (service_environment, os.getenv("ENVIRONMENT", ""))
+    return any(str(v).strip().lower().startswith("test") for v in candidates)
+
+
+def _register_rate_limiting(app: FastAPI) -> None:
+    """Wire per-user/per-IP rate limiting with Retry-After (REV-24); W0 only.
+
+    WS-11.3 deletes this once the runtime installs the limiter (``install_rate_limiting``).
+    The limiter is Redis-backed when ``REDIS_URL`` is set (a lazy client: it connects on first
+    use, with ``RATE_LIMIT_REDIS_TIMEOUT_SECONDS`` connect and command timeouts, and the lifespan
+    closes it). A Redis error at request time fails open (``RateLimitMiddleware`` logs
+    ``rate_limiter_backend_error`` and serves the request). In a strict environment a missing ``REDIS_URL`` raises
+    ``StartupDependencyError``: a per-process counter would give every replica its own budget.
+    The URL is never logged. Disabled only under a test harness (``_rate_limiting_disabled``),
+    so the shared in-memory counter cannot bleed across tests.
+    """
+    if _rate_limiting_disabled():
+        return
+    from infrastructure.api_gateway.rate_limiting import create_solace_rate_limiter
+    from solace_security.rate_limit import RateLimitMiddleware
+
+    redis_url = os.environ.get("REDIS_URL", "").strip()
+    if not redis_url and _strict():
+        raise StartupDependencyError(
+            "rate_limiting", "REDIS_URL is required for the shared rate limiter in strict environments"
         )
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "error": {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred"}
-            },
+    redis_client = None
+    if redis_url:
+        import redis.asyncio as redis_asyncio
+
+        redis_client = redis_asyncio.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_connect_timeout=RATE_LIMIT_REDIS_TIMEOUT_SECONDS,
+            socket_timeout=RATE_LIMIT_REDIS_TIMEOUT_SECONDS,
         )
+    app.state.rate_limit_redis = redis_client
+
+    hops = _trusted_proxy_hops()
+    _insert_inside_request_context(
+        app,
+        Middleware(
+            RateLimitMiddleware,
+            limiter=create_solace_rate_limiter(redis_client=redis_client),
+            service_name=SERVICE_NAME,
+            principal_resolver=_make_principal_resolver(hops),
+            trusted_proxy_hops=hops,
+        ),
+    )
+    logger.info(
+        "rate_limiting_enabled",
+        service=SERVICE_NAME,
+        trusted_proxy_hops=hops,
+        redis_backed=redis_client is not None,
+    )
+
+
+def _insert_inside_request_context(app: FastAPI, middleware: Middleware) -> None:
+    """Put ``middleware`` just inside the runtime's ``RequestContextMiddleware``.
+
+    That is where WS-04.6's ``install_rate_limiting`` puts the runtime's limiter: inside edge
+    CORS, so a 429 still carries the CORS headers a cross-origin client needs to read it and its
+    Retry-After, and inside the request context, so the 429 carries the request ids.
+    ``app.user_middleware`` lists the middleware outermost first.
+    """
+    stack = app.user_middleware
+    for index, entry in enumerate(stack):
+        if entry.cls is RequestContextMiddleware:
+            stack.insert(index + 1, middleware)
+            return
+    raise RuntimeError("create_service_app did not install RequestContextMiddleware")
 
 
 app = create_application()
-
-
-@app.get("/", include_in_schema=False)
-async def root() -> dict[str, str]:
-    """Root endpoint with service info."""
-    return {"service": "orchestrator-service", "status": "operational", "version": "1.0.0"}
-
-
-@app.get("/ready", include_in_schema=False)
-async def readiness() -> JSONResponse:
-    """Kubernetes readiness probe."""
-    if not hasattr(app.state, "compiled_graph") or app.state.compiled_graph is None:
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content={"status": "not_ready"}
-        )
-    return JSONResponse(status_code=status.HTTP_200_OK, content={"status": "ready"})
-
-
-@app.get("/live", include_in_schema=False)
-async def liveness() -> dict[str, str]:
-    """Kubernetes liveness probe."""
-    return {"status": "alive"}
-
-
-@app.get("/health", include_in_schema=False)
-async def health_check() -> dict:
-    """Health check endpoint with service status details."""
-    connection_count = sum(
-        len(conns) for conns in getattr(app.state, "active_connections", {}).values()
-    )
-    startup = getattr(app.state, "startup_time", None)
-    uptime_seconds = int(time.monotonic() - startup) if startup else None
-    return {
-        "status": "healthy",
-        "service": "orchestrator-service",
-        "version": "1.0.0",
-        "uptime_seconds": uptime_seconds,
-        "graph_ready": hasattr(app.state, "compiled_graph")
-        and app.state.compiled_graph is not None,
-        "active_websocket_connections": connection_count,
-        "agents": ["safety", "supervisor", "diagnosis", "therapy", "personality", "chat"],
-    }
 
 
 def run_server() -> None:

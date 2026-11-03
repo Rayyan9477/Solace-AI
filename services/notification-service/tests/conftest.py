@@ -4,15 +4,14 @@ Pytest configuration and fixtures for notification service tests.
 import sys
 from pathlib import Path
 
-# Add src directory to path for imports
-src_path = Path(__file__).parent.parent / "src"
-sys.path.insert(0, str(src_path))
+# Add the service root (not src) so the code imports as the `src` package, as in the image
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from domain.templates import TemplateRegistry, TemplateEngine
-from domain.channels import (
+from src.domain.templates import TemplateRegistry, TemplateEngine
+from src.domain.channels import (
     ChannelRegistry,
     EmailChannel,
     SMSChannel,
@@ -22,7 +21,7 @@ from domain.channels import (
     PushConfig,
     ChannelType,
 )
-from domain.service import NotificationService
+from src.domain.service import NotificationService
 
 
 @pytest.fixture

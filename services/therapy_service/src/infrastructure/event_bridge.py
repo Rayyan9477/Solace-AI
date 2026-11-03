@@ -12,19 +12,11 @@ import structlog
 
 from ..events import DomainEvent, EventBus, to_kafka_event
 
-import os
+from solace_events.publisher import EventPublisher, OutboxPoller, create_publisher
+from solace_events.config import KafkaSettings
 
-try:
-    from src.solace_events.publisher import EventPublisher, create_publisher
-    from src.solace_events.config import KafkaSettings
-    _KAFKA_AVAILABLE = True
-except ImportError:
-    _KAFKA_AVAILABLE = False
-    _logger = structlog.get_logger(__name__)
-    _logger.error("kafka_import_failed", package="solace_events",
-                  hint="Install solace_events or set KAFKA_BOOTSTRAP_SERVERS")
-    if os.environ.get("ENVIRONMENT", "").lower() == "production":
-        raise RuntimeError("solace_events package required in production")
+# MVP-133: a missing package is now an ImportError in every environment.
+_KAFKA_AVAILABLE = True
 
 logger = structlog.get_logger(__name__)
 
@@ -37,8 +29,11 @@ class KafkaEventBridge:
         event_bus: EventBus,
         kafka_settings: KafkaSettings | None = None,
         use_mock: bool = False,
+        postgres_pool: Any = None,
     ) -> None:
         self._event_bus = event_bus
+        self._started = False
+        self._poller = None
 
         if not _KAFKA_AVAILABLE:
             logger.info("kafka_bridge_disabled", reason="solace_events not installed")
@@ -47,21 +42,28 @@ class KafkaEventBridge:
 
         self._publisher = create_publisher(
             kafka_settings=kafka_settings, use_outbox=True, use_mock=use_mock,
+            postgres_pool=postgres_pool, source_service="therapy-service",
         )
-        self._started = False
         logger.info("therapy_kafka_bridge_initialized", use_mock=use_mock)
 
     async def start(self) -> None:
-        """Start the Kafka publisher and register with EventBus."""
+        """Start the Kafka publisher, outbox drain poller, and EventBus subscription."""
         if self._publisher and not self._started:
             await self._publisher.start()
+            # REV-01: drain the outbox to Kafka. Without a poller, published
+            # events are saved to the outbox but never sent.
+            self._poller = OutboxPoller(self._publisher)
+            await self._poller.start()
             self._started = True
             self._event_bus.subscribe_all(self._handle_event)
             logger.info("therapy_kafka_bridge_started")
 
     async def stop(self) -> None:
-        """Stop the Kafka publisher."""
+        """Stop the outbox poller and Kafka publisher."""
         if self._publisher and self._started:
+            if self._poller:
+                await self._poller.stop()
+                self._poller = None
             await self._publisher.stop()
             self._started = False
             logger.info("therapy_kafka_bridge_stopped")
@@ -113,11 +115,13 @@ async def initialize_event_bridge(
     event_bus: EventBus,
     kafka_settings: KafkaSettings | None = None,
     use_mock: bool = False,
+    postgres_pool: Any = None,
 ) -> KafkaEventBridge:
     """Initialize and start the Kafka event bridge."""
     global _bridge
     _bridge = KafkaEventBridge(
         event_bus=event_bus, kafka_settings=kafka_settings, use_mock=use_mock,
+        postgres_pool=postgres_pool,
     )
     await _bridge.start()
     return _bridge

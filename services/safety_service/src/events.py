@@ -195,7 +195,7 @@ def to_kafka_event(event: SafetyEvent) -> Any:
     or solace_events is not available.
     """
     try:
-        from src.solace_events.schemas import (
+        from solace_events.schemas import (
             EventMetadata as KafkaMetadata,
             CrisisLevel as KafkaCrisisLevel,
             CrisisDetectedEvent as KafkaCrisisDetected,

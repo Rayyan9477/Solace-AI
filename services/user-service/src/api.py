@@ -10,11 +10,12 @@ Principles: Clean API Design, Dependency Injection, DTOs
 """
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field, field_validator
 import structlog
 
@@ -47,6 +48,60 @@ def _mask_email(email: str) -> str:
     else:
         masked = local[0] + "***" + local[-1]
     return f"{masked}@{domain}"
+
+
+# P2-11: constant-time login. On the user-not-found path we still run a password verify
+# against a precomputed dummy hash so the request takes the same time as a wrong-password
+# verify against a real account — closing the timing side channel that let an attacker
+# enumerate which emails are registered. Computed once per process (lazily) from the
+# injected PasswordService so it matches the real hashing cost.
+_DUMMY_PASSWORD_HASH: str | None = None
+
+
+def _constant_time_dummy_verify(password_service: PasswordService, password: str) -> None:
+    """Burn the same work a real password verify would, discarding the result."""
+    global _DUMMY_PASSWORD_HASH
+    try:
+        if _DUMMY_PASSWORD_HASH is None:
+            _DUMMY_PASSWORD_HASH = password_service.hash_password(
+                "timing-equalizer-not-a-real-password"
+            )
+        password_service.verify_password(password, _DUMMY_PASSWORD_HASH)
+    except Exception:  # never let the timing-equalizer surface an error
+        pass
+
+
+# P2-4: per-account (per-email) anti-email-bomb throttle for /auth/resend-verification.
+# The per-IP gateway bucket (user-service main._register_rate_limiting) does NOT stop a
+# distributed bomb aimed at ONE victim address — an attacker rotating source IPs can still
+# flood a single inbox. This bounds how many verification emails a single ADDRESS can
+# trigger within a rolling window, regardless of source IP. It is deliberately in-process
+# (per-worker) and additive: the endpoint stays enumeration-safe (always 204) — over-limit
+# requests simply skip the send instead of leaking a distinguishing response.
+_RESEND_THROTTLE_MAX = 3
+_RESEND_THROTTLE_WINDOW_SECONDS = 3600
+_resend_attempts: dict[str, list[float]] = {}
+
+
+def _reset_resend_throttle() -> None:
+    """Clear the per-account resend throttle state (used by tests)."""
+    _resend_attempts.clear()
+
+
+def _resend_email_allowed(email: str, *, now: float | None = None) -> bool:
+    """Record a resend attempt for ``email`` and report whether it is within the
+    per-account budget. Enumeration-safe by construction: it neither reads account state
+    nor branches on registration status — it only counts requests per normalized address."""
+    now = time.monotonic() if now is None else now
+    key = (email or "").strip().lower()
+    window_start = now - _RESEND_THROTTLE_WINDOW_SECONDS
+    recent = [t for t in _resend_attempts.get(key, []) if t >= window_start]
+    if len(recent) >= _RESEND_THROTTLE_MAX:
+        _resend_attempts[key] = recent
+        return False
+    recent.append(now)
+    _resend_attempts[key] = recent
+    return True
 
 
 # --- Request/Response Models ---
@@ -306,13 +361,25 @@ async def get_current_user(
     try:
         token = jwt_service.extract_token_from_header(authorization)
         payload = await jwt_service.verify_token(token, expected_type=TokenType.ACCESS)
-        return payload
     except (TokenExpiredError, TokenInvalidError) as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e),
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # P1-3 (C.2 RLS): publish the authenticated user id into the request context so the
+    # DB layer sets the Postgres app.current_user_id GUC that RLS on consent/preferences
+    # (migration 006) enforces. Without this the user-service's own RLS-protected reads
+    # return no rows on real Postgres. Reset per-request in the finally so the contextvar
+    # never leaks into an unrelated request handled on the same worker.
+    from solace_common.request_context import set_current_user_id, reset_current_user_id
+
+    ctx_token = set_current_user_id(str(payload.user_id))
+    try:
+        yield payload
+    finally:
+        reset_current_user_id(ctx_token)
 
 
 # --- Helper Functions ---
@@ -425,6 +492,9 @@ async def login(
     # Find user by email
     user = await user_repository.get_by_email(request_data.email.lower())
     if not user:
+        # P2-11: equalize timing with the wrong-password path (see helper) so a missing
+        # account is indistinguishable from a wrong password by response latency.
+        _constant_time_dummy_verify(password_service, request_data.password)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
@@ -439,6 +509,11 @@ async def login(
             logger.warning("login_without_verification", user_id=str(user.user_id),
                            hint="Allowed in non-production only")
         else:
+            # P2-11: a blocked account (suspended / unverified-in-prod / locked) must not
+            # short-circuit before the password hasher — otherwise its response is
+            # measurably faster than a wrong-password attempt on an ACTIVE account, leaking
+            # account state by timing. Burn an equalizing dummy verify before the 401.
+            _constant_time_dummy_verify(password_service, request_data.password)
             logger.warning("login_blocked", user_id=str(user.user_id), reason=error)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -513,7 +588,28 @@ async def refresh_token(
             request_data.refresh_token,
             expected_type=TokenType.REFRESH,
         )
+    except TokenExpiredError as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
+    except TokenInvalidError as e:
+        # P2-2 refresh-token reuse detection: verify_token raises this "revoked" error
+        # only AFTER the signature + type checks pass, so a "revoked" message here means a
+        # genuinely-signed refresh token whose JTI was already consumed by a prior rotation
+        # is being REPLAYED. Treat it as a stolen-token signal and revoke the whole family
+        # (all of the user's sessions). A forged/garbage token fails signature first and
+        # raises a different message, so this cannot be abused to revoke a victim's
+        # sessions with an unsigned token bearing their id.
+        if "revoke" in str(e).lower():
+            claims = jwt_service.decode_token_unsafe(request_data.refresh_token) or {}
+            uid = claims.get("user_id")
+            if uid:
+                try:
+                    await session_manager.revoke_all_user_sessions(UUID(uid))
+                    logger.warning("refresh_token_reuse_detected_family_revoked", user_id=uid)
+                except Exception as revoke_err:
+                    logger.warning("refresh_family_revoke_failed", error=str(revoke_err))
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
 
+    try:
         # Verify user still has at least one active session
         active_sessions = await session_manager.get_user_sessions(payload.user_id, active_only=True)
         if not active_sessions:
@@ -522,6 +618,11 @@ async def refresh_token(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="No active session found. Please log in again.",
             )
+
+        # P2-2 rotation (revoke-old-then-issue): blacklist the CONSUMED refresh token's JTI
+        # so a replay of THIS token is rejected on the next call (and triggers the family
+        # revoke above), then mint a fresh access + refresh pair.
+        await jwt_service.revoke_token(request_data.refresh_token)
 
         # Generate new token pair
         token_pair = jwt_service.generate_token_pair(
@@ -926,6 +1027,7 @@ async def verify_email(
 async def resend_verification(
     request_data: ResendVerificationRequest,
     user_service: UserService = Depends(get_user_service),
+    background_tasks: BackgroundTasks = None,  # type: ignore[assignment]
 ) -> None:
     """Request a new verification email (UNAUTHENTICATED, enumeration-safe — REV-31).
 
@@ -936,7 +1038,24 @@ async def resend_verification(
     link if their initial email failed to send. Abuse (email bombing) is bounded by
     the API gateway rate limiter, not by requiring a login the user cannot perform.
     """
-    await user_service.resend_verification_email_by_email(request_data.email)
+    # P2-4: per-account anti-email-bomb throttle. Over-budget requests for the same
+    # address are dropped (no send) but STILL return 204 below — enumeration-safe. This
+    # runs before the (branch-independent) work below, and itself does no account lookup,
+    # so it does not reintroduce a timing oracle.
+    send_allowed = _resend_email_allowed(request_data.email)
+
+    # P2-5: run the lookup + email send OFF the synchronous request path so the
+    # registered / unknown / already-verified branches all return with equal timing
+    # (the branch-dependent DB read + notification call no longer happen before the
+    # response). Falls back to inline await when no BackgroundTasks is injected (e.g.
+    # direct unit-test invocation).
+    if send_allowed:
+        if background_tasks is not None:
+            background_tasks.add_task(
+                user_service.resend_verification_email_by_email, request_data.email
+            )
+        else:
+            await user_service.resend_verification_email_by_email(request_data.email)
     # Enumeration-safe: log nothing that distinguishes registered/verified/unknown
     # addresses, and return 204 unconditionally. (The prior log referenced
     # current_user/token, removed when this endpoint became unauthenticated — it

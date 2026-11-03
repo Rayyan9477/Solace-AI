@@ -3,13 +3,12 @@ Unit tests for notification domain events.
 """
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import pytest
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from events import (
+from src.events import (
     NotificationEventType,
     NotificationEvent,
     NotificationCreatedEvent,
@@ -370,7 +369,7 @@ class TestGetEventPublisher:
 
     def test_returns_singleton(self):
         """Test that get_event_publisher returns same instance."""
-        import events
+        from src import events
         events._publisher = None
 
         publisher1 = get_event_publisher()

@@ -1,63 +1,46 @@
-# Solace-AI Prometheus Configuration
+# Solace-AI Prometheus configuration (MVP-036).
+#
+# One job, solace-services, scrapes the nine MVP services on their real ports. Each target
+# carries a `service` label equal to the service_name of that service's ServiceRuntimeSpec,
+# which is also the `service` label on its solace_* metrics. Alert rules (WS-04.7) select on
+# job="solace-services" and `service`.
+#
+# Not scraped:
+# - config-service is not an MVP service (decision D-19);
+# - Postgres, Redis and Kafka expose no Prometheus endpoint, so they get a job only together
+#   with an exporter.
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
 scrape_configs:
-  # -------------------------------------------------------------------------
-  # Application services
-  # -------------------------------------------------------------------------
-  - job_name: orchestrator-service
+  - job_name: solace-services
+    metrics_path: /metrics
     static_configs:
       - targets: ["orchestrator-service:8000"]
-
-  - job_name: user-service
-    static_configs:
+        labels:
+          service: orchestrator-service
       - targets: ["user-service:8001"]
-
-  - job_name: safety-service
-    static_configs:
+        labels:
+          service: user-service
       - targets: ["safety-service:8002"]
-
-  - job_name: diagnosis-service
-    static_configs:
-      - targets: ["diagnosis-service:8004"]
-
-  - job_name: therapy-service
-    static_configs:
-      - targets: ["therapy-service:8006"]
-
-  - job_name: memory-service
-    static_configs:
-      - targets: ["memory-service:8005"]
-
-  - job_name: personality-service
-    static_configs:
-      - targets: ["personality-service:8007"]
-
-  - job_name: notification-service
-    static_configs:
+        labels:
+          service: safety-service
       - targets: ["notification-service:8003"]
-
-  - job_name: analytics-service
-    static_configs:
+        labels:
+          service: notification-service
+      - targets: ["diagnosis-service:8004"]
+        labels:
+          service: diagnosis-service
+      - targets: ["memory-service:8005"]
+        labels:
+          service: memory-service
+      - targets: ["therapy-service:8006"]
+        labels:
+          service: therapy-service
+      - targets: ["personality-service:8007"]
+        labels:
+          service: personality-service
       - targets: ["analytics-service:8009"]
-
-  - job_name: config-service
-    static_configs:
-      - targets: ["config-service:8010"]
-
-  # -------------------------------------------------------------------------
-  # Infrastructure
-  # -------------------------------------------------------------------------
-  - job_name: postgres
-    static_configs:
-      - targets: ["postgres:5432"]
-
-  - job_name: redis
-    static_configs:
-      - targets: ["redis:6379"]
-
-  - job_name: kafka
-    static_configs:
-      - targets: ["kafka:9092"]
+        labels:
+          service: analytics-service

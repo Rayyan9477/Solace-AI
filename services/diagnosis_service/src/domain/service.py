@@ -23,6 +23,7 @@ from .models import (
 )
 from .advocate import DevilsAdvocate, AdvocateSettings
 from .confidence import ConfidenceCalibrator, ConfidenceSettings
+from .erasure import build_user_data_erasure
 from ..events import (
     EventDispatcher, SymptomExtractedEvent, HypothesisGeneratedEvent,
     SafetyFlagRaisedEvent, DiagnosisRecordedEvent,
@@ -33,8 +34,14 @@ if TYPE_CHECKING:
     from .symptom_extractor import SymptomExtractor
     from .differential import DifferentialGenerator
     from ..infrastructure.repository import DiagnosisRepositoryPort
+    from solace_infrastructure.gdpr import ErasureReport
 
 logger = structlog.get_logger(__name__)
+
+# Safety flags that escalate a turn to CRISIS (mirrors _step1_analyze /
+# _determine_next_phase). A turn carrying any of these MUST be durably persisted:
+# see assess() / _persist_session fail-loud path (P2-9).
+_CRISIS_SAFETY_FLAGS = ("suicidal_ideation", "self_harm", "harm_to_others")
 
 
 class DiagnosisServiceSettings(BaseSettings):
@@ -46,7 +53,9 @@ class DiagnosisServiceSettings(BaseSettings):
     phase_transition_threshold: float = Field(default=0.7)
     enable_longitudinal_tracking: bool = Field(default=True)
     challenge_frequency: float = Field(default=0.3)
-    model_config = SettingsConfigDict(env_prefix="DIAGNOSIS_SERVICE_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="DIAGNOSIS_SERVICE_", env_file=".env", extra="ignore", populate_by_name=True
+    )
 
 
 class DiagnosisService(ServiceBase):
@@ -58,7 +67,8 @@ class DiagnosisService(ServiceBase):
                  repository: DiagnosisRepositoryPort | None = None,
                  advocate: DevilsAdvocate | None = None,
                  calibrator: ConfidenceCalibrator | None = None,
-                 event_dispatcher: EventDispatcher | None = None) -> None:
+                 event_dispatcher: EventDispatcher | None = None,
+                 session_store: Any = None) -> None:
         self._settings = settings or DiagnosisServiceSettings()
         self._symptom_extractor = symptom_extractor
         self._differential_generator = differential_generator
@@ -66,6 +76,7 @@ class DiagnosisService(ServiceBase):
         self._advocate = advocate or DevilsAdvocate()
         self._calibrator = calibrator or ConfidenceCalibrator()
         self._event_dispatcher = event_dispatcher
+        self._session_store = session_store  # REV-16 durable Redis live-session store (optional)
         self._active_sessions: dict[UUID, SessionState] = {}
         self._user_session_counts: dict[UUID, int] = {}
         self._user_history: dict[UUID, list[dict[str, Any]]] = {}
@@ -88,6 +99,59 @@ class DiagnosisService(ServiceBase):
         logger.info("diagnosis_service_shutting_down", stats=self._stats)
         self._initialized = False
 
+    async def _load_session(self, session_id: UUID):
+        """Recover a live session from the durable store on a cache miss (REV-16
+        read-through), hydrating the in-process cache. Returns None if unknown.
+        When no store is configured this is just the in-memory lookup.
+
+        P1-5: on a cache HIT with a durable store configured, reconcile before use.
+        A miss-only read-through trusts a possibly-stale cache: on a non-sticky
+        multi-worker LB another worker can have advanced the durable session (e.g.
+        escalated current risk + safety_flags) after this worker cached it. Re-read
+        the durable copy and adopt it when it is newer (``durable.version >
+        cached.version``), otherwise keep the cache — so this turn never operates on,
+        and never re-persists over, downgraded clinical state."""
+        async with self._session_lock:
+            session = self._active_sessions.get(session_id)
+            if self._session_store is not None:
+                durable = await self._session_store.get_session(session_id)
+                if session is None:
+                    # Miss: hydrate from the durable store (unchanged behavior).
+                    if durable is not None:
+                        self._active_sessions[session_id] = durable
+                        session = durable
+                elif durable is not None and durable.version > session.version:
+                    # Hit but stale: adopt the newer durable copy.
+                    self._active_sessions[session_id] = durable
+                    session = durable
+            return session
+
+    async def _persist_session(self, session, *, fail_loud: bool = False) -> None:
+        """Durable write-through with CAS-merge on ``safety_flags`` (REV-16). No-op
+        when no store is configured.
+
+        A persistent CAS conflict is logged loud. It is normally best-effort — the
+        in-memory working copy is authoritative for the current turn and the next
+        turn re-persists — so it does NOT fail the turn. BUT when ``fail_loud`` is
+        set (P2-9), the turn carries a crisis safety escalation that has no
+        guaranteed "next turn": swallowing CAS exhaustion could leave the durable
+        session reflecting the PRE-crisis state if this worker then crashes or the
+        next turn lands elsewhere. In that case re-raise so the API surfaces a 500
+        and the escalation is retried rather than silently un-persisted."""
+        if self._session_store is None or session is None:
+            return
+        from ..infrastructure.redis_session_repository import SessionPersistConflict
+        try:
+            await self._session_store.save_session_cas_merge(session)
+        except SessionPersistConflict:
+            logger.error(
+                "diagnosis_session_persist_cas_exhausted",
+                session_id=str(session.session_id),
+                crisis=fail_loud,
+            )
+            if fail_loud:
+                raise
+
     async def assess(self, user_id: UUID, session_id: UUID, message: str,
                      conversation_history: list[dict[str, str]],
                      existing_symptoms: list[SymptomDTO],
@@ -102,6 +166,23 @@ class DiagnosisService(ServiceBase):
         """
         start_time = time.perf_counter()
         self._stats["assessments"] += 1
+        # REV-16 read-through: recover the session from the durable store if it was
+        # created on another worker (or before a restart), so the IDOR check and
+        # _update_session operate on the real session instead of dropping the turn.
+        await self._load_session(session_id)
+        # IDOR guard (REV-07): assess mutates the session's clinical state, so an
+        # already-existing session must belong to the caller.
+        existing = self._active_sessions.get(session_id)
+        if existing is not None and existing.user_id != user_id:
+            logger.warning("assess_owner_mismatch", session_id=str(session_id), user_id=str(user_id))
+            return AssessmentResult(
+                phase=current_phase,
+                extracted_symptoms=existing_symptoms,
+                response_text="",
+                confidence_score=Decimal("0"),
+                processing_time_ms=0,
+                safety_flags=["unauthorized_session"],
+            )
         try:
             result = await asyncio.wait_for(
                 self._run_assessment_chain(
@@ -129,6 +210,16 @@ class DiagnosisService(ServiceBase):
                 safety_flags=["reasoning_timeout"],
             )
         await self._update_session(session_id, result, message=message)
+        # REV-16: durably write-through the updated session (symptoms, differential,
+        # phase, safety_flags) with CAS-merge so a concurrent write can't clobber it.
+        # P2-9: a turn carrying a crisis safety escalation must be durably recorded —
+        # if CAS contention exhausts the retry budget, fail loud (raise) so the
+        # escalation is retried, never silently dropped. Non-crisis turns stay
+        # best-effort (the next turn re-persists).
+        crisis_turn = any(f in _CRISIS_SAFETY_FLAGS for f in result.safety_flags)
+        await self._persist_session(
+            self._active_sessions.get(session_id), fail_loud=crisis_turn
+        )
         logger.debug("assessment_completed", user_id=str(user_id), time_ms=result.processing_time_ms)
         return result
 
@@ -172,8 +263,22 @@ class DiagnosisService(ServiceBase):
         step4_start = time.perf_counter()
         # Retrieve session for calibration context (H-08)
         session = self._active_sessions.get(session_id)
+        # REV-30: the current message's freshly-extracted symptoms (step 1) are not
+        # merged into session.symptoms until _update_session runs AFTER this chain
+        # completes. Without merging them here, step-4 Bayesian calibration would see
+        # only PRIOR-turn symptoms and ignore THIS utterance's symptoms. Build a
+        # current-turn-inclusive working set, deduplicated by name (case-insensitive)
+        # against the persisted session symptoms — mirroring the dedup _update_session
+        # later applies — so calibration counts this turn's symptoms without the
+        # subsequent persistence double-counting them. This is a local view only;
+        # session.symptoms is left untouched here.
+        prior_symptoms = list(session.symptoms) if session else []
+        prior_names = {s.name.lower() for s in prior_symptoms}
+        current_new = [s for s in step1_result["symptoms"] if s.name.lower() not in prior_names]
+        working_symptoms = prior_symptoms + current_new
         step4_result = await self._step4_synthesize(step2_result["hypotheses"], step3_result,
-                                                     current_phase, message, session=session)
+                                                     current_phase, message, session=session,
+                                                     working_symptoms=working_symptoms)
         reasoning_chain.append(ReasoningStepResultDTO(
             step=ReasoningStep.SYNTHESIZE, input_summary="All previous steps",
             output_summary=f"Final confidence: {step4_result['confidence']:.2f}",
@@ -272,9 +377,11 @@ class DiagnosisService(ServiceBase):
 
     async def _step4_synthesize(self, hypotheses: list[HypothesisDTO], challenge_result: dict[str, Any],
                                  phase: DiagnosisPhase, message: str,
-                                 session: SessionState | None = None) -> dict[str, Any]:
+                                 session: SessionState | None = None,
+                                 working_symptoms: list[SymptomDTO] | None = None) -> dict[str, Any]:
         """Step 4: Synthesize - Integrate and generate response."""
-        calibrated = await self._calibrate_confidence(hypotheses, challenge_result, session=session)
+        calibrated = await self._calibrate_confidence(hypotheses, challenge_result, session=session,
+                                                       working_symptoms=working_symptoms)
         primary = calibrated[0] if calibrated else None
         alternatives = calibrated[1:] if len(calibrated) > 1 else []
         differential = DifferentialDTO(primary=primary, alternatives=alternatives,
@@ -285,12 +392,18 @@ class DiagnosisService(ServiceBase):
                 "response": response, "confidence": float(primary.confidence) if primary else 0.5}
 
     async def _calibrate_confidence(self, hypotheses: list[HypothesisDTO], challenges: dict[str, Any],
-                                     session: SessionState | None = None) -> list[HypothesisDTO]:
+                                     session: SessionState | None = None,
+                                     working_symptoms: list[SymptomDTO] | None = None) -> list[HypothesisDTO]:
         """Calibrate confidence scores using Bayesian calibrator and challenge results."""
         calibrated_hypotheses: list[HypothesisDTO] = []
         per_hypothesis_adjustments: dict[UUID, Decimal] = challenges.get("per_hypothesis_adjustments", {})
-        # Use actual symptoms from session for calibration context (H-08)
-        session_symptoms = session.symptoms if session else []
+        # REV-30: prefer the current-turn-inclusive working symptom set so THIS
+        # message's symptoms inform its own calibration. Fall back to the persisted
+        # session symptoms (prior turns only, H-08) when no working set is supplied.
+        if working_symptoms is not None:
+            session_symptoms = working_symptoms
+        else:
+            session_symptoms = session.symptoms if session else []
         session_phase = session.phase.value if session else "unknown"
         for h in hypotheses:
             cal_result = await self._calibrator.calibrate(
@@ -352,6 +465,23 @@ class DiagnosisService(ServiceBase):
         async with self._session_lock:
             session = self._active_sessions.get(session_id)
             if session is None:
+                # REV-16: never SILENTLY drop clinical state. A missing session
+                # here means assess() ran against a session that was never started
+                # or was lost (e.g. a process restart before session durability
+                # lands). Record it loud with exactly what is being dropped so it
+                # is observable; escalate to ERROR when crisis safety_flags —
+                # which must never vanish without a trace — would be lost.
+                self._stats["unknown_session_updates"] = (
+                    self._stats.get("unknown_session_updates", 0) + 1
+                )
+                log = logger.error if result.safety_flags else logger.warning
+                log(
+                    "diagnosis_update_unknown_session",
+                    session_id=str(session_id),
+                    dropped_symptoms=len(result.extracted_symptoms),
+                    dropped_safety_flags=len(result.safety_flags),
+                    safety_flags=list(result.safety_flags),
+                )
                 return
             session.phase = result.phase
             # Append user message and generated response to session messages (M-07)
@@ -410,6 +540,9 @@ class DiagnosisService(ServiceBase):
             self._user_session_counts[user_id] = session_number
             session = SessionState(user_id=user_id, session_number=session_number)
             self._active_sessions[session.session_id] = session
+        # REV-16: persist the new session so a later assess on any worker (or after
+        # a restart) recovers it via read-through instead of dropping the turn.
+        await self._persist_session(session)
         greeting = self._generate_greeting(session_number, previous_session_id is not None)
         logger.info("session_started", user_id=str(user_id), session_id=str(session.session_id))
         return SessionStartResult(session_id=session.session_id, session_number=session_number,
@@ -427,8 +560,14 @@ class DiagnosisService(ServiceBase):
     async def end_session(self, user_id: UUID, session_id: UUID, generate_summary: bool) -> SessionEndResult:
         """End a diagnosis session."""
         self._stats["sessions_ended"] += 1
-        session = self._active_sessions.get(session_id)
+        session = await self._load_session(session_id)
         if not session:
+            return SessionEndResult()
+        # IDOR guard (REV-07): only the session's owner may end it. Sessions are
+        # loaded by id, so without this a caller could end another user's active
+        # clinical session.
+        if session.user_id != user_id:
+            logger.warning("end_session_owner_mismatch", session_id=str(session_id))
             return SessionEndResult()
         duration = datetime.now(timezone.utc) - session.started_at
         summary = self._generate_session_summary(session) if generate_summary else None
@@ -451,7 +590,12 @@ class DiagnosisService(ServiceBase):
                 await self._repository.save_record(record)
                 logger.info("session_record_persisted", session_id=str(session_id))
             except Exception as e:
-                logger.warning("session_record_persist_failed", session_id=str(session_id), error=str(e))
+                # M1-gate P0: do NOT swallow a clinical-record persistence failure.
+                # Returning a successful SessionEndResult while the diagnosis record
+                # never landed silently loses clinical data. Fail loud so the caller
+                # /API surfaces it (500) and can retry.
+                logger.error("session_record_persist_failed", session_id=str(session_id), error=str(e))
+                raise
         # Dispatch diagnosis recorded event (C-14)
         if self._event_dispatcher:
             primary = session.differential.primary if session.differential else None
@@ -464,6 +608,10 @@ class DiagnosisService(ServiceBase):
             ))
         async with self._session_lock:
             self._active_sessions.pop(session_id, None)
+        # REV-16: evict the live session from the durable store so a stale blob is
+        # not later recovered by read-through after the session has ended.
+        if self._session_store is not None:
+            await self._session_store.delete_session(session_id)
         logger.info("session_ended", user_id=str(user_id), session_id=str(session_id))
         return SessionEndResult(duration_minutes=int(duration.total_seconds() / 60),
                                messages_exchanged=len(session.messages), final_differential=session.differential,
@@ -517,16 +665,25 @@ class DiagnosisService(ServiceBase):
                     "phase": session.phase.value, "symptom_count": len(session.symptoms),
                     "started_at": session.started_at.isoformat()}
 
-    async def challenge_hypothesis(self, session_id: UUID, hypothesis_id: UUID) -> ChallengeResult:
+    async def challenge_hypothesis(
+        self, session_id: UUID, hypothesis_id: UUID, user_id: UUID | None = None
+    ) -> ChallengeResult:
         """Trigger Devil's Advocate challenge.
 
         Delegates to the DevilsAdvocate domain component for structured
         adversarial review instead of returning hardcoded strings (M-11).
+
+        ``user_id`` is the authenticated caller; when provided it is checked
+        against the session owner (REV-07 IDOR guard).
         """
         self._stats["challenges"] += 1
         async with self._session_lock:
             session = self._active_sessions.get(session_id)
         if not session or not session.differential:
+            return ChallengeResult()
+        # IDOR guard (REV-07): only the session owner may challenge its hypotheses.
+        if user_id is not None and str(session.user_id) != str(user_id):
+            logger.warning("challenge_owner_mismatch", session_id=str(session_id))
             return ChallengeResult()
         hypotheses = ([session.differential.primary] if session.differential.primary else []) + session.differential.alternatives
         target = next((h for h in hypotheses if h.hypothesis_id == hypothesis_id), None)
@@ -539,18 +696,58 @@ class DiagnosisService(ServiceBase):
             bias_flags=advocate_result.bias_flags,
         )
 
+    def _emit_erasure_audit(self, report: "ErasureReport") -> None:
+        """Audit sink for a completed GDPR erasure.
+
+        Invoked by the orchestrator ONLY on a fully successful erasure, giving a
+        durable, structured audit trail of the right-to-erasure fulfilment.
+        """
+        logger.info("gdpr_erasure_completed", **report.to_dict())
+
     async def delete_user_data(self, user_id: UUID) -> None:
-        """Delete all user data (GDPR compliance)."""
+        """Delete all user data (GDPR compliance).
+
+        Ephemeral, process-local caches are cleared directly; the durable
+        Postgres store is erased through the shared fail-loud orchestrator
+        (REV-17) so a failed delete raises ``ErasureIncomplete`` and is NEVER
+        reported as a completed erasure. Preserves the existing ``None`` return
+        (the endpoint maps success to 204).
+        """
+        # Process-local caches (not a durable GDPR store) — clear directly.
         self._user_history.pop(user_id, None)
         self._user_session_counts.pop(user_id, None)
         async with self._session_lock:
             for sid, session in list(self._active_sessions.items()):
                 if session.user_id == user_id:
                     self._active_sessions.pop(sid, None)
-        # Delete persisted data from repository (M-08)
+        # Delete persisted data from Postgres through the auditable, fail-loud
+        # right-to-erasure orchestrator (M-08, REV-17).
         if self._repository:
-            await self._repository.delete_user_data(user_id)
-        logger.info("user_data_deleted", user_id=str(user_id))
+            # P0 (Phase C gate): also erase the durable live-session Redis store,
+            # which holds special-category PHI (symptoms/differential/safety_flags)
+            # that would otherwise escape erasure while it is attested complete.
+            erasure = build_user_data_erasure(self._repository, session_store=self._session_store)
+            # P1 (Phase C gate) / C.2 RLS: scope the per-user GUC to the TARGET user
+            # for the erase — the diagnosis Postgres tables are RLS-protected, so an
+            # admin-triggered erasure (request GUC = admin) would be RLS-filtered to
+            # the admin's own rows and silently delete nothing. Restore afterwards.
+            from solace_common.request_context import (
+                reset_current_user_id,
+                set_current_user_id,
+            )
+            token = set_current_user_id(str(user_id))
+            try:
+                report = await erasure.erase(user_id, audit_emit=self._emit_erasure_audit)
+            finally:
+                reset_current_user_id(token)
+            logger.info(
+                "user_data_deleted",
+                user_id=str(user_id),
+                total_deleted=report.total_deleted,
+                stores=list(report.deleted),
+            )
+        else:
+            logger.info("user_data_deleted", user_id=str(user_id))
 
     async def get_status(self) -> dict[str, Any]:
         """Get service status."""

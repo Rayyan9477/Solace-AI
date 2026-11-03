@@ -176,3 +176,24 @@ class TestPcl5TenItemScreenerWeathers2013:
         test at 16 asserts SEVERE there, so both together pin the boundary.
         """
         assert assessor._interpret_pcl5(15) == SeverityLevel.MODERATE
+
+    def test_pcl5_interpretation_text_matches_halved_boundary_at_16(
+        self, assessor: SeverityAssessor
+    ) -> None:
+        """DRIFT-2 regression: the human-readable interpretation TEXT must
+        cross to "Probable PTSD" at the SAME halved boundary the severity
+        band uses (>=16), not the stale un-halved 17. A score of 16 is
+        SEVERE per _interpret_pcl5, so its message must not say "Below
+        clinical threshold".
+        """
+        text = assessor._get_pcl5_interpretation(16)
+        assert "Probable PTSD" in text
+        assert "Below clinical threshold" not in text
+
+    def test_pcl5_interpretation_text_below_threshold_at_15(
+        self, assessor: SeverityAssessor
+    ) -> None:
+        """The message stays below-threshold just under the boundary (15)."""
+        assert assessor._get_pcl5_interpretation(15) == (
+            "Below clinical threshold for PTSD"
+        )

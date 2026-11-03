@@ -75,6 +75,16 @@ class TestRiskScore:
         assert critical.is_critical is True
         assert non_critical.is_critical is False
 
+    def test_is_critical_boundary_matches_live_critical_floor(self) -> None:
+        """DRIFT-1 regression: is_critical must fire at the SAME 0.85
+        CRITICAL floor used by SafetyThresholds.critical_threshold /
+        CrisisDetectorSettings, not the stale hard-coded 0.9. A 0.85 score
+        is CRITICAL on the detection path, so is_critical must agree.
+        """
+        assert RiskScore(value=Decimal("0.85")).is_critical is True
+        # Just below the floor must NOT be critical (boundary is inclusive at 0.85).
+        assert RiskScore(value=Decimal("0.849")).is_critical is False
+
     def test_is_elevated(self) -> None:
         """Test elevated flag."""
         elevated = RiskScore(value=Decimal("0.6"))
@@ -254,7 +264,9 @@ class TestSafetyThresholds:
         """Test creating safety thresholds."""
         thresholds = SafetyThresholds()
         assert thresholds.low_threshold == Decimal("0.3")
-        assert thresholds.critical_threshold == Decimal("0.9")
+        # REV-25: CRITICAL threshold lowered 0.9 -> 0.85 to match the clinical spec
+        # (more sensitive = safer for crisis detection). Flagged for D2 sign-off.
+        assert thresholds.critical_threshold == Decimal("0.85")
 
     def test_get_level_critical(self) -> None:
         """Test getting critical level."""

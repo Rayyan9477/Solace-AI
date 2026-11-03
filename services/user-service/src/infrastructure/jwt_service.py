@@ -27,13 +27,32 @@ class TokenType(str, Enum):
 
 
 class JWTConfig(BaseModel):
-    """JWT service configuration."""
+    """JWT service configuration.
+
+    P1-1 (RS256 issuer migration): user-service is the token ISSUER. When
+    ``algorithm="RS256"`` and RS256 signing material is provisioned
+    (``private_key_pem`` + ``active_kid`` + ``public_keys``), user access/refresh
+    tokens are signed with the issuer-only RS256 private key (a ``kid`` header is
+    stamped) instead of the symmetric HS256 secret that every backend container
+    holds. Verification stays DUAL-ACCEPT: legacy HS256 tokens are still accepted
+    while ``accept_legacy_hs256`` is True (the default), so a rollout can flip the
+    issuer to RS256 before flipping validators to strict. HS256 remains the default
+    algorithm when no RS256 material is configured (dev/test, backward compatible).
+    """
     secret_key: str = Field(..., description="Secret key for signing tokens")
-    algorithm: str = Field(default="HS256", description="JWT signing algorithm")
+    algorithm: str = Field(default="HS256", description="JWT signing algorithm (HS256 or RS256)")
     access_token_expire_minutes: int = Field(default=15, description="Access token lifetime")
     refresh_token_expire_days: int = Field(default=30, description="Refresh token lifetime")
     issuer: str = Field(default="solace-ai", description="Token issuer")
     audience: str = Field(default="solace-ai-api", description="Token audience")
+    # RS256 signing material (issuer only). private_key_pem + active_kid enable signing;
+    # public_keys is the {kid: public_pem} verification keyset (issuer verifies its own kid).
+    private_key_pem: str | None = Field(default=None, description="RS256 private key PEM (issuer only)")
+    active_kid: str | None = Field(default=None, description="Key id stamped in newly-issued RS256 tokens")
+    public_keys: dict[str, str] | None = Field(default=None, description="{kid: public_pem} verification keyset")
+    # Backward-compat DUAL-ACCEPT: keep accepting legacy HS256 user tokens during the
+    # RS256 rollout. Strict rejection (False) is an opt-in OPS/CONFIG flip, not a code default.
+    accept_legacy_hs256: bool = Field(default=True, description="Accept legacy HS256 user tokens during the RS256 transition")
 
 
 @dataclass
@@ -138,17 +157,74 @@ class JWTService:
     - Payload extraction
     """
 
-    def __init__(self, config: JWTConfig, blacklist: TokenBlacklist | None = None):
+    def __init__(
+        self,
+        config: JWTConfig,
+        blacklist: TokenBlacklist | None = None,
+        key_manager: Any | None = None,
+    ):
         """
         Initialize JWT service.
 
         Args:
             config: JWT configuration
             blacklist: Optional token blacklist for revocation support
+            key_manager: Optional RS256 KeyManager (duck-typed: needs ``can_sign``,
+                ``active_kid``, ``sign(claims)`` and ``public_pem_for(kid)``). When
+                omitted and ``config.algorithm == "RS256"``, one is built from the
+                config's RS256 material.
         """
         self.config = config
         self._blacklist = blacklist
         self.logger = structlog.get_logger(__name__)
+        self._keys = key_manager
+        if self._keys is None and config.algorithm == "RS256":
+            # Build the issuer/verifier keyset from config material. Fail-soft so a
+            # misconfigured RS256 setup surfaces at sign/verify time, not import time.
+            try:
+                from solace_security.keys import KeyManager
+
+                self._keys = KeyManager(
+                    active_kid=config.active_kid,
+                    private_pem=config.private_key_pem,
+                    public_keys=config.public_keys or {},
+                )
+            except Exception as e:  # pragma: no cover - defensive
+                self.logger.warning("rs256_key_manager_init_failed", error=str(e))
+                self._keys = None
+
+    def _decode_claims(self, token: str) -> dict[str, Any]:
+        """Algorithm-aware signature verification returning the raw claims.
+
+        RS256 tokens are verified against the public keyset by ``kid``; HS256 tokens
+        are verified with the shared secret. In RS256 mode, HS256 tokens are rejected
+        unless ``accept_legacy_hs256`` is set (DUAL-ACCEPT during rollout). The
+        single-algorithm allowlist per branch blocks RS256/HS256 confusion attacks.
+        """
+        header = jwt.get_unverified_header(token)
+        alg = header.get("alg")
+        if alg == "RS256":
+            public_pem = self._keys.public_pem_for(header.get("kid")) if self._keys else None
+            if not public_pem:
+                raise TokenInvalidError("Unknown signing key id")
+            return jwt.decode(
+                token,
+                public_pem,
+                algorithms=["RS256"],
+                audience=self.config.audience,
+                issuer=self.config.issuer,
+            )
+        if alg == "HS256":
+            if self.config.algorithm == "RS256" and not self.config.accept_legacy_hs256:
+                raise TokenInvalidError("HS256 tokens are no longer accepted")
+            return jwt.decode(
+                token,
+                self.config.secret_key,
+                algorithms=["HS256"],
+                audience=self.config.audience,
+                issuer=self.config.issuer,
+            )
+        raise TokenInvalidError(f"Unsupported algorithm: {alg}")
 
     def generate_token_pair(
         self,
@@ -216,13 +292,7 @@ class JWTService:
             TokenInvalidError: If token is invalid or revoked
         """
         try:
-            payload = jwt.decode(
-                token,
-                self.config.secret_key,
-                algorithms=[self.config.algorithm],
-                audience=self.config.audience,
-                issuer=self.config.issuer,
-            )
+            payload = self._decode_claims(token)
 
             # Check revocation blacklist
             jti = payload.get("jti")
@@ -277,13 +347,7 @@ class JWTService:
             return False
 
         try:
-            payload = jwt.decode(
-                token,
-                self.config.secret_key,
-                algorithms=[self.config.algorithm],
-                audience=self.config.audience,
-                issuer=self.config.issuer,
-            )
+            payload = self._decode_claims(token)
             jti = payload.get("jti")
             if not jti:
                 self.logger.warning("token_has_no_jti")
@@ -296,7 +360,7 @@ class JWTService:
 
         except jwt.ExpiredSignatureError:
             return True  # Already expired, no need to revoke
-        except jwt.InvalidTokenError as e:
+        except (jwt.InvalidTokenError, TokenInvalidError) as e:
             self.logger.warning("revoke_invalid_token", error=str(e))
             return False
 
@@ -376,6 +440,12 @@ class JWTService:
 
         jwt_payload = {
             **payload.to_dict(),
+            # UNION claim schema (P1-1): user-service's own verifier reads
+            # user_id/email/role; the shared solace_security validators (used by every
+            # OTHER service via get_current_user) read sub/roles. Emitting both lets the
+            # SAME token verify on both without either side breaking.
+            "sub": str(payload.user_id),
+            "roles": [payload.role],
             "jti": jti,
             "exp": expires_at,
             "iat": now,
@@ -384,13 +454,21 @@ class JWTService:
             "aud": self.config.audience,
         }
 
-        token = jwt.encode(
+        # RS256 issuer path: sign with the issuer-only private key (stamps kid header).
+        if self.config.algorithm == "RS256":
+            if not (self._keys and self._keys.can_sign):
+                raise RuntimeError(
+                    "JWTConfig.algorithm=RS256 but no RS256 signing key is configured "
+                    "(private_key_pem + active_kid). This issuer cannot mint user tokens."
+                )
+            return self._keys.sign(jwt_payload)
+
+        # Legacy/default HS256 path (unchanged).
+        return jwt.encode(
             jwt_payload,
             self.config.secret_key,
             algorithm=self.config.algorithm,
         )
-
-        return token
 
     @staticmethod
     def extract_token_from_header(authorization: str) -> str:

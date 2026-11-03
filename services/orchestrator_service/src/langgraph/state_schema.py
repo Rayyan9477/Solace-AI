@@ -17,9 +17,15 @@ from pydantic import BaseModel, Field
 from solace_common.enums import CrisisLevel as RiskLevel  # noqa: E402
 
 # Canonical crisis keywords shared across safety_precheck and supervisor routing.
+# M1-gate P1: must stay a superset of BOTH the safety service's Layer-1
+# critical_keywords (crisis_detector.py) AND config/keywords.json CRITICAL, minus a
+# small set of context-dependent phrases ("have a plan") that would over-fire in
+# this crude substring precheck and are deferred to the safety service's ML
+# detector. Locked by test_crisis_keywords_superset_of_keywords_json_critical.
 CRISIS_KEYWORDS: list[str] = [
     "suicide", "kill myself", "end my life", "want to die", "self-harm",
     "hurt myself", "cutting", "overdose", "no reason to live", "end it all",
+    "better off dead", "can't go on", "take my life", "hanging myself",
 ]
 HIGH_RISK_KEYWORDS: list[str] = ["plan to", "going to", "tonight", "method", "final"]
 
@@ -253,6 +259,36 @@ def merge_personality_style(left: dict[str, Any], right: dict[str, Any]) -> dict
     return merged
 
 
+def merge_processing_phase(left: str, right: str) -> str:
+    """Reducer for processing_phase so parallel agents can write it in one step.
+
+    Without a reducer, two agents fanned out in the same step (e.g. assessment +
+    emotion both setting PARALLEL_PROCESSING) crashed LangGraph with
+    ``InvalidUpdateError: Can receive only one value per step``.
+
+    Semantics: last-write-wins — returns the incoming value. This preserves the
+    existing sequential phase progression exactly (the reducer only exists so the
+    channel *accepts* concurrent writes; the parallel agents all write the same
+    PARALLEL_PROCESSING value, so the result is deterministic). The actual safety
+    state lives in ``safety_flags`` (its own reducer), not in this bookkeeping
+    field, and crisis_handler never runs concurrently with the parallel agents.
+    """
+    return right
+
+
+def merge_final_response(left: str, right: str) -> str:
+    """Reducer for final_response so concurrent writers can't crash the graph.
+
+    Today only one node writes final_response per super-step (the supervisor
+    selects SAFETY exclusively, so crisis_handler never runs alongside aggregator),
+    but final_response had no reducer — if that invariant ever changed the two
+    would both write it in one step and raise ``InvalidUpdateError`` on the crisis
+    path. Prefer a non-empty incoming value (last-write-wins for real responses);
+    never let an empty write clobber an existing response.
+    """
+    return right or left
+
+
 class OrchestratorState(TypedDict, total=False):
     """
     LangGraph state schema for multi-agent orchestration.
@@ -269,8 +305,8 @@ class OrchestratorState(TypedDict, total=False):
     selected_agents: list[str]
     agent_results: Annotated[list[dict[str, Any]], add_agent_results]
     safety_flags: Annotated[dict[str, Any], update_safety_flags]
-    processing_phase: str
-    final_response: str
+    processing_phase: Annotated[str, merge_processing_phase]
+    final_response: Annotated[str, merge_final_response]
     error_message: str | None
     metadata: Annotated[dict[str, Any], merge_metadata]
     personality_style: Annotated[dict[str, Any], merge_personality_style]

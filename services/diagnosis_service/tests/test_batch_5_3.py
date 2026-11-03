@@ -10,16 +10,6 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 
-from services.diagnosis_service.src.config import (
-    AISettings,
-    DatabaseSettings,
-    DiagnosisServiceConfig,
-    ReasoningSettings,
-    RedisSettings,
-    SafetySettings,
-    get_config,
-    reload_config,
-)
 from services.diagnosis_service.src.domain.entities import (
     DiagnosisRecordEntity,
     DiagnosisSessionEntity,
@@ -601,65 +591,6 @@ class TestEventFactory:
                                                  "mentioned self-harm", "escalate")
         assert event.flag_type == "crisis"
         assert event.severity == "high"
-
-
-class TestConfiguration:
-    """Tests for configuration classes."""
-
-    def test_database_settings(self) -> None:
-        """Test database settings."""
-        settings = DatabaseSettings()
-        assert settings.port == 5432
-        assert "postgresql" in settings.connection_string
-
-    def test_redis_settings(self) -> None:
-        """Test Redis settings."""
-        settings = RedisSettings()
-        assert settings.port == 6379
-        assert "redis://" in settings.url
-
-    def test_ai_settings(self) -> None:
-        """Test AI settings."""
-        settings = AISettings()
-        assert settings.model_provider == "anthropic"
-        assert settings.temperature == 0.3
-
-    def test_reasoning_settings(self) -> None:
-        """Test reasoning settings."""
-        settings = ReasoningSettings()
-        assert settings.enable_anti_sycophancy is True
-        assert settings.max_hypotheses == 5
-
-    def test_safety_settings(self) -> None:
-        """Test safety settings."""
-        settings = SafetySettings()
-        assert settings.enable_safety_checks is True
-        assert len(settings.crisis_keywords) > 0
-
-    def test_main_config(self) -> None:
-        """Test main configuration."""
-        config = DiagnosisServiceConfig()
-        assert config.service_name == "diagnosis-service"
-        assert config.reasoning.enable_devil_advocate is True
-
-    def test_config_to_dict(self) -> None:
-        """Test configuration serialization."""
-        config = DiagnosisServiceConfig()
-        data = config.to_dict()
-        assert "service_name" in data
-        assert "reasoning" in data
-
-    def test_get_config_cached(self) -> None:
-        """Test cached config retrieval."""
-        config1 = get_config()
-        config2 = get_config()
-        assert config1 is config2
-
-    def test_reload_config(self) -> None:
-        """Test config reload."""
-        config1 = get_config()
-        config2 = reload_config()
-        assert config1.service_name == config2.service_name
 
 
 class TestRepositoryFactory:

@@ -145,7 +145,10 @@ class TherapyServiceClient:
         conversation_history: list[dict[str, Any]],
     ) -> TherapyResponse:
         """Process a message in the therapy session."""
-        url = f"{self._base_url}/sessions/{session_id}/message"
+        # REV-31: the therapy service mounts its router under /api/v1/therapy
+        # (main.py include_router prefix). The bare /sessions/... path 404'd, and
+        # the orchestrator silently degraded to a canned therapy reply.
+        url = f"{self._base_url}/api/v1/therapy/sessions/{session_id}/message"
         payload = {
             "session_id": session_id,
             "user_id": user_id,
@@ -178,7 +181,7 @@ class TherapyServiceClient:
 
     async def get_techniques(self, modality: str | None = None) -> list[TechniqueDTO]:
         """Get available therapeutic techniques."""
-        url = f"{self._base_url}/techniques"
+        url = f"{self._base_url}/api/v1/therapy/techniques"
         params = {"modality": modality} if modality else {}
         async with httpx.AsyncClient(timeout=self._settings.timeout_seconds) as client:
             response = await client.get(url, params=params)

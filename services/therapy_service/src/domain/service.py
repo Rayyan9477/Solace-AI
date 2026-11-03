@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from ..events import EventBus
     from ..infrastructure.context_assembler import ContextAssembler
     from ..infrastructure.repository import UnitOfWork
+    from solace_infrastructure.gdpr.erasure import ErasureReport, UserDataErasure
 
 logger = structlog.get_logger(__name__)
 
@@ -68,6 +69,8 @@ class TherapyOrchestrator(ServiceBase):
         treatment_planner: "TreatmentPlanner | None" = None,
         homework_manager: "HomeworkManager | None" = None,
         progress_tracker: "ProgressTracker | None" = None,
+        user_data_erasure: "UserDataErasure | None" = None,
+        session_store: Any = None,
     ) -> None:
         self._settings = settings or TherapyOrchestratorSettings()
         self._technique_selector = technique_selector
@@ -79,6 +82,8 @@ class TherapyOrchestrator(ServiceBase):
         self._treatment_planner = treatment_planner
         self._homework_manager = homework_manager
         self._progress_tracker = progress_tracker
+        self._user_data_erasure = user_data_erasure
+        self._session_store = session_store  # REV-16 durable Redis store (optional)
         self._treatment_plans: dict[UUID, TreatmentPlanDTO] = {}
         self._initialized = False
         self._stats = {
@@ -109,6 +114,68 @@ class TherapyOrchestrator(ServiceBase):
         logger.info("therapy_orchestrator_shutting_down", stats=self._stats)
         self._initialized = False
 
+    async def _load_session(self, session_id: UUID):
+        """Fetch a session, reconciling it with the durable store (REV-16).
+
+        When no store is configured this is exactly the in-memory lookup, so
+        behavior is unchanged for the non-durable path. With a store:
+          * cache MISS -> recover from the durable store (read-through) and
+            hydrate the working cache;
+          * cache HIT  -> re-read the durable copy and ADOPT it when it is
+            strictly newer (``durable.version > cached.version``). P1-5 (Phase C
+            gate): another worker may have advanced the session since this worker
+            cached it, so acting on the stale (possibly risk-DOWNGRADED) cached
+            copy could silently drop a concurrent escalation. ``_load_session``
+            runs once at request entry, so replacing the cached object here is
+            safe for in-flight mutations.
+        """
+        session = self._session_manager.get_session(session_id)
+        if self._session_store is None:
+            return session
+        if session is None:
+            session = await self._session_store.get_session(session_id)
+            if session is not None:
+                # Hydrate the working cache so subsequent in-request mutations
+                # alias this same object.
+                self._session_manager.put_session(session)
+            return session
+        # Cache HIT: reconcile against the durable copy so we never act on a
+        # stale session another worker has advanced.
+        durable = await self._session_store.get_session(session_id)
+        if durable is not None and durable.version > session.version:
+            self._session_manager.put_session(durable)
+            session = durable
+        return session
+
+    async def _persist_session(self, session, *, crisis: bool = False) -> None:
+        """Durably write-through the session with CAS-merge on the load-bearing
+        safety fields (REV-16). No-op when no store is configured.
+
+        On the NORMAL (best-effort) path a persistent CAS conflict is logged loud
+        but does NOT fail the turn — the in-memory working copy is authoritative
+        for the current request; the next turn re-persists.
+
+        On the CRISIS path (``crisis=True``) a CAS exhaustion is FAIL-LOUD (P2-9,
+        Phase C gate): swallowing it would let a turn report success while the
+        escalation (``safety_flags`` + ``current_risk``) never durably records.
+        Re-raise so the API surfaces a 500 and the client/orchestrator retries —
+        the crisis escalation must be durably recorded, never silently dropped."""
+        if self._session_store is None or session is None:
+            return
+        from ..infrastructure.redis_session_repository import SessionPersistConflict
+        try:
+            await self._session_store.save_session_cas_merge(session)
+        except SessionPersistConflict:
+            if crisis:
+                logger.error(
+                    "session_persist_cas_exhausted_crisis",
+                    session_id=str(session.session_id),
+                )
+                raise
+            logger.error(
+                "session_persist_cas_exhausted", session_id=str(session.session_id)
+            )
+
     async def start_session(self, user_id: UUID, treatment_plan_id: UUID, context: dict[str, Any]) -> SessionStartResult:
         """Start new therapy session."""
         self._stats["sessions_started"] += 1
@@ -134,6 +201,9 @@ class TherapyOrchestrator(ServiceBase):
         initial_message = ResponseGenerator.generate_initial_message(session.session_number, treatment_plan)
         suggested_agenda = ResponseGenerator.generate_suggested_agenda(treatment_plan, session.session_number)
         self._session_manager.transition_phase(session_id=session_id, target_phase=SessionPhase.OPENING, trigger="session_start")
+        # REV-16: persist the new session durably so a later message on any worker
+        # (or after a restart) recovers it via read-through.
+        await self._persist_session(session)
         duration_ms = int((time.perf_counter() - start_time) * 1000)
         logger.info("session_start_completed", session_id=str(session_id), duration_ms=duration_ms)
 
@@ -178,7 +248,7 @@ class TherapyOrchestrator(ServiceBase):
         if not self._session_manager:
             return TherapyMessageResult.failure("Session manager not initialized", "SESSION_MANAGER_NOT_INITIALIZED")
 
-        session = self._session_manager.get_session(session_id)
+        session = await self._load_session(session_id)
         if not session:
             return TherapyMessageResult.failure(f"Session {session_id} not found", "SESSION_NOT_FOUND")
 
@@ -253,6 +323,11 @@ class TherapyOrchestrator(ServiceBase):
 
         session = self._session_manager.get_session(session_id)
 
+        # REV-16: durably write-through the turn's accumulated state (messages,
+        # techniques, phase, engagement AND any safety_flags/current_risk set by
+        # _check_safety) with CAS-merge. No-op when no durable store is configured.
+        await self._persist_session(session)
+
         processing_time_ms = int((time.perf_counter() - start_time) * 1000)
 
         return TherapyMessageResult(
@@ -270,7 +345,7 @@ class TherapyOrchestrator(ServiceBase):
         self._stats["sessions_ended"] += 1
         if not self._session_manager:
             return SessionEndResult.failure("Session manager not initialized", "SESSION_MANAGER_NOT_INITIALIZED")
-        session = self._session_manager.get_session(session_id)
+        session = await self._load_session(session_id)
         if not session:
             return SessionEndResult.failure(f"Session {session_id} not found", "SESSION_NOT_FOUND")
         if session.user_id != user_id:
@@ -312,9 +387,19 @@ class TherapyOrchestrator(ServiceBase):
                 await self._unit_of_work.sessions.save(entity)
                 logger.info("session_persisted", session_id=str(session_id))
             except Exception as e:
-                logger.warning("session_persist_failed", session_id=str(session_id), error=str(e))
+                # M1-gate R2 (P1, sibling of REV-36): do NOT swallow a clinical-record
+                # persistence failure. Returning a successful SessionEndResult and
+                # deleting the in-memory session while the therapy record never
+                # persisted silently loses clinical data. Fail loud so the caller/API
+                # surfaces it (500) and can retry; keep the in-memory session.
+                logger.error("session_persist_failed", session_id=str(session_id), error=str(e))
+                raise
 
         self._session_manager.delete_session(session_id)
+        # REV-16: also evict from the durable store so a stale live-session blob is
+        # not later recovered by read-through after the session has ended.
+        if self._session_store is not None:
+            await self._session_store.delete_session(session_id)
         logger.info("session_end_completed", session_id=str(session_id), duration_minutes=duration_minutes)
         return SessionEndResult(summary=summary, duration_minutes=duration_minutes, recommendations=recommendations)
 
@@ -344,6 +429,13 @@ class TherapyOrchestrator(ServiceBase):
         """Handle crisis situation."""
         logger.warning("crisis_intervention_triggered", session_id=str(session_id), alerts=safety_result["alerts"])
         self._session_manager.transition_phase(session_id, SessionPhase.CLOSING, trigger="crisis_protocol")
+        # REV-16: durably persist the crisis escalation (safety_flags + current_risk
+        # set by _check_safety, plus the CLOSING transition) with CAS-merge so a
+        # concurrent write can never clobber it. P2-9: crisis=True makes a CAS
+        # exhaustion fail loud (propagate) so the escalation is never silently lost.
+        await self._persist_session(
+            self._session_manager.get_session(session_id), crisis=True
+        )
         return TherapyMessageResult(
             response_text=ResponseGenerator.generate_crisis_response(safety_result["alerts"]),
             current_phase=SessionPhase.CLOSING, technique_applied=None, safety_alerts=safety_result["alerts"],
@@ -531,7 +623,7 @@ class TherapyOrchestrator(ServiceBase):
         if not self._session_manager:
             return None
 
-        session = self._session_manager.get_session(session_id)
+        session = await self._load_session(session_id)
         if not session:
             return None
 
@@ -554,22 +646,34 @@ class TherapyOrchestrator(ServiceBase):
         if not self._session_manager:
             return None
 
-        session = self._session_manager.get_session(session_id)
+        session = await self._load_session(session_id)
         if not session:
             return None
 
         return self._treatment_plans.get(session.treatment_plan_id)
 
-    async def assign_homework(self, session_id: UUID, homework: HomeworkDTO) -> bool:
-        """Manually assign homework to session."""
+    async def assign_homework(
+        self, session_id: UUID, homework: HomeworkDTO, user_id: UUID | None = None
+    ) -> bool:
+        """Manually assign homework to session.
+
+        ``user_id`` is the authenticated caller; when provided it is checked
+        against the session owner (REV-07 IDOR guard).
+        """
         if not self._session_manager:
             return False
 
-        session = self._session_manager.get_session(session_id)
+        session = await self._load_session(session_id)
         if not session:
             return False
 
+        # IDOR guard (REV-07): only the session owner may have homework assigned.
+        if user_id is not None and str(session.user_id) != str(user_id):
+            logger.warning("assign_homework_owner_mismatch", session_id=str(session_id))
+            return False
+
         self._session_manager.update_state(session_id, {"homework_assigned": homework})
+        await self._persist_session(self._session_manager.get_session(session_id))
         return True
 
     async def list_techniques(self, modality: TherapyModality | None = None) -> list[TechniqueDTO]:
@@ -582,6 +686,40 @@ class TherapyOrchestrator(ServiceBase):
         """Delete session data."""
         if self._session_manager:
             self._session_manager.delete_session(session_id)
+        if self._session_store is not None:
+            await self._session_store.delete_session(session_id)
+
+    async def erase_user_data(
+        self, user_id: UUID, *, audit_emit: Any = None
+    ) -> "ErasureReport":
+        """GDPR right-to-erasure (REV-17): erase ALL of a user's therapy PHI.
+
+        Drives the service's :class:`UserDataErasure` across every registered
+        store (treatment_plans, therapy_sessions, outcome_measures,
+        therapy_redis). Raises ``RuntimeError`` if erasure was not wired, and —
+        via the orchestrator's fail-loud contract — ``ErasureIncomplete`` if any
+        store fails, so a partial erasure is never reported complete.
+        """
+        if self._user_data_erasure is None:
+            raise RuntimeError("user data erasure is not configured")
+        # P1-2 (Phase C gate) / C.2 RLS: scope the per-user GUC to the TARGET user
+        # for the erase. The therapy Postgres tables (treatment_plans,
+        # therapy_sessions, outcome_measures) are RLS-protected, so an
+        # admin-triggered erasure (request GUC = admin) would be RLS-filtered to the
+        # admin's own rows and silently delete NOTHING while attesting the erasure
+        # complete. Set the GUC to the target for the duration of the erase, then
+        # restore the caller's context (finally, even on failure).
+        from solace_common.request_context import (
+            reset_current_user_id,
+            set_current_user_id,
+        )
+        token = set_current_user_id(str(user_id))
+        try:
+            return await self._user_data_erasure.erase(
+                str(user_id), audit_emit=audit_emit
+            )
+        finally:
+            reset_current_user_id(token)
 
     async def get_user_progress(self, user_id: UUID) -> dict[str, Any]:
         """

@@ -4,13 +4,25 @@ Unified LLM gateway using Portkey AI for multi-provider support with fallbacks,
 load balancing, caching, and observability across all services.
 """
 from __future__ import annotations
-from typing import Any
+import asyncio
+import inspect
+import os
+from typing import Any, Callable
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
 
 logger = structlog.get_logger(__name__)
 
+
+class LLMConfigurationError(Exception):
+    """Raised when the LLM client cannot be configured in a strict environment."""
+
+
+def _default_client_factory(**kwargs: Any) -> Any:
+    """Build the Portkey async client; imports portkey_ai lazily (ImportError propagates)."""
+    from portkey_ai import AsyncPortkey
+    return AsyncPortkey(**kwargs)
 
 class LLMClientSettings(BaseSettings):
     """
@@ -77,8 +89,14 @@ class UnifiedLLMClient:
             )
     """
 
-    def __init__(self, settings: LLMClientSettings | None = None) -> None:
+    def __init__(
+        self,
+        settings: LLMClientSettings | None = None,
+        *,
+        client_factory: Callable[..., Any] | None = None,
+    ) -> None:
         self._settings = settings or LLMClientSettings()
+        self._client_factory = client_factory or _default_client_factory
         self._client = None
         self._initialized = False
         self._request_count = 0
@@ -93,38 +111,56 @@ class UnifiedLLMClient:
         await self.shutdown()
 
     async def initialize(self) -> None:
-        """Initialize the LLM client with Portkey configuration."""
-        try:
-            from portkey_ai import AsyncPortkey
-            config = self._build_portkey_config()
-            self._client = AsyncPortkey(
-                api_key=self._settings.portkey_api_key.get_secret_value(),
-                base_url=self._settings.portkey_gateway_url,
-                config=config,
-            )
-            self._initialized = True
-            logger.info(
-                "unified_llm_client_initialized",
-                provider=self._settings.primary_provider,
-                model=self._settings.primary_model,
-                fallback_enabled=self._settings.enable_fallback,
-                caching_enabled=self._settings.enable_caching,
-                cache_mode=self._settings.cache_mode,
-            )
-        except ImportError:
-            import os
-            logger.error("portkey_ai_not_installed",
-                         hint="Install portkey-ai: pip install portkey-ai")
-            if os.environ.get("ENVIRONMENT", "").lower() == "production":
-                raise RuntimeError("portkey-ai package required in production")
-            logger.warning("portkey_ai_fallback", fallback="using_mock_client")
+        """Initialize the LLM client; missing credentials disable the LLM instead of raising."""
+        strict = self._strict_environment()
+        api_key = self._settings.portkey_api_key.get_secret_value()
+        if not api_key:
+            # Never call the SDK with an empty key: it would fall back to the unprefixed
+            # PORTKEY_API_KEY env var and could silently enable a client.
+            log = logger.error if strict else logger.warning
+            log("llm_disabled_missing_credentials", variables=["LLM_PORTKEY_API_KEY"])
             self._client = None
             self._initialized = True
-        except Exception as e:
-            logger.error("unified_llm_client_initialization_failed", error=str(e))
-            self._initialized = False
-            raise
+            return
+        try:
+            self._client = self._client_factory(
+                api_key=api_key,
+                base_url=self._settings.portkey_gateway_url,
+                config=self._build_portkey_config(),
+            )
+        except ImportError as exc:
+            logger.error("portkey_ai_not_installed", hint="Install portkey-ai: pip install portkey-ai")
+            self._client = None
+            if strict:
+                self._initialized = False
+                raise LLMConfigurationError("portkey-ai package required in strict environments") from exc
+            logger.warning("llm_disabled_sdk_unavailable")
+            self._initialized = True
+            return
+        except Exception as exc:
+            logger.error("unified_llm_client_initialization_failed", error_type=type(exc).__name__)
+            self._client = None
+            if strict:
+                self._initialized = False
+                raise LLMConfigurationError(
+                    f"LLM client initialization failed: {type(exc).__name__}"
+                ) from exc
+            self._initialized = True
+            return
+        self._initialized = True
+        logger.info(
+            "unified_llm_client_initialized",
+            provider=self._settings.primary_provider,
+            model=self._settings.primary_model,
+            fallback_enabled=self._settings.enable_fallback,
+            caching_enabled=self._settings.enable_caching,
+            cache_mode=self._settings.cache_mode,
+        )
 
+    @staticmethod
+    def _strict_environment() -> bool:
+        """True for staging/production, where misconfiguration must fail loudly."""
+        return os.environ.get("ENVIRONMENT", "").strip().lower() in {"staging", "production", "prod"}
     def _build_portkey_config(self) -> dict[str, Any]:
         """
         Build Portkey configuration with fallbacks, load balancing, and caching.
@@ -301,10 +337,25 @@ class UnifiedLLMClient:
         if metadata:
             trace_id = f"{trace_id}-{metadata.get('request_id', 'unknown')}"
 
-        response = await self._client.chat.completions.create(
-            **request_params,
-            metadata={"trace_id": trace_id, "service": service_name, **(metadata or {})},
-        )
+        # REV-31: enforce the configured request timeout. Without this the await
+        # could hang indefinitely on a stalled provider connection despite
+        # timeout_seconds being set â€” a stuck LLM call would block the caller (and,
+        # on the crisis path, delay a response) with no bound.
+        try:
+            response = await asyncio.wait_for(
+                self._client.chat.completions.create(
+                    **request_params,
+                    metadata={"trace_id": trace_id, "service": service_name, **(metadata or {})},
+                ),
+                timeout=self._settings.timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                "llm_request_timeout",
+                service=service_name,
+                timeout_seconds=self._settings.timeout_seconds,
+            )
+            raise
         return response
 
     def _extract_response_text(self, response: Any) -> str:
@@ -345,16 +396,25 @@ class UnifiedLLMClient:
         return response if response else fallback_response
 
     async def shutdown(self) -> None:
-        """Shutdown the LLM client."""
+        """Shut down the LLM client, closing the SDK connection pool. Never raises."""
         logger.info(
             "unified_llm_client_shutting_down",
             total_requests=self._request_count,
             total_errors=self._error_count,
             cache_hits=self._cache_hits,
         )
+        client = self._client
+        if client is not None:
+            closer = getattr(client, "close", None) or getattr(client, "aclose", None)
+            if closer is not None:
+                try:
+                    result = closer()
+                    if inspect.isawaitable(result):
+                        await result
+                except Exception as exc:
+                    logger.warning("llm_client_close_failed", error_type=type(exc).__name__)
         self._client = None
         self._initialized = False
-
     def get_statistics(self) -> dict[str, Any]:
         """Get client statistics."""
         return {

@@ -102,7 +102,17 @@ class DevilsAdvocate:
         }
 
     def _build_bias_patterns(self) -> dict[str, dict[str, Any]]:
-        """Build cognitive bias detection patterns."""
+        """Build cognitive bias detection patterns.
+
+        REV-26 reconciliation (Phase C.5): this set now advertises ONLY the
+        biases ``analyze_bias`` can actually emit. ``base_rate_neglect`` and
+        ``attribution_error`` were previously declared here but had no detection
+        heuristic (no prevalence or comorbidity signal is available in the
+        reasoning inputs), so they were removed rather than left as dead
+        metadata. A clinician may later request implementing detectors for them;
+        if so, re-add the pattern together with its emission logic in
+        ``analyze_bias`` so the declared set stays equal to the emittable set.
+        """
         return {
             "confirmation_bias": {
                 "description": "Favoring information that confirms existing beliefs",
@@ -119,20 +129,10 @@ class DevilsAdvocate:
                 "indicators": ["common_diagnosis_preference", "recent_case_influence", "salient_feature_focus"],
                 "risk_weight": 0.7,
             },
-            "base_rate_neglect": {
-                "description": "Ignoring prevalence rates in diagnosis",
-                "indicators": ["rare_diagnosis_without_strong_evidence", "prevalence_ignored"],
-                "risk_weight": 0.75,
-            },
             "premature_closure": {
                 "description": "Accepting diagnosis before fully evaluating alternatives",
                 "indicators": ["insufficient_differential", "missing_rule_outs", "incomplete_history"],
                 "risk_weight": 0.85,
-            },
-            "attribution_error": {
-                "description": "Attributing symptoms to single cause when multiple exist",
-                "indicators": ["single_diagnosis_preference", "comorbidity_underestimation"],
-                "risk_weight": 0.6,
             },
         }
 

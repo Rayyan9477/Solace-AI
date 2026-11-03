@@ -199,6 +199,21 @@ class PostgresDiagnosisRepository(DiagnosisRepositoryPort):
                 logger.debug("session_deleted_postgres", session_id=str(session_id))
             return deleted
 
+    @staticmethod
+    def _current_encryption_key_id() -> str:
+        """Encryption key id for the NOT-NULL column. Uses the configured PHI
+        encryptor's current key, or a stable default when encryption is off."""
+        try:
+            from solace_infrastructure.database.base_models import get_phi_encryptor
+            enc = get_phi_encryptor()
+            if enc is not None:
+                return getattr(
+                    enc._encryptor._key_manager, "current_key_id", "primary"
+                ) or "primary"
+        except Exception:
+            pass
+        return "primary"
+
     async def save_record(self, record: DiagnosisRecordEntity) -> None:
         """Save a diagnosis record to PostgreSQL."""
         record.touch()
@@ -209,9 +224,9 @@ class PostgresDiagnosisRepository(DiagnosisRepositoryPort):
                 confidence, severity, symptom_summary, supporting_evidence,
                 differential_diagnoses, recommendations, assessment_scores,
                 clinician_notes, reviewed, reviewed_by, reviewed_at,
-                created_at, updated_at, version
+                created_at, updated_at, version, encryption_key_id
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
             )
             ON CONFLICT (id) DO UPDATE SET
                 primary_diagnosis = EXCLUDED.primary_diagnosis,
@@ -229,8 +244,13 @@ class PostgresDiagnosisRepository(DiagnosisRepositoryPort):
                 reviewed_by = EXCLUDED.reviewed_by,
                 reviewed_at = EXCLUDED.reviewed_at,
                 updated_at = EXCLUDED.updated_at,
-                version = EXCLUDED.version
+                version = EXCLUDED.version,
+                encryption_key_id = EXCLUDED.encryption_key_id
         """
+        # REV-04: diagnosis_records.encryption_key_id is NOT NULL with no server
+        # default; the raw INSERT bypasses the ORM before_insert listener that
+        # would set it, so provide it explicitly or every insert fails.
+        key_id = getattr(record, "encryption_key_id", None) or self._current_encryption_key_id()
         async with self._acquire() as conn:
             await conn.execute(
                 query,
@@ -254,6 +274,7 @@ class PostgresDiagnosisRepository(DiagnosisRepositoryPort):
                 record.created_at,
                 record.updated_at,
                 record.version,
+                key_id,
             )
             self._stats["records_saved"] += 1
             logger.debug("record_saved_postgres", record_id=str(record.id))

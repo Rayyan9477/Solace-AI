@@ -25,7 +25,7 @@ from src.infrastructure.encryption_service import create_encryption_service
 from src.domain.service import UserService
 from src.auth import SessionManager, SessionConfig, AuthenticationService
 
-from .fixtures import (
+from fixtures import (
     InMemoryUserRepository,
     InMemoryUserPreferencesRepository,
     InMemoryConsentRepository,
@@ -373,6 +373,39 @@ class TestUserProfile:
         assert response.status_code == 401
 
 
+class TestOnCallCliniciansRouting:
+    """REV-03: /users/on-call-clinicians must not be shadowed by /users/{user_id}."""
+
+    def _get_auth_header(self, client: TestClient) -> dict[str, str]:
+        client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "oncall@example.com",
+                "password": "SecurePass123!",
+                "display_name": "OnCall Tester",
+            },
+        )
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"email": "oncall@example.com", "password": "SecurePass123!"},
+        )
+        return {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    def test_on_call_clinicians_route_not_shadowed(self, client: TestClient) -> None:
+        """The static /users/on-call-clinicians route resolves to its own handler.
+
+        Previously /users/{user_id} (UUID) was registered first and captured the
+        literal path, returning 422 (uuid_parsing). It must resolve to the
+        on-call handler and return the clinician list envelope.
+        """
+        headers = self._get_auth_header(client)
+        response = client.get("/api/v1/users/on-call-clinicians", headers=headers)
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert "clinicians" in data
+        assert "count" in data
+
+
 class TestPasswordChange:
     """Tests for password change."""
 
@@ -572,3 +605,29 @@ class TestLogout:
         # Logout
         response = client.post("/api/v1/auth/logout", headers=headers)
         assert response.status_code == 204
+
+    def test_logout_blacklists_access_token(self, client: TestClient) -> None:
+        """REV-08: after logout, the presented access token is rejected immediately."""
+        client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "blacklist@example.com",
+                "password": "SecurePass123!",
+                "display_name": "BL User",
+            },
+        )
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"email": "blacklist@example.com", "password": "SecurePass123!"},
+        )
+        token = login.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Token works before logout.
+        assert client.get("/api/v1/users/me", headers=headers).status_code == 200
+
+        # Logout blacklists the token.
+        assert client.post("/api/v1/auth/logout", headers=headers).status_code == 204
+
+        # The same token must now be rejected.
+        assert client.get("/api/v1/users/me", headers=headers).status_code == 401

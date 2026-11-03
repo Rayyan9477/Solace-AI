@@ -228,6 +228,19 @@ class TestEventStore:
 class TestConfigSettings:
     """Tests for configuration settings."""
 
+    @pytest.fixture(autouse=True)
+    def _required_secrets(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Provide the required DB/Redis passwords.
+
+        Secret-hardening made DatabaseSettings.password and
+        RedisSettings.password REQUIRED SecretStr (sourced from
+        PERSONALITY_DB_PASSWORD / PERSONALITY_REDIS_PASSWORD). These tests
+        validate the *other* fields' defaults, so we supply the mandatory
+        password via env vars without overriding any of the defaulted fields.
+        """
+        monkeypatch.setenv("PERSONALITY_DB_PASSWORD", "test-db-password")
+        monkeypatch.setenv("PERSONALITY_REDIS_PASSWORD", "test-redis-password")
+
     def test_database_settings(self) -> None:
         """Test database settings defaults."""
         settings = DatabaseSettings()

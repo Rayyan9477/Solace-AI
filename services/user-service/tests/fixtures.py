@@ -163,6 +163,20 @@ class InMemoryUserRepository(UserRepository):
             self._assignments[clinician_id].add(patient_id)
             return True
 
+    async def delete_assignments_for_user(self, user_id: UUID) -> int:
+        """Delete ALL assignment rows referencing the user (clinician OR patient)."""
+        async with self._lock:
+            removed = 0
+            # User as clinician: drop the whole entry.
+            if user_id in self._assignments:
+                removed += len(self._assignments.pop(user_id))
+            # User as patient: discard from every remaining clinician's set.
+            for patients in self._assignments.values():
+                if user_id in patients:
+                    patients.discard(user_id)
+                    removed += 1
+            return removed
+
     async def unassign_patient_from_clinician(
         self, clinician_id: UUID, patient_id: UUID,
     ) -> bool:

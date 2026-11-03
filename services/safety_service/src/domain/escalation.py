@@ -57,7 +57,12 @@ class EscalationSettings(BaseSettings):
     """Configuration for escalation behavior."""
     auto_escalate_critical: bool = Field(default=True, description="Auto-escalate CRITICAL crises")
     auto_escalate_high: bool = Field(default=True, description="Auto-escalate HIGH crises")
-    notification_timeout_seconds: int = Field(default=300, description="Notification timeout")
+    notification_timeout_seconds: int = Field(
+        default=10,
+        description="Per-attempt notification HTTP timeout (seconds). Kept short "
+        "so a slow/down notification service does not block the /check response "
+        "for minutes (REV-05).",
+    )
     max_retries: int = Field(default=3, description="Max notification retries")
     critical_response_sla_minutes: int = Field(default=5, description="CRITICAL response SLA")
     high_response_sla_minutes: int = Field(default=15, description="HIGH response SLA")
@@ -534,6 +539,11 @@ class EscalationRepository(ABC):
     @abstractmethod
     async def update_status(self, escalation_id: UUID, status: EscalationStatus) -> None: ...
 
+    @abstractmethod
+    async def delete_user_data(self, user_id: UUID) -> int:
+        """Delete ALL of a user's escalation rows (GDPR Art. 17 / REV-17)."""
+        ...
+
 
 class InMemoryEscalationRepository(EscalationRepository):
     """In-memory implementation of EscalationRepository for MVP.
@@ -557,6 +567,14 @@ class InMemoryEscalationRepository(EscalationRepository):
     async def update_status(self, escalation_id: UUID, status: EscalationStatus) -> None:
         if escalation_id in self._records:
             self._records[escalation_id].status = status
+
+    async def delete_user_data(self, user_id: UUID) -> int:
+        """Delete ALL of a user's escalation rows (GDPR / REV-17)."""
+        uid = user_id if isinstance(user_id, UUID) else UUID(str(user_id))
+        to_remove = [eid for eid, r in self._records.items() if r.user_id == uid]
+        for eid in to_remove:
+            del self._records[eid]
+        return len(to_remove)
 
 
 class PostgresEscalationRepository(EscalationRepository):
@@ -688,6 +706,27 @@ class PostgresEscalationRepository(EscalationRepository):
                 escalation_id,
                 status.value,
             )
+
+    async def delete_user_data(self, user_id: UUID) -> int:
+        """Delete ALL of a user's escalation rows (GDPR Art. 17 / REV-17).
+
+        The ``escalations`` table stores crisis PHI (``crisis_level``, free-text
+        ``reason``, ``session_id`` and a ``context`` JSONB blob) keyed on
+        ``user_id NOT NULL``, so an Art. 17 erasure that omitted it would leave
+        crisis records behind while falsely attesting completion. Accepts either a
+        ``UUID`` or the ``str`` the erasure orchestrator passes, and returns the
+        row count from the asyncpg ``DELETE N`` command tag.
+        """
+        uid = user_id if isinstance(user_id, UUID) else UUID(str(user_id))
+        async with self._pool.acquire() as conn:
+            # {self._TABLE} is a class-level constant; user_id binds via $1.
+            result = await conn.execute(
+                f"DELETE FROM {self._TABLE} WHERE user_id = $1",  # noqa: S608
+                uid,
+            )
+        deleted = int(result.split()[-1])
+        logger.info("escalations_user_data_deleted", user_id=str(uid), deleted=deleted)
+        return deleted
 
     @staticmethod
     def _row_to_record(row: Any) -> EscalationRecord:
@@ -830,6 +869,15 @@ class EscalationManager:
             escalation = await self._workflow.execute_medium_workflow(escalation)
         else:
             escalation = await self._workflow.execute_low_workflow(escalation)
+        # REV-05: persist the FINAL state. The pre-workflow save only captured the
+        # initial PENDING record; a Postgres repo snapshots at save time, so the
+        # assigned clinician / IN_PROGRESS status would otherwise never be stored.
+        if self._repository:
+            try:
+                await self._repository.save_escalation(escalation)
+            except Exception as e:
+                logger.error("escalation_final_persist_failed", error=str(e),
+                             escalation_id=str(escalation.escalation_id))
         response_time = self._get_estimated_response_time(priority)
         resources_provided = priority in (EscalationPriority.CRITICAL, EscalationPriority.HIGH)
         return EscalationResult(

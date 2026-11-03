@@ -1,2 +1,3 @@
-# Diagnosis Service — service-specific deps (installed on top of ../../requirements-runtime.txt).
-# Diagnosis needs nothing beyond the shared runtime base; heavy ML lives in requirements-ml.txt.
+# Diagnosis Service: service extras, bare names only (WS-01.2, D-16).
+# Diagnosis needs nothing beyond the shared runtime set in ../../requirements.lock;
+# heavy ML (torch, transformers, spaCy) is kept out of every image (D-16).

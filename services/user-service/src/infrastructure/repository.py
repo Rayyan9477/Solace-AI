@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Any
 from uuid import UUID
 
 from pydantic import Field
@@ -244,6 +243,19 @@ class UserRepository(ABC):
         pass
 
     @abstractmethod
+    async def delete_assignments_for_user(self, user_id: UUID) -> int:
+        """Delete ALL clinician<->patient assignment rows referencing a user.
+
+        GDPR Art. 17 / REV-17: the ``clinician_patient_assignments`` table encodes
+        a therapeutic patient<->clinician relationship (special-category health
+        data by inference) keyed on ``user_id``. Because the users row is
+        soft-deleted (retained) rather than hard-deleted, the ON DELETE CASCADE
+        never fires, so erasure must remove these rows explicitly. Deletes rows
+        where the user is EITHER the patient OR the clinician. Returns the count.
+        """
+        pass
+
+    @abstractmethod
     async def unassign_patient_from_clinician(
         self, clinician_id: UUID, patient_id: UUID,
     ) -> bool:
@@ -383,67 +395,48 @@ class RepositoryFactory:
     """
     Factory for creating repository instances.
 
-    Supports different storage backends based on configuration.
+    With ``config.use_postgres`` it builds the PostgreSQL repositories, which share the service's one
+    ``"default"`` pool (ConnectionPoolManager, R-02.8); otherwise every getter raises ``RepositoryError``.
     Uses singleton pattern for repository instances.
     """
 
-    def __init__(
-        self,
-        config: RepositoryConfig | None = None,
-        postgres_client: Any | None = None,
-    ) -> None:
+    def __init__(self, config: RepositoryConfig | None = None) -> None:
         self._config = config or RepositoryConfig()
-        self._postgres_client = postgres_client
         self._user_repo: UserRepository | None = None
         self._prefs_repo: UserPreferencesRepository | None = None
         self._consent_repo: ConsentRepository | None = None
 
+    def _require_postgres(self) -> None:
+        if not self._config.use_postgres:
+            raise RepositoryError(
+                "PostgreSQL is required. For tests, use InMemory repos from tests/fixtures.py"
+            )
+
     def get_user_repository(self) -> UserRepository:
         """Get or create user repository."""
         if self._user_repo is None:
-            if self._config.use_postgres and self._postgres_client is not None:
-                from .postgres_repository import PostgresUserRepository
-                self._user_repo = PostgresUserRepository(
-                    self._postgres_client,
-                    schema=self._config.db_schema,
-                )
-                logger.info("user_repository_created", type="postgres")
-            else:
-                raise RepositoryError(
-                    "PostgreSQL is required. For tests, use InMemory repos from tests/fixtures.py"
-                )
+            self._require_postgres()
+            from .postgres_repository import PostgresUserRepository
+            self._user_repo = PostgresUserRepository(schema=self._config.db_schema)
+            logger.info("user_repository_created", type="postgres")
         return self._user_repo
 
     def get_preferences_repository(self) -> UserPreferencesRepository:
         """Get or create preferences repository."""
         if self._prefs_repo is None:
-            if self._config.use_postgres and self._postgres_client is not None:
-                from .postgres_repository import PostgresUserPreferencesRepository
-                self._prefs_repo = PostgresUserPreferencesRepository(
-                    self._postgres_client,
-                    schema=self._config.db_schema,
-                )
-                logger.info("preferences_repository_created", type="postgres")
-            else:
-                raise RepositoryError(
-                    "PostgreSQL is required. For tests, use InMemory repos from tests/fixtures.py"
-                )
+            self._require_postgres()
+            from .postgres_repository import PostgresUserPreferencesRepository
+            self._prefs_repo = PostgresUserPreferencesRepository(schema=self._config.db_schema)
+            logger.info("preferences_repository_created", type="postgres")
         return self._prefs_repo
 
     def get_consent_repository(self) -> ConsentRepository:
         """Get or create consent repository."""
         if self._consent_repo is None:
-            if self._config.use_postgres and self._postgres_client is not None:
-                from .postgres_repository import PostgresConsentRepository
-                self._consent_repo = PostgresConsentRepository(
-                    self._postgres_client,
-                    schema=self._config.db_schema,
-                )
-                logger.info("consent_repository_created", type="postgres")
-            else:
-                raise RepositoryError(
-                    "PostgreSQL is required. For tests, use InMemory repos from tests/fixtures.py"
-                )
+            self._require_postgres()
+            from .postgres_repository import PostgresConsentRepository
+            self._consent_repo = PostgresConsentRepository(schema=self._config.db_schema)
+            logger.info("consent_repository_created", type="postgres")
         return self._consent_repo
 
     def reset(self) -> None:
@@ -459,23 +452,19 @@ class RepositoryFactory:
 _factory: RepositoryFactory | None = None
 
 
-def get_repository_factory(
-    config: RepositoryConfig | None = None,
-    postgres_client: Any | None = None,
-) -> RepositoryFactory:
+def get_repository_factory(config: RepositoryConfig | None = None) -> RepositoryFactory:
     """
     Get singleton repository factory.
 
     Args:
         config: Optional configuration (only used on first call)
-        postgres_client: Optional PostgreSQL client for database connections
 
     Returns:
         Repository factory instance
     """
     global _factory
     if _factory is None:
-        _factory = RepositoryFactory(config, postgres_client)
+        _factory = RepositoryFactory(config)
     return _factory
 
 

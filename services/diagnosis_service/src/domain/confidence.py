@@ -3,9 +3,11 @@ Solace-AI Diagnosis Service - Sample Consistency Calibration.
 Implements Bayesian confidence calibration and consistency scoring.
 """
 from __future__ import annotations
+import math
+import random
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any
+from typing import Any, Protocol
 from uuid import UUID, uuid4
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,9 +25,71 @@ class ConfidenceSettings(BaseSettings):
     consistency_weight: float = Field(default=0.2)
     min_confidence: float = Field(default=0.1)
     max_confidence: float = Field(default=0.95)
-    calibration_samples: int = Field(default=5)
+    # Sample-consistency N. Spec (SYSTEM-DESIGN-SUMMARY "Bayesian Confidence
+    # Calibration") states "N=3-5 LLM samples"; default aligned to the
+    # documented lower bound. Larger N (e.g. 5) yields more stable agreement
+    # estimates -- flagged for clinician review of the N choice.
+    calibration_samples: int = Field(default=3)
+    # Sample-consistency agreement below this fraction is labelled "Uncertain"
+    # (documented low-confidence clinical safety surface; wide CI).
+    agreement_uncertain_threshold: float = Field(default=0.60)
     uncertainty_penalty: float = Field(default=0.1)
+    # REV-27 (true N-sample): spread across the N drawn estimates is turned
+    # into an agreement penalty via `agreement = mean * (1 - min(1, std * K))`.
+    # K is this factor. In the degenerate/default path std==0 so the penalty is
+    # inert and agreement collapses to the legacy consistency proxy.
+    sample_spread_penalty: float = Field(default=2.0)
     model_config = SettingsConfigDict(env_prefix="CONFIDENCE_", env_file=".env", extra="ignore")
+
+
+class ConsistencySampler(Protocol):
+    """Draws N independent point-estimates around a base estimate.
+
+    Injectable so the N-sample calibration path is deterministic under test.
+    A call returns a list of estimates in [0, 1]; its length is authoritative
+    for the sample count (the ``n`` argument is a hint the sampler may honour).
+    """
+
+    def __call__(self, base_estimate: float, n: int) -> list[float]: ...
+
+
+def _degenerate_sampler(base_estimate: float, n: int) -> list[float]:
+    """Default, inert sampler: N identical copies of the point estimate.
+
+    Zero spread -> the N-sample aggregate collapses to the legacy single-shot
+    consistency proxy, so behaviour is unchanged unless a real (stochastic)
+    sampler is injected. Backward-compatible with the degenerate N=1 case.
+    """
+    return [base_estimate] * max(1, n)
+
+
+class SeededGaussianSampler:
+    """Deterministic stochastic sampler for genuine N-sample calibration.
+
+    Draws N estimates ~ N(base_estimate, sigma) from a seeded RNG, clamped to
+    [0, 1]. The RNG is re-seeded on every call, so the same seed always yields
+    the same draws -> reproducible under test and in audit replay.
+    """
+
+    def __init__(self, seed: int = 0, sigma: float = 0.1) -> None:
+        self._seed = seed
+        self._sigma = sigma
+
+    def __call__(self, base_estimate: float, n: int) -> list[float]:
+        rng = random.Random(self._seed)
+        return [
+            min(1.0, max(0.0, rng.gauss(base_estimate, self._sigma)))
+            for _ in range(max(1, n))
+        ]
+
+
+@dataclass
+class SampleAggregate:
+    """Distribution summary of the N drawn estimates."""
+    samples: list[float] = field(default_factory=list)
+    mean: float = 0.0
+    spread: float = 0.0        # population standard deviation across samples
+    agreement: float = 0.0     # spread-penalised mean, in [0, 1]
 
 
 @dataclass
@@ -38,6 +102,15 @@ class CalibrationResult:
     confidence_level: ConfidenceLevel = ConfidenceLevel.MEDIUM
     calibration_factors: dict[str, float] = field(default_factory=dict)
     uncertainty_score: float = 0.0
+    # Sample-consistency agreement band per the documented spec:
+    #   "Uncertain" (<60% agreement, wide CI), "Moderate" (60-80%), "High" (>80%).
+    # "Uncertain" is a clinical low-confidence safety surface.
+    agreement_label: str = "Moderate"
+    # REV-27 (true N-sample): distribution of the N drawn estimates.
+    sample_count: int = 1
+    sample_mean: float = 0.0
+    sample_spread: float = 0.0
+    sample_agreement: float = 0.0
 
 
 @dataclass
@@ -54,8 +127,13 @@ class ConsistencyResult:
 class ConfidenceCalibrator:
     """Calibrates diagnostic confidence using Bayesian methods."""
 
-    def __init__(self, settings: ConfidenceSettings | None = None) -> None:
+    def __init__(self, settings: ConfidenceSettings | None = None,
+                 sampler: ConsistencySampler | None = None) -> None:
         self._settings = settings or ConfidenceSettings()
+        # REV-27: injectable N-sample sampler. Defaults to the inert degenerate
+        # sampler so the N-sample path is OFF (behaviour-preserving) unless a
+        # real stochastic/seeded sampler is supplied.
+        self._sampler: ConsistencySampler = sampler or _degenerate_sampler
         self._base_rates = self._build_base_rates()
         self._severity_weights = self._build_severity_weights()
         self._consistency_rules = self._build_consistency_rules()
@@ -127,7 +205,14 @@ class ConfidenceCalibrator:
         evidence_strength = self._calculate_evidence_strength(symptoms)
         posterior = self._bayesian_update(prior, likelihood, evidence_strength)
         consistency = await self.analyze_consistency(hypothesis, symptoms)
-        consistency_factor = consistency.consistency_score
+        # REV-27 true N-sample: draw N independent estimates around the
+        # consistency point-estimate and derive the agreement signal from their
+        # DISTRIBUTION (mean + spread) rather than the single-shot proxy. With
+        # the default (degenerate) sampler this collapses to the proxy exactly.
+        aggregate = self._aggregate_samples(
+            consistency.consistency_score, self._settings.calibration_samples
+        )
+        consistency_factor = aggregate.mean
         calibrated = (
             posterior * self._settings.evidence_weight +
             float(hypothesis.confidence) * self._settings.prior_weight +
@@ -142,12 +227,19 @@ class ConfidenceCalibrator:
             Decimal(str(min(1, round(calibrated + interval_width, 2))))
         )
         result.confidence_level = self._determine_confidence_level(calibrated)
+        result.agreement_label = self._determine_agreement_label(aggregate.agreement)
         result.uncertainty_score = uncertainty
+        result.sample_count = len(aggregate.samples)
+        result.sample_mean = aggregate.mean
+        result.sample_spread = aggregate.spread
+        result.sample_agreement = aggregate.agreement
         result.calibration_factors = {
             "prior": prior,
             "likelihood": likelihood,
             "evidence_strength": evidence_strength,
             "consistency": consistency_factor,
+            "sample_agreement": aggregate.agreement,
+            "sample_spread": aggregate.spread,
             "uncertainty": uncertainty,
         }
         if abs(float(hypothesis.confidence) - calibrated) > 0.05:
@@ -222,6 +314,29 @@ class ConfidenceCalibrator:
         )
         result.inconsistencies = self._identify_inconsistencies(hypothesis, symptoms)
         return result
+
+    def _aggregate_samples(self, base_estimate: float, n: int) -> SampleAggregate:
+        """Draw N estimates via the injected sampler and summarise them.
+
+        Agreement is the spread-penalised mean:
+            agreement = mean * (1 - min(1, std * sample_spread_penalty))
+        so tightly-clustered high samples yield high agreement, while wide
+        disagreement (large std) drives agreement down toward the "Uncertain"
+        band. With the degenerate sampler std==0, giving agreement == mean ==
+        the legacy consistency proxy (fully backward-compatible, incl. N=1).
+        """
+        samples = list(self._sampler(base_estimate, n))
+        if not samples:
+            samples = [base_estimate]
+        mean = sum(samples) / len(samples)
+        if len(samples) < 2:
+            spread = 0.0
+        else:
+            variance = sum((s - mean) ** 2 for s in samples) / len(samples)
+            spread = math.sqrt(variance)
+        penalty = min(1.0, spread * self._settings.sample_spread_penalty)
+        agreement = max(0.0, min(1.0, mean * (1.0 - penalty)))
+        return SampleAggregate(samples=samples, mean=mean, spread=spread, agreement=agreement)
 
     def _check_symptom_consistency(self, hypothesis: HypothesisDTO,
                                      symptoms: list[SymptomDTO]) -> float:
@@ -307,6 +422,21 @@ class ConfidenceCalibrator:
         if confidence >= 0.30:
             return ConfidenceLevel.LOW
         return ConfidenceLevel.ESCALATE
+
+    def _determine_agreement_label(self, agreement: float) -> str:
+        """Label sample-consistency agreement per the documented spec.
+
+        Spec (SYSTEM-DESIGN-SUMMARY "Bayesian Confidence Calibration"):
+            < 60% agreement -> "Uncertain" (wide CI; clinical low-confidence
+                                safety surface)
+            60-80% agreement -> "Moderate"
+            > 80% agreement -> "High" (narrow CI)
+        """
+        if agreement < self._settings.agreement_uncertain_threshold:
+            return "Uncertain"
+        if agreement <= 0.80:
+            return "Moderate"
+        return "High"
 
     async def calibrate_multiple(self, hypotheses: list[HypothesisDTO],
                                   symptoms: list[SymptomDTO],

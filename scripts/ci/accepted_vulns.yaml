@@ -1,0 +1,165 @@
+# Accepted dependency advisories (MVP-359). Created by WS-01.F1 on 2026-11-02; WS-01.10's supply-chain gate reads it.
+#
+# Every pip-audit finding against requirements.lock or requirements-dev.lock must be either fixed (a pin bump in
+# requirements.in / requirements-dev.in) or listed here. One entry per advisory:
+#   id       the advisory id exactly as pip-audit reports it (PyPI advisory service)
+#   target   the canonical package name the advisory is reported against
+#   reason   why it is not fixed yet, and what unblocks the fix
+#   owner    who renews or closes the entry
+#   expires  ISO date, after today and at most 90 days ahead; an expired entry fails
+#            tests/build/test_mvp_359_lock_has_no_unaccepted_advisories.py
+#
+# WS-01.F1 bumped within the same major version only; it fixed 60 of the 92 advisories found across both locks.
+# WS-01.F2 (2026-11-03, D-16 security bumps) fixed 12 more: the checkpoint path (langgraph, langgraph-checkpoint,
+# langgraph-checkpoint-postgres, langgraph-sdk, langchain-core), pydantic-settings, and starlette through fastapi.
+# The 20 entries below stay open: 9 are in the runtime lock (and therefore also in the dev lock), 11 are dev-only.
+# tests/build/test_mvp_005_dependency_lock.py::test_mvp_358_checkpoint_path_has_no_accepted_advisories forbids any
+# entry for langgraph, langgraph-checkpoint or langchain-core: those advisories must be fixed, not accepted.
+accepted:
+  # --- runtime lock (requirements.lock) ----------------------------------------------------------------------
+  - id: PYSEC-2026-2338
+    target: aiosmtplib
+    reason: >-
+      CR/LF injection in MAIL/RCPT addresses. Fixed only in 5.1.1, a new major version (pinned 3.0.2); WS-01.F1 bumps
+      within the same major only. Needs an aiosmtplib 5.x upgrade with the notification-service email channel tests.
+    owner: controller
+    expires: 2027-01-31
+  - id: PYSEC-2026-3805
+    target: aiosmtplib
+    reason: >-
+      STARTTLS response-buffer injection. Fixed only in 5.1.2, a new major version (pinned 3.0.2). Needs an
+      aiosmtplib 5.x upgrade with the notification-service email channel tests.
+    owner: controller
+    expires: 2027-01-31
+  - id: PYSEC-2026-3552
+    target: cryptography
+    reason: >-
+      PKCS7 decrypt length oracle. Fixed only in 50.0.0, a new major version; 46.0.7 (the lowest 46.x fix for
+      PYSEC-2026-36) is pinned. A cryptography major upgrade needs its own task with the PHI-encryption and JWT suites.
+    owner: controller
+    expires: 2027-01-31
+  - id: PYSEC-2026-3553
+    target: cryptography
+    reason: >-
+      Exponential chain building on duplicate self-signed certificates. Fixed only in 49.0.0, a new major version
+      (46.0.7 pinned). Needs the cryptography major-upgrade task.
+    owner: controller
+    expires: 2027-01-31
+  - id: PYSEC-2026-3554
+    target: cryptography
+    reason: >-
+      Wildcard SAN escapes a name-constrained intermediate in the X.509 verifier. Fixed only in 49.0.0, a new major
+      version (46.0.7 pinned). Needs the cryptography major-upgrade task.
+    owner: controller
+    expires: 2027-01-31
+  - id: GHSA-537c-gmf6-5ccf
+    target: cryptography
+    reason: >-
+      Statically linked OpenSSL in the wheels. Fixed only in 48.0.1, a new major version (46.0.7 pinned). Needs the
+      cryptography major-upgrade task.
+    owner: controller
+    expires: 2027-01-31
+  - id: PYSEC-2026-2556
+    target: langchain-anthropic
+    reason: >-
+      Path confinement in file-search components. The fix, 1.4.6, requires langchain-core>=1.4.6; WS-01.F2 raised
+      langchain-core only to 1.3.3, the lowest fix for PYSEC-2026-2564 (test_mvp_358_lock_pins_the_tested_baseline).
+      Moves with a langchain-core 1.4 upgrade.
+    owner: controller
+    expires: 2027-01-31
+  - id: GHSA-6hmw-9432-67qq
+    target: langgraph-checkpoint-postgres
+    reason: >-
+      Dotted-namespace collision in the Postgres store (PostgresStore; the repo uses only AsyncPostgresSaver, grep
+      2026-11-03). The fix, 3.1.3, requires langgraph-checkpoint>=4.3.0; WS-01.F2 pins langgraph-checkpoint 4.1.1,
+      the lowest fix for PYSEC-2026-2573, and checkpoint-postgres 3.1.1. Moves with a langgraph-checkpoint 4.3 bump
+      and the slot-017 follow-up (WS-10).
+    owner: controller
+    expires: 2027-01-31
+  - id: PYSEC-2026-4240
+    target: langgraph-sdk
+    reason: >-
+      actions= mis-applied on resource-scoped auth decorators (LangGraph server auth; no repo code imports
+      langgraph_sdk, grep 2026-11-03). Fixed in 0.4.4, but langgraph 1.0.10 requires langgraph-sdk>=0.3.0,<0.4.0;
+      WS-01.F2 pins 0.3.15, which fixes PYSEC-2026-2575. Moves with a langgraph upgrade that admits langgraph-sdk
+      0.4.x (1.1.0 still requires <0.4.0).
+    owner: controller
+    expires: 2027-01-31
+  # --- dev lock only (requirements-dev.lock) ------------------------------------------------------------------
+  - id: PYSEC-2026-1325
+    target: ecdsa
+    reason: >-
+      Minerva timing side channel on P-256 signing; there is no fixed release. Dev lock only, via python-jose for the
+      frozen Kong auth_plugin tests (D-19); never in requirements.lock or an image.
+    owner: controller
+    expires: 2027-01-31
+  - id: GHSA-8mx5-7m5m-r77g
+    target: filelock
+    reason: >-
+      Windows FileLock ignores mode. Fixed only in 4.2.1, a new major version; 3.20.3, which fixes the two 3.x
+      advisories, is pinned. Dev lock only (cachecontrol for pip-audit).
+    owner: controller
+    expires: 2027-01-31
+  - id: GHSA-69hj-f68j-2879
+    target: filelock
+    reason: >-
+      UnixFileLock truncates an existing file at the lock path. Fixed only in 4.2.1, a new major version (3.20.3
+      pinned). Dev lock only (cachecontrol for pip-audit).
+    owner: controller
+    expires: 2027-01-31
+  - id: PYSEC-2026-196
+    target: pip
+    reason: >-
+      Entry points written outside the install directory. Fixed only in 26.1.2, outside the pinned 24.x line. Dev
+      lock only, via pip-api for pip-audit; pip is not in requirements.lock. Needs a pip upgrade of the dev toolchain.
+    owner: controller
+    expires: 2027-01-31
+  - id: PYSEC-2026-1795
+    target: pip
+    reason: >-
+      Tar symlink escape on extraction. Fixed only in 25.3, outside the pinned 24.x line. Dev lock only (pip-api for
+      pip-audit); pip is not in requirements.lock. Needs a pip upgrade of the dev toolchain.
+    owner: controller
+    expires: 2027-01-31
+  - id: PYSEC-2026-1796
+    target: pip
+    reason: >-
+      Wheel extraction path traversal. Fixed only in 26.0, outside the pinned 24.x line. Dev lock only (pip-api for
+      pip-audit); pip is not in requirements.lock. Needs a pip upgrade of the dev toolchain.
+    owner: controller
+    expires: 2027-01-31
+  - id: PYSEC-2026-2875
+    target: pip
+    reason: >-
+      Concatenated tar/ZIP archives handled as ZIP. Fixed only in 26.1, outside the pinned 24.x line. Dev lock only
+      (pip-api for pip-audit); pip is not in requirements.lock. Needs a pip upgrade of the dev toolchain.
+    owner: controller
+    expires: 2027-01-31
+  - id: PYSEC-2026-2876
+    target: pip
+    reason: >-
+      Self-update check imports modules after installing wheels. Fixed only in 26.1, outside the pinned 24.x line.
+      Dev lock only (pip-api for pip-audit); pip is not in requirements.lock. Needs a pip upgrade of the dev toolchain.
+    owner: controller
+    expires: 2027-01-31
+  - id: PYSEC-2026-3721
+    target: pip
+    reason: >-
+      Doubly encoded index URLs install files to arbitrary locations. Fixed only in 26.2, outside the pinned 24.x
+      line. Dev lock only (pip-api for pip-audit); pip is not in requirements.lock. Needs a pip upgrade of the dev toolchain.
+    owner: controller
+    expires: 2027-01-31
+  - id: PYSEC-2026-1845
+    target: pytest
+    reason: >-
+      Predictable /tmp/pytest-of-{user} directories on multi-user UNIX hosts. Fixed only in 9.0.3, a new major
+      version; 8.3.3 is the D-16 tested runner. Dev lock only.
+    owner: controller
+    expires: 2027-01-31
+  - id: PYSEC-2026-4298
+    target: python-jose
+    reason: >-
+      HMAC key confusion lets a holder of the public key forge HS256 tokens; there is no fixed release. Dev lock only,
+      test-only for the frozen Kong auth_plugin tests (D-19); never in requirements.lock (test_mvp_359_312_security_floor).
+    owner: controller
+    expires: 2027-01-31

@@ -65,6 +65,14 @@ class InMemorySafetyAssessmentRepository(SafetyAssessmentRepository):
         return sum(1 for a in self._assessments.values()
                    if a.user_id == user_id and a.crisis_level == crisis_level)
 
+    async def delete_user_data(self, user_id: UUID) -> int:
+        uid = user_id if isinstance(user_id, UUID) else UUID(str(user_id))
+        async with self._lock:
+            to_delete = [k for k, v in self._assessments.items() if v.user_id == uid]
+            for k in to_delete:
+                del self._assessments[k]
+            return len(to_delete)
+
 
 class InMemorySafetyPlanRepository(SafetyPlanRepository):
     """In-memory implementation for testing."""
@@ -105,6 +113,14 @@ class InMemorySafetyPlanRepository(SafetyPlanRepository):
                 return True
             return False
 
+    async def delete_user_data(self, user_id: UUID) -> int:
+        uid = user_id if isinstance(user_id, UUID) else UUID(str(user_id))
+        async with self._lock:
+            to_delete = [k for k, v in self._plans.items() if v.user_id == uid]
+            for k in to_delete:
+                del self._plans[k]
+            return len(to_delete)
+
 
 class InMemorySafetyIncidentRepository(SafetyIncidentRepository):
     """In-memory implementation for testing."""
@@ -144,6 +160,14 @@ class InMemorySafetyIncidentRepository(SafetyIncidentRepository):
             self._incidents[incident.incident_id] = incident
             return incident
 
+    async def delete_user_data(self, user_id: UUID) -> int:
+        uid = user_id if isinstance(user_id, UUID) else UUID(str(user_id))
+        async with self._lock:
+            to_delete = [k for k, v in self._incidents.items() if v.user_id == uid]
+            for k in to_delete:
+                del self._incidents[k]
+            return len(to_delete)
+
 
 class InMemoryUserRiskProfileRepository(UserRiskProfileRepository):
     """In-memory implementation for testing."""
@@ -174,3 +198,8 @@ class InMemoryUserRiskProfileRepository(UserRiskProfileRepository):
 
     async def get_high_risk_users(self) -> list[UserRiskProfile]:
         return [p for p in self._profiles.values() if p.high_risk_flag]
+
+    async def delete_user_data(self, user_id: UUID) -> int:
+        uid = user_id if isinstance(user_id, UUID) else UUID(str(user_id))
+        async with self._lock:
+            return 1 if self._profiles.pop(uid, None) is not None else 0

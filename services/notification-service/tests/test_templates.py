@@ -3,12 +3,11 @@ Unit tests for notification templates module.
 """
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import pytest
 from uuid import uuid4
 
-from domain.templates import (
+from src.domain.templates import (
     TemplateType,
     NotificationTemplate,
     TemplateRegistry,

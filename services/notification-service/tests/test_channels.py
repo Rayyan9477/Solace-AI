@@ -3,12 +3,11 @@ Unit tests for notification channels module.
 """
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from domain.channels import (
+from src.domain.channels import (
     ChannelType,
     ChannelStatus,
     ChannelConfig,

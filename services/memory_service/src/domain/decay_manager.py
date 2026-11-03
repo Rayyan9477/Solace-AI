@@ -49,6 +49,35 @@ class DecayAction(str, Enum):
     DELETE = "delete"
 
 
+# Retention categories that are clinically load-bearing and must NEVER decay.
+# Includes PERMANENT plus clinical/diagnosis content (REV-29): the clinical spec
+# documents that "diagnoses / clinical memories never decay". A memory whose
+# retention_category is any of these is treated as permanent regardless of
+# elapsed time -- the 0.5 clinical *modifier* only applies to clinically-flagged
+# content stored under an ordinary (decaying) retention category.
+NEVER_DECAY_CATEGORIES: frozenset[str] = frozenset(
+    {RetentionCategory.PERMANENT.value, "clinical", "diagnosis"}
+)
+
+
+def category_decay_rates(settings: "DecaySettings | None" = None) -> dict[str, Decimal]:
+    """Canonical per-category, per-DAY decay rates.
+
+    Single source of truth shared by the in-process DecayManager and the SQL
+    batch-decay path (A4) so both apply identical per-category rates instead of a
+    flat rate. Never-decay categories (permanent/clinical/diagnosis) map to 0.
+    """
+    s = settings or DecaySettings()
+    rates: dict[str, Decimal] = {
+        RetentionCategory.LONG_TERM.value: s.long_term_rate,
+        RetentionCategory.MEDIUM_TERM.value: s.medium_term_rate,
+        RetentionCategory.SHORT_TERM.value: s.short_term_rate,
+    }
+    for cat in NEVER_DECAY_CATEGORIES:
+        rates[cat] = Decimal("0")
+    return rates
+
+
 class DecayableItem(Protocol):
     """Protocol for items that can decay."""
     @property
@@ -141,8 +170,9 @@ class DecayManager:
                     is_clinical: bool = False) -> DecayResult:
         """Apply decay to a single item."""
         self._stats["items_processed"] += 1
-        category = RetentionCategory(retention_category) if retention_category in [e.value for e in RetentionCategory] else RetentionCategory.MEDIUM_TERM
-        if category == RetentionCategory.PERMANENT or item_id in self._permanent_items:
+        raw_category = (retention_category or "").lower()
+        category = RetentionCategory(raw_category) if raw_category in [e.value for e in RetentionCategory] else RetentionCategory.MEDIUM_TERM
+        if raw_category in NEVER_DECAY_CATEGORIES or item_id in self._permanent_items:
             return DecayResult(
                 item_id=item_id, original_strength=current_strength,
                 new_strength=current_strength, decay_applied=Decimal("0"),
@@ -255,8 +285,9 @@ class DecayManager:
                               retention_category: str, created_at: datetime,
                               target_date: datetime) -> Decimal:
         """Estimate retention strength at a future date."""
-        category = RetentionCategory(retention_category) if retention_category in [e.value for e in RetentionCategory] else RetentionCategory.MEDIUM_TERM
-        if category == RetentionCategory.PERMANENT or item_id in self._permanent_items:
+        raw_category = (retention_category or "").lower()
+        category = RetentionCategory(raw_category) if raw_category in [e.value for e in RetentionCategory] else RetentionCategory.MEDIUM_TERM
+        if raw_category in NEVER_DECAY_CATEGORIES or item_id in self._permanent_items:
             return current_strength
         stability = self.get_stability(item_id)
         decay_rate = self.get_decay_rate(category)

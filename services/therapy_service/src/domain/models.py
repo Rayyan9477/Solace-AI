@@ -37,6 +37,11 @@ class SessionState:
     safety_flags: list[str] = field(default_factory=list)
     engagement_score: float = 0.0
     session_rating: float | None = None
+    # REV-16 durability: optimistic-concurrency version (bumped on each durable
+    # save) + last-write timestamp, used by the Redis write-through CAS to detect
+    # and merge concurrent updates to the load-bearing safety fields.
+    version: int = 0
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass

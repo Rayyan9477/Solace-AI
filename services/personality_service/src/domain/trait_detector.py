@@ -26,9 +26,13 @@ class TraitDetectorSettings(BaseSettings):
     """Trait detector configuration."""
     min_text_length: int = Field(default=50)
     max_text_length: int = Field(default=10000)
-    ensemble_weights_roberta: float = Field(default=0.5, ge=0.0, le=1.0)
-    ensemble_weights_llm: float = Field(default=0.3, ge=0.0, le=1.0)
-    ensemble_weights_liwc: float = Field(default=0.2, ge=0.0, le=1.0)
+    # B-4: 0 by default — roberta_model is a seeded-random stub (no fine-tuned
+    # checkpoint wired). At its old weight 0.5 it diluted real signal toward neutral.
+    # The ensemble renormalizes by total weight, so LLM+LIWC carry it. Raise this
+    # only once load_weights() is wired to a real checkpoint.
+    ensemble_weights_roberta: float = Field(default=0.0, ge=0.0, le=1.0)
+    ensemble_weights_llm: float = Field(default=0.6, ge=0.0, le=1.0)
+    ensemble_weights_liwc: float = Field(default=0.4, ge=0.0, le=1.0)
     # Legacy text weight kept for backward compatibility but no longer used
     # in the default ensemble. The LIWC processor replaces the old text detector.
     ensemble_weights_text: float = Field(default=0.2, ge=0.0, le=1.0)
@@ -159,7 +163,7 @@ Text to analyze:
 {text}
 
 Respond ONLY with valid JSON in this format:
-{"openness": 0.0, "conscientiousness": 0.0, "extraversion": 0.0, "agreeableness": 0.0, "neuroticism": 0.0, "evidence": ["marker1", "marker2"]}"""
+{{"openness": 0.0, "conscientiousness": 0.0, "extraversion": 0.0, "agreeableness": 0.0, "neuroticism": 0.0, "evidence": ["marker1", "marker2"]}}"""
 
     def __init__(self, llm_client: Any) -> None:
         self._llm_client = llm_client
@@ -263,8 +267,13 @@ class TraitDetector:
 
         # LLM zero-shot detection
         if self._settings.enable_llm_detection and self._llm_detector and AssessmentSource.ENSEMBLE in sources:
-            llm_result = await self._llm_detector.detect(text)
-            results.append(llm_result)
+            # B-1: guard the LLM path (mirrors the RoBERTa block) so an LLM/format
+            # failure degrades to the LIWC/RoBERTa ensemble instead of 500-ing /detect.
+            try:
+                llm_result = await self._llm_detector.detect(text)
+                results.append(llm_result)
+            except Exception as e:
+                logger.warning("llm_detection_failed", error=str(e))
 
         # RoBERTa detection
         if self._roberta is not None:

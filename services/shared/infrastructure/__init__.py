@@ -5,6 +5,7 @@ shared across all microservices.
 """
 from .llm_client import (
     LLMClientSettings,
+    LLMConfigurationError,
     UnifiedLLMClient,
     LLM_SYSTEM_PROMPTS,
     get_llm_prompt,
@@ -12,6 +13,7 @@ from .llm_client import (
 
 __all__ = [
     "LLMClientSettings",
+    "LLMConfigurationError",
     "UnifiedLLMClient",
     "LLM_SYSTEM_PROMPTS",
     "get_llm_prompt",

@@ -105,7 +105,10 @@ _PYDANTIC_INPUT_MARKER = "input_value="
 # kinds turns 'input': into \'input\':, and JSON re-encoding turns "input": into \"input\":
 # (or a " escape). Text that carries one of these never reaches a log line as is
 # (WS-04.F1 fix rounds 1 and 2).
-_QUOTE = r"(?:\\*['\"]|\\+u00(?:22|27))"
+# The backslash runs are bounded (16 covers four levels of re-encoding): an unbounded run made the
+# search quadratic, so one long body of backslashes could block a service's event loop while its
+# log line was checked (WS04F1F2-PHI-1).
+_QUOTE = r"(?:\\{0,16}['\"]|\\{1,16}u00(?:22|27))"
 _VALIDATION_INPUT_PATTERN = re.compile(
     re.escape(_PYDANTIC_INPUT_MARKER) + "|" + _QUOTE + "input" + _QUOTE + r"\s*:"
 )

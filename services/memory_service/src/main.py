@@ -1,20 +1,33 @@
 """
 Solace-AI Memory Service - FastAPI Application Entry Point.
 5-tier memory hierarchy service for therapeutic context management.
+
+The app is built by the IF-01 runtime (``create_service_app``): logging, exception handlers,
+middleware, ``/live`` ``/ready`` ``/health`` ``/metrics``, PHI-encryption guards and the
+Postgres and Redis clients come from ``solace_infrastructure.runtime``. This module composes the
+memory service on top of them. Weaviate is opt-in (D-04, ``WEAVIATE_ENABLED=true``); without it
+retrieval is keyword/BM25 only.
 """
 from __future__ import annotations
-import logging
-import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
-from uuid import uuid4
-from fastapi import FastAPI, Request, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
+
+import structlog
+from fastapi import FastAPI
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import structlog
+
+from solace_infrastructure.runtime import (
+    ServiceRuntime,
+    ServiceRuntimeSpec,
+    StartupDependencyError,
+    create_service_app,
+    is_strict_environment,
+    service_runtime,
+)
+
+from .api import router
+from .domain.service import MemoryService
 
 logger = structlog.get_logger(__name__)
 
@@ -45,108 +58,65 @@ class MemoryServiceAppSettings(BaseSettings):
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
 
-def configure_logging(settings: MemoryServiceAppSettings) -> None:
-    """Configure structured logging for the memory service."""
-    try:
-        from solace_security.phi_protection import phi_sanitizer_processor
-        _phi_processor = phi_sanitizer_processor
-    except ImportError:
-        if settings.environment == "production":
-            raise RuntimeError("PHI log sanitizer required in production - install solace_security")
-        _phi_processor = None
-    processors = [
-        structlog.contextvars.merge_contextvars,
-        structlog.processors.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-    ]
-    if _phi_processor:
-        processors.append(_phi_processor)
-    if settings.debug:
-        processors.append(structlog.dev.ConsoleRenderer())
-    else:
-        processors.append(structlog.processors.JSONRenderer())
-    structlog.configure(
-        processors=processors,
-        wrapper_class=structlog.make_filtering_bound_logger(
-            getattr(logging, settings.log_level, logging.INFO)
-        ),
-        context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
+SETTINGS = MemoryServiceAppSettings()
+
+SPEC = ServiceRuntimeSpec(
+    service_name="memory-service",
+    environment=SETTINGS.environment,
+    version=SETTINGS.version,
+    log_level=SETTINGS.log_level,
+    debug=SETTINGS.debug,
+    uses_postgres=True,
+    uses_redis=True,
+    event_plane="publish_consume",
+    handles_phi=True,
+    audited=True,
+    rate_limited=False,
+    edge=False,
+)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Application lifespan manager for startup/shutdown."""
-    settings = MemoryServiceAppSettings()
-    configure_logging(settings)
-    logger.info("memory_service_starting", environment=settings.environment,
-                host=settings.host, port=settings.port, version=settings.version)
-    # Activate PHI encryption for ClinicalBase entities
-    try:
-        from solace_security.encryption import EncryptionSettings, Encryptor, FieldEncryptor
-        from solace_infrastructure.database.base_models import configure_phi_encryption
-        encryption_settings = EncryptionSettings()
-        encryptor = Encryptor(encryption_settings)
-        field_encryptor = FieldEncryptor(encryptor, encryption_settings)
-        configure_phi_encryption(field_encryptor)
-        logger.info("phi_encryption_activated")
-    except Exception as e:
-        if settings.environment == "production":
-            raise RuntimeError(f"PHI encryption is required in production: {e}") from e
-        logger.warning("phi_encryption_not_configured", error=str(e))
+def build_memory_service(runtime: ServiceRuntime, settings: MemoryServiceAppSettings) -> MemoryService:
+    """Compose the memory service from the runtime's clients (the only composition seam).
 
-    from .domain.service import MemoryService, MemoryServiceSettings
-    from .domain.context_assembler import ContextAssembler, ContextAssemblerSettings
+    Redis comes from ``runtime.redis`` (the runtime closes it). Weaviate is built only when
+    ``WEAVIATE_ENABLED=true`` (D-04). Postgres persistence is built only when the runtime has a
+    Postgres pool.
+    """
     from .domain.consolidation import ConsolidationPipeline, ConsolidationSettings
+    from .domain.context_assembler import ContextAssembler, ContextAssemblerSettings
     from .domain.decay_manager import DecayManager
+    from .domain.service import MemoryServiceSettings
     from .infrastructure.hybrid_search import HybridSearchEngine, HybridSearchSettings
 
     # Shared DecayManager instance for consistent decay across service and consolidation
     decay_manager = DecayManager()
-
     context_assembler = ContextAssembler(ContextAssemblerSettings())
     consolidation_pipeline = ConsolidationPipeline(ConsolidationSettings(), decay_manager=decay_manager)
-
     # Hybrid BM25 + semantic search engine for memory retrieval
     search_engine = HybridSearchEngine(HybridSearchSettings())
 
-    # Initialize Redis for T2 working memory and T3 session memory cache
     redis_cache = None
-    try:
+    if runtime.redis is not None:
         from .infrastructure.redis_cache import RedisCache, RedisSettings
-        redis_cache = RedisCache(RedisSettings())
-        await redis_cache.initialize()
-        if redis_cache.is_initialized():
-            logger.info("redis_cache_initialized")
-        else:
-            logger.debug("redis_cache_not_available", hint="Using in-memory only for T2/T3")
-            redis_cache = None
-    except Exception as e:
-        logger.debug("redis_not_available", error=str(e), hint="Using in-memory only for T2/T3")
-        redis_cache = None
+        redis_cache = RedisCache(RedisSettings(), client=runtime.redis)
 
-    # Initialize Weaviate for vector search (optional — degrades gracefully)
     weaviate_repo = None
-    try:
-        from .infrastructure.weaviate_repo import WeaviateRepository, WeaviateSettings
-        weaviate_repo = WeaviateRepository(WeaviateSettings())
+    from .infrastructure.weaviate_repo import WeaviateRepository, WeaviateSettings
+    weaviate_settings = WeaviateSettings()
+    if weaviate_settings.enabled:
+        weaviate_repo = WeaviateRepository(weaviate_settings)
         logger.info("weaviate_repository_created")
-    except Exception as e:
-        logger.debug("weaviate_not_available", error=str(e), hint="Using fallback search")
+    else:
+        logger.info("weaviate_disabled", hint="keyword/BM25 retrieval only (D-04)")
 
-    # Initialize Postgres for persistent tiers 3-5
     postgres_repo = None
-    try:
+    if runtime.pg_pool is not None:
         from .infrastructure.postgres_repo import PostgresRepository
         postgres_repo = PostgresRepository()
         logger.info("postgres_repository_created")
-    except Exception as e:
-        logger.debug("postgres_repo_not_available", error=str(e), hint="Using in-memory storage")
 
-    memory_service = MemoryService(
+    return MemoryService(
         settings=MemoryServiceSettings(),
         context_assembler=context_assembler,
         consolidation_pipeline=consolidation_pipeline,
@@ -156,137 +126,40 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         redis_cache=redis_cache,
         decay_manager=decay_manager,
     )
-    await memory_service.initialize()
-    app.state.settings = settings
-    app.state.memory_service = memory_service
-    app.state.context_assembler = context_assembler
-    app.state.consolidation_pipeline = consolidation_pipeline
-    logger.info("memory_service_started", environment=settings.environment,
-                tiers_active=5, consolidation_enabled=settings.consolidation_enabled)
-    yield
-    logger.info("memory_service_stopping")
-    await memory_service.shutdown()
-    if redis_cache:
-        await redis_cache.close()
-    logger.info("memory_service_stopped")
 
 
-def create_application() -> FastAPI:
-    """Create and configure FastAPI application."""
-    settings = MemoryServiceAppSettings()
-    app = FastAPI(
-        title="Solace-AI Memory Service",
-        description="5-tier memory hierarchy for therapeutic context management",
-        version=settings.version,
-        docs_url="/docs" if settings.environment != "production" else None,
-        redoc_url="/redoc" if settings.environment != "production" else None,
-        openapi_url="/openapi.json" if settings.environment != "production" else None,
-        lifespan=lifespan,
-    )
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins_list,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["*"],
-        expose_headers=["X-Request-ID", "X-Correlation-ID", "X-Context-Assembly-Time-Ms"],
-    )
-    from .api import router
-    app.include_router(router, prefix="/api/v1/memory")
-    _register_middleware(app)
-    _register_exception_handlers(app)
-    return app
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Application lifespan: the runtime brackets it; this composes the memory service."""
+    async with service_runtime(app, SPEC) as runtime:
+        memory_service = build_memory_service(runtime, SETTINGS)
+        if memory_service._redis is not None:
+            await memory_service._redis.initialize()
+        elif is_strict_environment(SETTINGS.environment):
+            raise StartupDependencyError("redis", "memory cache requires REDIS_URL in strict environments")
+        await memory_service.initialize()
+
+        async def _service_ready() -> tuple[bool, str]:
+            ready = memory_service._initialized
+            return ready, "initialized" if ready else "not_initialized"
+
+        runtime.register_shutdown("memory_service", memory_service.shutdown)
+        runtime.register_readiness_check("memory_service", _service_ready)
+        app.state.settings = SETTINGS
+        app.state.memory_service = memory_service
+        app.state.context_assembler = memory_service._context_assembler
+        app.state.consolidation_pipeline = memory_service._consolidation_pipeline
+        logger.info("memory_service_started", environment=SETTINGS.environment,
+                    tiers_active=5, consolidation_enabled=SETTINGS.consolidation_enabled)
+        yield
 
 
-def _register_middleware(app: FastAPI) -> None:
-    """Register custom middleware for memory service."""
-    @app.middleware("http")
-    async def request_tracking_middleware(request: Request, call_next):
-        request_id = request.headers.get("X-Request-ID", str(uuid4()))
-        correlation_id = request.headers.get("X-Correlation-ID", str(uuid4()))
-        structlog.contextvars.clear_contextvars()
-        structlog.contextvars.bind_contextvars(
-            request_id=request_id,
-            correlation_id=correlation_id,
-            path=request.url.path,
-            method=request.method,
-        )
-        start_time = time.perf_counter()
-        response = await call_next(request)
-        process_time_ms = (time.perf_counter() - start_time) * 1000
-        response.headers["X-Request-ID"] = request_id
-        response.headers["X-Correlation-ID"] = correlation_id
-        response.headers["X-Process-Time-Ms"] = f"{process_time_ms:.2f}"
-        logger.info("request_completed", status_code=response.status_code,
-                    process_time_ms=round(process_time_ms, 2))
-        return response
-
-
-def _register_exception_handlers(app: FastAPI) -> None:
-    """Register global exception handlers."""
-    @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(request: Request, exc: RequestValidationError):
-        errors = []
-        for error in exc.errors():
-            loc = ".".join(str(x) for x in error["loc"])
-            errors.append({"field": loc, "message": error["msg"], "type": error["type"]})
-        logger.warning("validation_error", path=request.url.path, errors=errors)
-        return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content={"error": {"code": "VALIDATION_ERROR", "message": "Request validation failed", "details": errors}},
-        )
-
-    @app.exception_handler(ValueError)
-    async def value_error_handler(request: Request, exc: ValueError):
-        logger.warning("value_error", path=request.url.path, error=str(exc))
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={"error": {"code": "BAD_REQUEST", "message": str(exc)}},
-        )
-
-    @app.exception_handler(Exception)
-    async def global_exception_handler(request: Request, exc: Exception):
-        logger.error("unhandled_exception", path=request.url.path, error=str(exc), exc_type=type(exc).__name__)
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"error": {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred"}},
-        )
-
-
-app = create_application()
-
-
-@app.get("/", include_in_schema=False)
-async def root() -> dict[str, str]:
-    """Root endpoint with service info."""
-    return {"service": "memory-service", "status": "operational", "version": "1.0.0"}
-
-
-@app.get("/ready", include_in_schema=False)
-async def readiness() -> JSONResponse:
-    """Kubernetes readiness probe."""
-    if not hasattr(app.state, "memory_service") or not app.state.memory_service._initialized:
-        return JSONResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content={"status": "not_ready"})
-    return JSONResponse(status_code=status.HTTP_200_OK, content={"status": "ready"})
-
-
-@app.get("/live", include_in_schema=False)
-async def liveness() -> dict[str, str]:
-    """Kubernetes liveness probe."""
-    return {"status": "alive"}
-
-
-@app.get("/health", include_in_schema=False)
-async def health_check() -> dict[str, str]:
-    """Health check endpoint with service status details."""
-    return {
-        "status": "healthy",
-        "service": "memory-service",
-        "version": "1.0.0",
-        "memory_tiers": "5-tier-active",
-        "context_assembler": "active",
-        "consolidation_pipeline": "active",
-    }
+app = create_service_app(
+    SPEC,
+    lifespan=lifespan,
+    routers=[(router, "/api/v1/memory")],
+    title="Solace-AI Memory Service",
+)
 
 
 def run_server() -> None:

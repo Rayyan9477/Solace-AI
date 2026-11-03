@@ -12,9 +12,9 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field, ConfigDict
 import structlog
 
-from src.solace_events.schemas import BaseEvent, EventMetadata
-from src.solace_events.publisher import EventPublisher
-from src.solace_events.consumer import EventConsumer
+from solace_events.schemas import BaseEvent, EventMetadata
+from solace_events.publisher import EventPublisher
+from solace_events.consumer import EventConsumer
 
 logger = structlog.get_logger(__name__)
 

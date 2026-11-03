@@ -117,6 +117,15 @@ class SessionManager:
         """
         return self._active_sessions.get(session_id)
 
+    def put_session(self, session: SessionState) -> None:
+        """Insert/replace a session in the in-process working cache.
+
+        Used by the orchestrator to hydrate the cache from the durable store on a
+        cache miss (REV-16 read-through), so subsequent in-request mutations alias
+        the same object.
+        """
+        self._active_sessions[session.session_id] = session
+
     def update_state(
         self,
         session_id: UUID,

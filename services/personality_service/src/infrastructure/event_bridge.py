@@ -10,19 +10,11 @@ import structlog
 
 from ..events import DomainEvent, EventBus, to_kafka_event
 
-import os
+from solace_events.publisher import EventPublisher, create_publisher
+from solace_events.config import KafkaSettings
 
-try:
-    from src.solace_events.publisher import EventPublisher, create_publisher
-    from src.solace_events.config import KafkaSettings
-    _KAFKA_AVAILABLE = True
-except ImportError:
-    _KAFKA_AVAILABLE = False
-    _logger = structlog.get_logger(__name__)
-    _logger.error("kafka_import_failed", package="solace_events",
-                  hint="Install solace_events or set KAFKA_BOOTSTRAP_SERVERS")
-    if os.environ.get("ENVIRONMENT", "").lower() == "production":
-        raise RuntimeError("solace_events package required in production")
+# MVP-133: a missing package is now an ImportError in every environment.
+_KAFKA_AVAILABLE = True
 
 logger = structlog.get_logger(__name__)
 
@@ -46,7 +38,7 @@ class KafkaEventBridge:
 
         self._publisher = create_publisher(
             kafka_settings=kafka_settings, use_outbox=True, use_mock=use_mock,
-            postgres_pool=postgres_pool,
+            postgres_pool=postgres_pool, source_service="personality-service",
         )
         self._started = False
         logger.info("personality_kafka_bridge_initialized", use_mock=use_mock)

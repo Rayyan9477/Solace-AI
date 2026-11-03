@@ -52,7 +52,15 @@ def app(mock_safety_service: MagicMock) -> FastAPI:
     test_app = FastAPI()
     test_app.include_router(router, prefix="/api/v1/safety")
     test_app.state.safety_service = mock_safety_service
-    test_app.state.escalation_manager = MagicMock()
+    # Delegate the mocked escalation manager's resource lookup to the real
+    # CrisisResourceManager so /resources and crisis_resources return the true
+    # source-of-truth list (988, Crisis Text Line, …). An unconfigured MagicMock
+    # would serialize to [] (its __iter__ yields empty), hiding the real content.
+    from services.safety_service.src.domain.escalation import CrisisResourceManager
+    _resource_manager = CrisisResourceManager()
+    escalation_manager = MagicMock()
+    escalation_manager.get_crisis_resources.side_effect = _resource_manager.get_resources_for_level
+    test_app.state.escalation_manager = escalation_manager
     test_app.dependency_overrides[get_current_service] = _mock_service
     return test_app
 

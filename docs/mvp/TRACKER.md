@@ -13,11 +13,11 @@ The register's statuses are derived from this file at each barrier (`fixed` when
 
 | Status | todo | in-progress | review | fixing | done | blocked | deferred | total |
 |---|---|---|---|---|---|---|---|---|
-| Tasks | 281 | 0 | 0 | 2 | 46 | 1 | 0 | 330 |
+| Tasks | 281 | 0 | 0 | 0 | 48 | 1 | 0 | 330 |
 
 | Wave | Phase A done / total | Phase B done / total | Active | Blocked |
 |---|---|---|---|---|
-| W0 | 35 / 39 | 6 / 16 | 2 | 1 |
+| W0 | 35 / 39 | 7 / 16 | 0 | 1 |
 | W1 | 0 / 34 | 0 / 35 | 0 | 0 |
 | W2 | 0 / 16 | 0 / 61 | 0 | 0 |
 | W3 | 0 / 24 | 0 / 40 | 0 | 0 |
@@ -29,7 +29,7 @@ The register's statuses are derived from this file at each barrier (`fixed` when
 | WS-01 | 14 / 18 |
 | WS-02 | 7 / 9 |
 | WS-03 | 4 / 20 |
-| WS-04 | 6 / 16 |
+| WS-04 | 7 / 16 |
 | WS-05 | 3 / 22 |
 | WS-06 | 2 / 14 |
 | WS-07 | 1 / 12 |
@@ -37,7 +37,7 @@ The register's statuses are derived from this file at each barrier (`fixed` when
 | WS-09 | 3 / 19 |
 | WS-10 | 0 / 16 |
 | WS-11 | 1 / 21 |
-| WS-12 | 0 / 19 |
+| WS-12 | 1 / 19 |
 | WS-13 | 1 / 18 |
 | WS-14 | 1 / 22 |
 | WS-15 | 1 / 23 |
@@ -45,7 +45,7 @@ The register's statuses are derived from this file at each barrier (`fixed` when
 | WS-17 | 1 / 19 |
 | WS-18 | 0 / 19 |
 
-**Register entries:** 43 of 345 covered entries fixed (all their tasks done); 13 partly done.
+**Register entries:** 44 of 345 covered entries fixed (all their tasks done); 13 partly done.
 
 <!-- mvp:summary:end -->
 
@@ -119,7 +119,7 @@ Filled at each wave barrier (master plan, section 5.5). The tree zip is the only
 | [WS-15.1](../superpowers/plans/2026-10-18-mvp-remediation/WS-15-therapy-service.md#task-ws-151-adopt-the-if-01-runtime-in-therapy-and-build-the-session-store-from-the-runtimes-redis-client) | Adopt the IF-01 runtime in therapy and build the session store from the runtime's Redis client | high | standard | Sonnet | no | - | MVP-095, MVP-208 | `done` | fix1 e1d9508 (LLM/orchestrator closers registered right after initialize); controller-verified diff + tests; SPE-2 -> WS-06 follow-up; SPE-3 expected-red until WS-05.5 |
 | [WS-17.1](../superpowers/plans/2026-10-18-mvp-remediation/WS-17-memory-service.md#task-ws-171-adopt-the-if-01-runtime-in-memory-mainpy-keep-weaviate-off-by-default-and-take-redis-from-the-runtime) | Adopt the IF-01 runtime in memory main.py, keep Weaviate off by default and take Redis from the runtime | high | standard | Sonnet | no | - | MVP-270 | `done` | head 37aa63c APPROVED (2 lenses, 0 own defects); pre-existing minors routed: PostgresRepository private engine without TLS/role check -> WS-17.2 (must land before W0 exit), Weaviate init failure swallowed -> WS-17.11 |
 | [WS-11.1](../superpowers/plans/2026-10-18-mvp-remediation/WS-11-orchestrator-edge-contracts.md#task-ws-111-adopt-the-if-01-runtime-limiter-redis-from-redis_url-cors-from-cors_allowed_origins) | Adopt the IF-01 runtime; limiter Redis from REDIS_URL; CORS from CORS_ALLOWED_ORIGINS | blocker | security-critical | Opus | no | - | MVP-016, MVP-164 | `done` | fix1 dd06828 APPROVED (limiter fail-open, 0.5 s Redis timeouts; 0 findings); CORS_ALLOWED_ORIGINS for strict compose -> WS-03.5 |
-| [WS-12.1](../superpowers/plans/2026-10-18-mvp-remediation/WS-12-safety-detection-lexicon.md#task-ws-121-safety-runtime-adoption-if-01-and-a-strict-only-postgres-escalation-store) | Safety runtime adoption (IF-01) and a strict-only Postgres escalation store | high | safety-critical | Opus | no | - | MVP-088 | `fixing` | fix round 1: strict must refuse a mock Kafka producer (crisis rows marked PUBLISHED to a mock) |
+| [WS-12.1](../superpowers/plans/2026-10-18-mvp-remediation/WS-12-safety-detection-lexicon.md#task-ws-121-safety-runtime-adoption-if-01-and-a-strict-only-postgres-escalation-store) | Safety runtime adoption (IF-01) and a strict-only Postgres escalation store | high | safety-critical | Opus | no | - | MVP-088 | `done` | fix2 6706725 APPROVED (strictness = own env OR bare ENVIRONMENT; mock producer refused in strict; 48-combination equivalence with runtime); crisis path proven end to end; CRI-2 swallows -> WS-12.8/12.9 |
 | [WS-12.17](../superpowers/plans/2026-10-18-mvp-remediation/WS-12-safety-detection-lexicon.md#task-ws-1217-no-private-postgres-pool-in-safety-the-contraindication-repository-takes-an-injected-pool-w0) | No private Postgres pool in safety: the contraindication repository takes an injected pool (W0) | low | security-critical | Sonnet | no | - | MVP-271 | `todo` |  |
 | [WS-13.2](../superpowers/plans/2026-10-18-mvp-remediation/WS-13-notification-alert-delivery.md#task-ws-132-if-01-runtime-adoption-a-strict-crisis-consumer-guard-and-a-safe-legacy-consumer-lifecycle) | IF-01 runtime adoption, a strict crisis-consumer guard and a safe legacy consumer lifecycle | medium | safety-critical | Opus | no | WS-13.1 | MVP-155, MVP-287 | `todo` |  |
 | [WS-14.3](../superpowers/plans/2026-10-18-mvp-remediation/WS-14-accounts-roster-consent-erasure.md#task-ws-143-verbatim-split-of-identity-code-into-api_auth-api_deps-and-identity_wiring) | Verbatim split of identity code into api_auth, api_deps and identity_wiring | high | security-critical | Opus | no | WS-14.2 | MVP-107 | `todo` |  |
@@ -138,7 +138,7 @@ Filled at each wave barrier (master plan, section 5.5). The tree zip is the only
 | [WS-01.F2](../superpowers/plans/2026-10-18-mvp-remediation/WS-01-build-deps-ci.md#task-ws-01f2-patch-level-bumps-for-the-checkpoint-path-advisories-held-by-exact-pins) | Patch-level bumps for the checkpoint-path advisories held by exact pins | high | security-critical | Opus | no | - | MVP-358, MVP-359 | `done` | trees a5b1852..2d0519c + controller comment fixes; review R1 routed (LANGGRAPH_STRICT_MSGPACK: WS-01.F4 image, WS-03.2 compose, WS-10.10 test) |
 | [WS-01.F3](../superpowers/plans/2026-10-18-mvp-remediation/WS-01-build-deps-ci.md#task-ws-01f3-the-repos-tests-package-wins-over-portkey-ais-site-packages-tests) | The repo's tests package wins over portkey-ai's site-packages "tests" | high | standard | Sonnet | no | - | MVP-005 | `done` | trees 0226536..34ade92; tests resolves to repo; deploy 20, solace_testing 174; sandbox regression clean |
 | [WS-01.F4](../superpowers/plans/2026-10-18-mvp-remediation/WS-01-build-deps-ci.md#task-ws-01f4-entrypoint-hardening-from-the-ws-016-review) | Entrypoint hardening from the WS-01.6 review | low | security-critical | Sonnet | yes | - | MVP-211 | `done` | fix1 d966612 APPROVED (all 6 prior closed, 10 images verified); controller fixed minor CLO-1 (boolean flag before dotted app attr) test-first |
-| [WS-04.F1](../superpowers/plans/2026-10-18-mvp-remediation/WS-04-service-runtime-observability.md#task-ws-04f1-if-01-hardening-from-the-integrated-audit-lifespan-shape-phi-paths-body-limit-teardown) | IF-01 hardening from the integrated audit (lifespan shape, PHI paths, body limit, teardown) | high | security-critical | Opus | no | - | MVP-036, MVP-180, MVP-332 | `fixing` | fix1 f528018 APPROVED (4 closed); fix2: escape-tolerant validation-input markers (apostrophe leak), errors() dicts in _redact, form (b) handlers/orelse |
+| [WS-04.F1](../superpowers/plans/2026-10-18-mvp-remediation/WS-04-service-runtime-observability.md#task-ws-04f1-if-01-hardening-from-the-integrated-audit-lifespan-shape-phi-paths-body-limit-teardown) | IF-01 hardening from the integrated audit (lifespan shape, PHI paths, body limit, teardown) | high | security-critical | Opus | no | - | MVP-036, MVP-180, MVP-332 | `done` | fix2 f6378aa approved on closure; controller fixed the important regression WS04F1F2-PHI-1 (quadratic marker regex, ReDoS) test-first; minor WS04F1F2-PHI-2 parked for the W0 bug round |
 | [WS-09.F1](../superpowers/plans/2026-10-18-mvp-remediation/WS-09-phi-codec-audit-llm.md#task-ws-09f1-the-phi-log-sanitizer-never-recurses-into-the-logging-chain) | The PHI log sanitizer never recurses into the logging chain | high | security-critical | Opus | no | - | MVP-180 | `done` | trees a3b9a06..8da9ca2 (fix1, fix2); review findings closed; 24 new; stress 0 raw |
 
 ## W1: Crisis path

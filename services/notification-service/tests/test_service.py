@@ -3,13 +3,12 @@ Unit tests for notification service module.
 """
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import pytest
 from uuid import uuid4
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from domain.service import (
+from src.domain.service import (
     NotificationService,
     NotificationRequest,
     NotificationResult,
@@ -18,8 +17,8 @@ from domain.service import (
     NotificationStatus,
     create_notification_service,
 )
-from domain.templates import TemplateType, TemplateRegistry, RenderedTemplate
-from domain.channels import (
+from src.domain.templates import TemplateType, TemplateRegistry, RenderedTemplate
+from src.domain.channels import (
     ChannelType,
     ChannelRegistry,
     DeliveryResult,

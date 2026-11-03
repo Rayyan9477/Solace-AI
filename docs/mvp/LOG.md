@@ -11,6 +11,27 @@ Entry format:
 - Links: <files>.
 ```
 
+## 2026-11-03: W0 checkpoint 1; execution paused at the owner's request
+- **What the owner asked:** "complete the nearest checkpoint and then stop", then "no new task, just wrap up existing ones". Every started task was reviewed and fixed until done, and no new task was dispatched. The tree is `edba7d7`, zipped to `D:\tmp\mvp-exec\barriers\W0-checkpoint-1-edba7d7.zip`.
+- **Counts:** W0 is 48 / 61 done, with 1 blocked (WS-05.4 part 2 waits for WS-03.5) and 12 not started. The whole program is 48 / 330 done.
+- **Review method from 2026-11-03 (ultracode):**
+  - Every task gets a review workflow: lens-diverse reviewers (Opus and Sonnet) plus a skeptic panel on every finding (3 for important, 1 for minor; a majority refute kills the finding).
+  - The workflow scripts are `D:\tmp\mvp-exec\tools\review-wf.js` and `review-batch-wf.js`.
+- **Real defects the reviews caught and the program fixed:**
+  - **Crisis path:**
+    - a strict safety service could run on a mock Kafka producer, and a blank `SAFETY_ENVIRONMENT` turned its guards off; either way crisis rows were marked published and no human was paged;
+    - a Redis outage in the rate limiter returned 500 for crisis chat.
+  - **RLS bypass:** the strict pool role check accepted a session-user switch at login and the superuser-equivalent roles.
+  - **PHI in logs:** FastAPI validation errors, escaped quotes and `errors()` dicts could put patient text in log lines; a quadratic regex introduced by one PHI fix was also found and bounded.
+  - **Clean-checkout proof:** a crash would have made every real proof fail.
+  - **Images:** the migrate image's loader was writable, and the app user owned its code directories.
+  - **Shared bootstrap:** IF-01 had lifecycle leaks.
+- **Controller edits, each test-first:**
+  - production guards: forbidden dev passwords, a strict `REDIS_URL` password check, and a blank service environment refused under a strict `ENVIRONMENT`;
+  - `uvicorn_flags`;
+  - the bounded marker regex.
+- **Links:** [TRACKER.md](TRACKER.md); ledger `D:\tmp\mvp-exec\ledger\progress.md`; hand-offs `D:\tmp\mvp-exec\ledger\handoffs.md`; reviews `D:\tmp\mvp-exec\reviews\batch*.json`.
+
 ## 2026-11-02: "Go": execution started (W0 entry)
 - The owner said go and asked for a slow pace. AWS keeps the existing profile `MedCodex-Local`. The owner confirmed the BAA is in place (X-02 done).
 - W0 entry: tree `b309d50`, exported to `D:\tmp\mvp-exec\barriers\W0-entry-b309d50.zip`.

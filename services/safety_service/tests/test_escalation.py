@@ -406,3 +406,65 @@ class TestEscalationResult:
         assert result.status == "PENDING"
         assert result.notification_sent is False
         assert result.resources_provided is False
+
+
+class TestEscalationPersistenceAndTimeoutREV05:
+    """REV-05: durable persistence of the FINAL escalation state + a bounded
+    notification timeout so /check is not blocked for minutes."""
+
+    def test_notification_timeout_is_bounded(self) -> None:
+        """Per-attempt crisis notification timeout must be short (not 300s)."""
+        settings = EscalationSettings()
+        assert settings.notification_timeout_seconds <= 30, (
+            "a 300s per-attempt timeout blocks /check for minutes when the "
+            "notification service is slow/down"
+        )
+
+    @pytest.mark.asyncio
+    async def test_escalation_persists_final_state(self) -> None:
+        """The persisted record must reflect the workflow OUTCOME (assigned
+        clinician, IN_PROGRESS) — not just the initial PENDING save. A Postgres
+        repo snapshots at save time, so a single pre-workflow write loses the
+        outcome."""
+        from services.safety_service.src.domain.escalation import (
+            EscalationRepository,
+            EscalationStatus,
+        )
+
+        class _SnapshotRepo(EscalationRepository):
+            def __init__(self) -> None:
+                self.saves: list = []
+
+            async def save_escalation(self, record) -> None:
+                self.saves.append((record.status, record.assigned_clinician_id))
+
+            async def get_escalation(self, escalation_id):
+                return None
+
+            async def get_active_escalations(self, user_id=None):
+                return []
+
+            async def update_status(self, escalation_id, status) -> None:
+                pass
+
+            async def delete_user_data(self, user_id) -> int:
+                return 0
+
+        registry = _make_mock_registry(pool_size=3)
+        repo = _SnapshotRepo()
+        manager = EscalationManager(
+            EscalationSettings(), clinician_registry=registry, repository=repo
+        )
+        result = await manager.escalate(
+            user_id=uuid4(),
+            session_id=uuid4(),
+            crisis_level="CRITICAL",
+            reason="test",
+        )
+        assert result.escalation_id is not None
+        assert repo.saves, "escalation was never persisted"
+        final_status, final_clinician = repo.saves[-1]
+        assert final_status == EscalationStatus.IN_PROGRESS, (
+            f"persisted status was {final_status}, not the workflow outcome"
+        )
+        assert final_clinician is not None, "assigned clinician not persisted"

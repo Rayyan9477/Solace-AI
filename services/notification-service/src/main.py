@@ -9,13 +9,16 @@ Principles: 12-Factor App, Dependency Injection, Configuration Externalization
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
+
+if TYPE_CHECKING:
+    from .domain.service import NotificationService
 
 logger = structlog.get_logger(__name__)
 
@@ -153,12 +156,34 @@ def _create_notification_service(settings: NotificationServiceSettings) -> "Noti
     )
 
 
+def _require_crisis_consumer_in_production(settings) -> None:
+    """M1-gate R2 (P0): the safety-event consumer must run in production.
+
+    Consumer start is gated behind ``settings.kafka.enabled`` (default False). Without
+    this guard a production deploy that forgets to enable Kafka boots "healthy" and
+    consumes zero crisis events — crisis alerts never delivered. Consumer-side sibling
+    of REV-37 (safety publish side).
+    """
+    if settings.service.env == "production" and not settings.kafka.enabled:
+        raise RuntimeError(
+            "Kafka is required in production (enable the notification kafka consumer); "
+            "the safety-event consumer cannot deliver crisis alerts without it"
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     global _notification_service
 
     settings = NotificationServiceSettings.load()
+
+    # REV-32: fail loud at startup if this service's resolved environment disagrees with the
+    # deployment's bare ENVIRONMENT (a misnamed/unset NOTIFICATION_SERVICE_ENV would silently
+    # pin the service to the development default, disabling the production fail-loud guards).
+    # Also runs the broader production-secret validation (self-skips outside prod/staging).
+    from solace_security.production_guards import ProductionGuards
+    ProductionGuards.assert_startup(settings.service.env, service_name="notification-service")
 
     # Configure structured logging with PHI sanitizer
     try:
@@ -198,6 +223,11 @@ async def lifespan(app: FastAPI):
                push_enabled=settings.push.enabled,
                kafka_enabled=settings.kafka.enabled)
 
+    # REV-12: PHI-encryption exemption (documented). This service persists no
+    # ClinicalBase entities — Postgres is used only for the durable event outbox
+    # (operational rows). configure_phi_encryption() only affects ClinicalBase, so
+    # it is intentionally NOT configured here (least privilege: no PHI master key).
+    # Enforced by tests/integration/test_phi_encryption_activation.py.
     _notification_service = _create_notification_service(settings)
     logger.info("notification_service_ready")
 
@@ -222,6 +252,8 @@ async def lifespan(app: FastAPI):
 
     # Start Kafka safety event consumer if enabled
     safety_consumer = None
+    # M1-gate R2 (P0): fail loud if the crisis consumer is disabled in production.
+    _require_crisis_consumer_in_production(settings)
     if settings.kafka.enabled:
         try:
             from .consumers import initialize_safety_consumer, shutdown_safety_consumer
@@ -242,7 +274,10 @@ async def lifespan(app: FastAPI):
             )
             logger.info("safety_event_consumer_started")
         except Exception as e:
+            # M1-gate R2 (P0): don't boot "healthy" with a dead crisis consumer in prod.
             logger.error("safety_consumer_start_failed", error=str(e))
+            if settings.service.env == "production":
+                raise
 
     yield
 

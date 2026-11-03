@@ -5,7 +5,7 @@ Personality detection, profile management, and style adaptation endpoints.
 from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 import structlog
 
 from .schemas import (
@@ -17,12 +17,16 @@ from .schemas import (
 )
 from .domain.service import PersonalityOrchestrator
 
+from solace_infrastructure.gdpr import ErasureIncomplete
+
 from solace_security.middleware import (
     AuthenticatedUser,
     AuthenticatedService,
     get_current_user,
     get_current_service,
 )
+from solace_security import Role
+from solace_common.request_context import reset_current_user_id, set_current_user_id
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["personality"])
@@ -60,6 +64,13 @@ async def detect_personality(
 ) -> DetectPersonalityResponse:
     """Detect personality traits from user text."""
     logger.info("personality_detection_request", user_id=str(request.user_id), text_length=len(request.text))
+    # C.2 RLS: this is a service-to-service call (get_current_service sets no user
+    # GUC), but it reads/writes personality_* rows scoped to request.user_id. Publish
+    # that user into the request context so the DB layer sets app.current_user_id and
+    # RLS admits the row (INSERT WITH CHECK and SELECT/UPDATE USING).
+    # P2-7: capture the token and reset in finally so the request-scoped GUC does not
+    # rely solely on asyncio task boundaries (a reused task/thread would leak it).
+    token = set_current_user_id(str(request.user_id))
     try:
         response = await orchestrator.detect_personality(request)
         return response
@@ -69,6 +80,8 @@ async def detect_personality(
     except Exception as e:
         logger.error("personality_detection_failed", error=str(e))
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Personality detection failed")
+    finally:
+        reset_current_user_id(token)
 
 
 @router.post(
@@ -89,12 +102,18 @@ async def get_style(
 ) -> GetStyleResponse:
     """Get style parameters for user."""
     logger.info("style_request", user_id=str(request.user_id))
+    # C.2 RLS: set the per-user GUC so RLS admits this user's personality rows
+    # (SELECT is filtered by the same policy as writes).
+    # P2-7: reset the request-scoped GUC in finally (see /detect).
+    token = set_current_user_id(str(request.user_id))
     try:
         response = await orchestrator.get_style(request)
         return response
     except Exception as e:
         logger.error("style_retrieval_failed", error=str(e))
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Style retrieval failed")
+    finally:
+        reset_current_user_id(token)
 
 
 @router.post(
@@ -115,6 +134,9 @@ async def adapt_response(
 ) -> AdaptResponseResponse:
     """Adapt response content to user personality."""
     logger.info("adapt_request", user_id=str(request.user_id), base_length=len(request.base_response))
+    # C.2 RLS: set the per-user GUC so RLS admits this user's personality rows.
+    # P2-7: reset the request-scoped GUC in finally (see /detect).
+    token = set_current_user_id(str(request.user_id))
     try:
         response = await orchestrator.adapt_response(request)
         return response
@@ -124,6 +146,8 @@ async def adapt_response(
     except Exception as e:
         logger.error("adapt_failed", error=str(e))
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Response adaptation failed")
+    finally:
+        reset_current_user_id(token)
 
 
 @router.get(
@@ -185,13 +209,13 @@ async def update_profile(
         )
     current_profile = await orchestrator.get_profile(request.user_id)
     previous_version = current_profile.version if current_profile else 0
-    detect_request = DetectPersonalityRequest(
-        user_id=request.user_id,
-        text="Profile update from external assessment",
-        sources=[request.source],
+    # B-3: honor the submitted OCEAN scores directly instead of synthesizing a
+    # placeholder text (which fell below min_text_length and dragged toward 0.5).
+    updated_profile = await orchestrator.update_profile_from_scores(
+        request.user_id, request.ocean_scores, request.source
     )
-    await orchestrator.detect_personality(detect_request)
-    updated_profile = await orchestrator.get_profile(request.user_id)
+    if updated_profile is None:
+        updated_profile = await orchestrator.get_profile(request.user_id)
     changed_traits = []
     if current_profile and updated_profile:
         for trait in updated_profile.dominant_traits:
@@ -206,14 +230,62 @@ async def update_profile(
     )
 
 
+@router.delete(
+    "/user/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    responses={
+        403: {"model": ErrorResponse, "description": "Cannot delete another user's data"},
+        500: {"model": ErrorResponse, "description": "Erasure incomplete"},
+        503: {"model": ErrorResponse, "description": "Service unavailable"},
+    },
+    summary="Erase all personality data for a user",
+    description="GDPR right-to-erasure (REV-17): purge the user's in-memory profile "
+                "cache and all persistent personality records. Self-or-admin only.",
+)
+async def delete_user_data(
+    user_id: UUID,
+    orchestrator: OrchestratorDep,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> Response:
+    """Delete all personality data for a user (GDPR compliance, REV-17)."""
+    # Only allow self-deletion or admin deletion (mirrors memory/diagnosis services).
+    if str(user_id) != str(current_user.user_id) and Role.ADMIN not in current_user.roles:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot delete other user's data without admin role",
+        )
+    logger.info(
+        "user_data_deletion_requested",
+        user_id=str(user_id),
+        authenticated_user=str(current_user.user_id),
+    )
+    try:
+        await orchestrator.delete_user_data(user_id)
+    except ErasureIncomplete as e:
+        # Fail loud: a partial erasure is never reported as success.
+        logger.error("user_data_erasure_incomplete", user_id=str(user_id), failed=e.failed)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User data erasure incomplete",
+        )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get(
     "/status",
     status_code=status.HTTP_200_OK,
     summary="Get service status",
     description="Retrieve personality service status and operational statistics.",
 )
-async def get_status(orchestrator: OrchestratorDep) -> dict:
-    """Get service status and statistics."""
+async def get_status(
+    orchestrator: OrchestratorDep,
+    _service: AuthenticatedService = Depends(get_current_service),
+) -> dict:
+    """Get service status and statistics.
+
+    REV-09: gated behind service auth (no unauthenticated operational leak).
+    """
     return await orchestrator.get_status()
 
 

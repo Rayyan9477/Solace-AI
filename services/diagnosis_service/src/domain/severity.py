@@ -512,8 +512,16 @@ class SeverityAssessor:
         return "Minimal somatic symptoms"
 
     def _get_pcl5_interpretation(self, score: int) -> str:
-        """Get PCL-5 interpretation."""
-        return "Probable PTSD diagnosis - clinical evaluation recommended" if score >= 17 else "Below clinical threshold for PTSD"
+        """Get PCL-5 interpretation.
+
+        H-10 / DRIFT-2 reconciliation: the interpretation TEXT crosses to
+        "Probable PTSD" at the SAME halved boundary the severity band uses
+        (>=16 on the 10-item screener, from the 20-item Weathers 2013 cutoff
+        of 31). Previously this used a stale >=17, which was inconsistent
+        with _interpret_pcl5's SEVERE cutoff of 16 and could label a
+        SEVERE (16) score "Below clinical threshold".
+        """
+        return "Probable PTSD diagnosis - clinical evaluation recommended" if score >= 16 else "Below clinical threshold for PTSD"
 
     def _get_phq9_recommendations(self, severity: SeverityLevel) -> list[str]:
         """Get PHQ-9 based recommendations."""

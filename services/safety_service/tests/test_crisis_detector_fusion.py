@@ -145,6 +145,58 @@ class TestCrisisDetectorLayerFusion:
         assert result.crisis_detected is True
 
     @pytest.mark.asyncio
+    async def test_lone_critical_keyword_not_diluted_below_high(self) -> None:
+        """REV-02: a critical-tier keyword must escalate to HIGH+ even when the
+        corroborating signals are absent/degraded and the LLM returns a low score.
+
+        The weighted fusion previously divided by the FULL weight sum even when
+        only the keyword signal was present, diluting a 0.95 keyword to ~0.38
+        (LOW). Active-signal-weight normalization keeps it at 0.95, and a
+        max-severity floor prevents later LLM averaging from pulling it back
+        below HIGH.
+        """
+        keyword = MagicMock()
+        keyword.detect.return_value = ["suicide_risk"]
+        keyword.calculate_risk_score.return_value = Decimal("0.95")
+
+        zero_sentiment = MagicMock()
+        zero_sentiment.analyze.return_value = MagicMock(risk_score=Decimal("0.0"))
+
+        zero_pattern = MagicMock()
+        zero_pattern.detect.return_value = []
+        zero_pattern.calculate_risk_score.return_value = Decimal("0.0")
+
+        # LLM returns a LOW score: averaging must not pull a critical keyword back
+        # below HIGH once the floor is applied.
+        from unittest.mock import AsyncMock
+
+        low_llm = MagicMock()
+        low_llm.assess = AsyncMock(
+            return_value=MagicMock(
+                risk_score=Decimal("0.1"),
+                clinical_summary="",
+                confidence=Decimal("0.5"),
+            )
+        )
+
+        detector = CrisisDetector(
+            self.settings,
+            keyword_detector=keyword,
+            sentiment_analyzer=zero_sentiment,
+            pattern_matcher=zero_pattern,
+            llm_assessor=low_llm,
+        )
+
+        result = await detector.detect("I want to kill myself", user_id=None)
+
+        assert result.crisis_detected is True
+        assert result.crisis_level in (CrisisLevel.HIGH, CrisisLevel.CRITICAL), (
+            f"critical keyword diluted to {result.crisis_level} "
+            f"(score={result.risk_score})"
+        )
+        assert result.risk_score >= self.settings.high_threshold
+
+    @pytest.mark.asyncio
     async def test_layer1_disabled_produces_zero_keyword_score(self) -> None:
         """Verify disabling Layer1 produces zero keyword score."""
         settings = CrisisDetectorSettings(enable_layer_1=False)

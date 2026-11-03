@@ -16,6 +16,8 @@ import structlog
 from decimal import Decimal
 from services.shared import ServiceBase
 
+from solace_infrastructure.gdpr import ErasureReport, UserDataErasure
+
 if TYPE_CHECKING:
     from services.shared.infrastructure import UnifiedLLMClient
     from ..infrastructure.repository import PersonalityRepositoryPort
@@ -108,6 +110,30 @@ class ProfileStore:
         return len(self._profiles)
 
 
+def build_user_data_erasure(repository: "PersonalityRepositoryPort") -> UserDataErasure:
+    """REV-17: assemble the GDPR right-to-erasure orchestrator for this service.
+
+    The personality service owns a single persistent PHI store: the Postgres
+    tables (``personality_profiles`` + ``trait_assessments`` + ``profile_snapshots``),
+    all purged in one pass by ``PersonalityRepositoryPort.delete_user_data``. It is
+    registered here under a stable name so the shared ``UserDataErasure`` core can
+    drive it under the fail-loud contract (attempt all stores, collect per-store
+    failures, raise ``ErasureIncomplete`` on any failure — never report a partial
+    erasure as complete).
+
+    The in-memory ``ProfileStore`` cache is purged directly by the orchestrator
+    (it holds no independent source of truth), so it is not registered here.
+    """
+
+    async def _delete_postgres(user_id: str) -> int:
+        # erase() passes the user_id as a str; the repository keys on UUID.
+        return await repository.delete_user_data(UUID(user_id))
+
+    erasure = UserDataErasure()
+    erasure.register("personality_postgres", _delete_postgres)
+    return erasure
+
+
 class PersonalityOrchestrator(ServiceBase):
     """Main personality service orchestrator."""
 
@@ -171,11 +197,17 @@ class PersonalityOrchestrator(ServiceBase):
             entity = self._profile_to_entity(profile)
             await self._repository.save_profile(entity)
         except Exception as e:
-            logger.warning("profile_persist_failed", user_id=str(profile.user_id), error=str(e))
+            # B-2 (REV-36/44 class): a swallowed save left crisis/therapy callers
+            # reading a stale profile. Surface it — error-level always, and fail loud
+            # in production so ops sees it; /detect stays available in dev/test.
+            import os
+            logger.error("profile_persist_failed", user_id=str(profile.user_id), error=str(e))
+            if os.environ.get("ENVIRONMENT", "development") == "production":
+                raise
 
     def _profile_to_entity(self, profile: PersonalityProfile) -> Any:
         """Convert in-memory profile to domain entity for persistence."""
-        from .entities import PersonalityProfile as EntityProfile
+        from .entities import PersonalityProfile as EntityProfile, TraitAssessment
         from .value_objects import OceanScores
         ocean_scores = None
         if profile.ocean_scores:
@@ -184,6 +216,17 @@ class PersonalityOrchestrator(ServiceBase):
         if ocean_scores:
             from .value_objects import CommunicationStyle
             comm_style = CommunicationStyle.from_ocean(ocean_scores)
+        # B-5: carry assessment_history across the persist boundary. The service tracks
+        # history as list[OceanScoresDTO]; the entity/DB store list[TraitAssessment].
+        # Dropping it here (and in _entity_to_profile) silently erased every past
+        # assessment on reload, breaking stability/trend computation.
+        history = [
+            TraitAssessment(
+                user_id=profile.user_id,
+                ocean_scores=OceanScores.from_dict(scores.model_dump()),
+            )
+            for scores in profile.assessment_history
+        ]
         return EntityProfile(
             user_id=profile.user_id,
             profile_id=profile.profile_id,
@@ -194,6 +237,7 @@ class PersonalityOrchestrator(ServiceBase):
             created_at=profile.created_at,
             updated_at=profile.updated_at,
             version=profile.version,
+            assessment_history=history,
         )
 
     def _entity_to_profile(self, entity: Any) -> PersonalityProfile:
@@ -208,6 +252,14 @@ class PersonalityOrchestrator(ServiceBase):
         style_params = None
         if ocean_scores:
             style_params = self._style_adapter.get_style_parameters(ocean_scores)
+        # B-5: restore assessment_history (list[TraitAssessment] -> list[OceanScoresDTO]).
+        history = [
+            OceanScoresDTO(**{
+                k: v for k, v in assessment.ocean_scores.to_dict().items()
+                if k in OceanScoresDTO.model_fields
+            })
+            for assessment in (getattr(entity, "assessment_history", None) or [])
+        ]
         return PersonalityProfile(
             user_id=entity.user_id,
             profile_id=entity.profile_id,
@@ -218,6 +270,7 @@ class PersonalityOrchestrator(ServiceBase):
             created_at=entity.created_at,
             updated_at=entity.updated_at,
             version=entity.version,
+            assessment_history=history,
         )
 
     async def detect_personality(self, request: DetectPersonalityRequest) -> DetectPersonalityResponse:
@@ -243,6 +296,24 @@ class PersonalityOrchestrator(ServiceBase):
             evidence=evidence,
             processing_time_ms=processing_time_ms,
         )
+
+    async def update_profile_from_scores(
+        self, user_id: UUID, scores: OceanScoresDTO, source: AssessmentSource
+    ) -> "ProfileSummaryDTO | None":
+        """B-3: ingest a submitted external OCEAN assessment directly.
+
+        POST /profile/update previously discarded the submitted scores and ran
+        detection on a sub-min-length placeholder text, dragging every trait toward
+        neutral 0.5. This aggregates the provided assessment into the profile exactly
+        like a real detection result (same EMA path + history append).
+        """
+        self._request_count += 1
+        profile = await self._get_or_create_profile(user_id)
+        profile = self._update_profile_with_assessment(profile, scores)
+        await self._profile_store.save(profile)
+        await self._persist_profile(profile)
+        logger.info("profile_updated_from_scores", user_id=str(user_id), source=source.value)
+        return await self.get_profile(user_id)
 
     async def get_style(self, request: GetStyleRequest) -> GetStyleResponse:
         """Get communication style parameters for user."""
@@ -311,6 +382,56 @@ class PersonalityOrchestrator(ServiceBase):
             version=profile.version,
         )
 
+    async def delete_user_data(
+        self,
+        user_id: UUID,
+        *,
+        audit_emit: Any | None = None,
+    ) -> ErasureReport | None:
+        """REV-17 GDPR right-to-erasure: purge ALL of a user's personality data.
+
+        Two stores hold the user's PHI:
+          - the in-memory ``ProfileStore`` cache (purged directly here), and
+          - the persistent Postgres tables (driven through the shared
+            ``UserDataErasure`` orchestrator via :func:`build_user_data_erasure`).
+
+        The cache is cleared first and unconditionally (it holds PHI and has no
+        independent source of truth). If a repository is configured, the Postgres
+        store is then erased under the fail-loud contract: a failing deleter raises
+        :class:`ErasureIncomplete` (propagated to the caller) so a partial erasure
+        is never reported as complete. Returns the :class:`ErasureReport` when a
+        persistent store was erased, or ``None`` for the in-memory-only fallback.
+        """
+        # Clear the in-memory cache first, regardless of the persistent-store
+        # outcome — leaving cached PHI behind after an erasure request is unsafe.
+        await self._profile_store.delete(user_id)
+
+        if self._repository is None:
+            logger.info("user_data_erased_memory_only", user_id=str(user_id))
+            return None
+
+        erasure = build_user_data_erasure(self._repository)
+        # C.2 RLS: run the DELETEs with the GUC scoped to the TARGET user. The erase
+        # endpoint authenticates via get_current_user, so the request GUC is the
+        # CALLER's id — for an admin erasing another user that would RLS-filter the
+        # DELETE to the admin's own rows and silently erase nothing. Set it to the
+        # target for the duration of the erase, then restore the caller's context.
+        from solace_common.request_context import (
+            reset_current_user_id,
+            set_current_user_id,
+        )
+        token = set_current_user_id(str(user_id))
+        try:
+            report = await erasure.erase(str(user_id), audit_emit=audit_emit)
+        finally:
+            reset_current_user_id(token)
+        logger.info(
+            "user_data_erased",
+            user_id=str(user_id),
+            total_deleted=report.total_deleted,
+        )
+        return report
+
     async def _get_or_create_profile(self, user_id: UUID) -> PersonalityProfile:
         """Get existing profile or create new one."""
         profile = await self._get_cached_profile(user_id)
@@ -327,9 +448,12 @@ class PersonalityOrchestrator(ServiceBase):
         else:
             profile.ocean_scores = self._aggregate_scores(profile.ocean_scores, scores)
             profile.assessment_count += 1
-            profile.assessment_history.append(scores)
-            if len(profile.assessment_history) > self._settings.max_profile_history:
-                profile.assessment_history = profile.assessment_history[-self._settings.max_profile_history:]
+        # B-5: record EVERY assessment (including the first). Previously the first
+        # assessment was never appended, leaving len(history) == assessment_count - 1,
+        # so stability/trend computation silently missed the earliest data point.
+        profile.assessment_history.append(scores)
+        if len(profile.assessment_history) > self._settings.max_profile_history:
+            profile.assessment_history = profile.assessment_history[-self._settings.max_profile_history:]
         profile.stability_score = self._compute_stability(profile)
         profile.style_parameters = self._style_adapter.get_style_parameters(profile.ocean_scores)
         profile.version += 1

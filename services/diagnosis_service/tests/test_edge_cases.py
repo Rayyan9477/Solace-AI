@@ -293,6 +293,27 @@ class TestDiagnosisServiceEdgeCases:
         )
 
     @pytest.mark.asyncio
+    async def test_update_unknown_session_is_loud_not_silent(self) -> None:
+        """REV-16: updating a session that was never started (or lost on a
+        restart) must NOT silently drop clinical state — crisis safety_flags in
+        particular. The drop is recorded (observable) and the assess flow still
+        returns, but the miss is no longer swallowed."""
+        await self.service.initialize()
+        unknown_session = uuid4()
+        result = AssessmentResult(safety_flags=["suicidal_ideation"])
+
+        before = self.service._stats.get("unknown_session_updates", 0)
+        # Must not raise; the drop is recorded, not silently ignored.
+        await self.service._update_session(
+            unknown_session, result, message="I want to die"
+        )
+        after = self.service._stats.get("unknown_session_updates", 0)
+
+        assert after == before + 1
+        # The unknown session was not silently materialized as a side effect.
+        assert unknown_session not in self.service._active_sessions
+
+    @pytest.mark.asyncio
     async def test_multiple_concurrent_sessions(self) -> None:
         """Test handling multiple concurrent user sessions."""
         await self.service.initialize()
@@ -326,9 +347,10 @@ class TestDiagnosisServiceEdgeCases:
         """Test assessment when components are not configured."""
         bare_service = DiagnosisService(settings=DiagnosisServiceSettings())
         await bare_service.initialize()
-        session = await bare_service.start_session(uuid4(), "assessment", {}, None)
+        owner = uuid4()
+        session = await bare_service.start_session(owner, "assessment", {}, None)
         result = await bare_service.assess(
-            session.session_id, session.session_id, "I feel sad",
+            owner, session.session_id, "I feel sad",
             [], [], DiagnosisPhase.RAPPORT, None, {}
         )
         assert result is not None
@@ -345,9 +367,10 @@ class TestDiagnosisServiceEdgeCases:
             differential_generator=self.generator,
         )
         await service.initialize()
-        session = await service.start_session(uuid4(), "assessment", {}, None)
+        owner = uuid4()
+        session = await service.start_session(owner, "assessment", {}, None)
         result = await service.assess(
-            session.session_id, session.session_id,
+            owner, session.session_id,
             "I feel extremely depressed", [], [],
             DiagnosisPhase.RAPPORT, None, {}
         )

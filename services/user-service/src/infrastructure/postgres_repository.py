@@ -4,23 +4,24 @@ Solace-AI User Service - PostgreSQL Repository Implementations.
 PostgreSQL-backed repositories for user data persistence.
 Uses asyncpg for async database operations with connection pooling.
 
+Every repository acquires its connections from the service's one ``"default"`` pool
+(``ConnectionPoolManager``, IF-03; R-02.8), which logs in as ``solace_app`` (NOBYPASSRLS) and sets
+``app.current_user_id`` from the request context at acquire time. Writes to per-user tables
+(``user_preferences``, ``consent_records``) therefore need that context: a request's token sets it, and
+work without a request uses ``solace_common.request_context.acting_as_user`` (MVP-034).
+
 Architecture Layer: Infrastructure
 Principles: Repository Pattern, Dependency Inversion
 """
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
-from uuid import UUID
+from typing import Any
+from uuid import UUID, uuid4
 
 import structlog
 
-try:
-    from solace_infrastructure.database import ConnectionPoolManager
-    from solace_infrastructure.feature_flags import FeatureFlags
-except ImportError:
-    ConnectionPoolManager = None
-    FeatureFlags = None
+from solace_infrastructure.database import ConnectionPoolManager
 
 from ..domain.entities import User, UserPreferences
 from ..domain.value_objects import AccountStatus, ConsentRecord, ConsentType, UserRole
@@ -32,29 +33,24 @@ from .repository import (
     UserRepository,
 )
 
-if TYPE_CHECKING:
-    from solace_infrastructure.postgres import PostgresClient
-
 logger = structlog.get_logger(__name__)
+
+# ``users.encryption_key_id`` is NOT NULL with no default (EncryptedFieldMixin). User fields are stored in
+# plaintext until the PHI codec lands (WS-14.10), and this id says so.
+PLAINTEXT_KEY_ID = "none"
 
 
 class PostgresUserRepository(UserRepository):
     """PostgreSQL implementation of user repository."""
 
-    POOL_NAME = "user_db"
-
-    def __init__(self, client: PostgresClient, schema: str = "public") -> None:
-        self._client = client
+    def __init__(self, schema: str = "public", *, pool_name: str = "default") -> None:
         self._schema = schema
+        self._pool_name = pool_name
         self._table = f"{schema}.users"
 
     def _acquire(self):
-        """Get connection from ConnectionPoolManager or legacy client."""
-        if ConnectionPoolManager is not None and FeatureFlags is not None and FeatureFlags.is_enabled("use_connection_pool_manager"):
-            return ConnectionPoolManager.acquire(self.POOL_NAME)
-        if self._client is not None:
-            return self._client.acquire()
-        raise Exception("No database connection available.")
+        """A connection from the service's default pool (RLS user from the request context)."""
+        return ConnectionPoolManager.acquire(self._pool_name)
 
     async def save(self, user: User) -> User:
         """Save a new user to PostgreSQL."""
@@ -63,10 +59,11 @@ class PostgresUserRepository(UserRepository):
                 id, email, password_hash, display_name, role, status,
                 is_on_call, phone_number, timezone, locale, avatar_url, bio,
                 email_verified, email_verification_token, login_attempts,
-                locked_until, created_at, updated_at, last_login, deleted_at
+                locked_until, created_at, updated_at, last_login, deleted_at,
+                encryption_key_id
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                $13, $14, $15, $16, $17, $18, $19, $20
+                $13, $14, $15, $16, $17, $18, $19, $20, $21
             )
             RETURNING *
         """
@@ -94,6 +91,7 @@ class PostgresUserRepository(UserRepository):
                     user.updated_at,
                     user.last_login,
                     user.deleted_at,
+                    PLAINTEXT_KEY_ID,
                 )
                 logger.debug("user_saved_postgres", user_id=str(user.user_id), email=user.email)
                 return user
@@ -264,12 +262,12 @@ class PostgresUserRepository(UserRepository):
         """Assign a patient to a clinician in PostgreSQL."""
         query = f"""
             INSERT INTO {self._schema}.clinician_patient_assignments
-                (clinician_id, patient_id, assigned_at)
-            VALUES ($1, $2, NOW())
+                (id, clinician_id, patient_id, assigned_at)
+            VALUES ($1, $2, $3, NOW())
             ON CONFLICT (clinician_id, patient_id) DO NOTHING
         """
         async with self._acquire() as conn:
-            await conn.execute(query, clinician_id, patient_id)
+            await conn.execute(query, uuid4(), clinician_id, patient_id)
             return True
 
     async def unassign_patient_from_clinician(
@@ -283,6 +281,23 @@ class PostgresUserRepository(UserRepository):
         async with self._acquire() as conn:
             result = await conn.execute(query, clinician_id, patient_id)
             return result == "DELETE 1"
+
+    async def delete_assignments_for_user(self, user_id: UUID) -> int:
+        """Delete ALL assignment rows referencing a user (GDPR / REV-17).
+
+        The soft-delete of the users row disables the ON DELETE CASCADE, so
+        erasure must remove ``clinician_patient_assignments`` rows explicitly.
+        Keyed on ``patient_id`` OR ``clinician_id`` so the relationship is erased
+        whichever side the user was on. Accepts the ``str`` the orchestrator passes.
+        """
+        uid = user_id if isinstance(user_id, UUID) else UUID(str(user_id))
+        query = f"""
+            DELETE FROM {self._schema}.clinician_patient_assignments
+            WHERE patient_id = $1 OR clinician_id = $1
+        """
+        async with self._acquire() as conn:
+            result = await conn.execute(query, uid)
+        return int(result.split()[-1])
 
     async def is_patient_assigned_to_clinician(
         self, clinician_id: UUID, patient_id: UUID,
@@ -344,34 +359,33 @@ class PostgresUserRepository(UserRepository):
 
 
 class PostgresUserPreferencesRepository(UserPreferencesRepository):
-    """PostgreSQL implementation of user preferences repository."""
+    """PostgreSQL implementation of user preferences repository.
 
-    POOL_NAME = "user_db"
+    ``user_preferences`` is under FORCE row level security keyed on ``app.current_user_id``: every call must
+    run as the preferences' owner (a request's user, or ``acting_as_user``). ``notification_channels`` is
+    JSONB and is bound as a Python list, which the pool's JSONB codec encodes (IF-03).
+    """
 
-    def __init__(self, client: PostgresClient, schema: str = "public") -> None:
-        self._client = client
+    def __init__(self, schema: str = "public", *, pool_name: str = "default") -> None:
         self._schema = schema
+        self._pool_name = pool_name
         self._table = f"{schema}.user_preferences"
 
     def _acquire(self):
-        """Get connection from ConnectionPoolManager or legacy client."""
-        if ConnectionPoolManager is not None and FeatureFlags is not None and FeatureFlags.is_enabled("use_connection_pool_manager"):
-            return ConnectionPoolManager.acquire(self.POOL_NAME)
-        if self._client is not None:
-            return self._client.acquire()
-        raise Exception("No database connection available.")
+        """A connection from the service's default pool (RLS user from the request context)."""
+        return ConnectionPoolManager.acquire(self._pool_name)
 
     async def save(self, preferences: UserPreferences) -> UserPreferences:
         """Save user preferences to PostgreSQL."""
         query = f"""
             INSERT INTO {self._table} (
-                user_id, notification_email, notification_sms, notification_push,
+                id, user_id, notification_email, notification_sms, notification_push,
                 notification_channels, session_reminders, progress_updates,
                 marketing_emails, data_sharing_research, data_sharing_improvement,
                 theme, language, accessibility_high_contrast, accessibility_large_text,
                 accessibility_screen_reader, created_at, updated_at
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
             )
             ON CONFLICT (user_id) DO UPDATE SET
                 notification_email = EXCLUDED.notification_email,
@@ -394,11 +408,12 @@ class PostgresUserPreferencesRepository(UserPreferencesRepository):
         async with self._acquire() as conn:
             await conn.fetchrow(
                 query,
+                uuid4(),
                 preferences.user_id,
                 preferences.notification_email,
                 preferences.notification_sms,
                 preferences.notification_push,
-                json.dumps(preferences.notification_channels),
+                preferences.notification_channels,
                 preferences.session_reminders,
                 preferences.progress_updates,
                 preferences.marketing_emails,
@@ -453,7 +468,7 @@ class PostgresUserPreferencesRepository(UserPreferencesRepository):
                 preferences.notification_email,
                 preferences.notification_sms,
                 preferences.notification_push,
-                json.dumps(preferences.notification_channels),
+                preferences.notification_channels,
                 preferences.session_reminders,
                 preferences.progress_updates,
                 preferences.marketing_emails,
@@ -509,35 +524,34 @@ class PostgresUserPreferencesRepository(UserPreferencesRepository):
 
 
 class PostgresConsentRepository(ConsentRepository):
-    """PostgreSQL implementation of consent repository."""
+    """PostgreSQL implementation of consent repository.
 
-    POOL_NAME = "user_db"
+    ``consent_records`` is under FORCE row level security keyed on ``app.current_user_id``: every call must
+    run as the record's owner. The table's integer ``version`` column is the optimistic-lock counter, not
+    the consented document version, so ``save`` never binds ``ConsentRecord.version`` to it.
+    """
 
-    def __init__(self, client: PostgresClient, schema: str = "public") -> None:
+    def __init__(self, schema: str = "public", *, pool_name: str = "default") -> None:
         import re as _re
-        self._client = client
         self._schema = schema
+        self._pool_name = pool_name
         # Table name from config, not user input — safe for f-string interpolation.
         self._table = f"{schema}.consent_records"
         assert _re.match(r'^[a-zA-Z_][a-zA-Z0-9_.]*$', self._table), \
             f"Invalid table name: {self._table}"
 
     def _acquire(self):
-        """Get connection from ConnectionPoolManager or legacy client."""
-        if ConnectionPoolManager is not None and FeatureFlags is not None and FeatureFlags.is_enabled("use_connection_pool_manager"):
-            return ConnectionPoolManager.acquire(self.POOL_NAME)
-        if self._client is not None:
-            return self._client.acquire()
-        raise Exception("No database connection available.")
+        """A connection from the service's default pool (RLS user from the request context)."""
+        return ConnectionPoolManager.acquire(self._pool_name)
 
     async def save(self, consent: ConsentRecord) -> ConsentRecord:
         """Save a consent record to PostgreSQL."""
         query = f"""
             INSERT INTO {self._table} (
                 id, user_id, consent_type, granted, granted_at,
-                ip_address, user_agent, version
+                ip_address, user_agent, created_at, updated_at
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8
+                $1, $2, $3, $4, $5, $6, $7, $8, $9
             )
             RETURNING *
         """
@@ -551,7 +565,8 @@ class PostgresConsentRepository(ConsentRepository):
                 consent.granted_at,
                 consent.ip_address,
                 consent.user_agent,
-                consent.version,
+                consent.granted_at,
+                consent.granted_at,
             )
             logger.debug(
                 "consent_saved_postgres",

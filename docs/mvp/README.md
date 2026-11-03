@@ -8,12 +8,19 @@ The **method** is in the [master plan](../superpowers/plans/2026-10-18-mvp-remed
 
 *Edit this section by hand when the phase changes.*
 
-- **Phase:** **in execution since 2026-11-02** (the owner said "go"; the pace is deliberately slow, one task at a time with checks between tasks). W0 entry is in progress.
-- **Done at W0 entry:**
-  - entry tree `b309d50`, zip `D:\tmp\mvp-exec\barriers\W0-entry-b309d50.zip`;
-  - program venv created;
-  - aiokafka 0.12.0, langgraph-checkpoint-postgres 3.0.5, PyJWT 2.15.1 and orjson 3.13.0 installed into the venv only.
-- **Next:** the venv baseline, then W0: build, migrate and boot.
+- **Phase:** **paused at W0 checkpoint 1 (2026-11-03)**, at the owner's request: "complete the nearest checkpoint and then stop". Nothing is in progress, in review or fixing.
+- **Checkpoint 1:** tree `edba7d7`, zip `D:\tmp\mvp-exec\barriers\W0-checkpoint-1-edba7d7.zip`.
+  - W0 is 48 of 61 tasks done, with 1 blocked (WS-05.4 part 2) and 12 not started.
+  - Every done task passed a lens-diverse review workflow, with each finding put to a skeptic panel.
+- **Next, when resumed** (about 3 to 4 hours to the W0 barrier):
+  - the 12 remaining W0 tasks: WS-03.5 then WS-05.4 part 2, WS-05.5, WS-05.6, WS-12.17, WS-13.2, WS-14.2, WS-14.3, WS-15.2, WS-17.2, WS-17.19, WS-18.1, WS-18.2;
+  - the W0 bug-finding round, with AGY in per-file scopes;
+  - the W0 barrier: full regression, the strict boot smoke, and a barrier zip.
+- **Gates recorded for the W0 barrier:**
+  - WS-17.2 must land, because memory still opens its own Postgres engine without verified TLS.
+  - WS-03.5 must set `CORS_ALLOWED_ORIGINS` for orchestrator and user-service.
+  - The `/health` smoke tests stay red until WS-05.5.
+  - The pending hand-offs are in `D:\tmp\mvp-exec\ledger\handoffs.md`.
 - **Blocking outside engineering:**
   - X-01: attach the AWS deployer policy to `MedCodex-Local`, the profile in use. Needed by W4 and W5.
   - X-04 and X-06: clinical and legal approvers.
@@ -24,8 +31,8 @@ The **method** is in the [master plan](../superpowers/plans/2026-10-18-mvp-remed
 
 <!-- mvp:summary:start -->
 
-- Tasks done: **46 / 330** (active 2, blocked 1, deferred 0).
-- Register entries fixed: **43 / 345**.
+- Tasks done: **48 / 330** (active 0, blocked 1, deferred 0).
+- Register entries fixed: **44 / 345**.
 - Per-wave and per-workstream counts: [TRACKER.md](TRACKER.md).
 
 <!-- mvp:summary:end -->

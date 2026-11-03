@@ -129,8 +129,20 @@ class RiskScore(BaseModel):
 
     @property
     def is_critical(self) -> bool:
-        """Check if score indicates critical risk."""
-        return self.value >= Decimal("0.9")
+        """Check if score indicates critical risk.
+
+        REV-25 clinical reconciliation: the CRITICAL floor is 0.85 to match
+        SafetyThresholds.critical_threshold and CrisisDetectorSettings (the
+        live detection path). Previously this hard-coded 0.9, which was
+        LESS sensitive than detection and let a 0.85-0.899 score slip past
+        is_critical while the detector already treated it as CRITICAL.
+        Lowering it here is more sensitive (safer) and does not weaken any
+        severity band below. The severity property keeps its own bands
+        (EXTREME>=0.9, SEVERE>=0.75, both of which map to CRISIS CRITICAL
+        via RiskSeverity.to_crisis_level), so 0.85 remains SEVERE->CRITICAL
+        and is now also is_critical=True, keeping the two coherent.
+        """
+        return self.value >= Decimal("0.85")
 
     @property
     def is_elevated(self) -> bool:
@@ -282,7 +294,10 @@ class SafetyThresholds(BaseModel):
     low_threshold: Decimal = Field(default=Decimal("0.3"), ge=0, le=1)
     elevated_threshold: Decimal = Field(default=Decimal("0.5"), ge=0, le=1)
     high_threshold: Decimal = Field(default=Decimal("0.7"), ge=0, le=1)
-    critical_threshold: Decimal = Field(default=Decimal("0.9"), ge=0, le=1)
+    # REV-25 clinical reconciliation: the CRITICAL crisis floor is 0.85 (matches
+    # docs/CLINICAL-VALIDATION.md), NOT 0.9. A lower threshold is more sensitive,
+    # which is the safer default for crisis detection. Flagged for clinician review.
+    critical_threshold: Decimal = Field(default=Decimal("0.85"), ge=0, le=1)
 
     model_config = {"frozen": True}
 

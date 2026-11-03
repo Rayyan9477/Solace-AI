@@ -70,32 +70,18 @@ except ImportError:
     def require_permissions(*perms):
         return get_current_user
 
-try:
-    from .domain import (
-        NotificationService,
-        NotificationRequest,
-        NotificationResult,
-        NotificationRecipient,
-        NotificationPriority,
-        NotificationStatus,
-        TemplateType,
-        ChannelType,
-        TemplateNotFoundError,
-        TemplateRenderError,
-    )
-except ImportError:
-    from domain import (
-        NotificationService,
-        NotificationRequest,
-        NotificationResult,
-        NotificationRecipient,
-        NotificationPriority,
-        NotificationStatus,
-        TemplateType,
-        ChannelType,
-        TemplateNotFoundError,
-        TemplateRenderError,
-    )
+from .domain import (
+    NotificationService,
+    NotificationRequest,
+    NotificationResult,
+    NotificationRecipient,
+    NotificationPriority,
+    NotificationStatus,
+    TemplateType,
+    ChannelType,
+    TemplateNotFoundError,
+    TemplateRenderError,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -109,10 +95,7 @@ _channel_registry = None
 def _get_template_registry():
     global _template_registry
     if _template_registry is None:
-        try:
-            from .domain import TemplateRegistry
-        except ImportError:
-            from domain import TemplateRegistry
+        from .domain import TemplateRegistry
         _template_registry = TemplateRegistry()
     return _template_registry
 
@@ -120,10 +103,7 @@ def _get_template_registry():
 def _get_channel_registry():
     global _channel_registry
     if _channel_registry is None:
-        try:
-            from .domain import ChannelRegistry
-        except ImportError:
-            from domain import ChannelRegistry
+        from .domain import ChannelRegistry
         _channel_registry = ChannelRegistry()
     return _channel_registry
 
@@ -210,10 +190,7 @@ class HealthResponse(BaseModel):
 
 def _get_notification_service() -> NotificationService:
     """Dependency to get notification service instance."""
-    try:
-        from .main import get_notification_service
-    except ImportError:
-        from main import get_notification_service
+    from .main import get_notification_service
     return get_notification_service()
 
 
@@ -435,10 +412,7 @@ async def list_channels(
     """List all configured notification channels. Requires admin role."""
     if Role.ADMIN not in current_user.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required to view channel configuration")
-    try:
-        from .domain import ChannelStatus
-    except ImportError:
-        from domain import ChannelStatus
+    from .domain import ChannelStatus
     registry = _get_channel_registry()
     channels = registry.list_channels()
 

@@ -18,7 +18,7 @@ from src.infrastructure.repository import (
     EntityNotFoundError,
     DuplicateEntityError,
 )
-from .fixtures import (
+from fixtures import (
     InMemoryUserRepository,
     InMemoryUserPreferencesRepository,
     InMemoryConsentRepository,

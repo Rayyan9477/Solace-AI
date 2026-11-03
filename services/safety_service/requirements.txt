@@ -1,3 +1,9 @@
-# Safety Service — service-specific deps (installed on top of ../../requirements-runtime.txt).
-# Base covers everything the crisis pipeline needs at runtime. ML sentiment analysis
-# (transformers) is optional/guarded and lives in requirements-ml.txt.
+# Safety Service: service extras, bare names only (WS-01.2, D-16).
+# Versions and hashes come from ../../requirements.lock; requirements.in includes this file.
+# ML sentiment analysis (transformers, VADER) is kept out of every image (D-16); its imports are guarded.
+flashtext
+langchain-core
+langchain-anthropic
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp

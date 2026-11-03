@@ -1,4 +1,4 @@
-# Personality Service — service-specific deps (installed on top of ../../requirements-runtime.txt).
-# Base covers the FastAPI/security/observability stack. The real RoBERTa head (transformers,
-# torch) is heavy and optional for MVP — it lives in requirements-ml.txt and its import is
-# guarded, so the service starts without it.
+# Personality Service: service extras, bare names only (WS-01.2, D-16).
+# Personality needs nothing beyond the shared runtime set in ../../requirements.lock.
+# The RoBERTa head (transformers, torch) is kept out of every image (D-16); its import is guarded,
+# so the service starts without it.

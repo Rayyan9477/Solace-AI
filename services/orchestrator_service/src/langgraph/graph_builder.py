@@ -499,7 +499,38 @@ class OrchestratorGraphBuilder:
         graph = self.get_compiled_graph()
         config = {"configurable": {"thread_id": thread_id or state.get("thread_id", "default")}}
         result = await graph.ainvoke(state, config=config)
+        await self._maybe_emit_crisis_event(result)
         return result
+
+    async def _maybe_emit_crisis_event(self, result: OrchestratorState) -> None:
+        """M1-gate R2 (P0): emit a crisis event when the graph flags a crisis so the
+        notification service alerts an on-call clinician.
+
+        On the default chat path (``use_safety_service_precheck=False``) the safety
+        service is never called, so without this the orchestrator shows the user
+        crisis resources but no clinician is ever notified — the escalation pipeline
+        is unreachable via the primary ingress. Published to the EventBus, the
+        KafkaEventBridge forwards it onto ``safety.crisis.detected``.
+        """
+        flags = result.get("safety_flags", {}) or {}
+        if not flags.get("crisis_detected"):
+            return
+        try:
+            from uuid import UUID, uuid4
+            from ..events import EventFactory, get_event_bus
+            user_id = result.get("user_id")
+            session_id = result.get("session_id")
+            event = EventFactory.crisis_detected(
+                session_id=UUID(str(session_id)) if session_id else uuid4(),
+                user_id=UUID(str(user_id)) if user_id else uuid4(),
+                risk_level=str(flags.get("risk_level", "HIGH")),
+                crisis_type=flags.get("crisis_type"),
+            )
+            await get_event_bus().publish(event)
+            logger.info("orchestrator_crisis_event_emitted", risk_level=str(flags.get("risk_level")))
+        except Exception as e:
+            # Never let escalation-emit failure crash the user-facing crisis response.
+            logger.error("crisis_event_emit_failed", error=str(e))
 
     def invoke_sync(self, state: OrchestratorState, thread_id: str | None = None) -> OrchestratorState:
         """
