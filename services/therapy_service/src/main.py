@@ -213,6 +213,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan: the runtime brackets it; this composes the therapy service."""
     async with service_runtime(app, SPEC) as runtime:
         settings = TherapyServiceAppSettings()
+        # WS-15.F1: a mock producer "sends" events to an in-process list, so they never reach the
+        # broker. Strict = the service's own environment OR the bare ENVIRONMENT.
+        if settings.kafka_use_mock and (
+            is_strict_environment(settings.environment) or is_strict_environment()
+        ):
+            raise StartupDependencyError(
+                "events",
+                "a mock Kafka producer is not allowed in staging and production "
+                "(unset THERAPY_KAFKA_USE_MOCK)",
+            )
         components = await build_therapy_components(runtime, settings)
         app.state.settings = settings
         app.state.therapy_orchestrator = components.orchestrator
