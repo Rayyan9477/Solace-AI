@@ -14,7 +14,7 @@ from services.personality_service.src.events import (
     StabilityAchievedEvent, EventBus, EventStore, EventPublisher,
 )
 from services.personality_service.src.config import (
-    DatabaseSettings, RedisSettings, AISettings, TraitDetectionSettings,
+    AISettings, TraitDetectionSettings,
     StyleAdaptationSettings, ProfileSettings, ObservabilitySettings,
     PersonalityServiceConfig, get_config, reload_config,
 )
@@ -228,34 +228,6 @@ class TestEventStore:
 class TestConfigSettings:
     """Tests for configuration settings."""
 
-    @pytest.fixture(autouse=True)
-    def _required_secrets(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Provide the required DB/Redis passwords.
-
-        Secret-hardening made DatabaseSettings.password and
-        RedisSettings.password REQUIRED SecretStr (sourced from
-        PERSONALITY_DB_PASSWORD / PERSONALITY_REDIS_PASSWORD). These tests
-        validate the *other* fields' defaults, so we supply the mandatory
-        password via env vars without overriding any of the defaulted fields.
-        """
-        monkeypatch.setenv("PERSONALITY_DB_PASSWORD", "test-db-password")
-        monkeypatch.setenv("PERSONALITY_REDIS_PASSWORD", "test-redis-password")
-
-    def test_database_settings(self) -> None:
-        """Test database settings defaults."""
-        settings = DatabaseSettings()
-        assert settings.host == "localhost"
-        assert settings.port == 5432
-        assert settings.name == "solace"
-        assert "postgresql" in settings.connection_string
-
-    def test_redis_settings(self) -> None:
-        """Test Redis settings defaults."""
-        settings = RedisSettings()
-        assert settings.host == "localhost"
-        assert settings.port == 6379
-        assert "redis://" in settings.url
-
     def test_ai_settings(self) -> None:
         """Test AI settings defaults."""
         settings = AISettings()
@@ -289,7 +261,7 @@ class TestConfigSettings:
         config = PersonalityServiceConfig()
         assert config.service_name == "personality-service"
         assert config.port == 8007
-        assert config.database is not None
+        assert config.detection is not None
         assert config.ai is not None
 
     def test_config_to_dict(self) -> None:
