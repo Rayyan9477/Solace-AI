@@ -36,3 +36,4 @@
 - [ ] WS-14 owner (from WS-14.2 fix1): revoke-token answers a well-formed 'Bearer <garbage>' with 503 'revocation service unavailable' instead of 401 (pre-existing).
 - [ ] WS-07 (W1, from WS-03.5 security review): in strict, user-service's limiter keys on the socket peer (hops 0) so all anonymous users behind Caddy share one IP bucket; TRUSTED_PROXY_HOPS is set in compose but nothing reads it yet (orchestrator reads ORCHESTRATOR_TRUSTED_PROXY_HOPS).
 - [ ] W0 bug-finding round / owner (from WS-03.5 review W035-SEC-1): Caddy routes /ready and /health publicly (check names, ok/critical, version, exception class). IF-18 never-routed list excludes them - decide whether to add them to never_routed (contract change WS-04/WS-03).
+- [ ] Config adoption (after D-19 lifts, from W0 bug round A-4): config_service/src/main.py copies error['msg'] into 422 bodies and logs error=str(exc).

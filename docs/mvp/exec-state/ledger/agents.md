@@ -113,3 +113,6 @@
 - aca71e3c2034053ae  W0 bug hunt A (PHI/logging)
 - a9cd57bef1422be5b  W0 bug hunt B (safety/crisis)
 - a0085626bab2c5df6  W0 bug hunt C (strict boot/config)
+- aa4772c6e51dae491  Bug-round skeptic 1
+- a982a041108ee826a  Bug-round skeptic 2
+- a993e354f956d1739  Bug-round skeptic 3
