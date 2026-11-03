@@ -13,11 +13,11 @@ The register's statuses are derived from this file at each barrier (`fixed` when
 
 | Status | todo | in-progress | review | fixing | done | blocked | deferred | total |
 |---|---|---|---|---|---|---|---|---|
-| Tasks | 271 | 1 | 0 | 0 | 58 | 0 | 0 | 330 |
+| Tasks | 271 | 0 | 0 | 0 | 58 | 1 | 0 | 330 |
 
 | Wave | Phase A done / total | Phase B done / total | Active | Blocked |
 |---|---|---|---|---|
-| W0 | 36 / 39 | 16 / 16 | 1 | 0 |
+| W0 | 36 / 39 | 16 / 16 | 0 | 1 |
 | W1 | 0 / 34 | 0 / 35 | 0 | 0 |
 | W2 | 0 / 16 | 0 / 61 | 0 | 0 |
 | W3 | 0 / 24 | 0 / 40 | 0 | 0 |
@@ -92,7 +92,7 @@ Filled at each wave barrier (master plan, section 5.5). The tree zip is the only
 | [WS-05.3](../superpowers/plans/2026-10-18-mvp-remediation/WS-05-realinfra-harness-e2e.md#task-ws-053-expected-failure-manifest-plugin-with-hop-tracking) | Expected-failure manifest plugin with hop tracking | high | safety-critical | Opus | no | - | MVP-039 | `done` | trees a3b2a5a..5fb1992 (fix1+fix2); Opus review + scoped re-review closed; 22 plugin tests |
 | [WS-03.3](../superpowers/plans/2026-10-18-mvp-remediation/WS-03-deploy-secrets-backups.md#task-ws-033-redis-authentication-everywhere-strict-host-port-lockdown-and-required-grafana-credentials) | Redis authentication everywhere, strict host-port lockdown and required Grafana credentials | high | security-critical | Opus | yes | WS-03.2 | MVP-040, MVP-118 | `done` | fix3 f528018 APPROVED (harness run() via temp files, no hang); redis auth + URL-safe check, strict port lockdown, Grafana reset, pull_policy build, depends_on redis |
 | [WS-04.4](../superpowers/plans/2026-10-18-mvp-remediation/WS-04-service-runtime-observability.md#task-ws-044-start_service_runtime-and-stop_service_runtime-with-datastores-and-ordered-teardown) | start_service_runtime and stop_service_runtime with datastores and ordered teardown | low | security-critical | Opus | no | WS-04.3 | MVP-332 | `done` | trees ddda366..cf2bc2c (fix1); 20 lifecycle tests (mutation-checked); bootstrap 108+1 blocked; strict host policy -> WS-02.5 |
-| [WS-05.4](../superpowers/plans/2026-10-18-mvp-remediation/WS-05-realinfra-harness-e2e.md#task-ws-054-compose-test-stack-per-run-secrets-and-the-e2e_stack-fixture) | Compose test stack, per-run secrets and the e2e_stack fixture | high | safety-critical | Opus | yes | WS-02.5, WS-05.2, WS-05.3 | MVP-039 | `in-progress` | part 2 (cloud lane) |
+| [WS-05.4](../superpowers/plans/2026-10-18-mvp-remediation/WS-05-realinfra-harness-e2e.md#task-ws-054-compose-test-stack-per-run-secrets-and-the-e2e_stack-fixture) | Compose test stack, per-run secrets and the e2e_stack fixture | high | safety-critical | Opus | yes | WS-02.5, WS-05.2, WS-05.3 | MVP-039 | `blocked` | part 2 code done (5001fd2); live self-test blocked: egress 403 pkg-containers.githubusercontent.com (all 10 Dockerfiles copy uv from ghcr.io) |
 | [WS-01.3](../superpowers/plans/2026-10-18-mvp-remediation/WS-01-build-deps-ci.md#task-ws-013-lazy-package-exports-so-the-rate-limiter-and-the-postgres-client-import-without-kong-jose-weaviate-or-alembic) | Lazy package exports so the rate limiter and the Postgres client import without Kong, jose, weaviate or alembic | low | standard | Sonnet | no | WS-01.1 | MVP-269, MVP-310, MVP-312 | `done` | trees 56961cc..55b8ebe; RED 4 -> GREEN 6; light-import test now green; jose-free import proven in venv-clean |
 | [WS-03.4](../superpowers/plans/2026-10-18-mvp-remediation/WS-03-deploy-secrets-backups.md#task-ws-034-infra-health-and-capacity-weaviate-healthcheck-without-curl-behind-an-opt-in-profile-kafka-heap-inside-its-limit) | Infra health and capacity: Weaviate healthcheck without curl behind an opt-in profile, Kafka heap inside its limit | blocker | standard | Sonnet | yes | WS-03.3 | MVP-002, MVP-045 | `done` | head 825e24d APPROVED (spec-ops; only finding refuted) |
 | [WS-04.5](../superpowers/plans/2026-10-18-mvp-remediation/WS-04-service-runtime-observability.md#task-ws-045-service-conformance-suite-and-a-corrected-prometheus-scrape-config) | Service conformance suite and a corrected Prometheus scrape config | high | standard | Opus | yes | WS-04.4 | MVP-036 | `done` | trees f579888..d8d2224; scrape 3/3 + promtool; probe controls 3/3; 20 mutants; 18 per-service tests expected-red until phase B |
