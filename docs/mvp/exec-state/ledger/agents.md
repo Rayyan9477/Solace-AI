@@ -97,3 +97,9 @@
 - aac6365f9eb54ed83  Review WS-17.2 security+spec
 - a0aa066c54efa69f9  Review WS-17.2 real-PG reproduce
 - a78d6ec8c3f18133b  Skeptic WS-18.1
+- a9938311218d2815c  Review WS-18.2 spec+regression
+- affa4e403cddabeb5  Review WS-18.2 security
+- ac59ccb490f198d59  Review WS-12.17
+- aede0971b7a7e0a5a  Review WS-17.19
+- a24f71ecf9fd86947  Review WS-13.2 crisis-path
+- a9c9d0e7449dbe271  Review WS-13.2 spec+security
