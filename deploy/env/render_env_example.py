@@ -5,7 +5,8 @@
 
 One entry per source (env-file key), grouped under ``# --- <group> ---`` headings in registry
 order, each preceded by one comment line with the secret flag, the required-in-strict flag,
-the format and the notes. Secret sources are always written blank. Non-secret sources show
+the format and the notes. Secret sources are written blank, except a ``bcrypt`` secret, written
+as ``''`` so the operator keeps the single quotes its $ signs need (MVP-117). Non-secret sources show
 their dev default (else their example). A value containing ``$`` or whitespace is single-quoted.
 """
 from __future__ import annotations
@@ -25,7 +26,7 @@ HEADER = (
     "# GENERATED from deploy/env/env-contract.yaml by: python -m deploy.env.render_env_example --write",
     "# Do not edit by hand. Change the registry and re-render; tests/deploy/test_env_contract.py checks it.",
     "#",
-    "# Secrets are always blank here; never commit a real value. Single-quote any value that contains",
+    "# Secrets are blank here (a bcrypt hash shows '' to keep its quotes); never commit a real value. Single-quote any value that contains",
     "# a $ (a bcrypt hash, for example) so compose does not interpolate it. Unset values fall back to",
     "# the dev defaults shown; the strict profile (docker-compose.prod.yml) refuses to render while a",
     "# source marked 'required in strict' is unset.",
@@ -47,7 +48,8 @@ def _primary(source: str, rows: list[EnvVar]) -> EnvVar:
 
 def _value(primary: EnvVar, rows: list[EnvVar]) -> str:
     if primary.secret:
-        return ""
+        # a bcrypt hash contains $: keep the quotes the operator must use (MVP-117)
+        return "''" if primary.format == "bcrypt" else ""
     candidates = [primary, *rows]
     value = next((r.dev_default for r in candidates if r.dev_default is not None), None)
     if value is None:
