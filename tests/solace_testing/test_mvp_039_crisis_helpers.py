@@ -286,3 +286,19 @@ def test_mvp_039_page_level_is_tied_to_the_episode(subject_level: str, max_level
     else:
         with pytest.raises(AssertionError):
             crisis_suite._assert_page_level(subject, max_level)
+
+
+def test_mvp_039_page_phi_check_refuses_an_empty_or_linkless_body() -> None:
+    user = SimpleUser(email="user-000000000001@test.invalid")
+    crisis_suite._assert_page_without_phi(_page(CLIN, ALERT_A, text=f"Acknowledge: {ACK_URL}"), user)
+    for text in ("", "A crisis needs attention."):
+        with pytest.raises(AssertionError):
+            crisis_suite._assert_page_without_phi(_page(CLIN, ALERT_A, text=text), user)
+    for leak in ("I don’t want to be alive anymore", user.email):
+        with pytest.raises(AssertionError):
+            crisis_suite._assert_page_without_phi(_page(CLIN, ALERT_A, text=f"{ACK_URL} {leak}"), user)
+
+
+@dataclass
+class SimpleUser:
+    email: str

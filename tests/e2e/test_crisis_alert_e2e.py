@@ -61,9 +61,18 @@ def _assert_page_level(subject, max_level):
     assert LEVELS.index(match.group(1)) <= LEVELS.index(max_level), (match.group(1), max_level)
 
 
+ACK_PATH = "/api/v1/notifications/crisis-alerts/ack/"
+
+
+def _assert_page_without_phi(msg, user):
+    """The page body is real (non-empty, carries the ack link), so the PHI-absence checks cannot pass vacuously."""
+    assert msg.text and ACK_PATH in msg.text, "page body is empty or has no acknowledgement link"
+    assert "alive anymore" not in msg.text and user.email not in msg.text
+
+
 async def _acknowledge(stack, user_id, msg):
     """IF-09: GET shows a POST confirm form and changes nothing; POST acknowledges the episode."""
-    path = urlsplit(extract_link(msg.text, "/api/v1/notifications/crisis-alerts/ack/")).path
+    path = urlsplit(extract_link(msg.text, ACK_PATH)).path
     page = await stack.edge("GET", path)
     assert page.status_code == 200
     assert _POST_FORM_RE.search(page.text), "GET does not show a POST confirm form"
@@ -120,7 +129,7 @@ async def test_crisis_pages_the_oncall_clinician_once_without_message_text(e2e_s
         (episode,) = crisis_episodes(e2e_stack, user.id, timeout=60)          # one episode for this user's turn
         msg = wait_for_episode_page(e2e_stack, oncall.email, episode["alert_id"], timeout=60)
         _assert_page_level(msg.subject, crisis_episodes(e2e_stack, user.id)[0]["max_level"])   # W056-CRI-6
-        assert "alive anymore" not in msg.text and user.email not in msg.text
+        _assert_page_without_phi(msg, user)
         await asyncio.sleep(15)
         pages = pages_for_episode(e2e_stack, oncall.email, episode["alert_id"])
         max_level = crisis_episodes(e2e_stack, user.id)[0]["max_level"]

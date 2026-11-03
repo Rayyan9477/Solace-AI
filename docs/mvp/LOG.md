@@ -11,6 +11,11 @@ Entry format:
 - Links: <files>.
 ```
 
+## 2026-11-03: W0 code-complete; live runs and barrier wait on egress
+- WS-05.5 (boot smoke + in-process /live smoke, tests/system green) and WS-05.6 (crisis alert E2E, dev profile, helpers) are code-complete and reviewed; all 12 W0 tasks are now code-complete.
+- Still open: the live runs (WS-05.4 self-test, WS-05.5 dev/strict boot smoke and manifest, WS-05.6 crisis E2E) and the barrier record. All need the service images, which cannot build until the owner allows pkg-containers.githubusercontent.com.
+- PR to main waits for the owner's approval and repo push access.
+
 ## 2026-11-03: W0 resumed in a cloud session; barrier blocked on environment
 - 11 of the 12 remaining W0 tasks done (WS-03.5, 12.17, 13.2, 14.2, 14.3, 15.2, 17.2, 17.19, 18.1, 18.2; WS-05.4 part 2 code) plus bug-round fix WS-15.F1. WS-17.2 barrier gate met. Each task reviewed by two lenses with 3-skeptic panels; fix rounds on WS-12.17, 14.2, 17.2, 18.1, 18.2, 03.5.
 - Blocked: WS-05.4 live self-test, WS-05.5, WS-05.6 and the strict boot smoke. All 10 Dockerfiles copy uv from a digest-pinned ghcr.io image, and the cloud environment's network policy refuses pkg-containers.githubusercontent.com. Owner action: allow that host.
