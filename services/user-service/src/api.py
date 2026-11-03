@@ -698,7 +698,15 @@ async def revoke_token(
     requests even before natural expiry. Useful for forced logout or token compromise.
     """
     jwt_service = get_jwt_service(request)
-    token = jwt_service.extract_token_from_header(authorization)
+    try:
+        token = jwt_service.extract_token_from_header(authorization)
+    except (TokenExpiredError, TokenInvalidError) as e:
+        # W142-SEC-1: no app-level token-error handler exists (IF-01), so map it here.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     revoked = await jwt_service.revoke_token(token)
     if not revoked:
         raise HTTPException(

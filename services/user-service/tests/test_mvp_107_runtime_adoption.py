@@ -117,3 +117,23 @@ async def test_mvp_107_dev_event_bridge_failure_boots_not_ready(monkeypatch: pyt
         assert critical is True and await check() == (False, "unavailable")
         assert "user_event_bridge" not in runtime.shutdowns
     assert "user_service_state" in runtime.shutdowns
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("authorization", ["Basic abc", "Bearer", "Bearer a b"])
+async def test_w142_sec_1_revoke_token_malformed_header_is_401(authorization: str) -> None:
+    """W142-SEC-1: with no service-owned token-error handler, a malformed header is still a 401, not a 500."""
+    import httpx
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _no_lifespan(_app):
+        yield
+
+    app = create_service_app(main.SPEC, lifespan=_no_lifespan, routers=main.ROUTERS, title="probe")
+    await main.build_user_service_state(fake_runtime(redis=None), app)
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/api/v1/auth/revoke-token", headers={"Authorization": authorization})
+    assert resp.status_code == 401
+    assert resp.headers.get("www-authenticate") == "Bearer"
