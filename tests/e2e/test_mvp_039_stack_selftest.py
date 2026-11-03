@@ -74,6 +74,9 @@ def test_mvp_039_overlay_changes_only_allowed_keys_in_strict(tmp_path):
         before, after = without[name].get("environment") or {}, with_overlay[name].get("environment") or {}
         changed = {k for k in before.keys() | after.keys() if before.get(k) != after.get(k)}
         assert changed <= OVERLAY_ALLOWED_KEYS, (name, sorted(changed - OVERLAY_ALLOWED_KEYS))
+        # only user-service lets the harness's @test.invalid addresses register (WS-14.1 test-only setting)
+        tlds = after.get("USER_EMAIL_ALLOW_SPECIAL_USE_TLDS")   # a local, so a failure never prints the environment
+        assert tlds == ("invalid" if name == "user-service" else None), name
         # the one non-environment change: the e2e CA mounted at /run/secrets/e2e-ca.crt, next to the base mounts
         mounts_before = {s["source"]: s for s in without[name].get("secrets") or []}
         mounts_after = {s["source"]: s for s in with_overlay[name].get("secrets") or []}

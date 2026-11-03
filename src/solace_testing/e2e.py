@@ -78,6 +78,8 @@ OVERLAY_APP_ENV_KEYS = frozenset({
     "NOTIFICATION_FALLBACK_ONCALL_EMAIL", "NOTIFICATION_ACK_BASE_URL",
     "WEAVIATE_ENABLED",
 })
+# user-service only: the test-only WS-14.1 setting that lets the harness's @test.invalid addresses register.
+OVERLAY_USER_ENV_KEYS = frozenset({"USER_EMAIL_ALLOW_SPECIAL_USE_TLDS"})
 OVERLAY_CADDY_ENV_KEYS = frozenset({"CADDY_API_SITE", "CADDY_AUTH_SITE"})
 # The one service key the overlay adds to the app services: ``secrets: [e2e-ca.crt]``, the per-run CA that
 # SSL_CERT_FILE names in strict, mounted at /run/secrets/e2e-ca.crt (both profiles, so one overlay serves both).
@@ -85,7 +87,7 @@ OVERLAY_APP_SECRET = "e2e-ca.crt"  # noqa: S105 - a compose secret name, not a s
 OVERLAY_APP_SERVICE_KEYS = frozenset({"secrets"})
 # Every key the overlay may add or change on a base or prod service: the environment keys above (app services and
 # caddy) and the app services' e2e CA mount.
-OVERLAY_ALLOWED_KEYS = OVERLAY_APP_ENV_KEYS | OVERLAY_CADDY_ENV_KEYS | OVERLAY_APP_SERVICE_KEYS
+OVERLAY_ALLOWED_KEYS = OVERLAY_APP_ENV_KEYS | OVERLAY_USER_ENV_KEYS | OVERLAY_CADDY_ENV_KEYS | OVERLAY_APP_SERVICE_KEYS
 
 EDGE_API_PORT = 8080
 EDGE_AUTH_PORT = 8081
@@ -977,6 +979,7 @@ __all__ = [
     "OVERLAY_APP_SECRET",
     "OVERLAY_RESET_KEYS",
     "OVERLAY_SERVICES",
+    "OVERLAY_USER_ENV_KEYS",
     "SERVICE_PORTS",
     "ComposeError",
     "Faults",
