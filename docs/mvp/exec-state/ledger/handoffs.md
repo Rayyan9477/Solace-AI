@@ -31,3 +31,5 @@
 - [ ] WS-17.5/17.6/17.11 (from WS-17.2 real-PG probe W172-REP-1): real-infra tests must cover therapeutic_events too; session_summaries, therapeutic_events and memory_user_profiles have no RLS at head (migration 006 deferral) - confirm an owner task enables it.
 - [ ] WS-03 owner / CI (from WS-14.2): USER_DB_* and USER_REDIS_* are dead after WS-14.2 but still set in docker-compose.yml, deploy/env/env-contract.yaml and .github/workflows/ci.yml - drop them.
 - [ ] W0 bug-finding round (from WS-17.2 fix1): platform-level scrub of asyncpg error text (IntegrityError detail, server-side DataError) in the runtime log chain, not per repository.
+- [ ] WS-04.6 / WS-07.7 (from WS-14.2 review W142-SPE-1/SPE-2): user-service RateLimitMiddleware sits outside CORS and RequestContextMiddleware (429 has no ACAO / X-Request-ID; OPTIONS preflights to /auth/login counted); _register_rate_limiting opens a second Redis client with no closer - install_rate_limiting must sit inside CORS and use runtime.redis.
+- [ ] WS-14.3 (from WS-14.2 fix1): revoke-token now catches TokenInvalidError locally in api.py - the verbatim split into api_auth must keep it.
