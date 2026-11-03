@@ -81,3 +81,9 @@
 - workflow wf_4cafcebe-1ed  WS-17.1 review
 - a3ebc928d5b41a475  Implement WS-16.1 diagnosis adoption
 - workflow wf_5abeffaf-964  checkpoint batch review (8 tasks)
+- ac605e289ebada8ce  Implement WS-03.5 (cloud)
+- a0b010a66376a3a5f  Implement WS-14.2 (cloud)
+- ae5a401100221d34a  Implement WS-17.2 (cloud)
+- a2e142451a03b8af1  Implement WS-13.2 (cloud)
+- add8d8abea4b3039c  Implement WS-15.2 (cloud)
+- a266ed63162d99934  Implement WS-18.1 (cloud)
