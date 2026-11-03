@@ -110,3 +110,6 @@
 - aae92c6bf139ed115  Review WS-14.3 verbatim+security
 - a6e20de245b7ec27d  Review WS-14.3 spec
 - a588519a28e1d59ce  Implement WS-05.4 part 2 (cloud)
+- aca71e3c2034053ae  W0 bug hunt A (PHI/logging)
+- a9cd57bef1422be5b  W0 bug hunt B (safety/crisis)
+- a0085626bab2c5df6  W0 bug hunt C (strict boot/config)
