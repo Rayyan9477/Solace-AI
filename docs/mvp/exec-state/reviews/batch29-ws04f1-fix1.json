@@ -1,0 +1,125 @@
+{
+ "task": "WS-04.F1-fix1",
+ "results": [
+  {
+   "lens": "phi-closure",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "APPROVED",
+    "prior_findings": [
+     {
+      "id": "WS04F1-PHI-1",
+      "closed": true,
+      "note": "Closed. Every probe ran under the strict chain. (1) TestClient and an in-process real uvicorn 0.40 server: a response_model mismatch on GET /rm, returning patient text, logged one unhandled_exception line with error_type=ResponseValidationError, validation_errors=[{int_parsing, response.age}] and origin, and no exception field. uvicorn's own record became asgi_unhandled_exception with error_type only. (2) The request-body 422 path (int_parsing, an extra_forbidden key, invalid JSON) logs only http_request, and the 422 body carries no input. (3) Under real uvicorn, a ValidationError inside a WebSocket handler gives asgi_unhandled_exception with error_type only. (4) WebSocket query validation closes with 1008 and the fixed reason, and writes no log line. The fix-round tests pass: test_if01_audit_hardening plus test_mvp_180_logging gave 102 passed."
+     },
+     {
+      "id": "WS04F1-PHI-2",
+      "closed": true,
+      "note": "Closed for the reported scenarios. 'Task exception was never retrieved' with a linked ValidationError keeps the first line of the event and adds the summary. error=ve, a chained error and errors=[ve] become the {error_type, validation_errors} summary. A 40-link chain, a 41-member ExceptionGroup, __notes__, an asyncio callback, the pydantic 2.13 serializer warning (python_warning_redacted), stdlib %s and structlog positional %s all leak no input. A narrower variant still leaks when the text has been escaped by repr(): see WS04F1F1-PHI-1. On the 'broad cut' concern, I judge it acceptable for a PHI service. A dict value with an 'input' key is rendered intact: the probe's llm_request_dict kept its body. Only a string that literally contains 'input': or \"input\": is cut, for example str() or json.dumps of an LLM request, or a one-line SDK error such as \"Invalid 'input': ...\". The event name, error_type and origin remain. In services/src the only 'input' key is memory_service's embedding payload, and that is user text anyway. On the concern about unlinked exception reprs, I also judge it acceptable: 266 service call sites pass error=str(e), which the runtime cannot summarise, so a type-only rule would change little."
+     },
+     {
+      "id": "WS04F1-HTT-1",
+      "closed": true,
+      "note": "Closed. REQUEST_TOO_LARGE_CODE = \"REQUEST_TOO_LARGE\" (http.py:115). The docstrings in http.py, spec.py and bootstrap.py are updated. test_fix1_htt1 and the four HTT-2 tests assert the upper-case code and pass. A repo grep finds lower case only in the helper name _send_request_too_large and in the original brief text (docs/superpowers/plans/2026-10-18-mvp-remediation/WS-04-service-runtime-observability.md:1632). Neither is a runtime contract."
+     },
+     {
+      "id": "WS04F1-LIF-1",
+      "closed": true,
+      "note": "Closed for the reported shapes. The five new NEAR_MISSES are rejected: stop code after the yield in form (a) and in form (b), a nested yield, a yield with a value, and two yields. Forms (a) and (b) are still accepted. test_service_conformance: 13 passed and 8 failed. All five adopted services (safety, therapy, diagnosis, memory, orchestrator, all in form a) pass test_service_conforms and test_lifespan_is_bracketed_by_the_runtime. The 8 failures are the 4 unadopted services \u00d7 2 cases, failing for pre-adoption reasons: no SPEC, and structlog.configure( still present. Form (a) is airtight. Form (b) still leaves the try's except and else clauses unchecked: see WS04F1F1-LIF-1. On the concern that a lifespan can no longer yield a value, I judge it acceptable. No services/*/src/main.py yields a value, and the shape note (line 65) documents the bare-yield rule."
+     }
+    ],
+    "findings": [
+     {
+      "id": "WS04F1F1-PHI-1",
+      "severity": "minor",
+      "file": "src/solace_infrastructure/runtime/logging.py",
+      "line": 105,
+      "problem": "The FastAPI and errors() markers are matched as literal substrings ('input': and \"input\":), so they fail once the text has passed through repr() or JSON encoding. If the text holds both quote kinds, repr() escapes the single quotes, and 'input': becomes \\'input\\':. Any apostrophe in the patient's input is enough for that. JSON re-encoding turns \"input\": into \\\"input\\\":. _quotes_validation_input then returns False, so _withhold_validation_input and the renderer and filter backstops let the text through. The pydantic marker input_value= survives escaping; only the dict-rendering markers are fragile.",
+      "failure_scenario": "Strict configure. A batch step stores exc.errors() and later raises RuntimeError(f\"batch rejected: {errors}\") outside the except block, so the exception is unlinked. The input is \"Margaret can't stop crying\". (1) log.error('batch_failed', error=exc) rendered \"error\": \"RuntimeError('batch rejected: [{\\'type\\': \\'int_parsing\\', ... \\'input\\': \\\"Margaret can\\'t stop crying\\\", ...}]')\". (2) The same exception in an un-awaited task gave the event \"Task exception was never retrieved\\nfuture: <Task finished ... exception=RuntimeError('... \\'input\\': \\\"Margaret can\\'t stop crying\\\" ...')>\". On that same line the renderer had matched the unescaped traceback (validation_errors: [], no exception field), but the event text was kept whole. (3) The patient text also leaked through: stdlib warning('rejected %r', str(ResponseValidationError(errs))); structlog warning('rejected %r', ...); a dataclass repr holding that text; warnings.warn(repr(...)); and a JSON string re-encoded inside JSON. The same code paths without an apostrophe are withheld, and error=str(exc) is withheld. This is latent: in services/src only 5 call sites log error=e directly and 8 call asyncio.create_task/ensure_future. Free text with apostrophes is routine in this product.",
+      "fix": "Make the markers escape-tolerant in _quotes_validation_input, which the renderer, _AsgiExceptionFilter, _WarningFilter and _redact all use. For example: _VALIDATION_INPUT_RE = re.compile(r\"input_value=|\\\\*['\\\"]input\\\\*['\\\"]\\s*:\"), then return bool(_VALIDATION_INPUT_RE.search(text)). Add tests with an apostrophe in the input for: an unlinked exception as an event value, an un-retrieved task holding that exception, and stdlib %r of str(ResponseValidationError(...)).",
+      "evidence": "Scratch probe (since deleted) under configure_service_logging(production spec). These scenarios leaked 'Margaret' and 'crying': exc_value_unlinked_apos, exc_value_unlinked_fastapi_apos, task_unlinked_apos, stdlib_percent_r (only the %r of the FastAPI text), structlog_positional (only %r), warning_text (the repr form), object_repr (holder_detail) and json_double_encoded (the wrapped form). Controls with no leak: exc_value_unlinked_plain, exc_value_unlinked_str_apos, task_linked_apos, unlinked_500 (the HTTP 500 path renders the traceback unescaped, so the backstop drops it). Code: logging.py:105 holds the literal markers; :305-307 uses substring matching; :615 renders an unlinked exception as repr(); :490 runs the backstop on the exception field only."
+     },
+     {
+      "id": "WS04F1F1-PHI-2",
+      "severity": "minor",
+      "file": "src/solace_infrastructure/runtime/logging.py",
+      "line": 596,
+      "problem": "_redact summarises exception objects but passes pydantic and FastAPI error dicts through unchanged. The usual way to log a validation failure, errors=exc.errors(), therefore renders every input value. This contradicts the redact_credentials docstring: \"Validation input never reaches a rendered string\". The stdlib ExtraAdder allows the key validation_errors, so extra={'validation_errors': exc.errors()} renders the input the same way. A value_error's ctx.error is the validator's ValueError, and its repr often quotes the value.",
+      "failure_scenario": "Strict configure. structlog.get_logger('svc').warning('validation_failed', errors=ve.errors()), where ve is a ValidationError on the patient's free text, rendered {\"errors\": [{\"type\": \"int_parsing\", \"loc\": [\"age\"], \"msg\": \"...\", \"input\": \"Margaret can't stop crying\", \"url\": \"...\"}], ...}. The regex PHI sanitizer does not mask free text. This is latent: today only the pre-adoption handlers in config_service and personality_service call .errors(), and they drop input. Nothing in the runtime stops an adopting service from logging errors() directly.",
+      "fix": "In _redact_mapping, or in _redact for dicts, recognise the pydantic error shape: a dict with 'type' and 'loc' plus 'input' or 'ctx'. Drop 'input' and 'ctx' from it, or reduce it to {type, field} with _masked_field_path, which _validation_error_fields already does. Add a test for errors=ve.errors() on structlog and for extra={'validation_errors': ve.errors()} on stdlib.",
+      "evidence": "Scratch probe scenario structured_errors (since deleted): the patient text appeared verbatim in the 'input' field of the JSON line. logging.py:596-615 (_redact) only special-cases str, None/int/float, dict, list/tuple/set and BaseException. A dict's values are redacted but never shape-checked. logging.py:743-745: ExtraAdder allows validation_errors from any stdlib caller. grep '\\.errors\\(\\)' in services/src finds only config_service main.py:114 and personality_service main.py:231, both of which strip input."
+     },
+     {
+      "id": "WS04F1F1-LIF-1",
+      "severity": "minor",
+      "file": "tests/bootstrap/test_service_conformance.py",
+      "line": 235,
+      "problem": "For form (b), _bracket_form checks only the try body (it must end with the only bare yield) and finalbody. The try's handlers and orelse are never inspected. Stop code after the yield can therefore sit in an else: clause, stop code can sit in an except: clause, and a second yield can sit in a handler, and the gate passes them all. That contradicts the checker's own docstring (\"no service stop code may follow the yield\").",
+      "failure_scenario": "The check accepts this shape: runtime = await start_service_runtime(app, SPEC); try: consumer = await start_consumer(runtime); yield; except Exception: raise; else: await consumer.stop(); finally: await stop_service_runtime(runtime). It also accepts 'except BaseException: await consumer.stop(); raise' and 'except Exception: yield'. In a runtime probe of the else-shape cancelled while serving, the events were ['runtime.start', 'consumer.start', 'runtime.stop', 'cancelled']. consumer.stop never ran, which is the original LIF-1 failure mode: the service-owned stop is skipped, though the datastore closers still run. This is latent: all five adopted services use form (a), which is airtight.",
+      "fix": "In the form (b) branch, also require body[1].orelse == [], and either require body[1].handlers == [] or reject any handler that contains a yield or any statement other than a bare raise. Add NEAR_MISSES cases stop_code_in_the_else_of_form_b, stop_code_in_an_except_of_form_b and yield_in_an_except_of_form_b.",
+      "evidence": "Scratch probe (since deleted) fed snippets to _assert_lifespan_bracketed. form_b_stop_in_else: ACCEPTED. form_b_stop_in_except: ACCEPTED. form_b_second_yield_in_handler: ACCEPTED. form_a_plain: ACCEPTED. test_service_conformance.py:233-238 checks body[1].finalbody and body[1].body only. The services' main.py lifespans at therapy:203, orchestrator:97, memory:134, diagnosis:183 and safety:130 are all 'async with service_runtime(app, SPEC) as runtime:'."
+     }
+    ]
+   },
+   "verified": [
+    {
+     "id": "WS04F1F1-PHI-1",
+     "severity": "minor",
+     "file": "src/solace_infrastructure/runtime/logging.py",
+     "line": 105,
+     "problem": "The FastAPI and errors() markers are matched as literal substrings ('input': and \"input\":), so they fail once the text has passed through repr() or JSON encoding. If the text holds both quote kinds, repr() escapes the single quotes, and 'input': becomes \\'input\\':. Any apostrophe in the patient's input is enough for that. JSON re-encoding turns \"input\": into \\\"input\\\":. _quotes_validation_input then returns False, so _withhold_validation_input and the renderer and filter backstops let the text through. The pydantic marker input_value= survives escaping; only the dict-rendering markers are fragile.",
+     "failure_scenario": "Strict configure. A batch step stores exc.errors() and later raises RuntimeError(f\"batch rejected: {errors}\") outside the except block, so the exception is unlinked. The input is \"Margaret can't stop crying\". (1) log.error('batch_failed', error=exc) rendered \"error\": \"RuntimeError('batch rejected: [{\\'type\\': \\'int_parsing\\', ... \\'input\\': \\\"Margaret can\\'t stop crying\\\", ...}]')\". (2) The same exception in an un-awaited task gave the event \"Task exception was never retrieved\\nfuture: <Task finished ... exception=RuntimeError('... \\'input\\': \\\"Margaret can\\'t stop crying\\\" ...')>\". On that same line the renderer had matched the unescaped traceback (validation_errors: [], no exception field), but the event text was kept whole. (3) The patient text also leaked through: stdlib warning('rejected %r', str(ResponseValidationError(errs))); structlog warning('rejected %r', ...); a dataclass repr holding that text; warnings.warn(repr(...)); and a JSON string re-encoded inside JSON. The same code paths without an apostrophe are withheld, and error=str(exc) is withheld. This is latent: in services/src only 5 call sites log error=e directly and 8 call asyncio.create_task/ensure_future. Free text with apostrophes is routine in this product.",
+     "fix": "Make the markers escape-tolerant in _quotes_validation_input, which the renderer, _AsgiExceptionFilter, _WarningFilter and _redact all use. For example: _VALIDATION_INPUT_RE = re.compile(r\"input_value=|\\\\*['\\\"]input\\\\*['\\\"]\\s*:\"), then return bool(_VALIDATION_INPUT_RE.search(text)). Add tests with an apostrophe in the input for: an unlinked exception as an event value, an un-retrieved task holding that exception, and stdlib %r of str(ResponseValidationError(...)).",
+     "evidence": "Scratch probe (since deleted) under configure_service_logging(production spec). These scenarios leaked 'Margaret' and 'crying': exc_value_unlinked_apos, exc_value_unlinked_fastapi_apos, task_unlinked_apos, stdlib_percent_r (only the %r of the FastAPI text), structlog_positional (only %r), warning_text (the repr form), object_repr (holder_detail) and json_double_encoded (the wrapped form). Controls with no leak: exc_value_unlinked_plain, exc_value_unlinked_str_apos, task_linked_apos, unlinked_500 (the HTTP 500 path renders the traceback unescaped, so the backstop drops it). Code: logging.py:105 holds the literal markers; :305-307 uses substring matching; :615 renders an unlinked exception as repr(); :490 runs the backstop on the exception field only.",
+     "lens": "phi-closure",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "I reproduced the core claim with a cheap probe, since deleted. For RuntimeError(f\"batch rejected: {errs}\") where the input is \"Margaret can't stop crying\", repr(e) renders \\'input\\': with escaped quotes. _quotes_validation_input(repr(e)) returned False, while the same check on str(e) returned True. logging.py:105 holds the literal markers \"'input':\" and '\"input\":', and they are matched as substrings (lines 305-307). So an unlinked exception rendered through repr(), such as an event value or a task-exception event text, escapes the withhold check, and the backstops that rely on this function miss it. Only the dict-rendering markers are fragile, and input_value= survives escaping. It is latent, because it needs an exception whose message embeds FastAPI error dicts to be stored and then raised or logged outside the except block. Free text with apostrophes is common, so minor severity is right. I did not run the full pytest suites or the other scenarios in the finding (stdlib %r, JSON double encoding)."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "WS04F1F1-PHI-2",
+     "severity": "minor",
+     "file": "src/solace_infrastructure/runtime/logging.py",
+     "line": 596,
+     "problem": "_redact summarises exception objects but passes pydantic and FastAPI error dicts through unchanged. The usual way to log a validation failure, errors=exc.errors(), therefore renders every input value. This contradicts the redact_credentials docstring: \"Validation input never reaches a rendered string\". The stdlib ExtraAdder allows the key validation_errors, so extra={'validation_errors': exc.errors()} renders the input the same way. A value_error's ctx.error is the validator's ValueError, and its repr often quotes the value.",
+     "failure_scenario": "Strict configure. structlog.get_logger('svc').warning('validation_failed', errors=ve.errors()), where ve is a ValidationError on the patient's free text, rendered {\"errors\": [{\"type\": \"int_parsing\", \"loc\": [\"age\"], \"msg\": \"...\", \"input\": \"Margaret can't stop crying\", \"url\": \"...\"}], ...}. The regex PHI sanitizer does not mask free text. This is latent: today only the pre-adoption handlers in config_service and personality_service call .errors(), and they drop input. Nothing in the runtime stops an adopting service from logging errors() directly.",
+     "fix": "In _redact_mapping, or in _redact for dicts, recognise the pydantic error shape: a dict with 'type' and 'loc' plus 'input' or 'ctx'. Drop 'input' and 'ctx' from it, or reduce it to {type, field} with _masked_field_path, which _validation_error_fields already does. Add a test for errors=ve.errors() on structlog and for extra={'validation_errors': ve.errors()} on stdlib.",
+     "evidence": "Scratch probe scenario structured_errors (since deleted): the patient text appeared verbatim in the 'input' field of the JSON line. logging.py:596-615 (_redact) only special-cases str, None/int/float, dict, list/tuple/set and BaseException. A dict's values are redacted but never shape-checked. logging.py:743-745: ExtraAdder allows validation_errors from any stdlib caller. grep '\\.errors\\(\\)' in services/src finds only config_service main.py:114 and personality_service main.py:231, both of which strip input.",
+     "lens": "phi-closure",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "Reproduced. I ran redact_credentials on {\"event\":\"x\",\"errors\":ve.errors()}, where ve is a pydantic ValidationError for age=\"Margaret can't stop crying\". The output kept the patient text verbatim in the 'input' field of the error dict. _redact (logging.py:596-615) only cuts strings that contain the markers \"'input':\" or '\"input\":', and only summarises BaseException objects. A dict with an 'input' key holding a plain string passes through unchanged. The docstring's claim that validation input never reaches a rendered string is therefore false for errors=exc.errors(). Minor severity fits: the leak needs a service to log errors() directly, and the two current .errors() callers drop input."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "WS04F1F1-LIF-1",
+     "severity": "minor",
+     "file": "tests/bootstrap/test_service_conformance.py",
+     "line": 235,
+     "problem": "For form (b), _bracket_form checks only the try body (it must end with the only bare yield) and finalbody. The try's handlers and orelse are never inspected. Stop code after the yield can therefore sit in an else: clause, stop code can sit in an except: clause, and a second yield can sit in a handler, and the gate passes them all. That contradicts the checker's own docstring (\"no service stop code may follow the yield\").",
+     "failure_scenario": "The check accepts this shape: runtime = await start_service_runtime(app, SPEC); try: consumer = await start_consumer(runtime); yield; except Exception: raise; else: await consumer.stop(); finally: await stop_service_runtime(runtime). It also accepts 'except BaseException: await consumer.stop(); raise' and 'except Exception: yield'. In a runtime probe of the else-shape cancelled while serving, the events were ['runtime.start', 'consumer.start', 'runtime.stop', 'cancelled']. consumer.stop never ran, which is the original LIF-1 failure mode: the service-owned stop is skipped, though the datastore closers still run. This is latent: all five adopted services use form (a), which is airtight.",
+     "fix": "In the form (b) branch, also require body[1].orelse == [], and either require body[1].handlers == [] or reject any handler that contains a yield or any statement other than a bare raise. Add NEAR_MISSES cases stop_code_in_the_else_of_form_b, stop_code_in_an_except_of_form_b and yield_in_an_except_of_form_b.",
+     "evidence": "Scratch probe (since deleted) fed snippets to _assert_lifespan_bracketed. form_b_stop_in_else: ACCEPTED. form_b_stop_in_except: ACCEPTED. form_b_second_yield_in_handler: ACCEPTED. form_a_plain: ACCEPTED. test_service_conformance.py:233-238 checks body[1].finalbody and body[1].body only. The services' main.py lifespans at therapy:203, orchestrator:97, memory:134, diagnosis:183 and safety:130 are all 'async with service_runtime(app, SPEC) as runtime:'.",
+     "lens": "phi-closure",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The code confirms the gap. The form (b) branch in `_bracket_form` (test_service_conformance.py lines 232-239) checks only `body[1].finalbody` and `_ends_with_the_only_bare_yield(body[1].body)`. It never looks at `body[1].orelse` or `body[1].handlers`. So stop code in an `else:` or `except:` clause, or a yield in a handler, would pass. That contradicts the docstring's rule that no stop code may follow the yield. I read the code and did not run the shapes. The gap is latent because the services use form (a). Minor severity fits."
+      }
+     ],
+     "survives": true
+    }
+   ]
+  }
+ ]
+}

@@ -282,7 +282,10 @@ dump.rdb
 appendonly.aof
 
 # ==================== CLAUDE CODE ====================
-.claude/
+# Local Claude Code state stays out; the vendored skills and agents are committed so cloud sessions load them.
+.claude/*
+!.claude/skills/
+!.claude/agents/
 .claude-code/
 
 # ==================== MISC ====================

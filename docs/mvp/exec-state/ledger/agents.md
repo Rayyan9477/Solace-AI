@@ -1,0 +1,83 @@
+# Agent ids (controller lookup; fix rounds 1-3 resume these)
+
+- a067d17f4038f8821  Re-grade register for confirmed scope
+- aa67c6bbc11e08c5b  Verify uncovered tracker items
+- aaf570ef7e5e50c1d  Implement WS-01.1 gitignore fix
+- aa9461aec79f76865  Implement WS-01.2 dependency lock
+- a6b862dd748bc05cb  Implement WS-01.F1 security bumps
+- ae5d0c0ce3fc4c649  Implement WS-02.1 platform roles
+- af8791e145296c936  Implement WS-04.1 production guards
+- a18e7bb11cb802b93  Implement WS-03.1 env registry
+- aeba6ab96ef749c66  Implement WS-05.1 fake LLM
+- af9f0bb48533086cc  Implement WS-07.1 acting_as_user
+- a997f2e382dd89ad8  Implement WS-01.7 import root
+- a23b5fd2a555adba8  Implement WS-05.3 xfail manifest plugin
+- afa6837e78a278155  Implement WS-09.2 LLM client init
+- ae878d65e55bd3c85  Implement WS-04.2 runtime spec
+- a82502c6e72216b5d  Opus review of WS-07.1 and WS-04.1
+- a1f730ac0de2c2d56  Implement WS-09.1 master key formats
+- a73d0d92270d8dd5d  Implement WS-01.4 pytest config
+- a4d171a6a5ed40689  Implement WS-02.2 migration chain
+- a140671b00b785abd  Implement WS-01.5 image layout
+- a1ebf73b726f8ee0d  Opus review of WS-02.1 and WS-09.1
+- a69a9283d350b2138  Implement WS-04.3 create_service_app
+- a3102088087ef5d0b  Opus review of WS-04.2 and WS-05.3
+- a2771234e3bda7ac9  Implement WS-01.F3 tests package
+- a180be9a8ed2343c4  Implement WS-01.6 container entry
+- a33d3974eea11edd3  Opus review of WS-03.1
+- a35e90e2a048fe52f  Implement WS-09.F1 sanitizer reentrancy
+- ad636b7aae8b6b6f6  Opus review of WS-04.3 and WS-01.6
+- ab676b0acf82b6512  Implement WS-01.8 CI pipeline
+- a6203d560cc7ec31d  Implement WS-02.3 slot 009 RLS
+- a3683ad7d8a323677  Scoped re-review of two fix diffs
+- a00052e29a723d238  Implement WS-01.F2 checkpoint-path bumps
+- a2ee37c598c38cf04  Opus review WS-02.3 + WS-04.3 fix
+- ad4fea5608edd8ef9  Opus review of WS-09.F1
+- ae3b64d62c1503ef3  Implement WS-02.4 migrate entrypoint
+- a27a14f2b1f072d03  Implement WS-04.4 service runtime
+- af30e6480be4cf747  Implement WS-01.14 SOPS ignore rules
+- af0e31302128d695d  Implement WS-02.5 Postgres TLS
+- aca14c6d5c2414858  Implement WS-05.2 realinfra fixtures
+- abf5c422348775f56  Implement WS-01.9 migrate image + clean checkout
+- aafc6994e021daa6b  Implement WS-04.5 conformance suite
+- aa0267e0fb10098bb  Implement WS-01.3 lazy package exports
+- a3e9e0276bdb3206d  Implement WS-06.1 event tables slot 010
+- aefe52a5c74ff57e5  Implement WS-02.7 database lazy exports
+- a9b7b8e4f31f8c924  Implement WS-03.2 compose data plane
+- a9f2141996b959ffa  Implement WS-06.2 bridges source_service
+- a0f6a8a06ec4c1d7c  Implement WS-04.15 PHI-activation lock
+- aaed3f806b258db72  Implement WS-02.6 default pool
+- a3264e53c42222c0c  Implement WS-05.4 e2e harness (part 1)
+- a186655e3d08b48e4  Scoped re-review WS-05.2 fix2
+- AGY job task-mvzsf9z7-e9d47dd81b  IF-01 adversarial review (workspace D:\tmp\mvp-exec\agy\if01)
+- workflow wf_d02c7b67-e2d  WS-01.9 fix2 re-review (2 lenses + skeptic panels)
+- workflow wf_aea62245-cf5  WS-03.2 review (spec/security/ops lenses + skeptic panels)
+- workflow wf_a8660966-e53  IF-01 integrated audit (lifecycle/phi-errors/http-profile + skeptic panels)
+- workflow wf_d02c7b67-e2d result saved: D:\tmp\mvp-exec\reviews\batch8-ws019-fix2.json
+- workflow wf_96d6a5b5-b44  WS-06.2 review (spec/crisis-path)
+- workflow wf_f0992a96-46e  WS-06.1 fix1 scoped re-review (closure/regression)
+- workflow wf_051ffad0-f1e  WS-01.9 fix3 scoped re-review
+- accf7ce0c00b93448  Implement WS-01.F4 entrypoint hardening
+- a3abfe665027ed6b8  Implement WS-04.F1 IF-01 hardening
+- workflow wf_aea62245-cf5 result: D:\tmp\mvp-exec\reviews\batch11-ws032.json
+- workflow wf_a8660966-e53 result: D:\tmp\mvp-exec\reviews\batch12-if01-audit.json
+- workflow wf_051ffad0-f1e result: D:\tmp\mvp-exec\reviews\batch13-ws019-fix3.json
+- workflow wf_2ac7277b-253  WS-01.F4 review (security/correctness)
+- workflow wf_3c193dde-439  WS-01.9 fix4 scoped re-review
+- workflow wf_9dc2a5f9-37c  WS-03.2 fix1 scoped re-review
+- workflow wf_525dba5d-dfc  WS-03.3 review (security/spec-ops)
+- workflow wf_819b9443-a74  WS-02.6 fix1 scoped re-review
+- a1933b27d98c7c800  Implement WS-12.1 safety adoption
+- a7c5bffd55ce5808c  Implement WS-11.1 orchestrator adoption
+- ae4933317f20bdf6a  Implement WS-13.1 notification imports
+- adda9a98decd3a5fc  Implement WS-14.1 registration writes
+- a673bcb173a4c1fec  Implement WS-15.1 therapy adoption
+- workflow wf_1b24be4b-630  WS-01.F4 fix1 re-review
+- workflow wf_724a9516-ff4  WS-05.4 part1 review
+- workflow wf_525dba5d-dfc result: D:\tmp\mvp-exec\reviews\batch18-ws033.json
+- workflow wf_dc85fef3-d1d  WS-13.1 review (spec/crisis-path)
+- ac125b18baee912b9  Implement WS-17.1 memory adoption
+- workflow wf_8d50456c-a88  WS-15.1 review (spec-lifecycle/crisis-phi)
+- workflow wf_4cafcebe-1ed  WS-17.1 review
+- a3ebc928d5b41a475  Implement WS-16.1 diagnosis adoption
+- workflow wf_5abeffaf-964  checkpoint batch review (8 tasks)

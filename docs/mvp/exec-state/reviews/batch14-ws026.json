@@ -1,0 +1,134 @@
+{
+ "task": "WS-02.6",
+ "results": [
+  {
+   "lens": "security",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "APPROVED",
+    "prior_findings": [],
+    "findings": [
+     {
+      "id": "WS026-SEC-1",
+      "severity": "minor",
+      "file": "src/solace_infrastructure/database/connection_manager.py",
+      "line": 124,
+      "problem": "verify_app_role checks only current_user, not the role that actually logged in (session_user). The ownership test also uses pg_has_role(relowner, 'USAGE'), which does not count NOINHERIT membership. Both miss SET ROLE escalation paths, which the function's own docstring says it refuses ('could SET ROLE its way past RLS').",
+      "failure_scenario": "Strict environment with POSTGRES_USER=postgres, the superuser, which is the exact misconfiguration this check exists to catch. Postgres also has a connection-time role default, for example `ALTER ROLE postgres SET role = 'solace_app'` (or ALTER DATABASE ... SET role). At login current_user is solace_app, so rolsuper, rolbypassrls and owns_public_tables are all false. member_of_privileged_role is also false, because pg_has_role is evaluated for solace_app. get_pool/PostgresClient.connect accept the pool. Ordinary queries do run under RLS, but the authenticated session is still the superuser: any injected `SET ROLE NONE` (allowed for any user) makes current_user the superuser for the rest of that borrow, which exposes every row and allows COPY ... PROGRAM. A second variant: solace_app is a NOINHERIT (or INHERIT FALSE) member of a table-owning role that is not BYPASSRLS. owns_public_tables is false and the membership check is false, yet `SET ROLE owner; ALTER TABLE ... NO FORCE ROW LEVEL SECURITY` works. This variant cannot happen with this program's provisioning, where every table is owned by solace_migrator (BYPASSRLS), so the membership test catches it. Both paths need an unusual operator grant plus SQL execution, hence minor.",
+      "fix": "Evaluate the session user as well as the current user. Either refuse when `session_user <> current_user` (a role switched at login is never the plain app role), or run the attribute and membership tests for both, e.g. `pg_has_role(session_user, p.oid, 'MEMBER')` and `rolname IN (current_user, session_user)` with bool_or. Use 'MEMBER' instead of 'USAGE' in the ownership test so NOINHERIT membership in a table owner also counts. Add a real-PG test that runs ALTER ROLE <superuser-probe> SET role = solace_app and expects DatabaseConfigError.",
+      "evidence": "_APP_ROLE_SQL (connection_manager.py lines 107-125) uses `WHERE r.rolname = current_user`, `pg_has_role(c.relowner, 'USAGE')` and the one-argument `pg_has_role(p.oid, 'MEMBER')`, all of which act on current_user. The PostgreSQL 16 SET ROLE docs (fetched): 'RESET ROLE sets the current user identifier to the connection-time setting specified by the command-line options, ALTER ROLE, or ALTER DATABASE', 'SET ROLE NONE sets the current user identifier to the current session user identifier, as returned by session_user', 'These forms can be executed by any user', '(If the session user is a superuser, any role can be selected.)'. Checked and not a defect: the DSN carries no query string (no options/role injection), asyncpg 0.30 does not read PGOPTIONS, and with an SSLContext asyncpg sets sslmode=disable internally, so ssl_is_advisory is False and there is no plaintext fallback (connect_utils.py 537-672, 927). SEPARATE NOTE, not a finding (the strictness-source concern the controller asked about): this cannot happen in this program. start_service_runtime calls ProductionGuards.assert_startup(spec.environment) as its first statement (bootstrap.py:371), before start_postgres (bootstrap.py:380), and the 10 legacy service lifespans also call assert_startup. assert_startup raises when the spec is strict and bare ENVIRONMENT is blank, and assert_environment_consistency raises on any mismatch where either side is strict. A throwaway probe ran spec production/staging/' Production ' against bare ENVIRONMENT unset/''/' '/development/test/prod: all 18 combinations raised ProductionSecurityError. Once the guard passes, spec_is_strict and _is_strict_environment() therefore agree, so the role check and host/password refusals run whenever start_postgres treats the spec as strict. The difference only matters to a caller that skips assert_startup, which makes it defence in depth, not a defect. Other attempts that failed to break the change: an asyncpg DSN round trip of 10 reserved/unicode/whitespace strings in user, password and database gave 0 mismatches. Strict refused passwords '', ' ', tab/newline, NBSP and U+3000, and refused loopback spellings (127.1, 0, 0x7f000001, 2130706433, 0177.0.0.1, 127.000.000.001, [::ffff:127.0.0.1], foo.localhost, %-encoded, '@', '/', '?', '#', ':'). The role check runs on a connection of the same pool before the pool is stored or assigned (get_pool:417, PostgresClient.connect:402), and a refused pool is closed. No new error text carries a DSN or password. The WS-02.5 comment is accurate: asyncpg splits at the first '@' (`parsed.netloc.partition('@')`, connect_utils.py:289). Unit suites: 147 passed."
+     }
+    ]
+   },
+   "verified": [
+    {
+     "id": "WS026-SEC-1",
+     "severity": "minor",
+     "file": "src/solace_infrastructure/database/connection_manager.py",
+     "line": 124,
+     "problem": "verify_app_role checks only current_user, not the role that actually logged in (session_user). The ownership test also uses pg_has_role(relowner, 'USAGE'), which does not count NOINHERIT membership. Both miss SET ROLE escalation paths, which the function's own docstring says it refuses ('could SET ROLE its way past RLS').",
+     "failure_scenario": "Strict environment with POSTGRES_USER=postgres, the superuser, which is the exact misconfiguration this check exists to catch. Postgres also has a connection-time role default, for example `ALTER ROLE postgres SET role = 'solace_app'` (or ALTER DATABASE ... SET role). At login current_user is solace_app, so rolsuper, rolbypassrls and owns_public_tables are all false. member_of_privileged_role is also false, because pg_has_role is evaluated for solace_app. get_pool/PostgresClient.connect accept the pool. Ordinary queries do run under RLS, but the authenticated session is still the superuser: any injected `SET ROLE NONE` (allowed for any user) makes current_user the superuser for the rest of that borrow, which exposes every row and allows COPY ... PROGRAM. A second variant: solace_app is a NOINHERIT (or INHERIT FALSE) member of a table-owning role that is not BYPASSRLS. owns_public_tables is false and the membership check is false, yet `SET ROLE owner; ALTER TABLE ... NO FORCE ROW LEVEL SECURITY` works. This variant cannot happen with this program's provisioning, where every table is owned by solace_migrator (BYPASSRLS), so the membership test catches it. Both paths need an unusual operator grant plus SQL execution, hence minor.",
+     "fix": "Evaluate the session user as well as the current user. Either refuse when `session_user <> current_user` (a role switched at login is never the plain app role), or run the attribute and membership tests for both, e.g. `pg_has_role(session_user, p.oid, 'MEMBER')` and `rolname IN (current_user, session_user)` with bool_or. Use 'MEMBER' instead of 'USAGE' in the ownership test so NOINHERIT membership in a table owner also counts. Add a real-PG test that runs ALTER ROLE <superuser-probe> SET role = solace_app and expects DatabaseConfigError.",
+     "evidence": "_APP_ROLE_SQL (connection_manager.py lines 107-125) uses `WHERE r.rolname = current_user`, `pg_has_role(c.relowner, 'USAGE')` and the one-argument `pg_has_role(p.oid, 'MEMBER')`, all of which act on current_user. The PostgreSQL 16 SET ROLE docs (fetched): 'RESET ROLE sets the current user identifier to the connection-time setting specified by the command-line options, ALTER ROLE, or ALTER DATABASE', 'SET ROLE NONE sets the current user identifier to the current session user identifier, as returned by session_user', 'These forms can be executed by any user', '(If the session user is a superuser, any role can be selected.)'. Checked and not a defect: the DSN carries no query string (no options/role injection), asyncpg 0.30 does not read PGOPTIONS, and with an SSLContext asyncpg sets sslmode=disable internally, so ssl_is_advisory is False and there is no plaintext fallback (connect_utils.py 537-672, 927). SEPARATE NOTE, not a finding (the strictness-source concern the controller asked about): this cannot happen in this program. start_service_runtime calls ProductionGuards.assert_startup(spec.environment) as its first statement (bootstrap.py:371), before start_postgres (bootstrap.py:380), and the 10 legacy service lifespans also call assert_startup. assert_startup raises when the spec is strict and bare ENVIRONMENT is blank, and assert_environment_consistency raises on any mismatch where either side is strict. A throwaway probe ran spec production/staging/' Production ' against bare ENVIRONMENT unset/''/' '/development/test/prod: all 18 combinations raised ProductionSecurityError. Once the guard passes, spec_is_strict and _is_strict_environment() therefore agree, so the role check and host/password refusals run whenever start_postgres treats the spec as strict. The difference only matters to a caller that skips assert_startup, which makes it defence in depth, not a defect. Other attempts that failed to break the change: an asyncpg DSN round trip of 10 reserved/unicode/whitespace strings in user, password and database gave 0 mismatches. Strict refused passwords '', ' ', tab/newline, NBSP and U+3000, and refused loopback spellings (127.1, 0, 0x7f000001, 2130706433, 0177.0.0.1, 127.000.000.001, [::ffff:127.0.0.1], foo.localhost, %-encoded, '@', '/', '?', '#', ':'). The role check runs on a connection of the same pool before the pool is stored or assigned (get_pool:417, PostgresClient.connect:402), and a refused pool is closed. No new error text carries a DSN or password. The WS-02.5 comment is accurate: asyncpg splits at the first '@' (`parsed.netloc.partition('@')`, connect_utils.py:289). Unit suites: 147 passed.",
+     "lens": "security",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "I confirmed in connection_manager.py that the role check uses only current_user. The query filters on `r.rolname = current_user` (line 124), uses `pg_has_role(c.relowner, 'USAGE')` (line 115), and uses the one-argument `pg_has_role(p.oid, 'MEMBER')` (line 121). Line 106 says outright that these functions check current_user. session_user is never consulted. A role default set with `ALTER ROLE ... SET role` is applied at connection time, so `current_user` would report solace_app while `session_user` is the superuser. `SET ROLE NONE` then returns to the session user. That makes the finding real, not a false positive. It is only minor because it needs a deliberate, unusual operator misconfiguration plus attacker-controlled SQL, and the check is a defence-in-depth guard whose main target is a plainly misconfigured POSTGRES_USER. I did not run a throwaway probe. The strictness-source question does not change this: assert_startup runs before start_postgres and rejects any mismatch between the spec and ENVIRONMENT, as the finding's own probe showed."
+      }
+     ],
+     "survives": true
+    }
+   ]
+  },
+  {
+   "lens": "correctness",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "APPROVED",
+    "prior_findings": [
+     {
+      "id": "WS-02.6-report-concern-2 (strictness source: ENVIRONMENT vs spec_is_strict)",
+      "closed": true,
+      "note": "This cannot happen in the program, so its severity is none. It is defence in depth only, not a defect. Every caller that has a spec passes ProductionGuards.assert_startup first. That covers bootstrap.start_service_runtime at bootstrap.py:371, before start_postgres at :380, and all 10 legacy lifespans (user-service main.py:155, orchestrator:95, therapy:92, notification:183, config:61, memory:89, diagnosis:89, analytics:216, safety:107, personality:87). assert_startup raises in two cases. First, when the service environment is strict and the bare ENVIRONMENT is blank (production_guards.py:234-247). Second, when the two disagree after strip().lower() and either side is strict (assert_environment_consistency, :159-184). So once startup passes, spec_is_strict(spec) == is_strict_environment() == postgres._is_strict_environment(), and they use the same strip/lower rule. The only place a strict spec meets a non-strict ENVIRONMENT is tests/bootstrap/test_mvp_332_runtime_lifecycle.py:253-266, and its `fakes` fixture stubs out the guards. Callers without a spec (scripts, CLIs) only have ENVIRONMENT, which is what get_pool and PostgresClient.connect read. No change is needed. Optionally, start_postgres could pass the spec's environment through for belt-and-braces."
+     }
+    ],
+    "findings": [
+     {
+      "id": "WS026-COR-1",
+      "severity": "minor",
+      "file": "src/solace_infrastructure/postgres.py",
+      "line": 42,
+      "problem": "This change makes the DatabaseConfigError class docstring untrue. It still says the error is 'raised before any connection attempt' and that its message names POSTGRES_SSL_ROOT_CERT or POSTGRES_SSL_MODE. WS-02.6 now raises it in three more ways. (1) verify_app_role raises it after a pool has been opened and a connection authenticated (connection_manager.py check_new_pool_role / verify_app_role). (2) _validated_settings raises it naming POSTGRES_PASSWORD, POSTGRES_PORT or other variables. (3) validate_for_environment raises it naming POSTGRES_PASSWORD. Two smaller doc gaps: the PostgresClient.connect docstring (postgres.py:376-381) leaves out the membership reason that verify_app_role enforces, and the DatabaseConfigError docstring does not mention the role refusal.",
+      "failure_scenario": "A lane that consumes IF-03 or IF-01 takes the class contract at its word and treats DatabaseConfigError as 'no connection was made'. For example, it skips pool cleanup, or reports 'settings invalid, nothing dialled', when it handles a strict role refusal. In fact a pool was created and authenticated as the privileged role, then discarded. No current caller depends on this: start_postgres registers close_all_pools before the attempt, and the refused pool is never stored. So the impact is only a misleading interface contract.",
+      "fix": "Update the DatabaseConfigError docstring along these lines: 'The database client settings or login role are unusable. Settings errors are raised before any connection attempt. The strict role refusal (verify_app_role) is raised after one connection, and the pool it opened has been closed. The message names the variable (POSTGRES_HOST, POSTGRES_PASSWORD, POSTGRES_USER, POSTGRES_SSL_*), never a value.' Also add the membership reason to the PostgresClient.connect docstring.",
+      "evidence": "postgres.py:42-46: `class DatabaseConfigError(DatabaseError): \"\"\"The database client settings are unusable; raised before any connection attempt. The message names the setting (POSTGRES_SSL_ROOT_CERT, POSTGRES_SSL_MODE), never its value.\"\"\"`. connection_manager.py check_new_pool_role runs `async with pool.acquire(timeout=...) as conn: await verify_app_role(conn, ...)`, and verify_app_role raises `DatabaseConfigError(\"The Postgres login role (POSTGRES_USER) ...\", operation=\"verify_app_role\")` after fetchrow on a live connection. get_pool's own docstring (connection_manager.py:361-363) already says 'Raised before any connection, except the role check, which needs one', so the class docstring and the method docstring disagree."
+     }
+    ]
+   },
+   "verified": [
+    {
+     "id": "WS026-COR-1",
+     "severity": "minor",
+     "file": "src/solace_infrastructure/postgres.py",
+     "line": 42,
+     "problem": "This change makes the DatabaseConfigError class docstring untrue. It still says the error is 'raised before any connection attempt' and that its message names POSTGRES_SSL_ROOT_CERT or POSTGRES_SSL_MODE. WS-02.6 now raises it in three more ways. (1) verify_app_role raises it after a pool has been opened and a connection authenticated (connection_manager.py check_new_pool_role / verify_app_role). (2) _validated_settings raises it naming POSTGRES_PASSWORD, POSTGRES_PORT or other variables. (3) validate_for_environment raises it naming POSTGRES_PASSWORD. Two smaller doc gaps: the PostgresClient.connect docstring (postgres.py:376-381) leaves out the membership reason that verify_app_role enforces, and the DatabaseConfigError docstring does not mention the role refusal.",
+     "failure_scenario": "A lane that consumes IF-03 or IF-01 takes the class contract at its word and treats DatabaseConfigError as 'no connection was made'. For example, it skips pool cleanup, or reports 'settings invalid, nothing dialled', when it handles a strict role refusal. In fact a pool was created and authenticated as the privileged role, then discarded. No current caller depends on this: start_postgres registers close_all_pools before the attempt, and the refused pool is never stored. So the impact is only a misleading interface contract.",
+     "fix": "Update the DatabaseConfigError docstring along these lines: 'The database client settings or login role are unusable. Settings errors are raised before any connection attempt. The strict role refusal (verify_app_role) is raised after one connection, and the pool it opened has been closed. The message names the variable (POSTGRES_HOST, POSTGRES_PASSWORD, POSTGRES_USER, POSTGRES_SSL_*), never a value.' Also add the membership reason to the PostgresClient.connect docstring.",
+     "evidence": "postgres.py:42-46: `class DatabaseConfigError(DatabaseError): \"\"\"The database client settings are unusable; raised before any connection attempt. The message names the setting (POSTGRES_SSL_ROOT_CERT, POSTGRES_SSL_MODE), never its value.\"\"\"`. connection_manager.py check_new_pool_role runs `async with pool.acquire(timeout=...) as conn: await verify_app_role(conn, ...)`, and verify_app_role raises `DatabaseConfigError(\"The Postgres login role (POSTGRES_USER) ...\", operation=\"verify_app_role\")` after fetchrow on a live connection. get_pool's own docstring (connection_manager.py:361-363) already says 'Raised before any connection, except the role check, which needs one', so the class docstring and the method docstring disagree.",
+     "lens": "correctness",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The class docstring at postgres.py:43 says the error is \"raised before any connection attempt\" and names only the SSL variables. The code contradicts this. verify_app_role (connection_manager.py:150) raises the error after check_new_pool_role has acquired a live connection, and _validated_settings (connection_manager.py:198) raises it naming other POSTGRES_* variables. check_new_pool_role also closes the refused pool before re-raising, so no resource leaks. The impact is only a misleading interface contract, so minor severity is right."
+      }
+     ],
+     "survives": true
+    }
+   ]
+  },
+  {
+   "lens": "compat",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "APPROVED",
+    "prior_findings": [],
+    "findings": [
+     {
+      "id": "WS026-COM-1",
+      "severity": "minor",
+      "file": "src/solace_infrastructure/database/connection_manager.py",
+      "line": 417,
+      "problem": "get_pool and PostgresClient.connect decide strictness from the bare ENVIRONMENT variable. WS-04's start_postgres decides it with spec_is_strict, which is strict when spec.environment OR ENVIRONMENT is strict (runtime/logging.py:360-362). spec.environment is the service's own setting (for example DIAGNOSIS_ENVIRONMENT). So the app-role check and the host and password refusals can be skipped for a spec that WS-04 treats as strict.",
+      "failure_scenario": "A deployment, for example an ECS or Kubernetes task definition, sets only the per-service variable (DIAGNOSIS_ENVIRONMENT=production) and leaves ENVIRONMENT unset or 'development'. start_postgres treats the spec as strict and runs the schema-head check. get_pool treats the environment as non-strict, so a superuser or BYPASSRLS login, or an empty password, is accepted and RLS is silently bypassed. The role check fails open in that case. Docker Compose cannot trigger it, because every per-service environment variable there is derived from ${ENVIRONMENT}. WS-02.5's TLS policy has the same blind spot. Severity is minor because it needs a deployment that sets the service variable but not ENVIRONMENT. It is not larger for two reasons. First, the ProductionGuards startup check is outside this diff, so I did not check whether it covers the case. Second, the pool-level code has no access to the spec.",
+      "fix": "Have start_postgres (WS-04) enforce the same strict-only rules whenever spec_is_strict is true and the bare ENVIRONMENT is not. For example, call check_new_pool_role(pool, environment='production') and settings.validate_for_environment('production') in that case. Alternatively, have the runtime bootstrap export ENVIRONMENT from the spec before any pool is created, or have it fail startup when the two disagree.",
+      "evidence": "runtime/logging.py:360-362 defines _is_strict as is_strict_environment(spec.environment) or is_strict_environment(). runtime/datastores.py:183 gates only the schema check on spec_is_strict(spec), while get_pool at line 182 reads the bare ENVIRONMENT through postgres._is_strict_environment. docker-compose.yml derives every per-service environment variable from ${ENVIRONMENT:-development}, which is why compose does not hit this."
+     }
+    ]
+   },
+   "verified": [
+    {
+     "id": "WS026-COM-1",
+     "severity": "minor",
+     "file": "src/solace_infrastructure/database/connection_manager.py",
+     "line": 417,
+     "problem": "get_pool and PostgresClient.connect decide strictness from the bare ENVIRONMENT variable. WS-04's start_postgres decides it with spec_is_strict, which is strict when spec.environment OR ENVIRONMENT is strict (runtime/logging.py:360-362). spec.environment is the service's own setting (for example DIAGNOSIS_ENVIRONMENT). So the app-role check and the host and password refusals can be skipped for a spec that WS-04 treats as strict.",
+     "failure_scenario": "A deployment, for example an ECS or Kubernetes task definition, sets only the per-service variable (DIAGNOSIS_ENVIRONMENT=production) and leaves ENVIRONMENT unset or 'development'. start_postgres treats the spec as strict and runs the schema-head check. get_pool treats the environment as non-strict, so a superuser or BYPASSRLS login, or an empty password, is accepted and RLS is silently bypassed. The role check fails open in that case. Docker Compose cannot trigger it, because every per-service environment variable there is derived from ${ENVIRONMENT}. WS-02.5's TLS policy has the same blind spot. Severity is minor because it needs a deployment that sets the service variable but not ENVIRONMENT. It is not larger for two reasons. First, the ProductionGuards startup check is outside this diff, so I did not check whether it covers the case. Second, the pool-level code has no access to the spec.",
+     "fix": "Have start_postgres (WS-04) enforce the same strict-only rules whenever spec_is_strict is true and the bare ENVIRONMENT is not. For example, call check_new_pool_role(pool, environment='production') and settings.validate_for_environment('production') in that case. Alternatively, have the runtime bootstrap export ENVIRONMENT from the spec before any pool is created, or have it fail startup when the two disagree.",
+     "evidence": "runtime/logging.py:360-362 defines _is_strict as is_strict_environment(spec.environment) or is_strict_environment(). runtime/datastores.py:183 gates only the schema check on spec_is_strict(spec), while get_pool at line 182 reads the bare ENVIRONMENT through postgres._is_strict_environment. docker-compose.yml derives every per-service environment variable from ${ENVIRONMENT:-development}, which is why compose does not hit this.",
+     "lens": "compat",
+     "votes": [
+      {
+       "refuted": true,
+       "severity_ok": false,
+       "reason": "The failure scenario cannot happen. Every service lifespan calls ProductionGuards.assert_startup(settings.environment) as its first statement, before logging or any pool is created. I checked the diagnosis service main.py and the REV-32 comments in the other services. assert_startup (src/solace_security/production_guards.py:194-233) raises when the service environment is strict and the bare ENVIRONMENT is blank or unset. Its docstring says it exists for this case, so that a strict service with no bare ENVIRONMENT cannot skip every check. It also raises when the service's environment and the bare ENVIRONMENT disagree and either one is strict. So a DIAGNOSIS_ENVIRONMENT=production deployment with ENVIRONMENT unset or 'development' aborts startup before get_pool is reached. In every run that gets past the guard, spec.environment and the bare ENVIRONMENT agree on strictness, so spec_is_strict and the bare-ENVIRONMENT check give the same answer. The finding did not check this guard and its own evidence concedes the point (\"did not check whether it covers the case\"). The only remaining gap is a service that skips assert_startup, and none of the services I checked do. I did not read every service's main.py, did not run tests, and did not run any probes. At most this is a defense-in-depth or consistency nit, not a minor correctness bug."
+      }
+     ],
+     "survives": false
+    }
+   ]
+  }
+ ]
+}

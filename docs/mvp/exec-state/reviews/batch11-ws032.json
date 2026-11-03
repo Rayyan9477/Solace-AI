@@ -1,0 +1,196 @@
+{
+ "task": "WS-03.2",
+ "results": [
+  {
+   "lens": "spec",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "APPROVED",
+    "prior_findings": [],
+    "findings": [
+     {
+      "id": "WS032-SPE-1",
+      "severity": "minor",
+      "file": "tests/deploy/test_mvp_003_data_plane.py",
+      "line": 43,
+      "problem": "No test in the repo checks that the password init-db gives solace_app (postgres SOLACE_APP_PASSWORD) is the same one the nine app services use (POSTGRES_PASSWORD, the legacy *_DB_PASSWORD aliases and the safety DSN), in either profile. The report says hand-off 8 is verified by a 'names-only probe', but that probe is a scratch file outside the repo (D:\\tmp\\mvp-exec\\scratch\\ws032_probe_render.py). The in-repo tests check only that the app password differs from the superuser password and, through the registry test, that the names are present. Neither checks that the values match.",
+      "failure_scenario": "A later lane breaks the link: for example WS-03.7 moves postgres to SOLACE_APP_PASSWORD_FILE, or an overlay edit points SOLACE_APP_PASSWORD at another source. Every tests/deploy unit test stays green, because test_registered_variables_are_set_for_their_services checks presence only and test_required_strict_sources_fail_fast still fails on the app env. The real-infra test exercises only the migrator login. init-db then creates solace_app with a password none of the nine services has, so every service fails authentication at boot. Nothing catches this before e2e.",
+      "fix": "Add a render test for both profiles. It asserts that r.services['postgres']['environment']['SOLACE_APP_PASSWORD'] equals each app service's POSTGRES_PASSWORD and its legacy DB password alias, that the password inside SAFETY_REPO_POSTGRES_DSN matches too, and that the password in the migrate DATABASE_URL equals postgres SOLACE_MIGRATOR_PASSWORD. This moves the scratch probe's checks into the repo.",
+      "evidence": "I rendered both profiles read-only. The values match today: one distinct app password, equal to postgres SOLACE_APP_PASSWORD, in dev and strict. They match only because of YAML aliases (*pg-app-password in docker-compose.yml:54/119, *strict-app-db-password in docker-compose.prod.yml:70/256). Grepping tests/deploy/*.py for SOLACE_APP_PASSWORD, SOLACE_MIGRATOR_PASSWORD and USER_DB_PASSWORD finds only test_mvp_116_dev_db_password.py:14, which compares USER_DB_PASSWORD with POSTGRES_PASSWORD on user-service and never looks at the postgres container."
+     },
+     {
+      "id": "WS032-SPE-2",
+      "severity": "minor",
+      "file": "docker-compose.yml",
+      "line": 433,
+      "problem": "The brief requires every app service's compose healthcheck to probe /live, and the compose now does. But user-service, notification-service and analytics-service still have no /live route; IF-18 makes that route WS-04's job. Under this compose those three containers turn unhealthy, where the base compose's `curl -f .../health` check kept them healthy (curl is installed in their images and /health exists). The report does not mention this regression or the dependency on WS-04. WS-01.6 concern 3 predicted it and asked that the ordering be confirmed.",
+      "failure_scenario": "Run `docker compose up -d --wait` on the full dev stack, or any harness or later task that waits for health on these services, such as WS-05.4's e2e stack or compose_project.up([...app services...]). After start_period (60 s) plus 3 x 15 s retries, user-service, notification-service and analytics-service are unhealthy. `--wait` then fails, even though the apps work. Once W4 autoheal is in place, it would restart-loop them.",
+      "fix": "Keep the compose exactly as briefed. Record a W0 barrier dependency, a hand-off to WS-04, so /live exists in user-service, notification-service and analytics-service, for example through solace_infrastructure.runtime.health LIVE_PATH, before anything waits for health on the full stack. Add this to the WS-03.2 report's concerns so the controller can sequence it.",
+      "evidence": "A recursive search of services/{user-service,notification-service,analytics-service}/src for '/live' or LIVE_PATH finds 0 hits in each. They define only /health: user-service main.py:641, notification-service main.py:336, analytics-service main.py:392. The new healthchecks call urlopen('http://127.0.0.1:8001|8003|8009/live'), which gets a 404, so the check exits 1. The base compose used `curl -f http://localhost:800x/health`, and the user-service Dockerfile installs curl. The report has no concern about /live in these three services."
+     }
+    ]
+   },
+   "verified": [
+    {
+     "id": "WS032-SPE-1",
+     "severity": "minor",
+     "file": "tests/deploy/test_mvp_003_data_plane.py",
+     "line": 43,
+     "problem": "No test in the repo checks that the password init-db gives solace_app (postgres SOLACE_APP_PASSWORD) is the same one the nine app services use (POSTGRES_PASSWORD, the legacy *_DB_PASSWORD aliases and the safety DSN), in either profile. The report says hand-off 8 is verified by a 'names-only probe', but that probe is a scratch file outside the repo (D:\\tmp\\mvp-exec\\scratch\\ws032_probe_render.py). The in-repo tests check only that the app password differs from the superuser password and, through the registry test, that the names are present. Neither checks that the values match.",
+     "failure_scenario": "A later lane breaks the link: for example WS-03.7 moves postgres to SOLACE_APP_PASSWORD_FILE, or an overlay edit points SOLACE_APP_PASSWORD at another source. Every tests/deploy unit test stays green, because test_registered_variables_are_set_for_their_services checks presence only and test_required_strict_sources_fail_fast still fails on the app env. The real-infra test exercises only the migrator login. init-db then creates solace_app with a password none of the nine services has, so every service fails authentication at boot. Nothing catches this before e2e.",
+     "fix": "Add a render test for both profiles. It asserts that r.services['postgres']['environment']['SOLACE_APP_PASSWORD'] equals each app service's POSTGRES_PASSWORD and its legacy DB password alias, that the password inside SAFETY_REPO_POSTGRES_DSN matches too, and that the password in the migrate DATABASE_URL equals postgres SOLACE_MIGRATOR_PASSWORD. This moves the scratch probe's checks into the repo.",
+     "evidence": "I rendered both profiles read-only. The values match today: one distinct app password, equal to postgres SOLACE_APP_PASSWORD, in dev and strict. They match only because of YAML aliases (*pg-app-password in docker-compose.yml:54/119, *strict-app-db-password in docker-compose.prod.yml:70/256). Grepping tests/deploy/*.py for SOLACE_APP_PASSWORD, SOLACE_MIGRATOR_PASSWORD and USER_DB_PASSWORD finds only test_mvp_116_dev_db_password.py:14, which compares USER_DB_PASSWORD with POSTGRES_PASSWORD on user-service and never looks at the postgres container.",
+     "lens": "spec",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "Grep over tests/deploy finds no assertion that ties postgres SOLACE_APP_PASSWORD or SOLACE_MIGRATOR_PASSWORD to the services' passwords. No other test under tests/ checks it either. The only related test is test_app_password_is_not_the_superuser_password (line 54), which checks that the app password differs from the superuser one. So the claimed gap exists. Values match today through YAML aliases, so there is no live bug; the finding is a missing regression test, and minor severity fits. I did not render the configs."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "WS032-SPE-2",
+     "severity": "minor",
+     "file": "docker-compose.yml",
+     "line": 433,
+     "problem": "The brief requires every app service's compose healthcheck to probe /live, and the compose now does. But user-service, notification-service and analytics-service still have no /live route; IF-18 makes that route WS-04's job. Under this compose those three containers turn unhealthy, where the base compose's `curl -f .../health` check kept them healthy (curl is installed in their images and /health exists). The report does not mention this regression or the dependency on WS-04. WS-01.6 concern 3 predicted it and asked that the ordering be confirmed.",
+     "failure_scenario": "Run `docker compose up -d --wait` on the full dev stack, or any harness or later task that waits for health on these services, such as WS-05.4's e2e stack or compose_project.up([...app services...]). After start_period (60 s) plus 3 x 15 s retries, user-service, notification-service and analytics-service are unhealthy. `--wait` then fails, even though the apps work. Once W4 autoheal is in place, it would restart-loop them.",
+     "fix": "Keep the compose exactly as briefed. Record a W0 barrier dependency, a hand-off to WS-04, so /live exists in user-service, notification-service and analytics-service, for example through solace_infrastructure.runtime.health LIVE_PATH, before anything waits for health on the full stack. Add this to the WS-03.2 report's concerns so the controller can sequence it.",
+     "evidence": "A recursive search of services/{user-service,notification-service,analytics-service}/src for '/live' or LIVE_PATH finds 0 hits in each. They define only /health: user-service main.py:641, notification-service main.py:336, analytics-service main.py:392. The new healthchecks call urlopen('http://127.0.0.1:8001|8003|8009/live'), which gets a 404, so the check exits 1. The base compose used `curl -f http://localhost:800x/health`, and the user-service Dockerfile installs curl. The report has no concern about /live in these three services.",
+     "lens": "spec",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "Confirmed. docker-compose.yml probes /live on 8001, 8003 and 8009 (and the other app ports). No /live route or LIVE_PATH exists in the user, notification or analytics services' source. Nothing under services/ imports solace_infrastructure.runtime, so /live is not registered indirectly. A 404 from urlopen raises, the check fails, and the containers go unhealthy. That makes `--wait` fail and would trigger autoheal restarts once W4 is in place. It is a sequencing dependency on WS-04 and does not affect app function, so minor severity fits. I did not render the compose config or run the tests."
+      }
+     ],
+     "survives": true
+    }
+   ]
+  },
+  {
+   "lens": "security",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "CHANGES_REQUESTED",
+    "prior_findings": [],
+    "findings": [
+     {
+      "id": "WS032-SEC-1",
+      "severity": "important",
+      "file": "docker-compose.yml",
+      "line": 85,
+      "problem": "All ten built services (the nine app services and migrate) set both `build:` and an unqualified `image: solace/<service>:${SOLACE_IMAGE_TAG:-dev}`, and none sets `pull_policy`. The Compose spec says that in this case Compose pulls the image first and builds from source only when the pull fails. The unqualified reference resolves to docker.io/solace/<service>. That Docker Hub namespace belongs to a third party: Solace Corporation, the verified publisher of solace/solace-pubsub-standard. The strict overlay neither overrides `image` nor requires SOLACE_IMAGE_TAG, so production also resolves `:dev`.",
+      "failure_scenario": "On a fresh staging or production host, `docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml up -d` (or the common `docker compose pull`) asks Docker Hub for docker.io/solace/orchestrator-service:dev, solace/user-service:dev, solace/migrate:dev and the rest before building anything. Suppose a repository of that name and tag ever exists in the third-party namespace, because it was published or because the account was compromised. Compose then runs that image instead of the local build. It receives POSTGRES_PASSWORD (solace_app), AUTH_SECRET_KEY, ENCRYPTION_MASTER_KEY, AUDIT_HMAC_KEY and the Fernet keys, and it runs on the `data` network next to the PHI database. For migrate it receives DATABASE_URL, which carries the BYPASSRLS solace_migrator credentials. Nothing in the compose files prevents this.",
+      "fix": "Keep the brief-mandated `image:` value (WS-01.5 image_ref) and add `pull_policy: build` to the `x-app-service` anchor (docker-compose.yml:85-87) and to the `migrate` service (docker-compose.yml:142-157). Compose then never asks a registry for a built service's image. Alternatively the controller asks WS-01 to registry-qualify image_ref with a namespace the project controls. Either way, consider making SOLACE_IMAGE_TAG `:?`-required in docker-compose.prod.yml so strict never runs a `:dev` tag. Add a raw-YAML assertion next to test_built_services_are_tagged_for_ci that every built service has pull_policy build (or a qualified ref).",
+      "evidence": "1) Compose spec, build.md, section 'Using build and image': 'If pull_policy is missing in the service definition, Compose attempts to pull the image first and then builds from source if the image isn't found in the registry or platform cache.' Also, `docker compose pull --help` on the installed Compose v5.4.0 offers `--ignore-buildable`, so pull includes buildable services by default. 2) A read-only render of dev and strict (`docker compose config` with synthetic values, scratch directory deleted afterwards) shows pull_policy=None and image solace/<name>:dev on analytics, diagnosis, memory, migrate, notification, orchestrator, personality, safety, therapy and user-service in both profiles. 3) docker-compose.yml lines 146, 318, 368, 400, 432, 460, 501, 535, 563 and 614 set the unqualified refs, and docker-compose.prod.yml sets no image or pull_policy override. 4) The Docker Hub namespace `solace` is held by Solace Corporation as a verified publisher (hub.docker.com/r/solace/solace-pubsub-standard). 5) The implementer raised this as report concern 6 but did not verify it, and no WS plan task sets pull_policy. The only owner named is a hand-off ('WS-01 or WS-03.8'). Refuted during this review and not reported: strict `ports: []` still publishes postgres and redis on 0.0.0.0 (owned by WS-03.3's `!reset`, plan line 428). memory-service's raw SQLAlchemy engine ignores POSTGRES_SSL_* (owned by WS-17.2 in W0). The superuser and migrator passwords reach no app service. Strict TLS settings are literals (verify-full plus /run/secrets/postgres-ca.crt) on all ten clients. ProductionGuards already forbids the three new *_dev_only defaults. LANGGRAPH_STRICT_MSGPACK=true is set in both files. Healthchecks and commands print no secrets. tests/deploy: 31 passed, 2 skipped."
+     }
+    ]
+   },
+   "verified": [
+    {
+     "id": "WS032-SEC-1",
+     "severity": "important",
+     "file": "docker-compose.yml",
+     "line": 85,
+     "problem": "All ten built services (the nine app services and migrate) set both `build:` and an unqualified `image: solace/<service>:${SOLACE_IMAGE_TAG:-dev}`, and none sets `pull_policy`. The Compose spec says that in this case Compose pulls the image first and builds from source only when the pull fails. The unqualified reference resolves to docker.io/solace/<service>. That Docker Hub namespace belongs to a third party: Solace Corporation, the verified publisher of solace/solace-pubsub-standard. The strict overlay neither overrides `image` nor requires SOLACE_IMAGE_TAG, so production also resolves `:dev`.",
+     "failure_scenario": "On a fresh staging or production host, `docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml up -d` (or the common `docker compose pull`) asks Docker Hub for docker.io/solace/orchestrator-service:dev, solace/user-service:dev, solace/migrate:dev and the rest before building anything. Suppose a repository of that name and tag ever exists in the third-party namespace, because it was published or because the account was compromised. Compose then runs that image instead of the local build. It receives POSTGRES_PASSWORD (solace_app), AUTH_SECRET_KEY, ENCRYPTION_MASTER_KEY, AUDIT_HMAC_KEY and the Fernet keys, and it runs on the `data` network next to the PHI database. For migrate it receives DATABASE_URL, which carries the BYPASSRLS solace_migrator credentials. Nothing in the compose files prevents this.",
+     "fix": "Keep the brief-mandated `image:` value (WS-01.5 image_ref) and add `pull_policy: build` to the `x-app-service` anchor (docker-compose.yml:85-87) and to the `migrate` service (docker-compose.yml:142-157). Compose then never asks a registry for a built service's image. Alternatively the controller asks WS-01 to registry-qualify image_ref with a namespace the project controls. Either way, consider making SOLACE_IMAGE_TAG `:?`-required in docker-compose.prod.yml so strict never runs a `:dev` tag. Add a raw-YAML assertion next to test_built_services_are_tagged_for_ci that every built service has pull_policy build (or a qualified ref).",
+     "evidence": "1) Compose spec, build.md, section 'Using build and image': 'If pull_policy is missing in the service definition, Compose attempts to pull the image first and then builds from source if the image isn't found in the registry or platform cache.' Also, `docker compose pull --help` on the installed Compose v5.4.0 offers `--ignore-buildable`, so pull includes buildable services by default. 2) A read-only render of dev and strict (`docker compose config` with synthetic values, scratch directory deleted afterwards) shows pull_policy=None and image solace/<name>:dev on analytics, diagnosis, memory, migrate, notification, orchestrator, personality, safety, therapy and user-service in both profiles. 3) docker-compose.yml lines 146, 318, 368, 400, 432, 460, 501, 535, 563 and 614 set the unqualified refs, and docker-compose.prod.yml sets no image or pull_policy override. 4) The Docker Hub namespace `solace` is held by Solace Corporation as a verified publisher (hub.docker.com/r/solace/solace-pubsub-standard). 5) The implementer raised this as report concern 6 but did not verify it, and no WS plan task sets pull_policy. The only owner named is a hand-off ('WS-01 or WS-03.8'). Refuted during this review and not reported: strict `ports: []` still publishes postgres and redis on 0.0.0.0 (owned by WS-03.3's `!reset`, plan line 428). memory-service's raw SQLAlchemy engine ignores POSTGRES_SSL_* (owned by WS-17.2 in W0). The superuser and migrator passwords reach no app service. Strict TLS settings are literals (verify-full plus /run/secrets/postgres-ca.crt) on all ten clients. ProductionGuards already forbids the three new *_dev_only defaults. LANGGRAPH_STRICT_MSGPACK=true is set in both files. Healthchecks and commands print no secrets. tests/deploy: 31 passed, 2 skipped.",
+     "lens": "security",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": false,
+       "reason": "The code facts hold. All ten built services set an unqualified `image: solace/<svc>:${SOLACE_IMAGE_TAG:-dev}` (docker-compose.yml lines 146, 318, 368, 400, 432, 460, 501, 535, 563, 614). A repo-wide grep found no `pull_policy` in any compose or workflow file, and no registry qualification. `docker compose pull` would ask Docker Hub for these names. Compose's documented fallback is pull-first-then-build when `pull_policy` is absent. I did not run `up`, so I could not confirm that `up` pulls before it builds. Exploitation needs a third party to publish, or lose control of, `solace/<svc>:dev` on Docker Hub. That is a hardening gap, not a defect that can occur with the current repo state. The docs show the intended flow is `build && up -d` on the host, which would build locally. I rate it minor or suggestion, not important. The fix (`pull_policy: build` plus requiring `SOLACE_IMAGE_TAG` in the prod overlay) is cheap and worth taking."
+      },
+      {
+       "refuted": true,
+       "severity_ok": false,
+       "reason": "Not convinced this is a defect in WS-03.2. (1) The brief and WS-01.5 make `image: solace/<svc>:${SOLACE_IMAGE_TAG:-dev}` (`image_ref(name, COMPOSE_TAG)`) a mandated value. A test asserts it, and the brief says the format belongs to WS-01 and this task \"only writes the compose values\". The registry qualification the finding wants is therefore WS-01's decision. The implementer also recorded it as a hand-off. (2) The exploit needs a third party to publish solace/<service>:dev on Docker Hub, or a compromise of that namespace. No such repo is shown to exist, and the Solace Corporation namespace is a different product. The scenario is hypothetical. (3) In normal `docker compose up`, a service with `build:` whose image is absent locally is built, not pulled first. Only an explicit `docker compose pull` hits the registry, and production images are expected to come from CI. (4) `pull_policy: build` is cheap hardening and could be a good follow-up, but it is not a spec violation or a regression in this diff. At most it is a minor or suggestion-level hardening item, not important."
+      },
+      {
+       "refuted": true,
+       "severity_ok": false,
+       "reason": "I did not re-render the compose files or re-run the tests; this rests on how Compose behaves and on the finding's own evidence. The `build:` plus `image:` pattern with no `pull_policy` is the standard local-build setup. In practice `docker compose up` checks for the image locally and builds it when it is missing. It does not first pull an unqualified `solace/*:dev` tag from Docker Hub. The Compose spec text the finding quotes says \"pull first, then build\", but the implementation of `up` builds buildable services. A pull happens only on an explicit `docker compose pull`, which for buildable services fails harmlessly unless the tag exists. The scenario needs a third party to publish `solace/<service>:dev`, or its Docker Hub account to be compromised, and then an operator to run `pull`. The finding names no such repository and shows no test. It is a hardening suggestion, not a defect in this change. The brief mandates the `image_ref` value, and a registry-qualified name or `pull_policy: build` would be a low-priority improvement. At most it is a minor or nit item, not important. The finding also gives no evidence that `up` pulls first."
+      }
+     ],
+     "survives": false
+    }
+   ]
+  },
+  {
+   "lens": "ops",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "APPROVED",
+    "prior_findings": [],
+    "findings": [
+     {
+      "id": "WS032-OPS-1",
+      "severity": "minor",
+      "file": "docker-compose.yml",
+      "line": 358,
+      "problem": "Every app healthcheck probes /live, but user-service, notification-service and analytics-service have no /live route in their code yet. Grep for 'live' under services/user-service/src, services/notification-service/src and services/analytics-service/src finds nothing, and none of the services import solace_infrastructure.runtime. Only orchestrator, safety, therapy, diagnosis, personality and memory define /live in main.py. The brief mandates /live (IF-18), so compose is spec-correct. The report does not name this cross-lane dependency.",
+      "failure_scenario": "In the dev stack, urlopen('http://127.0.0.1:8001/live') (and :8003, :8009) gets a 404, which raises HTTPError. After 3 retries the three containers sit 'unhealthy' for good. The compose_project fixture's up(..., wait=True) runs 'up --wait', so it fails for any test that brings these services up. Any later autoheal or health-gated depends_on on these services would restart them in a loop. The nine-service claim only holds once the WS-04 bootstrap lands in those three services.",
+      "fix": "Add a hand-off or ledger line: the WS-04 runtime health routes must land in user-service, notification-service and analytics-service before any compose test uses --wait with them. Until then, real-infra tests should name only services that serve /live.",
+      "evidence": "Read of docker-compose.yml lines 356-358, 420-422 and 627-629. Grep 'live' over the three services' src returns no matches. services/orchestrator_service/src/main.py:454 defines @app.get('/live'). src/solace_infrastructure/runtime/health.py is not imported by any services/*/src/main.py."
+     },
+     {
+      "id": "WS032-OPS-2",
+      "severity": "minor",
+      "file": "docker-compose.yml",
+      "line": 130,
+      "problem": "The postgres healthcheck runs pg_isready and psql over the unix socket only. The official entrypoint's temporary init server listens on the socket only (listen_addresses=''). The check can therefore pass once 01-roles.sh has created both roles but before the temporary server stops and the real TCP server starts. The report says the role check closes the 'init failed partway' hole, but it does not close this window.",
+      "failure_scenario": "A 10s healthcheck tick lands in the short gap between role creation and the temporary server shutting down. postgres turns healthy, migrate starts, and its TCP connection to postgres:5432 is refused. migrate exits non-zero, 'service_completed_successfully' fails, and 'docker compose up' aborts. Since restart is 'no', someone has to re-run it by hand. The probability is low and gets higher if later lanes add more init scripts after 01-roles.sh.",
+      "fix": "Make the readiness probe prove TCP is up, for example 'pg_isready -h 127.0.0.1 -U postgres -d solace' before the psql role check. pg_isready needs no password, so this also works under the strict hostssl-only hba.",
+      "evidence": "Read of docker-compose.yml lines 126-133. The strict hba in scripts/db/pg_tls_entrypoint.sh keeps 'local all all trust' for the socket and requires scram for TCP, so the psql part has to stay on the socket. The pg_isready part is the one that can move to TCP."
+     }
+    ]
+   },
+   "verified": [
+    {
+     "id": "WS032-OPS-1",
+     "severity": "minor",
+     "file": "docker-compose.yml",
+     "line": 358,
+     "problem": "Every app healthcheck probes /live, but user-service, notification-service and analytics-service have no /live route in their code yet. Grep for 'live' under services/user-service/src, services/notification-service/src and services/analytics-service/src finds nothing, and none of the services import solace_infrastructure.runtime. Only orchestrator, safety, therapy, diagnosis, personality and memory define /live in main.py. The brief mandates /live (IF-18), so compose is spec-correct. The report does not name this cross-lane dependency.",
+     "failure_scenario": "In the dev stack, urlopen('http://127.0.0.1:8001/live') (and :8003, :8009) gets a 404, which raises HTTPError. After 3 retries the three containers sit 'unhealthy' for good. The compose_project fixture's up(..., wait=True) runs 'up --wait', so it fails for any test that brings these services up. Any later autoheal or health-gated depends_on on these services would restart them in a loop. The nine-service claim only holds once the WS-04 bootstrap lands in those three services.",
+     "fix": "Add a hand-off or ledger line: the WS-04 runtime health routes must land in user-service, notification-service and analytics-service before any compose test uses --wait with them. Until then, real-infra tests should name only services that serve /live.",
+     "evidence": "Read of docker-compose.yml lines 356-358, 420-422 and 627-629. Grep 'live' over the three services' src returns no matches. services/orchestrator_service/src/main.py:454 defines @app.get('/live'). src/solace_infrastructure/runtime/health.py is not imported by any services/*/src/main.py.",
+     "lens": "ops",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "I could not refute it. user-service, notification-service and analytics-service define only /health routes: user-service main.py:641, notification-service main.py:336, and analytics-service api.py:515. A search of all three src trees finds no /live route and no solace_infrastructure.runtime import. The brief (line 20 and the test at line 47) mandates /live healthchecks, and docker-compose.yml probes /live on ports 8001, 8003 and 8009. The probe would therefore get a 404 and the containers would stay unhealthy until WS-04 adds the route. The report does not name this cross-lane dependency. It is a hand-off gap, not a compose defect, so minor severity fits."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "WS032-OPS-2",
+     "severity": "minor",
+     "file": "docker-compose.yml",
+     "line": 130,
+     "problem": "The postgres healthcheck runs pg_isready and psql over the unix socket only. The official entrypoint's temporary init server listens on the socket only (listen_addresses=''). The check can therefore pass once 01-roles.sh has created both roles but before the temporary server stops and the real TCP server starts. The report says the role check closes the 'init failed partway' hole, but it does not close this window.",
+     "failure_scenario": "A 10s healthcheck tick lands in the short gap between role creation and the temporary server shutting down. postgres turns healthy, migrate starts, and its TCP connection to postgres:5432 is refused. migrate exits non-zero, 'service_completed_successfully' fails, and 'docker compose up' aborts. Since restart is 'no', someone has to re-run it by hand. The probability is low and gets higher if later lanes add more init scripts after 01-roles.sh.",
+     "fix": "Make the readiness probe prove TCP is up, for example 'pg_isready -h 127.0.0.1 -U postgres -d solace' before the psql role check. pg_isready needs no password, so this also works under the strict hostssl-only hba.",
+     "evidence": "Read of docker-compose.yml lines 126-133. The strict hba in scripts/db/pg_tls_entrypoint.sh keeps 'local all all trust' for the socket and requires scram for TCP, so the psql part has to stay on the socket. The pg_isready part is the one that can move to TCP.",
+     "lens": "ops",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "I could not refute it. The postgres healthcheck at docker-compose.yml:130 runs pg_isready and psql with no -h flag, so both use the unix socket. The official entrypoint's temporary init server listens on the socket only, and pg_tls_entrypoint.sh keeps 'local all all trust'. The role-count check therefore passes as soon as 01-roles.sh has created both roles, even while the temporary server is still up and TCP is not yet listening. The migrate service depends on service_healthy and connects over TCP to postgres:5432, with restart \"no\" and no retry visible in the compose file. A tick in that gap would make migrate fail and abort 'compose up'. The window is narrow and the effect is a manual re-run, so minor is the right severity. Moving pg_isready to '-h 127.0.0.1' is a valid fix, because pg_isready needs no password under the hostssl-only hba. I did not run a live reproduction because containers must not be started."
+      }
+     ],
+     "survives": true
+    }
+   ]
+  }
+ ]
+}

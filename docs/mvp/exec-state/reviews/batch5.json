@@ -1,0 +1,166 @@
+[
+ {
+  "item": "WS-02.5",
+  "review": {
+   "spec_verdict": "PASS",
+   "quality_verdict": "CHANGES_REQUESTED",
+   "findings": [
+    {
+     "id": "WS-02.5-R1",
+     "severity": "important",
+     "location": "src/solace_infrastructure/postgres.py:96-117 (_is_local_host_part / _is_local_host); tests/solace_infrastructure/test_ssl_enforcement.py:402-404 (LOCAL_HOSTS)",
+     "problem": "The strict POSTGRES_HOST rule checks the raw string, but asyncpg percent-decodes the host it takes from the DSN. A percent-encoded host therefore gets past the rule in staging and production. The encoded unix-socket form, which is the standard libpq way to write a socket directory in a URL, gives a connection with no TLS at all. Encoded loopback names reach this machine and pass verify-full against a default gen_certs certificate, whose SANs include localhost and 127.0.0.1. The docstring and report say the rule refuses unix-socket paths and loopback names in strict environments; these forms are not refused.",
+     "evidence": "asyncpg 0.30.0 connect_utils.py:302 calls _parse_hostlist(dsn_hostspec, port, unquote=True), and lines 228-229 run urllib.parse.unquote(addr). Lines 495-499 and 913-915 treat a host starting with '/' as a unix socket and never apply the ssl context to it. Probe with ENVIRONMENT=production, PostgresSettings(host=X).validate_for_environment() and then asyncpg's _parse_connect_dsn_and_args(get_dsn()): 'localhost' and '::1' are refused. '%2Fvar%2Frun%2Fpostgresql' is ACCEPTED and dials a unix socket (TLS skipped). '%6Cocalhost' is ACCEPTED and dials tcp localhost. '%31%32%37.0.0.1' is ACCEPTED and dials tcp 127.0.0.1. 'db.internal,%6Cocalhost' is ACCEPTED and dials tcp db.internal and tcp localhost. End-to-end test against a real SOLACE_PG_TLS=required container behind scripts/db/pg_tls_entrypoint.sh, with default gen_certs SANs: in production, host='localhost' was refused, but host='%6Cocalhost' and host='%31%32%37.0.0.1' both passed get_dsn(). asyncpg.connect(dsn, ssl=s.get_ssl_context()) then connected, and pg_stat_ssl reported ssl=true. Also checked: inet_aton spellings such as '127.1' and '2130706433' pass the rule too, but the strict context rejects them at the handshake ('Hostname mismatch'), so they are not exploitable with gen_certs certificates.",
+     "fix": "Decode the host the same way asyncpg does before classifying it. In _is_local_host_part, replace `name = part.strip()` with `name = urllib.parse.unquote(part).strip()` and add `from urllib.parse import unquote` (or `import urllib.parse`). The socket, localhost and IP checks then see what asyncpg will dial. A simpler alternative is to refuse, in strict environments, any POSTGRES_HOST that contains '%'. Optional hardening: when ipaddress.ip_address fails, also try `ipaddress.IPv4Address(socket.inet_aton(name))` so legacy numeric forms such as 127.1 are classified too. Add '%2Fvar%2Frun%2Fpostgresql', '%6Cocalhost', '%31%32%37.0.0.1' and 'db.internal,%6Cocalhost' to LOCAL_HOSTS in tests/solace_infrastructure/test_ssl_enforcement.py so that test_ruling_strict_pool_refuses_a_local_postgres_host covers them. Check RED before the change and GREEN after it."
+    },
+    {
+     "id": "WS-02.5-R2",
+     "severity": "minor",
+     "location": "scripts/db/gen_certs.py:63-66 (_dns_name); tests/migrations/test_mvp_010_gen_certs.py:128-130",
+     "problem": "--san accepts an IP literal as a DNS name, because the label regex allows all-digit labels. `--san 10.0.0.5` or `--san 127.0.0.1` writes a dNSName SAN '127.0.0.1' and no iPAddress SAN. Python ssl and libpq match an IP host only against iPAddress SANs, so the certificate fails verify-full for exactly the address the operator meant to cover. The failure is closed (the connection is refused), but it only shows up at connect time, as a confusing 'Hostname mismatch' after deploy.",
+     "evidence": "Probe: gen_certs.main(['--out', d, '--san', '127.0.0.1']) returned 0. The server certificate had DNS SANs ['127.0.0.1'] and IP SANs []. _DNS_LABEL = re.compile(r\"(?!-)[A-Za-z0-9-]{1,63}(?<!-)\") (gen_certs.py:52) matches '127', '0', '0' and '1'.",
+     "fix": "At the start of _dns_name, add: `try: ipaddress.ip_address(text)` / `except ValueError: pass` / `else: raise argparse.ArgumentTypeError(f\"{text!r} is an IP address; pass it with --ip\")`. Add [\"--san\", \"127.0.0.1\"] to the parametrization of test_gen_certs_rejects_bad_arguments_without_writing. It expects exit 2 and nothing written."
+    }
+   ],
+   "summary": "Spec: PASS. Every interface in the brief is present with the stated signatures and behaviour: _is_strict_environment, effective_ssl_mode, build_ssl_context, DatabaseConfigError, PostgresSettings delegation, the env.py connect_args, migrate.py's _connect ssl, gen_certs and pg_tls_entrypoint.sh. The changes to the brief's tests are justified: _dsn() is forced by the ruling, and v=True on container removal stops a volume leak.\n\nQuality: CHANGES_REQUESTED, because of one important bypass of the strict host rule (R1).\n\nTests I re-ran:\n- tests/solace_infrastructure/test_ssl_enforcement.py plus tests/migrations/test_mvp_010_gen_certs.py: 98 passed, 1 skipped (the POSIX-only key-mode test).\n- tests/migrations/test_mvp_010_tls_real_pg.py with SOLACE_REQUIRE_REALINFRA=1: 14/14 passed.\n- test_mvp_038_lint_gate -k WS-02: passed.\n\nChecked and found sound:\n- **Hostname verification is really enforced in strict mode.** The context is PROTOCOL_TLS_CLIENT, loads only cadata from POSTGRES_SSL_ROOT_CERT, and has CERT_REQUIRED, check_hostname=True and a TLS 1.2 minimum. No strict path reaches CERT_NONE or check_hostname=False.\n- **asyncpg 0.30.0 honours that context.** Given an SSLContext it is non-advisory, so a server answering 'N' raises 'rejected SSL upgrade' and there is no plaintext retry. It also passes server_hostname=host to start_tls.\n- **Memory-BIO handshake probes behave correctly.** The strict context accepts postgres, localhost and 127.0.0.1. It rejects another host name ('Hostname mismatch'), a server from another CA, and a server capped at TLS 1.1.\n- **No downgrade in strict.** prefer, allow and disable are unreachable there; build_ssl_context always returns a verifying context or raises.\n- **Certificates are generated soundly.** Keys are ECDSA P-256 with SHA-256 signatures. The CA has critical BasicConstraints ca=True with pathlen 0 and critical keyCertSign/cRLSign key usage. The server certificate has ca=False, critical digitalSignature, serverAuth EKU, the requested SANs, and an AKI matching the CA's SKI. Validity defaults to 365 days (at most 3650). The CA key is never written.\n- **Key handling is sound.** server.key is created with O_EXCL at 0600 and then chmod'ed, and stdout and stderr carry only file names. The entrypoint copies under umask 077, sets 0600 owned by postgres, appends the -c settings last, and fails closed on half-provisioned or unreadable files.\n- **Errors leak nothing.** DatabaseConfigError messages name only the variable and are raised from None.\n\nNot findings:\n- Names that resolve to loopback through DNS or /etc/hosts (localhost.localdomain, ip6-localhost) are not resolved by the rule. With gen_certs certificates, verify-full rejects them on SAN mismatch.\n- migrate.py's DATABASE_URL and POSTGRES_* fallback are not covered by the host rule. That is the implementer's acknowledged hand-off (report concern 4), and the ruling scoped the rule to postgres.py.\n- get_dsn() percent-encoding belongs to WS-02.6 (MVP-273).\n\nDocker: every container and volume I created was removed (checked against a before-snapshot; no new images). The temporary probe directory D:\\tmp\\ws025-review-probe, including all generated certificates, has been deleted. No repo file was edited.\n\nFiles reviewed: D:\\Repo\\Contextual-Chatbot\\src\\solace_infrastructure\\postgres.py, D:\\Repo\\Contextual-Chatbot\\scripts\\db\\gen_certs.py, D:\\Repo\\Contextual-Chatbot\\scripts\\db\\pg_tls_entrypoint.sh, D:\\Repo\\Contextual-Chatbot\\migrations\\env.py, D:\\Repo\\Contextual-Chatbot\\scripts\\db\\migrate.py (TLS parts), D:\\Repo\\Contextual-Chatbot\\tests\\solace_infrastructure\\test_ssl_enforcement.py, D:\\Repo\\Contextual-Chatbot\\tests\\migrations\\test_mvp_010_gen_certs.py, D:\\Repo\\Contextual-Chatbot\\tests\\migrations\\test_mvp_010_tls_real_pg.py."
+  },
+  "verdicts": [
+   {
+    "id": "WS-02.5-R1",
+    "real": true,
+    "severity_ok": true,
+    "reason": "Reproduced. _is_local_host returns False for '%2Fvar%2Frun%2Fpostgresql', '%6Cocalhost', '%31%32%37.0.0.1' and 'db.internal,%6Cocalhost'. asyncpg's _parse_hostlist with unquote=True decodes them to 'localhost' and '/var/run', so the strict rule is bypassed. Important is fair: it needs the operator to set a malicious host, and the socket form skips TLS."
+   },
+   {
+    "id": "WS-02.5-R2",
+    "real": true,
+    "severity_ok": true,
+    "reason": "Reproduced. gen_certs main with --san 127.0.0.1 returns 0 and writes the cert. _dns_name accepts all-digit labels, so the SAN is a dNSName and not an iPAddress. It fails closed at connect time, so minor is right."
+   }
+  ]
+ },
+ {
+  "item": "WS-01.9",
+  "review": {
+   "spec_verdict": "PASS",
+   "quality_verdict": "CHANGES_REQUESTED",
+   "findings": [
+    {
+     "id": "WS-01.9-R1",
+     "severity": "important",
+     "location": "scripts/ci/check_tracked_closure.py:63 (roots) and :78-87 (_resolve)",
+     "problem": "Import roots are global and always tried in the same order: repo root, src/, then every services/<svc> alphabetically. The first root where any part of the import chain exists wins, whichever file is doing the importing. The repo root has src/__init__.py, so a service-local `from src.domain import X` inside the merged-src services (user-service, notification-service, which use this form throughout) resolves to the repo-root src package. Flat imports inside services/analytics-service/src (image module `main`, e.g. `from aggregations import ...`) resolve to nothing. Untracked dependencies reached either way are dropped, and `--strict` (the owner's release-gate-closure aid) exits 0 when it should not.",
+     "evidence": "I built synthetic repos in a temp dir and ran the real checker on them. (1) Tracked root src/__init__.py plus tracked services/notification-service/src/api.py containing `from src.domain import NotificationService`, with services/notification-service/src/domain.py untracked: output `0 tracked -> untracked pair(s)`, rc=0. (2) Tracked services/analytics-service/src/main.py containing `from aggregations import AnalyticsAggregator`, with aggregations.py untracked: 0 pairs, rc=0. (3) Control, with the untracked dependency at root src/domain.py: reported `services/x/a.py -> src/domain.py`, rc=1. On the real repo, service-first roots give the same 306 pairs today, so the defect is latent: user-service's untracked src/oauth.py and src/domain/erasure.py happen to be imported relatively.",
+     "fix": "Choose roots per importing file in python_deps. For a path under services/<svc>/ use [f\"services/{svc}\", f\"services/{svc}/src\", \"\", \"src\"] and never another service's roots; for any other path use [\"\", \"src\"]. In _resolve, stop at the first root where the leaf module resolves (parts plus names via _module_files(..., leaf_only=True)), not at the first root where any chain element exists; only when no root has the leaf, return the partial chain matches. Add synthetic cases (1) and (2) to tests/build/test_mvp_008_clean_checkout.py, asserting rc=1 and the expected pair."
+    },
+    {
+     "id": "WS-01.9-R2",
+     "severity": "important",
+     "location": "scripts/ci/clean_checkout.py:144 (run return), tests/build/test_mvp_008_clean_checkout.py:99",
+     "problem": "The proof can pass vacuously. run() returns 0 whenever no recorded step failed, so an empty plan prints `0/0 steps ok` and exits 0. An Image with neither module nor probes is built without any probe, and nothing flags it. The realinfra test asserts only returncode == 0, and no other test would catch an empty registry: test_mvp_008_clean_checkout_builds_every_registered_image compares plan names with IMAGES names (empty equals empty), and the test_mvp_032 cases parametrized over IMAGES collect nothing.",
+     "evidence": "Probe outside the repo: with clean_checkout.plan patched to return [], clean_checkout.run('1dabe01159a0f5ac01740f687e1a3eabedb0c810', <temp out>, 'reviewprobe', compose=False, tests=False, remove_images=False) exported the tree, printed `0/0 steps ok` and returned exit code 0.",
+     "fix": "In run(), fail when `not steps` (print `no images registered`, return 1). In plan(), raise when any image has zero probe commands. Return 0 only when no step failed and len(results) equals len(steps) + sum(len(s.probes) for s in steps) + int(compose) + int(tests), i.e. every expected step actually ran. In the realinfra test, compute expected = len(IMAGES) + total probe count, then assert len(IMAGES) >= 10 and that f\"{expected}/{expected} steps ok\" is in r.stdout."
+    },
+    {
+     "id": "WS-01.9-R3",
+     "severity": "minor",
+     "location": "scripts/ci/clean_checkout.py:33",
+     "problem": "The set of images and probe modules under test comes from the live working tree's scripts/ci/images.py, not from the exported tree. Other lanes are editing that working tree concurrently, so the result of a proof for tree T depends on whatever images.py happens to be on disk when the run starts. That is reliance on local state in the one proof D-17 accepts.",
+     "evidence": "`from scripts.ci.images import IMAGES, Image, probe_env` resolves against REPO, the working tree. The report's negative control on b309d50 shows it: migrate failed because docker/migrate.Dockerfile does not exist in that tree, so the migrate entry came from the working-tree registry.",
+     "fix": "After export_tree, if (out / 'scripts/ci/images.py') exists, load it with runpy.run_path (the module is stdlib-only) and build/probe from that IMAGES and probe_env. Fall back to the tool's registry only when the tree has none, which keeps the old-baseline negative control working. Print which registry was used, and fail if the two registries' image names differ."
+    },
+    {
+     "id": "WS-01.9-R4",
+     "severity": "minor",
+     "location": "scripts/ci/clean_checkout.py:93",
+     "problem": "`git archive` applies the host's core.autocrlf=true, so the export (and every image built from it) is not byte-identical to the tree. Text files get CRLF; only *.sh is forced to LF by .gitattributes. The proof's output therefore depends on local git config and differs from a Linux/CI checkout of the same tree.",
+     "evidence": "`git config core.autocrlf` = true. In my export of 1dabe01, scripts/ci/images.py was 2192 bytes with 52 CRLF pairs, against a 2140-byte blob in the tree. docker/entrypoint.sh had 0 CRLF (`*.sh text eol=lf`).",
+     "fix": "Run the archive as [\"git\", \"-c\", \"core.autocrlf=false\", \"-c\", \"core.eol=lf\", \"-C\", str(repo), \"archive\", \"--format=tar\", tree], and add a unit check that an exported .py file has the same byte size as its blob (git cat-file -s)."
+    },
+    {
+     "id": "WS-01.9-R5",
+     "severity": "minor",
+     "location": "scripts/ci/clean_checkout.py:132-137",
+     "problem": "The `--tests` step mutates os.environ and passes the operator's whole environment to pytest, so the in-export tests are not isolated from local shell state. Concretely, if SOLACE_CLEAN_CHECKOUT_TREE is set (the brief's Step 4 sets it in the session), the export's own test_mvp_008_tree_builds_and_probes_from_clean_checkout runs. tests/build/conftest.py require_docker needs no opt-in, only a reachable Docker. That test re-invokes the export's clean_checkout.py without --out, so it targets the same absolute DEFAULT_ROOT\\<tree7>. The marker file is present, so export_tree calls shutil.rmtree on the export that the outer pytest is running in.",
+     "evidence": "From the code: DEFAULT_ROOT = Path(r\"D:\\tmp\\mvp-exec\\clean-checkout\") is hard-coded. export_tree removes any directory that carries MARKER. The realinfra test calls clean_checkout.py with only --tree and --tag, and `env_cmd` passes no `-m \"not realinfra\"`. In tests/build/conftest.py:19-33, require_docker skips only when Docker is unreachable.",
+     "fix": "Give _run an `env` parameter instead of mutating os.environ. For the tests step, pass env = {k: v for k, v in os.environ.items() if not k.startswith(\"SOLACE_\")} | {\"PYTHONPATH\": os.pathsep.join([str(out), str(out / \"src\")]), \"ENVIRONMENT\": \"test\"}, and add `-m`, `not realinfra` to env_cmd so the proof never re-invokes itself."
+    },
+    {
+     "id": "WS-01.9-R6",
+     "severity": "minor",
+     "location": "scripts/ci/clean_checkout.py:86-92 (export_tree), :114-117 (_git_context)",
+     "problem": "Nothing stops `--out` from pointing inside the repository; a relative --out run from the repo root, where the Makefile runs, lands in the working tree. With `--tests`, `git init` + `git add -A` then create an embedded repository there. The next checkpoint.ps1 (`git add -A` on a temp index) would record it as a gitlink; without --tests it would record about 864 duplicated exported files into the next checkpoint tree. That is how the private git context could leak into the repo and into later proofs. Separately, has_git_context() is never called by run(), so its test guards nothing in the proof.",
+     "evidence": "export_tree only refuses a non-empty directory that lacks the marker. An empty or new path inside D:\\Repo\\Contextual-Chatbot is accepted. checkpoint.ps1 runs `git -C $Repo add -A`. run() has no reference to has_git_context.",
+     "fix": "In main()/run(), set out = out.resolve() and raise SystemExit when out == REPO or REPO in out.parents. Right after export_tree, `if has_git_context(out): raise SystemExit(...)` before any build, so the existing helper actually enforces that the export carries no VCS state."
+    },
+    {
+     "id": "WS-01.9-R7",
+     "severity": "minor",
+     "location": "scripts/ci/check_tracked_closure.py:119-138 (dockerfile_deps)",
+     "problem": "Dockerfile COPY dependencies ignore .dockerignore, so untracked files that never enter the build context are reported as dependencies. This false-positive noise goes into the owner's post-program commit decision.",
+     "evidence": "In D:\\tmp\\mvp-exec\\closure-ws0109.txt, 42 of the 248 Dockerfile pairs are files under tests/, e.g. `services/diagnosis_service/Dockerfile -> services/diagnosis_service/tests/test_end_session_persistence.py`. .dockerignore excludes those via `**/tests/` and `tests/`.",
+     "fix": "In the candidate loop, skip candidates where dockerfiles.dockerignored(candidate, self.repo / \".dockerignore\") is True, when that file exists. Apply the same filter to the `rel == \"\"` (COPY . .) branch. Add a synthetic test: a tracked Dockerfile with `COPY src/ ./src/`, an untracked src/tests/x.py and `**/tests/` in .dockerignore should give 0 pairs."
+    },
+    {
+     "id": "WS-01.9-R8",
+     "severity": "minor",
+     "location": "scripts/ci/clean_checkout.py:56 (probe image ref), :141 (rmi)",
+     "problem": "Probes and cleanup use the mutable tag solace/<name>:<tag>, not the image just built, and the default tag `clean` is shared by the realinfra test, the PS1 wrapper and the CLI. Two concurrent runs for different trees can overwrite each other's tag between build and probe, so a probe may test an image built from another export. `--remove-images` also force-removes any :clean image, including one another run is about to probe.",
+     "evidence": "probe_commands uses image_ref(image.name, tag). Cleanup runs `docker rmi -f image_ref(step.image.name, tag)` for every step, whether or not this run built it. The tag defaults to \"clean\" in main(), check_clean_checkout.ps1 and the realinfra test.",
+     "fix": "Default the tag to f\"clean-{tree[:7]}\". Build with `--iidfile <tmp>`, then probe and remove by the recorded image ID, removing only images this run actually built."
+    }
+   ],
+   "summary": "Spec: PASS. Quality: CHANGES_REQUESTED, because of two important findings (R1, R2) plus six minor ones.\n\nEvery file the brief lists exists and matches its interface. migrate.Dockerfile uses the app template's builder stage and copies alembic.ini, migrations/, scripts/db/ and src/. It sets PYTHONPATH=/app:/app/src, ENTRYPOINT /app/docker/entrypoint.sh and CMD `python -m scripts.db.migrate upgrade head`, and runs as appuser (uid 1000) with no HEALTHCHECK. The images.py entry is verbatim. The Makefile targets, the non-gating ci_local `tracked-closure --report` stage and check_clean_checkout.ps1 (D-20 interpreter) are as specified. The negative control and the closure report are recorded in the ledger. The two red MVP-013 probes (jose) wait on WS-01.3 and are known. The out-of-list build_images.py edit (probe `image.probes` when module is empty) is justified, because CI's images matrix lists every image including migrate, and the ledger accepted it.\n\nWhat I checked and found sound:\n- Export contents: checkpoint tree 7879f89 has 863 entries and nothing matching ignore rules (only the .env.example negation), with no .env, keys, venv or caches. My export of 1dabe01 had no .git and no .env.\n- Venv: no .pth file maps the venv or the anaconda base to this repo.\n- Builds: every build runs with cwd set to the export and context `.`.\n- Private git context: it is created only after all builds and the compose step, and .git is in .dockerignore.\n- Secrets: alembic.ini's sqlalchemy.url is empty, .dockerignore drops .env and secrets, and the COPY sources contain no key or env files. The probe values are random throwaways and are masked in logs.\n- Probe imports: scripts.db.migrate and schema_check import with only ENVIRONMENT=test.\n- Tests: test_mvp_008, 032, 211 and 038 give 91 passed, 1 skipped.\n\nImportant findings:\n- R1: the closure resolver tries import roots in one global order and takes the first partial match. Service-local `from src.*` imports in the merged-src services, and flat imports in analytics, therefore resolve to the wrong place or nowhere, and `--strict` can report clean when it is not. I reproduced this on synthetic repos; it is latent on the real repo today (306 = 306 pairs with service-first roots).\n- R2: clean_checkout passes vacuously. An empty plan printed `0/0 steps ok` and exited 0, and the realinfra test checks only the return code.\n\nMinor findings:\n- R3: the image registry is read from the live working tree, not from the exported tree.\n- R4: the export is not byte-identical to the tree, because git archive applied the host's core.autocrlf=true (52 CRLFs in images.py).\n- R5: `--tests` passes the operator's environment to pytest, so a set SOLACE_CLEAN_CHECKOUT_TREE makes the export's own realinfra test delete the running export.\n- R6: nothing stops `--out` from being inside the repo, and has_git_context is never enforced.\n- R7: the closure ignores .dockerignore, giving 42 false-positive pairs on tests/ files.\n- R8: probes and cleanup use the shared mutable `clean` tag rather than the ID of the image just built.\n\nAll probes ran in D:\\tmp\\ws0109-review-probe, which I deleted. I created no images, containers or volumes and changed nothing in the repo."
+  },
+  "verdicts": [
+   {
+    "id": "WS-01.9-R1",
+    "real": true,
+    "severity_ok": false,
+    "reason": "Reproduced. A repo-root src/__init__.py exists, and `from src.domain import X` in a service with an untracked services/n/src/domain.py gives 0 pairs and rc=0 under --strict. The root loop returns at the first root where any chain element exists. The flat `from agg import A` case also gives 0 pairs. The finding itself says it is latent on the real repo, and the tool is report-only, so 'important' is overstated; minor."
+   },
+   {
+    "id": "WS-01.9-R2",
+    "real": true,
+    "severity_ok": false,
+    "reason": "By the code, run() returns 0 whenever no step failed, so an empty plan gives '0/0 steps ok' and rc 0. Nothing asserts a minimum image or probe count, and plan() does not reject an Image with no module and no probes. The registry has real entries today, so this is a missing guard, not a current false pass; minor."
+   },
+   {
+    "id": "WS-01.9-R3",
+    "real": true,
+    "severity_ok": true,
+    "reason": "clean_checkout.py imports IMAGES and probe_env from the working-tree scripts.ci.images (REPO), not from the exported tree, so the image list depends on local state. Minor is right."
+   },
+   {
+    "id": "WS-01.9-R4",
+    "real": true,
+    "severity_ok": true,
+    "reason": "Reproduced. With core.autocrlf=true, the git archive of Makefile is 1084 bytes with 32 CRLF pairs, against a 1052-byte LF blob. With -c core.autocrlf=false the export is 1052 bytes, byte-identical to the blob."
+   },
+   {
+    "id": "WS-01.9-R5",
+    "real": true,
+    "severity_ok": true,
+    "reason": "The code mutates os.environ and passes no `-m not realinfra`. The realinfra test is selected when SOLACE_CLEAN_CHECKOUT_TREE is set and Docker is reachable, because addopts is overridden. It re-invokes clean_checkout.py without --out, which targets the same DEFAULT_ROOT export, and export_tree rmtree's a marked directory. This is conditional on the env var and Docker; minor."
+   },
+   {
+    "id": "WS-01.9-R6",
+    "real": true,
+    "severity_ok": true,
+    "reason": "export_tree only refuses a non-empty directory that lacks the marker, and nothing rejects an --out inside the repo. has_git_context is defined at line 66 but never called outside its own definition, so the run does not enforce that the export carries no VCS state. This needs operator misuse; minor."
+   },
+   {
+    "id": "WS-01.9-R7",
+    "real": true,
+    "severity_ok": true,
+    "reason": "dockerfile_deps never consults dockerfiles.dockerignored, which exists at dockerfiles.py:184. .dockerignore excludes `**/tests/` and `tests/`, so untracked test files are reported as COPY dependencies that never enter the build context. This is noise only, not a missed failure."
+   },
+   {
+    "id": "WS-01.9-R8",
+    "real": true,
+    "severity_ok": true,
+    "reason": "Probes and `docker rmi -f` use the mutable tag image_ref(name, tag), and the default tag 'clean' is shared across runs. There is no iidfile, so concurrent runs could race, and cleanup removes any :clean image even if this run did not build it. I did not reproduce the race; it follows from the code. Minor."
+   }
+  ]
+ }
+]

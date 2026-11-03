@@ -1,0 +1,116 @@
+{
+ "task": "WS-03.3",
+ "results": [
+  {
+   "lens": "security",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "APPROVED",
+    "prior_findings": [],
+    "findings": [
+     {
+      "id": "WS033-SEC-1",
+      "severity": "minor",
+      "file": "docker-compose.yml",
+      "line": 183,
+      "problem": "REDIS_PASSWORD has to be URL-safe, but only a comment says so and nothing checks it. The redis command printf's whatever value it gets into /tmp/redis.conf, and every client builds a raw redis://:<pw>@ URL. A value outside [A-Za-z0-9_-] therefore leaks the production secret into container logs instead of failing closed.",
+      "failure_scenario": "(a) An operator puts a space or an unbalanced quote in REDIS_PASSWORD in .env.prod. redis-server cannot parse the requirepass line, prints `>>> 'requirepass <password>'` to stderr and exits. With restart: unless-stopped this repeats on every restart into the json-file logs on the host. (b) An operator generates the value with `openssl rand -base64 24`, which often contains '/'. Redis parses it fine and turns healthy, but redis-py from_url fails while parsing the URL with a ValueError whose message contains the password prefix. user-service logs it with `error=str(bl_err)` / `error=str(_sess_err)` (services/user-service/src/main.py:261, :350) and then falls back to the in-memory token blacklist and session manager.",
+      "fix": "Fail closed before the config file is written. Prepend to the redis command: `case \"$$REDIS_PASSWORD\" in ''|*[!A-Za-z0-9_-]*) echo 'REDIS_PASSWORD must be URL-safe [A-Za-z0-9_-]' >&2; exit 1;; esac;`. The message must not echo the value. This also closes the newline config-injection the prod header mentions. Diagnosis, personality, orchestrator, notification and analytics have no depends_on redis, so also hand off a strict preflight or ProductionGuards format check on REDIS_PASSWORD / REDIS_URL.",
+      "evidence": "Redis 7.4.7 src/config.c, loadServerConfigFromString: on an sdssplitargs NULL ('Unbalanced quotes') or a wrong argument count it jumps to loaderr, which runs `fprintf(stderr, \">>> '%s'\\n\", lines[i])` with no SENSITIVE_CONFIG redaction. Local probe with redis-py 5.3.1: from_url('redis://:AbCdEf/ghI+jk=@redis:6379/0') raised a ValueError whose message contained the password prefix. A grep of deploy/, scripts/ and src/ finds no format validation of operator-supplied strict values; urlsafe24 is only used to generate synthetic values (deploy/env/registry.py:209)."
+     },
+     {
+      "id": "WS033-SEC-2",
+      "severity": "minor",
+      "file": "docker-compose.prod.yml",
+      "line": 332,
+      "problem": "The strict guarantee that Grafana never boots on admin/admin rests on the render alone. Grafana applies GF_SECURITY_ADMIN_PASSWORD only when it first creates grafana.db, and it ignores empty env overrides. Dev renders GF_SECURITY_ADMIN_PASSWORD=\"\", so a dev run seeds grafana_data with the built-in admin/admin. No compose file sets a top-level `name:`, so a strict run from the same checkout reuses that `<dir>_grafana_data` volume.",
+      "failure_scenario": "An operator follows docs/STAGING-BRINGUP.md:92-93 ('the dev compose also works: docker compose up -d --build') on the staging host. Later they switch to `--env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml up -d` with a strong GRAFANA_ADMIN_PASSWORD. Compose renders fine and the test passes, but Grafana still accepts admin/admin. Anyone holding the shared Caddy ops basic-auth credential then gets Grafana admin. Caddy's basic auth is the only remaining barrier.",
+      "fix": "Make strict independent of volume history. In the strict overlay, run `grafana cli admin reset-admin-password --password-from-stdin` (fed from the env var, never as an argv value) before exec'ing /run.sh. Alternatively, give the strict overlay its own top-level `name:` so it never shares dev volumes. At minimum, have the runbook require a fresh grafana_data volume.",
+      "evidence": "docker-compose.yml:320 `GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}` (dev render: password empty, user admin). docker-compose.prod.yml:332 only overrides the env value. Grafana's applyEnvVariableOverrides applies an override only when len(envValue) > 0, and Grafana documents admin_password as 'set once on first-run'. Neither compose file has a top-level `name:` (grep). The volume is grafana_data:/var/lib/grafana (docker-compose.yml:325)."
+     }
+    ]
+   },
+   "verified": [
+    {
+     "id": "WS033-SEC-1",
+     "severity": "minor",
+     "file": "docker-compose.yml",
+     "line": 183,
+     "problem": "REDIS_PASSWORD has to be URL-safe, but only a comment says so and nothing checks it. The redis command printf's whatever value it gets into /tmp/redis.conf, and every client builds a raw redis://:<pw>@ URL. A value outside [A-Za-z0-9_-] therefore leaks the production secret into container logs instead of failing closed.",
+     "failure_scenario": "(a) An operator puts a space or an unbalanced quote in REDIS_PASSWORD in .env.prod. redis-server cannot parse the requirepass line, prints `>>> 'requirepass <password>'` to stderr and exits. With restart: unless-stopped this repeats on every restart into the json-file logs on the host. (b) An operator generates the value with `openssl rand -base64 24`, which often contains '/'. Redis parses it fine and turns healthy, but redis-py from_url fails while parsing the URL with a ValueError whose message contains the password prefix. user-service logs it with `error=str(bl_err)` / `error=str(_sess_err)` (services/user-service/src/main.py:261, :350) and then falls back to the in-memory token blacklist and session manager.",
+     "fix": "Fail closed before the config file is written. Prepend to the redis command: `case \"$$REDIS_PASSWORD\" in ''|*[!A-Za-z0-9_-]*) echo 'REDIS_PASSWORD must be URL-safe [A-Za-z0-9_-]' >&2; exit 1;; esac;`. The message must not echo the value. This also closes the newline config-injection the prod header mentions. Diagnosis, personality, orchestrator, notification and analytics have no depends_on redis, so also hand off a strict preflight or ProductionGuards format check on REDIS_PASSWORD / REDIS_URL.",
+     "evidence": "Redis 7.4.7 src/config.c, loadServerConfigFromString: on an sdssplitargs NULL ('Unbalanced quotes') or a wrong argument count it jumps to loaderr, which runs `fprintf(stderr, \">>> '%s'\\n\", lines[i])` with no SENSITIVE_CONFIG redaction. Local probe with redis-py 5.3.1: from_url('redis://:AbCdEf/ghI+jk=@redis:6379/0') raised a ValueError whose message contained the password prefix. A grep of deploy/, scripts/ and src/ finds no format validation of operator-supplied strict values; urlsafe24 is only used to generate synthetic values (deploy/env/registry.py:209).",
+     "lens": "security",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The code confirms the gap. The redis command at docker-compose.yml:183 printf's $$REDIS_PASSWORD into /tmp/redis.conf with no format check. REDIS_URL at line 71 embeds the raw password, and only a comment (lines 49-51) says it must be URL-safe. Nothing in deploy/ validates operator-supplied strict values; urlsafe24 is used only to generate synthetic values (registry.py:209), and the other regexes there check key names. A hand-set password with a space or unbalanced quote makes redis-server print the config line to stderr, per the finding's cited Redis source (not re-checked here). A '/' or '+' in the password breaks URL parsing and the error text can echo part of the password. The condition needs an operator-supplied non-URL-safe value, so minor severity is appropriate."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "WS033-SEC-2",
+     "severity": "minor",
+     "file": "docker-compose.prod.yml",
+     "line": 332,
+     "problem": "The strict guarantee that Grafana never boots on admin/admin rests on the render alone. Grafana applies GF_SECURITY_ADMIN_PASSWORD only when it first creates grafana.db, and it ignores empty env overrides. Dev renders GF_SECURITY_ADMIN_PASSWORD=\"\", so a dev run seeds grafana_data with the built-in admin/admin. No compose file sets a top-level `name:`, so a strict run from the same checkout reuses that `<dir>_grafana_data` volume.",
+     "failure_scenario": "An operator follows docs/STAGING-BRINGUP.md:92-93 ('the dev compose also works: docker compose up -d --build') on the staging host. Later they switch to `--env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml up -d` with a strong GRAFANA_ADMIN_PASSWORD. Compose renders fine and the test passes, but Grafana still accepts admin/admin. Anyone holding the shared Caddy ops basic-auth credential then gets Grafana admin. Caddy's basic auth is the only remaining barrier.",
+     "fix": "Make strict independent of volume history. In the strict overlay, run `grafana cli admin reset-admin-password --password-from-stdin` (fed from the env var, never as an argv value) before exec'ing /run.sh. Alternatively, give the strict overlay its own top-level `name:` so it never shares dev volumes. At minimum, have the runbook require a fresh grafana_data volume.",
+     "evidence": "docker-compose.yml:320 `GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}` (dev render: password empty, user admin). docker-compose.prod.yml:332 only overrides the env value. Grafana's applyEnvVariableOverrides applies an override only when len(envValue) > 0, and Grafana documents admin_password as 'set once on first-run'. Neither compose file has a top-level `name:` (grep). The volume is grafana_data:/var/lib/grafana (docker-compose.yml:325).",
+     "lens": "security",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The mechanism holds up in the code. Dev compose renders GF_SECURITY_ADMIN_PASSWORD empty (docker-compose.yml:320). Grafana skips empty env overrides and applies the admin password only when it first creates grafana.db. So a dev run seeds admin/admin into the grafana_data volume. Neither compose file sets a top-level name:, so a strict run from the same checkout reuses that volume. The strict overlay (prod.yml:332) only changes the env value, so it does not reset the stored password. docs/STAGING-BRINGUP.md:93 does suggest running the dev compose first. I did not render the configs or run Grafana. The Grafana first-run and empty-override behaviour comes from my own knowledge of Grafana, not from anything checked in the repo. The scenario needs an operator to switch from dev to strict on one host, and Caddy basic auth still sits in front of Grafana. That makes minor the right severity."
+      }
+     ],
+     "survives": true
+    }
+   ]
+  },
+  {
+   "lens": "spec-ops",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "APPROVED",
+    "prior_findings": [],
+    "findings": [
+     {
+      "id": "WS033-SPE-1",
+      "severity": "minor",
+      "file": "docker-compose.yml",
+      "line": 460,
+      "problem": "diagnosis-service now receives DIAGNOSIS_REDIS_* and DIAGNOSIS_SESSION_REDIS_* settings and really uses Redis for its durable live-session store, but it has `depends_on: *app-depends-on` only (no `redis: service_healthy`). Therapy, user, safety and memory do wait for Redis.",
+      "failure_scenario": "If diagnosis-service starts before Redis answers, DiagnosisSessionStore.initialize() gives up after its 3 retries and the service silently falls back to in-memory sessions (main.py:142-144 comment says it degrades). The sessions that should be durable are then lost on restart. It does not crash. In practice the migrate and Kafka gates make this unlikely, so it is a startup-race hardening point and not a blocker. Personality needs no change: it only declares RedisSettings and never opens a client.",
+      "fix": "Add `redis: {condition: service_healthy}` under diagnosis-service depends_on, the same block therapy-service uses. The implementer's omission is acceptable for the brief, but the change costs nothing.",
+      "evidence": "services/diagnosis_service/src/infrastructure/redis_session_repository.py:128-149 (retry then no-op); docker-compose.yml diagnosis-service block: `depends_on: *app-depends-on`; services/personality_service/src/config.py:33-47 is the only Redis reference in personality."
+     }
+    ]
+   },
+   "verified": [
+    {
+     "id": "WS033-SPE-1",
+     "severity": "minor",
+     "file": "docker-compose.yml",
+     "line": 460,
+     "problem": "diagnosis-service now receives DIAGNOSIS_REDIS_* and DIAGNOSIS_SESSION_REDIS_* settings and really uses Redis for its durable live-session store, but it has `depends_on: *app-depends-on` only (no `redis: service_healthy`). Therapy, user, safety and memory do wait for Redis.",
+     "failure_scenario": "If diagnosis-service starts before Redis answers, DiagnosisSessionStore.initialize() gives up after its 3 retries and the service silently falls back to in-memory sessions (main.py:142-144 comment says it degrades). The sessions that should be durable are then lost on restart. It does not crash. In practice the migrate and Kafka gates make this unlikely, so it is a startup-race hardening point and not a blocker. Personality needs no change: it only declares RedisSettings and never opens a client.",
+     "fix": "Add `redis: {condition: service_healthy}` under diagnosis-service depends_on, the same block therapy-service uses. The implementer's omission is acceptable for the brief, but the change costs nothing.",
+     "evidence": "services/diagnosis_service/src/infrastructure/redis_session_repository.py:128-149 (retry then no-op); docker-compose.yml diagnosis-service block: `depends_on: *app-depends-on`; services/personality_service/src/config.py:33-47 is the only Redis reference in personality.",
+     "lens": "spec-ops",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "Confirmed in code. The diagnosis-service block (docker-compose.yml:475) uses only `depends_on: *app-depends-on`, which is migrate and kafka. It has no redis healthy gate, while therapy (555-558) and memory (515-518) add one. DiagnosisSessionStore.initialize() retries 3 times with 1s, 2s and 4s delays, then logs init_failed and returns without a client. That matches the claimed silent in-memory fallback. A startup race is plausible because kafka and migrate are gated but redis is not. Severity is correctly minor: it is a hardening gap, not a crash, and it needs Redis to be slower than the migrate and Kafka gates plus 7s."
+      }
+     ],
+     "survives": true
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,108 @@
+[
+ {
+  "item": "WS-02.5-fix1",
+  "review": {
+   "quality_verdict": "APPROVED",
+   "findings": [
+    {
+     "id": "WS-02.5-fix1-N1",
+     "severity": "minor",
+     "location": "src/solace_infrastructure/postgres.py:99 in fix tree 3f73c09 (line 103 in the current working tree): the rationale comment above _PLAIN_HOST_NAME",
+     "problem": "The comment says asyncpg \"splits user from host at the last '@'\". asyncpg 0.30.0 actually splits at the first '@'. The comment is a wrong model of the parser, sitting in the rationale for a security allowlist. Behaviour is unaffected: '@' is refused either way, and the WS-02.6 lane now percent-encodes the userinfo. Non-blocking; it is a comment-only fix.",
+     "evidence": "asyncpg/connect_utils.py:288-289 is `dsn_auth, _, dsn_hostspec = parsed.netloc.partition('@')`, which splits at the first '@'. Probe: _parse_connect_dsn_and_args(dsn='postgresql://solace:synthetic@x@localhost:5432/solace', ...) returned addrs [('x@localhost', 5432)] and user 'solace'. So the host is the literal name 'x@localhost', not 'localhost'. Only urllib's .hostname uses the last '@', and asyncpg never reads it.",
+     "fix": "Replace `(and splits user from host at the last '@')` with `(and splits user from host at the first '@', so an '@' in POSTGRES_HOST becomes part of the name it dials)`. No code or test change is needed."
+    }
+   ],
+   "summary": "Both original findings are closed. The only new defect is one minor comment inaccuracy (N1). No code change is needed.\n\n**R1 (percent-encoded host, socket and loopback bypass): closed.**\n- Tests: the fix's two test files gave 127 passed and 1 POSIX skip on the current tree.\n- Windows probe: I ran the strict rule (ENVIRONMENT=production) and then asyncpg 0.30.0's own `_parse_connect_dsn_and_args` on the `get_dsn()` output. No connection was made.\n  - Inputs: 117,034 values, made of a targeted edge list plus fuzz over `% / @ ? # : [ ] , space tab` and letter/digit mixes, plus mutations of localhost, 127.0.0.1 and [::1].\n  - 60,529 values were accepted. None of them parsed to a unix-socket address, and none to a TCP host that is localhost, *.localhost, or a loopback or unspecified address (inet_aton forms included).\n- Linux probe: a throwaway python:3.12-slim container (`--rm --network none`), the same base as the service images, so glibc.\n  - It ran the rule's functions, extracted from postgres.py, on glibc's inet_aton. The rule made the same decision as on Windows for every edge and legit value.\n  - getaddrinfo with AI_NUMERICHOST over all 60k accepted TCP hosts, plus 236,710 accepted numeric-style fuzz values, never returned a loopback or unspecified address.\n- Refused, as asked: [::1], [0::1], [0:0:0:0:0:0:0:1], [::ffff:127.0.0.1], [::ffff:7f00:1], [::], [::ffff:0.0.0.0], 127.1, 0x7f.1, 0177.1, 2130706433, 017700000001, 0, 127.000.000.001, localhost., LOCALHOST, *.localhost, every percent-encoded form, and every non-ASCII lookalike (fullwidth, U+3002 dot, soft hyphen, ZWSP, Cyrillic o, long s, dotless i). Internal tab and newline are refused too, which matters because urlsplit deletes them, so 'local\\thost' would otherwise dial localhost.\n- Accepted, as asked: postgres, db.internal, a.b-c.example, [fd00::5], [FD00::5], [2001:db8::1], 10.0.0.5, solace_postgres, PostgreS, punycode (xn--bcher-kva.example), db.internal., and comma lists of these, including mixed bracketed and plain members. asyncpg dials each one exactly as written. IDN has to be given as punycode now; that is a deliberate, documented change.\n- Accepted IPv6 forms that embed 127.0.0.1 ([::127.0.0.1], [::ffff:0:127.0.0.1], [64:ff9b::127.0.0.1]) gave ENETUNREACH against a local dual-stack listener on Linux. They do not reach loopback.\n\n**R2 (IP literal as --san): closed.**\n- `--san 10.0.0.5` exits 2 with \"pass it with --ip\". No repo caller passes an IP to --san.\n- A memory-BIO handshake against a default gen_certs certificate accepted postgres, localhost and 127.0.0.1. It rejected 0127.0.0.1 and 127.000.000.001.\n\n**Residuals, not findings (none introduced by the fix):**\n- ip6-localhost and ip6-loopback are accepted and resolve to ::1 through the /etc/hosts file Docker writes in every container. They fail verify-full against gen_certs SANs (handshake probe failed), and batch5 already ruled hosts-file names out of scope. Optional hardening: add them, and localhost.localdomain, to the refused names.\n- Surrounding whitespace is stripped before the check but not by asyncpg. So ' db.internal' and 'db1, db2' are accepted, and the padded name then fails to resolve. This fails closed and predates the fix.\n- Trailing-dot hosts are accepted but never pass verify-full: the 'postgres.' handshake failed. This also predates the fix.\n\n**Scope and cleanup:**\n- The WS-02.6 lane has since changed `get_dsn()` (percent-encoding the user, password and database) and `validate_for_environment`. The host functions are byte-identical to the fix diff, and I judged only the diff.\n- Docker: the one `--rm` container was removed and no image was pulled; the volume count is unchanged at 68.\n- The probe directory D:\\tmp\\ws025fix1-rr-probe, including its synthetic certificates and key, is deleted. No repo file was edited and no git command changed anything.\n\n**Files reviewed:** D:\\Repo\\Contextual-Chatbot\\src\\solace_infrastructure\\postgres.py, D:\\Repo\\Contextual-Chatbot\\scripts\\db\\gen_certs.py, D:\\Repo\\Contextual-Chatbot\\tests\\solace_infrastructure\\test_ssl_enforcement.py, D:\\Repo\\Contextual-Chatbot\\tests\\migrations\\test_mvp_010_gen_certs.py, C:\\Users\\rayyan.a\\AppData\\Local\\anaconda3\\Lib\\site-packages\\asyncpg\\connect_utils.py."
+  },
+  "verdicts": [
+   {
+    "id": "WS-02.5-fix1-N1",
+    "real": true,
+    "severity_ok": true,
+    "reason": "postgres.py:103 says asyncpg splits user from host at the last '@'. asyncpg 0.30.0 connect_utils.py:289 uses parsed.netloc.partition('@'), which splits at the first '@'. The comment is wrong. It has no effect on behaviour because '@' is refused either way, so minor is the right severity."
+   }
+  ]
+ },
+ {
+  "item": "WS-01.9-fix1",
+  "review": {
+   "quality_verdict": "CHANGES_REQUESTED",
+   "findings": [
+    {
+     "id": "WS-01.9-fix1-N1",
+     "severity": "important",
+     "location": "scripts/ci/clean_checkout.py:219-222 (cleanup), :52-54 (default_tag), :240 (main)",
+     "problem": "The R8 fix changed --remove-images to run `docker rmi -f <image id>`. Docker gives byte-identical build inputs the same image id, whatever the tag or context directory. A force-remove by id deletes every tag that points at that id. So when two proofs run at once (two trees where one image did not change, or two runs of the same tree, which share the default tag clean-<tree7>), the first run's cleanup deletes the second run's image before the second run probes it. Any other lane's tag on an identical image is deleted as well. The report says only images this run built are removed, which is not true. The gate test now always passes --remove-images, so the gate takes this path.",
+     "evidence": "Probe on Docker 29.7.2 with BuildKit, using temp dirs and synthetic files, all removed afterwards. Two export-like directories with identical content were built as solace-rvprobe/y:clean-tree001 and :clean-tree002 with --iidfile. Both builds returned the same id. `docker rmi -f <id1>` removed both tags. `docker run --rm <id2>` then failed with 'No such image: sha256:c1329df0...'. Before the fix, cleanup ran `docker rmi -f solace/<name>:clean`. Removing by reference only untags that reference when other tags exist.",
+     "fix": "Record (ref, image_id) for each successful build. In the finally block, for each pair, run `docker image inspect -f {{.Id}} <ref>`. Only when it equals image_id, run `docker rmi <ref>` by reference and without -f: this untags when other references exist and deletes only the last one. Make the default tag unique per run, e.g. f\"clean-{tree[:7]}-{secrets.token_hex(4)}\", so two runs never share a reference. Keep probing by image id. Add a unit test that the cleanup commands name the reference and never pass `-f` with a `sha256:` id."
+    },
+    {
+     "id": "WS-01.9-fix1-C1",
+     "severity": "minor",
+     "location": "tests/build/test_mvp_008_clean_checkout.py:243-245; scripts/ci/clean_checkout.py:188-189",
+     "problem": "R2 is only partly closed at the gate. The realinfra test asserts only `done == of and int(of) >= len(IMAGES) + 1`, i.e. at least 11 steps today, while the full plan is 25 (10 builds + 15 probes). With the implementer's deviation, a differing image list between the export and the working tree only prints a warning. Together these let the gating test pass when the tree's registry builds and probes far fewer images than the working tree registers. For example, an export images.py with 6 images and 1 probe each gives 12/12 >= 11, rc 0 and a warning nobody checks. Warn-only is fine for the CLI when proving older trees, but the gate must pin the count.",
+     "evidence": "The R2 fix asked for expected = len(IMAGES) + total probe count, len(IMAGES) >= 10, and f\"{expected}/{expected} steps ok\" in stdout. The test implements a lower bound instead. run() prints 'warning: the export's image list differs ...' and continues (lines 188-189). The test never inspects that line.",
+     "fix": "In test_mvp_008_tree_builds_and_probes_from_clean_checkout, compute expected = len(IMAGES) + sum((1 if i.module else 0) + len(i.probes) for i in IMAGES). Assert len(IMAGES) >= 10, assert \"warning: the export's image list differs\" not in r.stdout, and assert total == f\"{expected}/{expected} steps ok\". Optionally add a --require-registry-match flag that turns the warning into a failure, pass it from the test, the Makefile clean-checkout target and check_clean_checkout.ps1, and keep warn-only for explicit older-tree proofs."
+    },
+    {
+     "id": "WS-01.9-fix1-C2",
+     "severity": "minor",
+     "location": "scripts/ci/clean_checkout.py:167-170 (_git_context), :108-113 (tests_env), :215-218 (run)",
+     "problem": "The git context for --tests and the isolated tests env both inherit GIT_* variables. tests_env strips only SOLACE_*, and _git_context passes no env. If GIT_INDEX_FILE or GIT_DIR is set in the operator's environment (git hooks, `git submodule foreach`, or the GIT_INDEX_FILE window that checkpoint.ps1 opens), the 'private' git context writes to that index or repository instead of out/.git, and the in-export tests' `git ls-files` / `git check-ignore` read foreign state. So the check 'the git context added for --tests never touches the real repo' does not hold. With GIT_DIR pointing at the real repo, --tests would flip it to bare. The trigger is latent and the damage can be undone, but this is the isolation R5 and R6 were meant to give.",
+     "evidence": "Probes in temp dirs only. (1) With GIT_INDEX_FILE=<tmp>/foreign-index, _git_context(<tmp>/out) wrote foreign-index and created no out/.git/index, and tests_env(...) kept GIT_INDEX_FILE. (2) <tmp>/other was a normal repo (core.bare=false). With GIT_DIR=<tmp>/other/.git, _git_context(<tmp>/out) reinitialised that repo and set core.bare=true. `add -A` then raised CalledProcessError, and `git -C other status` now fails with 'fatal: this operation must be run in a work tree'. No out/.git was created.",
+     "fix": "Build git_env = {k: v for k, v in os.environ.items() if not k.startswith(\"GIT_\")} and pass env=git_env to both git calls in _git_context (and to the git archive call in export_tree). After `init`, assert that `git -C out rev-parse --absolute-git-dir` resolves to (out / '.git').resolve() before running `add -A`. In tests_env, drop GIT_* keys too: `if not k.startswith((\"SOLACE_\", \"GIT_\"))`. Add a unit test that sets GIT_INDEX_FILE and GIT_DIR to temp targets and asserts that both are untouched and that out/.git/index exists."
+    },
+    {
+     "id": "WS-01.9-fix1-N2",
+     "severity": "minor",
+     "location": "scripts/ci/clean_checkout.py:52-54 (default_tag), :240 (main)",
+     "problem": "The new default tag f\"clean-{tree[:7]}\" is built from the raw --tree argument, which the help text documents as 'tree id (or any tree-ish)'. Tree-ish forms like HEAD~1 or HEAD^{tree} give an invalid Docker reference, so every build fails with 'invalid reference format' and the proof reports a false FAIL for all 10 images. With the old fixed default tag 'clean', these inputs worked.",
+     "evidence": "default_tag('HEAD~1') returns 'clean-HEAD~1' and default_tag('HEAD^{tree}') returns 'clean-HEAD^{t'. `docker build -t solace-rvprobe/x:clean-HEAD~1 <tmp>` gives 'ERROR: failed to build: invalid tag \"solace-rvprobe/x:clean-HEAD~1\": invalid reference format'.",
+     "fix": "In main(), resolve the tree-ish once: tree_id = git -C REPO rev-parse --verify '<tree>^{tree}' (raise SystemExit on failure). Use tree_id for resolve_out, default_tag, run() and the export marker. Add a unit test that default_tag(<resolved id>) matches ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$."
+    },
+    {
+     "id": "WS-01.9-fix1-N3",
+     "severity": "minor",
+     "location": "tests/build/test_mvp_008_clean_checkout.py:122-128 (test_mvp_008_r1_a_service_never_uses_another_services_roots)",
+     "problem": "The new R1 regression test for 'a service never uses another service's roots' does not distinguish the fixed code from the old code. Its untracked helper sits at services/b/src/helper.py, which the old global root list (\"\", src, services/<svc>) never searched either. So the test passes on the code before the fix and guards nothing.",
+     "evidence": "I extracted the pre-fix checker (base tree 7879f89, git archive into a temp dir) and ran it on synthetic temp repos. With the test's repo2 layout (untracked services/b/src/helper.py), the old checker gives rc 0, the same as the fixed one. With the helper untracked at services/b/helper.py instead, the old checker gives rc 1 ('services/a/src/main.py -> services/b/helper.py') and the fixed one gives rc 0.",
+     "fix": "In repo2, put the untracked dependency at services/b/helper.py, i.e. _tracked(tmp_path / \"d\", {\"services/a/src/main.py\": \"from helper import X\\n\"}, {\"services/b/helper.py\": \"X = 1\\n\"}), so the test fails on the old global roots. Keep the services/b/src/helper.py variant as an extra case if wanted."
+    }
+   ],
+   "summary": "Scoped re-review of WS-01.9-fix1. I checked the head tree 684ad43 against the working tree: clean_checkout.py and check_tracked_closure.py are identical apart from line endings. test_mvp_008 + test_mvp_032: 82 passed, 1 skipped.\n\nClosed:\n- R1: per-file roots, leaf-first resolution; synthetic cases (1) and (2) give rc 1 with the expected pair.\n- R3: the registry is loaded from the export. The warn-only drift deviation is acceptable for the CLI, but the gate does not compensate for it (see C1).\n- R4: autocrlf/eol overridden. No other attribute sources exist: no info/attributes, no core.attributesFile, and .gitattributes has only *.sh eol=lf.\n- R5: SOLACE_* stripped, `-m \"not realinfra\"` added, os.environ no longer mutated.\n- R6: resolve_out refuses repo paths given in another case, with forward slashes or with `..`. The has_git_context guard is wired in.\n- R7: the real-repo closure dropped from 295 to 264 pairs, with no tests/ COPY noise left.\n- R2 in the CLI: probes through run() show an empty plan gives rc 1 ('no images registered') and an unprobed image gives rc 1. verdict() requires every expected step, and a build failure records its probes as failed 'not run' results.\n- R8: probes now address the image by id.\n\nNot closed or newly introduced:\n- N1 (important): cleanup now force-removes by image id. Identical builds share an id, so one run deletes other runs' and other lanes' tags. Verified with Docker.\n- C1: the gate test only asserts N >= images+1, so with warn-only drift it can pass while far fewer images are proven.\n- C2: the --tests git context and the tests env inherit GIT_*. Verified in temp dirs: GIT_INDEX_FILE gets overwritten, and GIT_DIR flips the target repo to core.bare=true.\n- N2: default_tag gives invalid Docker tags for documented tree-ish inputs like HEAD~1.\n- N3: the cross-service R1 test passes on the pre-fix code too, so it guards nothing.\n\nAll probes ran in temp dirs outside the repo and were deleted. Probe images (solace-rvprobe/*) were removed, and no repo files or git state were changed."
+  },
+  "verdicts": [
+   {
+    "id": "WS-01.9-fix1-N1",
+    "real": true,
+    "severity_ok": true,
+    "reason": "clean_checkout.py:219-222 runs `docker rmi -f <image id>` and the default tag is shared per tree (line 54). A force-remove by id untags every reference to that id, so it also deletes a concurrent run's image and other lanes' tags on identical content. I did not re-run the Docker probe."
+   },
+   {
+    "id": "WS-01.9-fix1-C1",
+    "real": true,
+    "severity_ok": true,
+    "reason": "The realinfra test (lines 243-245) only asserts `done == of and int(of) >= len(IMAGES) + 1`. The registry-mismatch case (lines 188-189) only prints a warning, which the test never checks. A smaller export registry can therefore pass the gate. Minor is the right level."
+   },
+   {
+    "id": "WS-01.9-fix1-C2",
+    "real": true,
+    "severity_ok": true,
+    "reason": "_git_context (lines 167-170) passes no env, and tests_env (line 110) strips only SOLACE_*, so GIT_DIR and GIT_INDEX_FILE are inherited. This is a latent isolation hole that only triggers when those variables are set. Minor is right. I confirmed it from the code and did not re-run the probe."
+   },
+   {
+    "id": "WS-01.9-fix1-N2",
+    "real": true,
+    "severity_ok": true,
+    "reason": "default_tag uses tree[:7] from the raw --tree argument (lines 52-54 and 240), whose help text allows any tree-ish. Inputs like HEAD~1 produce an invalid Docker tag, and the old fixed tag would have worked. Minor."
+   },
+   {
+    "id": "WS-01.9-fix1-N3",
+    "real": true,
+    "severity_ok": true,
+    "reason": "The old import-root list searched \"\", src and services/<svc>, as the check_tracked_closure.py header and roots code show. It never searched services/b/src, so repo2 with an untracked services/b/src/helper.py passes on the old code too, and the test (lines 125-128) does not distinguish fixed from old. Minor."
+   }
+  ]
+ }
+]

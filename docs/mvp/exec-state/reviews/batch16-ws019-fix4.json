@@ -1,0 +1,127 @@
+{
+  "summary": "Lens-diverse task review of one diff, each finding adversarially verified by a skeptic panel",
+  "agentCount": 2,
+  "logs": [
+    "1 minor finding(s) verified by a single skeptic only (important ones got 3)."
+  ],
+  "result": {
+    "task": "WS-01.9-fix4",
+    "results": [
+      {
+        "lens": "closure",
+        "review": {
+          "spec_verdict": "PASS",
+          "quality_verdict": "APPROVED",
+          "prior_findings": [
+            {
+              "id": "WS019F3-COR-1",
+              "closed": true,
+              "note": "remove_export clears the read-only bit (rmtree onexc handler, chmod on files), deletes the marker last, and a failed removal keeps the marker. test_mvp_008_cor1_an_export_with_a_private_git_dir_can_be_reused and ..._a_failed_removal_keeps_the_marker pass. The private-git-dir test would hit PermissionError on faa52bb. Probes with symlinks to a file and a directory, both at top level and nested, left the target files and directories untouched. The chmod did not change the read-only target either."
+            },
+            {
+              "id": "WS019F3-TES-1",
+              "closed": true,
+              "note": "test_mvp_008_tes1 runs main() offline with a fake runner. With --require-registry-match it asserts rc != 0, the 'registries differ' message and no docker build. Without the flag it asserts rc == 0, the warning and 3 builds. A mutant that disables the require branch would fail the first assertion."
+            },
+            {
+              "id": "WS019F3-TES-2",
+              "closed": true,
+              "note": "test_mvp_008_tes2 sets GIT_DIR and GIT_INDEX_FILE, then asserts that the env passed to the resolve_tree rev-parse and the export_tree git archive contains no GIT_* keys. A git_env that returns the whole environ would fail it. The suite ran: 58 passed, 1 skipped."
+            }
+          ],
+          "findings": [
+            {
+              "id": "WS019F4-CLO-1",
+              "severity": "minor",
+              "file": "scripts/ci/clean_checkout.py",
+              "line": 171,
+              "problem": "remove_export can lose the marker without deleting the export. A directory junction inside the export is not is_symlink(), so it goes to shutil.rmtree. On Python 3.12.3 rmtree refuses it ('Cannot call rmtree on a symbolic link') and calls the onexc handler. The handler's chmod and retry call os.path._path_islink, which does not raise, so the failure is swallowed. The loop then unlinks the marker and out.rmdir() raises 'directory not empty'.",
+              "failure_scenario": "Repro with a scratch export that holds the marker and a junction to a victim directory. remove_export raised OSError(41), left ['junc'] in the export and had already deleted the marker. The victim's files survived, so nothing outside the export was deleted. The next export_tree on that --out then hits 'refusing to reuse ... not an earlier export', which breaks the 'a partial failure leaves the marker so the dir stays reusable' guarantee. git archive extraction never creates junctions, so this needs another tool to create one inside the export.",
+              "fix": "Before the marker unlink, treat os.path.isjunction(child) like a symlink and remove it with os.rmdir or unlink. Or let the handler re-raise when it cannot remove the path, and delete the marker only after every child is confirmed gone.",
+              "evidence": "Scratch probe on Python 3.12.3 / Windows: os.path.isjunction was True and Path.is_symlink() was False. rmtree called onexc with func=_path_islink and path=exp\\junc. After remove_export the export held only 'junc', the marker was gone, and the victim directory was intact. Scratch dir deleted."
+            }
+          ]
+        },
+        "verified": [
+          {
+            "id": "WS019F4-CLO-1",
+            "severity": "minor",
+            "file": "scripts/ci/clean_checkout.py",
+            "line": 171,
+            "problem": "remove_export can lose the marker without deleting the export. A directory junction inside the export is not is_symlink(), so it goes to shutil.rmtree. On Python 3.12.3 rmtree refuses it ('Cannot call rmtree on a symbolic link') and calls the onexc handler. The handler's chmod and retry call os.path._path_islink, which does not raise, so the failure is swallowed. The loop then unlinks the marker and out.rmdir() raises 'directory not empty'.",
+            "failure_scenario": "Repro with a scratch export that holds the marker and a junction to a victim directory. remove_export raised OSError(41), left ['junc'] in the export and had already deleted the marker. The victim's files survived, so nothing outside the export was deleted. The next export_tree on that --out then hits 'refusing to reuse ... not an earlier export', which breaks the 'a partial failure leaves the marker so the dir stays reusable' guarantee. git archive extraction never creates junctions, so this needs another tool to create one inside the export.",
+            "fix": "Before the marker unlink, treat os.path.isjunction(child) like a symlink and remove it with os.rmdir or unlink. Or let the handler re-raise when it cannot remove the path, and delete the marker only after every child is confirmed gone.",
+            "evidence": "Scratch probe on Python 3.12.3 / Windows: os.path.isjunction was True and Path.is_symlink() was False. rmtree called onexc with func=_path_islink and path=exp\\junc. After remove_export the export held only 'junc', the marker was gone, and the victim directory was intact. Scratch dir deleted.",
+            "lens": "closure",
+            "votes": [
+              {
+                "refuted": false,
+                "severity_ok": true,
+                "reason": "I reproduced it. I put the marker and a directory junction to a victim directory in a scratch export and called remove_export. It raised OSError(41, 'The directory is not empty') and left only 'junc' in the export. The marker was gone, which breaks the reusable-on-partial-failure guarantee. The victim's files were intact, so nothing outside the export was deleted. A junction is not is_symlink(), so it goes to shutil.rmtree. The onexc handler swallows the failure, and the marker is then unlinked. The case is narrow, because git archive never creates junctions, so minor severity is right. The scratch directory was cleaned up."
+              }
+            ],
+            "survives": true
+          }
+        ]
+      }
+    ]
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Review"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Verify"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "review:closure",
+      "phaseIndex": 1,
+      "phaseTitle": "Review",
+      "agentId": "a7e6ecbf616272726",
+      "model": "claude-sonnet-5-5",
+      "state": "done",
+      "startedAt": 1793657733341,
+      "queuedAt": 1793657733326,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "PASS",
+      "promptPreview": "Repo: D:\\Repo\\Contextual-Chatbot. READ-ONLY scoped re-review of a small follow-up round. No repo edits, no git writes, no subagents.\nTask WS-01.9 clean-checkout proof. Fix3 was APPROVED; this round fixes three minors from D:\\tmp\\mvp-exec\\reviews\\batch13-ws019-fix3.json: WS019F3-COR-1 (export reuse after --tests: shutil.rmtree fails on read-only .git objects on Windows and deletes the marker first)…",
+      "promptFramed": true,
+      "lastProgressAt": 1793657828108,
+      "tokens": 68823,
+      "toolCalls": 9,
+      "durationMs": 94767,
+      "resultPreview": "{\"spec_verdict\":\"PASS\",\"quality_verdict\":\"APPROVED\",\"prior_findings\":[{\"id\":\"WS019F3-COR-1\",\"closed\":true,\"note\":\"remove_export clears the read-only bit (rmtree onexc handler, chmod on files), deletes the marker last, and a failed removal keeps the marker. test_mvp_008_cor1_an_export_with_a_private_git_dir_can_be_reused and ..._a_failed_removal_keeps_the_marker pass. The private-git-dir test would…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "verify:WS019F4-CLO-1:0",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "a5ca99deaa100ce1b",
+      "model": "claude-sonnet-5-5",
+      "state": "done",
+      "startedAt": 1793657830132,
+      "queuedAt": 1793657830123,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "I reproduced it. I put the marker and a directory junction …",
+      "promptPreview": "Repo: D:\\Repo\\Contextual-Chatbot. READ-ONLY scoped re-review of a small follow-up round. No repo edits, no git writes, no subagents.\nTask WS-01.9 clean-checkout proof. Fix3 was APPROVED; this round fixes three minors from D:\\tmp\\mvp-exec\\reviews\\batch13-ws019-fix3.json: WS019F3-COR-1 (export reuse after --tests: shutil.rmtree fails on read-only .git objects on Windows and deletes the marker first)…",
+      "promptFramed": true,
+      "lastProgressAt": 1793657859049,
+      "tokens": 58402,
+      "toolCalls": 5,
+      "durationMs": 28917,
+      "resultPreview": "{\"refuted\":false,\"severity_ok\":true,\"reason\":\"I reproduced it. I put the marker and a directory junction to a victim directory in a scratch export and called remove_export. It raised OSError(41, 'The directory is not empty') and left only 'junc' in the export. The marker was gone, which breaks the reusable-on-partial-failure guarantee. The victim's files were intact, so nothing outside the export …"
+    }
+  ],
+  "totalTokens": 127225,
+  "totalToolCalls": 14
+}

@@ -1,0 +1,166 @@
+[
+ {
+  "item": "WS-01.14",
+  "review": {
+   "spec_verdict": "PASS",
+   "quality_verdict": "CHANGES_REQUESTED",
+   "findings": [
+    {
+     "id": "WS-01.14-R1",
+     "severity": "important",
+     "location": "scripts/ci/secret_scan.py:50 (regex) and :132 (single raw-bytes search)",
+     "problem": "The age-private-key rule only matches the literal upper-case ASCII bytes `AGE-SECRET-KEY-1` followed by 50 or more bech32 characters. It misses three things. (a) Post-quantum identities: age v1.3.0 and later write them as `AGE-SECRET-KEY-PQ-1...` (`age-keygen -pq`). (b) Any UTF-16 key file: Windows PowerShell 5.1 `>` and `Out-File` write UTF-16LE with a BOM by default, and this project's operator shell is PowerShell. (c) A lower-cased identity, whose key material is still fully recoverable. A key file in any of these forms that is checkpoint-visible is captured by `git add -A` and still passes `test_d07_checkpoint_visible_tree_has_no_secret_findings`.",
+     "evidence": "I ran a throwaway probe in a temp dir outside the repo with synthetic characters, calling `secret_scan.scan()` on `key.txt` laid out the way age-keygen writes it. UTF-8, UTF-8 with BOM and CRLF gave ['age-private-key']. UTF-16LE with BOM gave []. UTF-16BE gave []. `ops/age-identity.txt` in UTF-16LE gave []. A lower-case identity gave []. `AGE-SECRET-` + `KEY-PQ-1` + 90 bech32 characters gave []. The age README says: \"Post-quantum identities start with `AGE-SECRET-KEY-PQ-1...`\" and \"Support for post-quantum keys is built into age v1.3.0 and later\", and it shows `age-keygen -pq -o key.txt`. WS-03.8 (plan line 923) pins the age release from the project's published checksums, so the pinned age-keygen can produce PQ keys.",
+     "fix": "In secret_scan.py replace line 50 with `_AGE_PRIVATE_KEY = re.compile(re.escape((\"AGE-SECRET-\" + \"KEY-\").encode()) + rb\"(?:PQ-)?1[02-9AC-HJ-NP-Z]{50,}\", re.IGNORECASE)`. The prefix is still never written contiguously. Replace line 132 with `if _AGE_PRIVATE_KEY.search(data) or (b\"\\x00\" in data and _AGE_PRIVATE_KEY.search(data.replace(b\"\\x00\", b\"\"))):`, which catches UTF-16LE and UTF-16BE. Add scan cases to tests/build/test_d07_sops_tree_hygiene.py for a PQ identity, a UTF-16LE file with BOM, a UTF-16BE file and a lower-case identity, each expecting ('age-private-key', path). Update the docstring rule text to match."
+    },
+    {
+     "id": "WS-01.14-R2",
+     "severity": "important",
+     "location": ".gitignore:72-73, .dockerignore:47-49, scripts/ci/secret_scan.py:134",
+     "problem": "`key.txt` is not covered by any rule. It is age's own documented default key file name (`age-keygen -o key.txt`) and the name WS-03.8's own round-trip test uses (`age-keygen -o /work/key.txt`). The new rules cover only `keys.txt` and `*.agekey`. So `key.txt` anywhere in the repo is captured into checkpoint trees by `git add -A`, and it enters every Docker build context. The `age-key-file` name rule does not flag it either, so only the content rule catches it, and that rule misses PQ and UTF-16 keys (R1). In the worst case, an operator runs README-style `age-keygen -pq -o key.txt` in the repo. The key is captured, the scan passes, and per WS-03.8 the key then ships in the `git archive` of the checkpoint tree that goes to S3 and the host. Separately, `*.key` (for example `age.key`) is gitignored but not dockerignored.",
+     "evidence": "`git check-ignore --no-index -v` reports `key.txt` and `ops/key.txt` as VISIBLE under both core.ignorecase=true and core.ignorecase=false. `age.key` is ignored only through `.gitignore:56:*.key`. A real `docker build --output type=local` of a throwaway context using the repo's .dockerignore delivered `key.txt`, `services/svc/key.txt` and `services/svc/age.key` into the build output. Eight service Dockerfiles `COPY services/<svc>/` whole, and user-service also copies `scripts/`. The age README uses `age-keygen -o key.txt`, and WS-03 plan line 1109 uses `/work/key.txt`. No checkpoint-visible file today is named key.txt, so the new rule hides nothing planned: I filtered `git ls-files --cached --others --exclude-standard` for key or identity .txt names and got no matches.",
+     "fix": "In .gitignore, add `key.txt` right after line 73 (`keys.txt`). In .dockerignore, add `**/key.txt` and `**/*.key` after line 49. In secret_scan.py:134, use `lowered.endswith(\".agekey\") or lowered in {\"keys.txt\", \"key.txt\"}` and update the docstring. Add `key.txt` and `ops/key.txt` to `test_d07_age_keys_and_decrypted_files_stay_ignored`. Add `key.txt` and `services/x/age.key` to `test_d07_build_contexts_exclude_sops_files_and_age_keys`. Add an `age-key-file` case for `key.txt` to the scan test."
+    },
+    {
+     "id": "WS-01.14-R3",
+     "severity": "minor",
+     "location": ".dockerignore:47-49 (with scripts/ci/dockerfiles.py:139-157)",
+     "problem": "Docker ignore matching is case-sensitive, but git on the Windows host where checkpoints and image builds run uses core.ignorecase=true. A file like `services/<svc>/KEYS.TXT` or `staging.AgeKey` is therefore gitignored, so `visible_paths` never lists it and the scan's case-insensitive name rule never runs on it. Docker still sends it in the build context, and the whole-directory COPYs bake it into the image. The .dockerignore exclusion of age keys does not hold for case variants on this host.",
+     "evidence": "This repo has `git config core.ignorecase` = true. Under it, check-ignore ignores `KEYS.TXT`, `services/user-service/KEYS.TXT` and `x.AGEKEY`. A real docker build of a throwaway context with the repo's .dockerignore delivered `KEYS.TXT`, `x.AGEKEY`, `services/svc/KEYS.TXT` and `services/svc/staging.AgeKey`, while `services/svc/a.agekey` was correctly excluded. With the class patterns `**/*.[aA][gG][eE][kK][eE][yY]`, `**/[kK][eE][yY][sS].[tT][xX][tT]` and `**/[kK][eE][yY].[tT][xX][tT]`, real Docker excluded every variant. The repo's replica `dockerfiles.dockerignored()` returned False for all of them because `_pattern_regex` re-escapes `[`, so the replica would disagree with Docker.",
+     "fix": "Replace .dockerignore lines 48-49 (and the R2 additions) with case-class patterns: `**/*.[aA][gG][eE][kK][eE][yY]`, `**/[kK][eE][yY][sS].[tT][xX][tT]`, `**/[kK][eE][yY].[tT][xX][tT]` and `**/*.[kK][eE][yY]`. In scripts/ci/dockerfiles.py `_pattern_regex`, copy a `[...]` bracket expression through as a regex character class instead of escaping it, so the replica matches Docker. Add `services/x/KEYS.TXT` and `ops/staging.AgeKey` to `test_d07_build_contexts_exclude_sops_files_and_age_keys`."
+    },
+    {
+     "id": "WS-01.14-R4",
+     "severity": "minor",
+     "location": "scripts/ci/secret_scan.py:93 (plus docstring :15-16)",
+     "problem": "`_has_plaintext_leaf` skips every top-level key named `sops`, while `construct_document` keeps only the last one (last key wins). A file with a first `sops:` mapping holding a plaintext value, followed by encrypted values and a valid metadata block, therefore passes both rules. Plaintext children of the real `sops` mapping are never inspected either. The docstring says \"The composed YAML node graph is walked, so a duplicate key cannot hide a plaintext value\", and that is false for the `sops` key. R-01.18's ban on `unencrypted_*` and `encrypted_regex` is also not enforced on the metadata block.",
+     "evidence": "In the synthetic probe, `sops:\\n  DB_PASSWORD: SYNTHETIC-PLAINTEXT\\nAUTH_SECRET_KEY: ENC[...]\\n` followed by a valid SOPS metadata block gave []. A valid file with an extra `  DB_PASSWORD: SYNTHETIC-PLAINTEXT` child under `sops:` also gave []. A merge-key alias case was correctly flagged.",
+     "fix": "In `_has_plaintext_leaf`, collect the top-level key nodes equal to `sops`. If there is more than one, return True. Exempt only that one mapping. Treat any child of the `sops` mapping whose key is outside an allowlist ({age, kms, gcp_kms, azure_kv, hc_vault, pgp, lastmodified, mac, version, key_groups, shamir_threshold}) as a plaintext finding, which also enforces R-01.18's no-unencrypted_* rule. Add a scan test for the duplicate-`sops` case. At minimum, correct the docstring claim."
+    },
+    {
+     "id": "WS-01.14-R5",
+     "severity": "minor",
+     "location": "tests/build/test_d07_sops_tree_hygiene.py:85",
+     "problem": "The tree test's failure message shows only stdout. When the CLI exits 2 (git unavailable, as in the WS-01.9 git-archive export the report flags, or an unreadable file), the reason goes to stderr, so the assertion fails with an empty message.",
+     "evidence": "secret_scan.main prints `secret_scan: cannot scan ...` to stderr and returns 2, and stdout stays empty. The test asserts `r.returncode == 0, r.stdout[-4000:]`. The implementer's report (concern 2) notes this test exits 2 in a git-less export.",
+     "fix": "Change line 85 to `assert r.returncode == 0, (r.returncode, r.stdout[-4000:], r.stderr[-2000:])`. stderr carries only names, counts and the exception text, never file content."
+    }
+   ],
+   "summary": "Spec: PASS. The implementation matches the WS-01.14 brief. The .gitignore D-07 block is verbatim and sits right after `secrets/`, the three .dockerignore patterns were appended, scripts/ci/secret_scan.py has the specified Finding/visible_paths/scan/CLI interface and all five rules, and the Step 1 test is verbatim. My run of test_d07_sops_tree_hygiene.py, test_mvp_008_git_visibility.py and test_mvp_032_dockerfiles.py gave 115 passed. The implementer's extra hardening holds up: the node-graph walk catches duplicate non-sops keys and merge aliases, names are matched case-insensitively, and the history path is strict. CRLF and UTF-16 SOPS files parse correctly.\n\nQuality: CHANGES_REQUESTED, because this is a security-critical review and two realistic gaps break the D-07 rule that an age private key is never captured and is always caught.\n- R1: the content rule misses age v1.3+ post-quantum identities (`AGE-SECRET-KEY-PQ-1`), UTF-16 key files (the Windows PowerShell 5.1 `>` default) and lower-cased keys. Synthetic probes confirmed all three.\n- R2: `key.txt`, age's own documented name and the one WS-03.8 uses, is neither gitignored nor dockerignored nor name-flagged. A real docker build confirmed it, and `age.key`, reach the build context.\n- R3 (minor): Docker ignore matching is case-sensitive, but git on this Windows host ignores case. So `KEYS.TXT` and `*.AgeKey` are hidden from the scan yet shipped by Docker, which a real build confirmed. Docker character-class patterns fix it but need the dockerfiles.py replica taught `[...]`.\n- R4 (minor): a duplicate top-level `sops` key hides plaintext, which contradicts the docstring.\n- R5 (minor): the tree test's failure message drops stderr.\n\nResidual risk, not raised as findings because they are out of the brief's scope:\n- Decrypted output written outside deploy/secrets/ with a non-env extension (for example deploy/staging.json or staging.yaml) is visible and not detected.\n- The creation-rules exemption applies to any file named `.sops.yaml` anywhere, and that file's content is never checked.\n- A future per-Dockerfile `<name>.Dockerfile.dockerignore` would override the root rules under BuildKit. None exists today; every build, including docker/migrate.Dockerfile, uses the repo-root context and the single root .dockerignore.\n- Null leaves are flagged as plaintext. That is spec-compliant and consistent with WS-03.8's flat-string contract.\n\nHousekeeping: probes ran in D:\\tmp\\ws0114-review-probe and that directory has been deleted. The Docker probes used `--output type=local` from `FROM scratch`, so they created no image, container or volume. No repo file was edited and no mutating git command was run."
+  },
+  "verdicts": [
+   {
+    "id": "WS-01.14-R1",
+    "real": true,
+    "severity_ok": true,
+    "reason": "Reproduced. A plain UTF-8 identity is flagged. UTF-16LE with BOM, UTF-16BE, a lower-case identity and a PQ-prefixed identity (AGE-SECRET-KEY-PQ-1 form) all return no findings. The regex at secret_scan.py:50 is upper-case only and has no PQ branch, and the search at :132 runs on raw bytes."
+   },
+   {
+    "id": "WS-01.14-R2",
+    "real": true,
+    "severity_ok": true,
+    "reason": "Reproduced. `git check-ignore --no-index -v key.txt ops/key.txt` reports no match for either path. age.key is ignored only through *.key. .dockerignore lines 47-49 hold only **/*.agekey and **/keys.txt. scan() on a key.txt file returns no age-key-file finding because the name rule at :134 lists only keys.txt and .agekey. I did not re-run docker build, but the .dockerignore text confirms the gap."
+   },
+   {
+    "id": "WS-01.14-R3",
+    "real": true,
+    "severity_ok": true,
+    "reason": "core.ignorecase is true in this repo. The .dockerignore patterns are lower-case literals, and Docker matches case-sensitively. The gap is plausible and the stated minor severity fits. I did not re-run the docker build or the dockerfiles.py replica check."
+   },
+   {
+    "id": "WS-01.14-R4",
+    "real": true,
+    "severity_ok": true,
+    "reason": "Reproduced. A file with a first `sops:` mapping holding a plaintext value, then an encrypted value, then a valid second `sops:` mapping, returns no findings. The skip at secret_scan.py:93 exempts every top-level `sops` key, and the last duplicate key wins in construct_document. The docstring claim about duplicate keys is therefore wrong for `sops`."
+   },
+   {
+    "id": "WS-01.14-R5",
+    "real": true,
+    "severity_ok": true,
+    "reason": "Confirmed by reading the code. tests/build/test_d07_sops_tree_hygiene.py:85 asserts `r.returncode == 0, r.stdout[-4000:]`, so the message carries stdout only. secret_scan.main prints the cannot-scan reason to stderr and returns 2, so the assertion message is empty in that case."
+   }
+  ]
+ },
+ {
+  "item": "WS-05.2",
+  "review": {
+   "spec_verdict": "PASS",
+   "quality_verdict": "CHANGES_REQUESTED",
+   "findings": [
+    {
+     "id": "WS-05.2-R1",
+     "severity": "important",
+     "location": "tests/realinfra/conftest.py:48-50; src/solace_testing/realinfra.py:751-757 (SmtpSink.wait_for), 781-799 (smtp_sink), 814-818 and 849-863 (fake_llm)",
+     "problem": "smtp_sink, fake_llm and redis_url are session-scoped, and nothing resets them between tests. The only autouse fixture is require_docker. SmtpSink.wait_for returns the OLDEST matching message, so a test can pass on mail that an earlier test sent. A fake_llm scenario (crisis_intent, timeout, error) and its request log carry over into every later test. A crisis-path test that asserts 'a clinician email was sent' or 'the LLM said crisis' can therefore pass even though its own code path did nothing.",
+     "evidence": "I ran two throwaway probe tests in order on the real fixtures. Test A sent '[Solace CRISIS HIGH] from test A' to clin-iso@test.invalid. Test B sent nothing, yet smtp_sink.wait_for('clin-iso@test.invalid', '[Solace CRISIS', timeout=2) returned subject='[Solace CRISIS HIGH] from test A'. For the fake LLM, test A called fake_llm.scenario('crisis_intent'). In test B, a benign 'I had a nice day' chat completion came back as the crisis_disclosure payload (True), and fake_llm.requests() still held 1 request from earlier tests.",
+     "fix": "In src/solace_testing/realinfra.py, add a function-scoped helper fixture and re-export it from tests/realinfra/conftest.py as autouse, so other workstreams' conftests can reuse it: `@pytest.fixture(autouse=True)\ndef _realinfra_isolate(request):\n    names = set(request.fixturenames)\n    if 'smtp_sink' in names: request.getfixturevalue('smtp_sink').clear()\n    if 'fake_llm' in names: request.getfixturevalue('fake_llm').reset()\n    if 'redis_url' in names:\n        c = redis.Redis.from_url(request.getfixturevalue('redis_url')); c.flushdb(); c.close()\n    yield\n    if 'kafka_bootstrap' in names:\n        k = request.getfixturevalue('kafka_bootstrap')\n        if k._wrapped().status == 'paused' (after reload): k.unpause(); pytest.fail('test left the kafka broker paused')`. Add a regression test made of two ordered tests: the first sends mail and sets a scenario, and the second asserts smtp_sink.messages() == [] and fake_llm.requests() == []."
+    },
+    {
+     "id": "WS-05.2-R2",
+     "severity": "important",
+     "location": "src/solace_testing/realinfra.py:607-612 (KafkaHandle.consume_until)",
+     "problem": "After the first match, consume_until drains only to the end offsets seen at that moment and then returns. A duplicate published a moment later (an outbox retry or a redelivery) is never counted, so an exactly-once assertion such as the brief's `len(got) == 1` passes while a duplicate crisis event exists. The report says 'duplicates are returned and counted', but that holds only for duplicates already on the log when the call is made.",
+     "evidence": "Probe on the real broker: produce(ev), then a task produced the same event again 1.5 s later. consume_until(topic, event_id predicate, timeout=30) returned 1 match. A second consume_until on the same topic returned 2. The first call hid the duplicate.",
+     "fix": "Add a keyword-only `settle: float = 1.0` to consume_until, bounded by `timeout`. After the first match, keep calling getmany until `settle` seconds pass with no new matching record (or the deadline is reached), then commit and return. Document that the result counts matches that arrive up to first-match + settle. Add a real-infra test that produces a late duplicate (1 s after the first) and asserts len(got) == 2."
+    },
+    {
+     "id": "WS-05.2-R3",
+     "severity": "important",
+     "location": "src/solace_testing/realinfra.py:600-617 (KafkaHandle.consume_until timeout path)",
+     "problem": "When the deadline passes, consume_until returns [] even if the consumer was never assigned a partition or never read up to the end of the topic. An empty result therefore does not mean 'the topic held no matching message', and a negative safety assertion such as `assert await kafka.consume_until(topic, is_crisis, timeout=t) == []` can pass without the topic having been read. The risk is highest when a group join is slow on a fresh broker; GroupCoordinatorNotAvailableError was logged during the probes.",
+     "evidence": "Probe with one matching message already on the topic: with timeout=0.05 and a new group_id, the call returned 0 matches in 0.19 s. With timeout=0.15 and a new group, it returned 1 match. Without a group at 0.05 s, it returned 1. The empty result came purely from the consumer not catching up, not from the message being absent.",
+     "fix": "Track catch-up. Once consumer.assignment() is non-empty, record `target = await consumer.end_offsets(list(assignment))` once, and set `caught_up = True` when `await consumer.position(tp) >= target[tp]` for every tp. At the deadline, if `matched` is empty and not caught_up, raise `TimeoutError(f\"consume_until: did not read {topic!r} to its end within {timeout}s (assigned={bool(consumer.assignment())})\")` instead of returning []. Return [] only when caught_up. Add a test asserting that a tiny timeout with a fresh group raises rather than returning []."
+    },
+    {
+     "id": "WS-05.2-R4",
+     "severity": "important",
+     "location": "src/solace_testing/realinfra.py:814-818 (FakeLLMHandle.scenario); server behaviour in infrastructure/test/fake-llm/app.py:50-51,158",
+     "problem": "scenario() validates only `mode`. Three malformed scenarios pass silently: 'reply' without content (the server answers with an empty assistant message), non-str content or match (the server's handler raises on every request and drops the connection), and content given for a mode that ignores it. To the system under test, a dropped connection looks like an LLM outage, so a crisis test can pass through the fallback path instead of the scenario it meant to test.",
+     "evidence": "Probe: fake_llm.scenario('reply') was accepted, and the next /v1/chat/completions returned content=''. fake_llm.scenario('reply', content=123) was accepted, and the next request failed with `httpx.RemoteProtocolError: Server disconnected without sending a response.` The cause is app.py `_tokens(content)` calling .split() on an int. fake_llm.scenario('ok', content='ignored text') was accepted without error.",
+     "fix": "In FakeLLMHandle.scenario, before the POST: `if mode == 'reply':\n    if not isinstance(content, str): raise ValueError(\"fake_llm.scenario: mode 'reply' needs content as a str\")\nelif content is not None: raise ValueError(f\"fake_llm.scenario: content applies only to mode 'reply', not {mode!r}\")\nif match is not None and (not isinstance(match, str) or not match): raise ValueError('fake_llm.scenario: match must be None or a non-empty str')`. Add one real-infra test per rejection."
+    },
+    {
+     "id": "WS-05.2-R5",
+     "severity": "minor",
+     "location": "src/solace_testing/realinfra.py:104-110 (_image_refs), 118 (IMAGE_REFS computed at import)",
+     "problem": "The rule that an image must be a literal reference is applied to every compose service, not only to the four images the fixtures use. IMAGE_REFS is computed at import, and tests/realinfra/conftest.py imports it. An unrelated compose change (for example a service image tagged `${TAG}`) therefore makes conftest loading fail and aborts collection of all of tests/, not just the real-infra tests.",
+     "evidence": "Probe: _image_refs([compose]) on a compose that pins postgres, redis and kafka literally but also declares `user-service: {image: 'ghcr.io/solace/user-service:${TAG:-dev}'}` raised `ValueError: docker-compose.yml: service 'user-service' must pin a literal image reference`.",
+     "fix": "Apply the literal-reference check only to the required services: `if name not in _REQUIRED_IMAGES: continue` before the `isinstance`/`'$'` check. Alternatively, record only the required names in refs. Then add a unit test showing that an interpolated image on an unrelated service is ignored while one on postgres still raises."
+    }
+   ],
+   "summary": "Spec: PASS. Quality: CHANGES_REQUESTED. Five findings, four of them important; the important ones are all places where the harness can let a test pass without proving anything.\n\n**Spec compliance.** Everything in IF-19 is implemented as specified:\n- `IMAGE_REFS`, `INIT_DB_ENV`, `PgHandle` (masked `__repr__`, `superuser_fetch`, `create_database`), `KafkaHandle`, `MailMessage`, `SmtpSink`, `FakeLLMHandle` and `require_docker`.\n- The five session fixtures, and a conftest that adds the markers, sets the session loop scope and adds the autouse Docker check.\n- The eight brief test bodies are verbatim.\n- The only edit to `test_persistence_roundtrip.py` is the five import lines (`git diff --stat`: 5 insertions, 5 deletions).\n\n`INIT_DB_ENV` uses `SOLACE_MIGRATOR_PASSWORD`/`SOLACE_APP_PASSWORD` instead of the brief's names. That is a justified deviation: `01-roles.sh` reads the `SOLACE_*` names, and R-02.12 (`WS-02-data-platform-schema.md` lines 1393, 1399 and 1449) declines the brief's names.\n\n**What I verified on real Docker:**\n- **Test runs:** the brief file passes 8/8 in `D:\\tmp\\mvp-exec\\venv` and 8/8 in `venv-clean`. With `DOCKER_HOST` pointed at a dead port, the suite gives 8 errors when `SOLACE_REQUIRE_REALINFRA=1` and 8 skips when it is unset, so it never passes silently.\n- **Regression:** `tests/solace_testing` gives 182 passed, and `test_persistence_roundtrip.py` gives 26 passed.\n- **RLS:** `solace_app` is NOSUPERUSER NOBYPASSRLS, belongs to no role and owns no tables. A session `app.current_user_id` set on a pooled connection is reset when the connection is released.\n- **Redis password:** it is not in the container's configured command, `/proc/1/cmdline` or `docker top`. Redis rewrites its process title to `redis-server *:6379`.\n- **Teardown:** it left no extra containers or volumes; the volume count stayed at 68 and only the Ryuk reaper appeared. I created no images. My throwaway probe directory (`D:\\tmp\\ws052-review-probes`) has been deleted.\n\n**Findings:**\n- **R1 (important):** the mail sink, fake LLM and Redis keep state from one test to the next. Probes showed a test that sent no mail still passing `wait_for` on an earlier test's crisis mail, and a fresh test getting a crisis reply from a scenario an earlier test set.\n- **R2 (important):** `consume_until` misses a duplicate published 1.5 s after the first match: it returned 1 while the topic held 2, so exactly-once assertions can pass falsely.\n- **R3 (important):** `consume_until` returns `[]` when it never caught up on the topic. With a new group and a 0.05 s timeout it returned 0 while a matching message was there, so \"no crisis event\" checks can pass without reading anything.\n- **R4 (important):** `fake_llm.scenario` accepts malformed scenarios. `reply` with no content gives an empty answer, and `content=123` crashes the fake server on every request, which looks like an LLM outage.\n- **R5 (minor):** the import-time image check rejects variable image tags on any compose service, not just the four the fixtures use. One unrelated compose change would stop the whole `tests/` collection."
+  },
+  "verdicts": [
+   {
+    "id": "WS-05.2-R1",
+    "real": true,
+    "severity_ok": true,
+    "reason": "Confirmed by reading the code. smtp_sink, fake_llm and redis_url are session-scoped. The only autouse fixture in tests/realinfra/conftest.py is the session-scoped docker check. SmtpSink.clear() and FakeLLMHandle.reset() exist but nothing calls them per test. wait_for returns found[0], the oldest match, so earlier mail satisfies later tests. I did not re-run the probes."
+   },
+   {
+    "id": "WS-05.2-R2",
+    "real": true,
+    "severity_ok": true,
+    "reason": "Confirmed in consume_until (realinfra.py:607-612). end_offsets is captured once at the first match, and the loop breaks as soon as the consumer reaches those offsets. A duplicate published after that is never counted, so a len(got) == 1 exactly-once assertion can pass. The docstring only promises duplicates already on the log. I did not re-run the probe."
+   },
+   {
+    "id": "WS-05.2-R3",
+    "real": true,
+    "severity_ok": true,
+    "reason": "Confirmed in consume_until (realinfra.py:600-617). The loop ends on the deadline and returns matched, which is [] with no catch-up check, and the docstring says '[] after timeout'. Because it never verifies that the consumer was assigned and read to the end offsets, an empty result cannot prove absence. A negative safety assertion could therefore pass vacuously. I did not re-run the probe. I rate it important rather than critical because the caller can choose the timeout."
+   },
+   {
+    "id": "WS-05.2-R4",
+    "real": true,
+    "severity_ok": true,
+    "reason": "Confirmed. FakeLLMHandle.scenario (realinfra.py:814-818) validates only mode. The server's _decide does match.lower() and _tokens(content).split(), so a non-str match or content raises in the handler and drops the connection. A 'reply' with no content returns an empty string (app.py:51). Content for a mode that ignores it is accepted without error. I did not re-run the probe."
+   },
+   {
+    "id": "WS-05.2-R5",
+    "real": true,
+    "severity_ok": true,
+    "reason": "Confirmed. _image_refs (realinfra.py:104-110) raises ValueError for any compose service with an interpolated image, and IMAGE_REFS = _image_refs() runs at import. tests/realinfra/conftest.py imports it, so such a compose change would fail conftest loading. This is minor and hypothetical, because the current compose files may be fine. I did not re-run the probe."
+   }
+  ]
+ }
+]

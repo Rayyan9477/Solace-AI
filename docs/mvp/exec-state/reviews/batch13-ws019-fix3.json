@@ -1,0 +1,148 @@
+{
+ "task": "WS-01.9-fix3",
+ "results": [
+  {
+   "lens": "correctness",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "APPROVED",
+    "prior_findings": [
+     {
+      "id": "COR-1",
+      "closed": true,
+      "note": "Closed. Lines 240-243 now read `ok = _run(...)`, `image_id = ... if ok and iid.is_file()` and `built.append((ref, image_id))`, so `built` stays a list and the finally block calls `cleanup(built)` with it. The working-tree blobs match head tree faa52bb (clean_checkout.py c203574, test file 63dbe3c). I copied the head file to scratch and drove main() with a fake subprocess layer (no Docker) through every path. All OK, no remove: rc 0, last line '25/25 steps ok', 0 rmi. All OK with --remove-images: rc 0, 25/25, 10 rmi, one per built ref. One build fails: rc 1, '23/25 steps ok; FAILED: build safety-service, probe ... (not run: no built image)', 9 rmi. Every build fails: rc 1, 0/25, no rmi, no TypeError. A probe fails: rc 1, 23/25, 10 rmi. A ref re-tagged to another id: 9 rmi, that ref left alone. Inspect rc 1: 0 rmi, which leaks but never deletes. KeyboardInterrupt on the 3rd build: the exception propagates and exactly the 2 built refs are rmi'd. --compose: 26/26. --tests: 26/26. --compose --tests: 27/27. Every path with --remove-images untagged exactly the refs it built, each as `docker rmi <ref>` with no -f and no sha256. The cleanup() change (`run = run or subprocess.run`) leaves production behaviour as it was: main() still calls the real subprocess.run, and an injected callable still wins. It only moves the lookup from import time to call time. Read-only `docker image ls` shows no clean-* images, and the e399b3b export marker holds the full tree id, which matches the implementer's real-Docker claim."
+     },
+     {
+      "id": "MAIN-TEST",
+      "closed": true,
+      "note": "Closed. test_mvp_008_main_drives_every_step_offline_and_cleans_up_by_reference passes on head (119 passed, 1 skipped across test_mvp_008_clean_checkout, test_mvp_008_git_visibility and test_mvp_032_dockerfiles). Its fake docker writes the iidfile, and every probe returns rc 0. Non-vacuity, checked in a scratch copy that is now deleted. On fix2 0fb06ba the test fails with TypeError: 'bool' object is not iterable at cleanup line 75. On fix2 with only the `ok` rename, docker removed from PATH, it fails with FileNotFoundError, because fix2's default argument bound the real subprocess.run, so the test also pins the call-time lookup. Each of these mutants is caught. main() passing args.tree to run() fails on `exported == [resolved]`, which shows the test pins the tree-ish resolution. `docker rmi -f ref` and `docker rmi image_id` fail on the rmi-by-ref assertion. Disabling cleanup fails with empty rmi. Probing by ref instead of id, and skipping probes, both fail on the runs assertion. Removing the tag print fails on the tag assertion. N is pinned as len(IMAGES) + modules + probes against the last line, and rc 0 is required. Small residual gap: the test passes --out, so the resolved id reaching resolve_out's default path is not exercised. The run()/marker/tag wiring is."
+     },
+     {
+      "id": "TAG-PRINT",
+      "closed": true,
+      "note": "Closed. run() prints `tag: {tag}` at line 221, right after export and registry load and before any build. That covers the Makefile and ps1 runs, which do not remove images. The main() test asserts `tag: clean-<tree7>-` from the resolved id, and a mutant without the print fails that assertion."
+     }
+    ],
+    "findings": [
+     {
+      "id": "WS019F3-COR-1",
+      "severity": "minor",
+      "file": "scripts/ci/clean_checkout.py",
+      "line": 166,
+      "problem": "This predates fix3 and is not a regression of this round. export_tree() reuses an earlier export with a plain `shutil.rmtree(out)`. A `--tests` run gives the export a private git context (`git init` plus `git add -A`), and Git for Windows writes the loose objects read-only. Python 3.12's rmtree raises PermissionError on them. It also deletes the alphabetically-first `.clean-checkout-export` marker before it reaches `.git`, so the directory is left half-deleted and without a marker.",
+      "failure_scenario": "Run `clean_checkout.py --tree X --tests`, then rerun any mode for the same tree with the default out D:\\tmp\\mvp-exec\\clean-checkout\\<tree7> or the same --out. The rerun crashes in export_tree with `PermissionError [WinError 5] Access is denied: ...\\.git\\objects\\..`. Every later run then stops with `refusing to reuse <out>: it is not empty and is not an earlier export` until the operator deletes the directory by hand and clears the read-only attributes. Both fail loud with a non-zero rc, and no false pass is produced. Neither the gate test nor the W0 barrier `--compose` run uses --tests.",
+      "fix": "Clear the read-only bit and retry in rmtree, e.g. `shutil.rmtree(out, onexc=lambda f, p, e: (os.chmod(p, stat.S_IWRITE), f(p)))`. Alternatively, delete everything except the marker first and remove the marker last, so a failed delete stays reusable. Add a unit test: _git_context(out), then export_tree into the same out.",
+      "evidence": "In a scratch copy of the head file (Python 3.12.3, venv): I wrote the marker and a file, ran clean_checkout._git_context(out) (1 read-only object file appeared), then ran export_tree('HEAD^{tree}', out, repo). Result: `PermissionError [WinError 5] Access is denied: ...rerun-out\\.git\\objects\\58\\7be6b4...`. Afterwards the marker was gone and 2 entries were left. A third export_tree raised `SystemExit refusing to reuse ...: it is not empty and is not an earlier export`. The scratch directory is deleted. Prior WS-01.9 reviews never mention rmtree, read-only files or PermissionError."
+     }
+    ]
+   },
+   "verified": [
+    {
+     "id": "WS019F3-COR-1",
+     "severity": "minor",
+     "file": "scripts/ci/clean_checkout.py",
+     "line": 166,
+     "problem": "This predates fix3 and is not a regression of this round. export_tree() reuses an earlier export with a plain `shutil.rmtree(out)`. A `--tests` run gives the export a private git context (`git init` plus `git add -A`), and Git for Windows writes the loose objects read-only. Python 3.12's rmtree raises PermissionError on them. It also deletes the alphabetically-first `.clean-checkout-export` marker before it reaches `.git`, so the directory is left half-deleted and without a marker.",
+     "failure_scenario": "Run `clean_checkout.py --tree X --tests`, then rerun any mode for the same tree with the default out D:\\tmp\\mvp-exec\\clean-checkout\\<tree7> or the same --out. The rerun crashes in export_tree with `PermissionError [WinError 5] Access is denied: ...\\.git\\objects\\..`. Every later run then stops with `refusing to reuse <out>: it is not empty and is not an earlier export` until the operator deletes the directory by hand and clears the read-only attributes. Both fail loud with a non-zero rc, and no false pass is produced. Neither the gate test nor the W0 barrier `--compose` run uses --tests.",
+     "fix": "Clear the read-only bit and retry in rmtree, e.g. `shutil.rmtree(out, onexc=lambda f, p, e: (os.chmod(p, stat.S_IWRITE), f(p)))`. Alternatively, delete everything except the marker first and remove the marker last, so a failed delete stays reusable. Add a unit test: _git_context(out), then export_tree into the same out.",
+     "evidence": "In a scratch copy of the head file (Python 3.12.3, venv): I wrote the marker and a file, ran clean_checkout._git_context(out) (1 read-only object file appeared), then ran export_tree('HEAD^{tree}', out, repo). Result: `PermissionError [WinError 5] Access is denied: ...rerun-out\\.git\\objects\\58\\7be6b4...`. Afterwards the marker was gone and 2 entries were left. A third export_tree raised `SystemExit refusing to reuse ...: it is not empty and is not an earlier export`. The scratch directory is deleted. Prior WS-01.9 reviews never mention rmtree, read-only files or PermissionError.",
+     "lens": "correctness",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "I reproduced the failure. `export_tree` calls a plain `shutil.rmtree(out)` at line 166, and `--tests` runs `_git_context(out)` at line 254, which creates a `.git` directory inside the export. In a scratch repo (`git init`, then `git add -A`), Python 3.12.3 `shutil.rmtree('.git')` raised `PermissionError [WinError 5]` on a loose object file. Nothing in the code clears the read-only bit. A rerun on the same tree or `--out` would therefore crash, and the half-deleted directory would lose its marker. Both outcomes fail loud with a non-zero rc and produce no false pass, so \"minor\" is the right severity. The gate test and the `--compose` barrier run don't use `--tests`, so they are unaffected. I did not run `export_tree` itself, and I did not confirm that the marker is deleted first."
+      }
+     ],
+     "survives": true
+    }
+   ]
+  },
+  {
+   "lens": "tests",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "APPROVED",
+    "prior_findings": [
+     {
+      "id": "COR-1",
+      "closed": true,
+      "note": "ok = _run(...) rename is in place. The new offline main() test fails when I revert it to built = _run(...) (3 failures in a scratch copy), so it catches the bool rebinding. Current suite: 54 passed, 1 skipped."
+     },
+     {
+      "id": "MAIN-TEST",
+      "closed": true,
+      "note": "test_mvp_008_main_drives_every_step_offline_and_cleans_up_by_reference drives main() offline. It asserts tree-ish resolution before export, 'N/N steps ok', rmi by ref without -f or sha, and probes run by image id. It fails when I add -f to rmi."
+     },
+     {
+      "id": "TAG-PRINT",
+      "closed": true,
+      "note": "run() prints 'tag: <name>', and the main test asserts 'tag: clean-<7>-' appears in stdout."
+     }
+    ],
+    "findings": [
+     {
+      "id": "WS019F3-TES-1",
+      "severity": "minor",
+      "file": "tests/build/test_mvp_008_clean_checkout.py",
+      "line": 340,
+      "problem": "C1 (shrunken registry) has no behavioural test. test_mvp_008_c1 only checks that the flag is parsed and that 'require-registry-match' appears in the Makefile and the ps1 script. The main() test passes --require-registry-match, but its fake registry equals IMAGES, so the mismatch branch never runs.",
+      "failure_scenario": "If the `if require_registry_match:` guard in run() is neutralised (I replaced it with `if False:` in a scratch copy), the mismatch only warns and the proof stays green with a shrunken export registry. All c1 and main tests still passed: the failure set was identical to the baseline, whose 2 failures come from files missing in the scratch copy.",
+      "fix": "Add an offline test that makes load_registry return IMAGES[:-1] and calls run() or main() with require_registry_match=True. Assert rc == 1, '[FAIL] --require-registry-match' in stdout, and that no docker build was issued.",
+      "evidence": "The scratch mutation `if False:` left the same two scratch-only failures as the unmodified baseline. No test exercises the registry-mismatch return."
+     },
+     {
+      "id": "WS019F3-TES-2",
+      "severity": "minor",
+      "file": "tests/build/test_mvp_008_clean_checkout.py",
+      "line": 320,
+      "problem": "C2 (GIT_* leak) is tested only through _git_context, plus tests_env. The git_env(os.environ) wiring in resolve_tree and export_tree (git archive) is not covered.",
+      "failure_scenario": "If someone removes env=git_env(os.environ) from resolve_tree, or from the git archive call, an operator's GIT_DIR or GIT_INDEX_FILE would redirect tree resolution or export to a foreign repo. In a scratch copy I dropped env= from resolve_tree's subprocess.run, and the suite result was unchanged from baseline. The main test fakes subprocess.run, so it never checks the env passed to it.",
+      "fix": "Add a test that sets GIT_DIR and GIT_INDEX_FILE to a foreign repo and calls resolve_tree(tree, repo) and export_tree(tree, out, repo). Assert they resolve against `repo`. Alternatively, have the fake run in the main test assert that the env kwarg for git calls contains no GIT_* keys.",
+      "evidence": "Mutating resolve_tree's `env=git_env(os.environ)` away left test results identical to baseline. The test names that exist (c2_git_calls_ignore..., main_drives...) do not reach that call's real env."
+     }
+    ]
+   },
+   "verified": [
+    {
+     "id": "WS019F3-TES-1",
+     "severity": "minor",
+     "file": "tests/build/test_mvp_008_clean_checkout.py",
+     "line": 340,
+     "problem": "C1 (shrunken registry) has no behavioural test. test_mvp_008_c1 only checks that the flag is parsed and that 'require-registry-match' appears in the Makefile and the ps1 script. The main() test passes --require-registry-match, but its fake registry equals IMAGES, so the mismatch branch never runs.",
+     "failure_scenario": "If the `if require_registry_match:` guard in run() is neutralised (I replaced it with `if False:` in a scratch copy), the mismatch only warns and the proof stays green with a shrunken export registry. All c1 and main tests still passed: the failure set was identical to the baseline, whose 2 failures come from files missing in the scratch copy.",
+     "fix": "Add an offline test that makes load_registry return IMAGES[:-1] and calls run() or main() with require_registry_match=True. Assert rc == 1, '[FAIL] --require-registry-match' in stdout, and that no docker build was issued.",
+     "evidence": "The scratch mutation `if False:` left the same two scratch-only failures as the unmodified baseline. No test exercises the registry-mismatch return.",
+     "lens": "tests",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "run() in scripts/ci/clean_checkout.py returns 1 when --require-registry-match is set and the export's registry differs (lines 223-227). The main() test passes the flag, but its fake load_registry returns list(IMAGES), so the mismatch branch is never taken. test_mvp_008_c1 only checks flag parsing and the presence of the flag text in the Makefile and ps1 script. No test asserts rc==1 or the '[FAIL] --require-registry-match' output for a shrunken registry, so neutralising the guard would leave the tests green. This is a real but minor coverage gap."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "WS019F3-TES-2",
+     "severity": "minor",
+     "file": "tests/build/test_mvp_008_clean_checkout.py",
+     "line": 320,
+     "problem": "C2 (GIT_* leak) is tested only through _git_context, plus tests_env. The git_env(os.environ) wiring in resolve_tree and export_tree (git archive) is not covered.",
+     "failure_scenario": "If someone removes env=git_env(os.environ) from resolve_tree, or from the git archive call, an operator's GIT_DIR or GIT_INDEX_FILE would redirect tree resolution or export to a foreign repo. In a scratch copy I dropped env= from resolve_tree's subprocess.run, and the suite result was unchanged from baseline. The main test fakes subprocess.run, so it never checks the env passed to it.",
+     "fix": "Add a test that sets GIT_DIR and GIT_INDEX_FILE to a foreign repo and calls resolve_tree(tree, repo) and export_tree(tree, out, repo). Assert they resolve against `repo`. Alternatively, have the fake run in the main test assert that the env kwarg for git calls contains no GIT_* keys.",
+     "evidence": "Mutating resolve_tree's `env=git_env(os.environ)` away left test results identical to baseline. The test names that exist (c2_git_calls_ignore..., main_drives...) do not reach that call's real env.",
+     "lens": "tests",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The gap is real. resolve_tree (line 66) and the git archive call (line 169) both pass env=git_env(os.environ). Test c2 (lines 320-337) only calls _git_context and tests_env, with GIT_DIR and GIT_INDEX_FILE set. The N2 test (lines 302-317) calls resolve_tree with no GIT_* variables set. The main test's fake_run takes **_kw and never inspects env, and export_tree is replaced by fake_export. So no test reaches the env= wiring in resolve_tree or in the archive call. A GIT_DIR set in the environment overrides git -C, so dropping env= would let the operator's variable redirect tree resolution or export. Nothing would catch that. I did not run the suite or a mutation here. The claim rests on reading the code, and the mutation result is the finding's own report. Minor severity is right: it is a regression-guard gap, not a live defect."
+      }
+     ],
+     "survives": true
+    }
+   ]
+  }
+ ]
+}
