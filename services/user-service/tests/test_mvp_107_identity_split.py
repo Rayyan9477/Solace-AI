@@ -66,3 +66,29 @@ def test_split_keeps_handler_names() -> None:
     names = {r.endpoint.__name__ for r in auth_router.routes if isinstance(r, APIRoute)}
     assert {"register", "login", "refresh_token", "logout", "revoke_token", "verify_email",
             "resend_verification", "change_password", "delete_current_user", "jwks"} <= names
+
+
+async def test_split_lifespan_registers_the_identity_stop(monkeypatch) -> None:
+    # Controller check (WS-14.3): the lifespan registers stop_identity as "identity" via the runtime.
+    from contextlib import asynccontextmanager
+
+    from fastapi import FastAPI
+
+    import src.identity_wiring as wiring
+    import src.infrastructure.event_bridge as event_bridge
+    import src.main as main
+    from runtime_fakes import fake_runtime
+
+    runtime = fake_runtime(redis=None, environment="development")
+
+    @asynccontextmanager
+    async def _fake_service_runtime(app, spec):
+        yield runtime
+
+    async def _failing_bridge(**_kwargs):
+        raise ConnectionError("broker down")
+
+    monkeypatch.setattr(main, "service_runtime", _fake_service_runtime)
+    monkeypatch.setattr(event_bridge, "initialize_event_bridge", _failing_bridge)
+    async with main.lifespan(FastAPI()):
+        assert runtime.shutdowns.get("identity") is wiring.stop_identity
