@@ -37,3 +37,5 @@
 - [ ] WS-07 (W1, from WS-03.5 security review): in strict, user-service's limiter keys on the socket peer (hops 0) so all anonymous users behind Caddy share one IP bucket; TRUSTED_PROXY_HOPS is set in compose but nothing reads it yet (orchestrator reads ORCHESTRATOR_TRUSTED_PROXY_HOPS).
 - [ ] W0 bug-finding round / owner (from WS-03.5 review W035-SEC-1): Caddy routes /ready and /health publicly (check names, ok/critical, version, exception class). IF-18 never-routed list excludes them - decide whether to add them to never_routed (contract change WS-04/WS-03).
 - [ ] Config adoption (after D-19 lifts, from W0 bug round A-4): config_service/src/main.py copies error['msg'] into 422 bodies and logs error=str(exc).
+- [ ] WS-09.13 (from W0 bug round A-1): add RED cases for top-level errors() spread, value_error msg/ctx strings, model repr holding error dicts, str(ValidationError) of hide_input_in_errors models.
+- [ ] Owner / W1 priority (from W0 bug round B-6): orchestrator SafetyServiceClient never authenticates to safety (always 401) and the keyword fallback can lower flags - WS-10.4; recommend scheduling first in W1.
