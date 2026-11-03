@@ -14,18 +14,18 @@ __pycache__/
 
 # Distribution / packaging
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
+/build/
+/develop-eggs/
+/dist/
+/downloads/
+/eggs/
 .eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
+/lib/
+/lib64/
+/parts/
+/sdist/
+/var/
+/wheels/
 share/python-wheels/
 *.manifest
 *.spec
@@ -35,14 +35,14 @@ MANIFEST
 # Virtual environments
 .env
 .venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-myenv/
-.myenv/
-new_venv/
+/env/
+/venv/
+/ENV/
+/env.bak/
+/venv.bak/
+/myenv/
+/.myenv/
+/new_venv/
 __pypackages__/
 .installed.cfg
 
@@ -58,6 +58,20 @@ __pypackages__/
 *.p12
 *.pfx
 secrets/
+# D-07 (SOPS + age): only encrypted files and public-recipient lists under deploy/secrets/ are tracked
+!deploy/secrets/
+deploy/secrets/*
+!deploy/secrets/*.sops.yaml
+!deploy/secrets/escrow-recipients.txt
+!deploy/secrets/README.md
+!deploy/secrets/history/
+deploy/secrets/history/**
+!deploy/secrets/history/**/
+!deploy/secrets/history/**/*.sops.yaml
+# age private keys never enter the tree
+*.agekey
+keys.txt
+key.txt
 credentials/
 key.py
 *.secret
@@ -179,7 +193,8 @@ pytorch_model.bin
 tf_model.h5
 model.ckpt*
 checkpoint/
-checkpoint*
+checkpoint-*/
+*.ckpt
 fine_tuned_model/
 fine_tuned_model_checkpoint/
 models/cache/

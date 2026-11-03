@@ -34,21 +34,21 @@ PROD = (REPO / "docker-compose.prod.yml").read_text(encoding="utf-8")
 
 def test_p1_9_memory_environment_var_is_correct_and_overridable():
     # runtime gate: MemoryServiceAppSettings(env_prefix="MEMORY_").environment
-    assert "MEMORY_ENVIRONMENT: ${MEMORY_ENVIRONMENT:-development}" in BASE
+    assert "MEMORY_ENVIRONMENT: ${ENVIRONMENT:-development}" in BASE
     # the old name bound nothing and must be gone
     assert "MEMORY_SERVICE_ENV:" not in BASE
 
 
 def test_p1_9_notification_env_var_is_correct_and_overridable():
     # runtime gate: ServiceConfig(env_prefix="NOTIFICATION_SERVICE_").env
-    assert "NOTIFICATION_SERVICE_ENV: ${NOTIFICATION_SERVICE_ENV:-development}" in BASE
+    assert "NOTIFICATION_SERVICE_ENV: ${ENVIRONMENT:-development}" in BASE
     # must no longer be a bare, non-overridable literal
     assert "NOTIFICATION_SERVICE_ENV: development" not in BASE
 
 
 def test_p1_9_analytics_env_var_is_correct_and_overridable():
     # runtime gate: ServiceConfig(env_prefix="ANALYTICS_SERVICE_").env
-    assert "ANALYTICS_SERVICE_ENV: ${ANALYTICS_SERVICE_ENV:-development}" in BASE
+    assert "ANALYTICS_SERVICE_ENV: ${ENVIRONMENT:-development}" in BASE
     assert "ANALYTICS_SERVICE_ENV: development" not in BASE
 
 
@@ -104,5 +104,6 @@ def test_p2_15_dockerignore_excludes_env():
 
 def test_p2_15_env_debug_disabled():
     env_text = (REPO / ".env").read_text(encoding="utf-8")
-    assert "DEBUG=false" in env_text
-    assert "DEBUG=true" not in env_text
+    # never assert on env_text directly: a failure would print the .env file
+    ok = "DEBUG=false" in env_text and "DEBUG=true" not in env_text
+    assert ok, "DEBUG must be false in .env"

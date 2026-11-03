@@ -35,3 +35,23 @@ node_modules
 # Logs / scratch
 *.log
 tests/logs
+**/tests/
+tests/
+src/models/
+docs/
+infrastructure/aws-staging/
+**/logs/
+.secrets
+secrets
+# D-07 (SOPS + age): images never carry even the encrypted files (render_secrets.py runs on the host), nor age keys
+deploy/secrets
+**/*.agekey
+**/keys.txt
+# Docker matches these case-sensitively, but git on the Windows host ignores case (core.ignorecase=true) and so
+# hides case variants from scripts/ci/secret_scan.py; the classes keep every letter case out of the context.
+# key.txt is age-keygen's documented default name; *.key is gitignored too.
+[dD][eE][pP][lL][oO][yY]/[sS][eE][cC][rR][eE][tT][sS]
+**/*.[aA][gG][eE][kK][eE][yY]
+**/[kK][eE][yY][sS].[tT][xX][tT]
+**/[kK][eE][yY].[tT][xX][tT]
+**/*.[kK][eE][yY]

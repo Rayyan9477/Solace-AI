@@ -361,13 +361,13 @@ class TestSchemaRegistryIntegrity:
         """All safety entities are in the schema registry."""
         # Force entity module import to trigger @SchemaRegistry.register
         import services.orchestrator_service.src.langgraph.state_schema  # noqa: F401
-        from src.solace_infrastructure.database.entities.safety_entities import (
+        from solace_infrastructure.database.entities.safety_entities import (
             SafetyAssessment,
             SafetyPlan,
             RiskFactor,
             ContraindicationCheck,
         )
-        from src.solace_infrastructure.database.schema_registry import SchemaRegistry
+        from solace_infrastructure.database.schema_registry import SchemaRegistry
 
         assert SchemaRegistry.is_registered("safety_assessments")
         assert SchemaRegistry.is_registered("safety_plans")
@@ -376,7 +376,7 @@ class TestSchemaRegistryIntegrity:
 
     def test_safety_assessment_has_phi_fields(self):
         """SafetyAssessment declares PHI fields for encryption."""
-        from src.solace_infrastructure.database.entities.safety_entities import (
+        from solace_infrastructure.database.entities.safety_entities import (
             SafetyAssessment,
         )
 
@@ -387,14 +387,14 @@ class TestSchemaRegistryIntegrity:
 
     def test_safety_plan_has_phi_fields(self):
         """SafetyPlan declares PHI fields for encryption."""
-        from src.solace_infrastructure.database.entities.safety_entities import SafetyPlan
+        from solace_infrastructure.database.entities.safety_entities import SafetyPlan
 
         phi_fields = SafetyPlan.__phi_fields__
         assert "clinician_notes" in phi_fields
 
     def test_registry_statistics(self):
         """Schema registry tracks registered entities."""
-        from src.solace_infrastructure.database.schema_registry import SchemaRegistry
+        from solace_infrastructure.database.schema_registry import SchemaRegistry
 
         stats = SchemaRegistry.get_statistics()
         assert stats["total_entities"] >= 4  # At least the 4 safety entities

@@ -188,7 +188,7 @@ async def test_postgres_get_pending_issues_atomic_claim_sql() -> None:
     from solace_events.postgres_stores import PostgresOutboxStore
 
     pool = _FakePool()
-    store = PostgresOutboxStore(pool)
+    store = PostgresOutboxStore(pool, source_service="svc-test")
     await store.get_pending(limit=50, stale_after_seconds=120)
 
     sql, args = pool.conn.fetched[-1]
@@ -199,9 +199,9 @@ async def test_postgres_get_pending_issues_atomic_claim_sql() -> None:
     assert "claimed_at = NOW()" in normalized
     assert "FOR UPDATE SKIP LOCKED" in normalized
     assert "RETURNING *" in normalized
-    # Stale-reclaim branch present, and params are (limit, stale_seconds).
+    # Stale-reclaim branch present, and params are (limit, stale_seconds, source_service).
     assert "status = 'PUBLISHING'" in normalized
-    assert args == (50, 120.0)
+    assert args == (50, 120.0, "svc-test")
 
 
 # ===========================================================================
@@ -432,7 +432,7 @@ async def test_postgres_mark_published_is_conditional_on_publishing() -> None:
     from solace_events.postgres_stores import PostgresOutboxStore
 
     conn = _RecordingConn(execute_result="UPDATE 1")
-    store = PostgresOutboxStore(_RecordingPool(conn))
+    store = PostgresOutboxStore(_RecordingPool(conn), source_service="svc-test")
     result = await store.mark_published(uuid4())
 
     sql, _args = conn.calls[-1]
@@ -448,7 +448,7 @@ async def test_postgres_mark_published_reports_false_when_no_row_owned() -> None
     from solace_events.postgres_stores import PostgresOutboxStore
 
     conn = _RecordingConn(execute_result="UPDATE 0")  # 0 rows -> claim was stolen
-    store = PostgresOutboxStore(_RecordingPool(conn))
+    store = PostgresOutboxStore(_RecordingPool(conn), source_service="svc-test")
     result = await store.mark_published(uuid4())
     assert result is False
 
@@ -458,7 +458,7 @@ async def test_postgres_get_pending_respects_next_retry_at_backoff() -> None:
     from solace_events.postgres_stores import PostgresOutboxStore
 
     conn = _RecordingConn()
-    store = PostgresOutboxStore(_RecordingPool(conn))
+    store = PostgresOutboxStore(_RecordingPool(conn), source_service="svc-test")
     await store.get_pending(limit=10, stale_after_seconds=60)
 
     sql, _args = conn.calls[-1]

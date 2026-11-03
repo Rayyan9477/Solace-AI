@@ -1,0 +1,7 @@
+# Expected-failure manifest for tests/e2e (owner: WS-05).
+# Format and semantics: src/solace_testing/e2e_manifest.py. A listed test is XFAIL only
+# while it fails at its expected_failing_hop; any other failure, or an early pass, fails.
+version: 1
+entries: []
+shortcuts:
+  - {name: verify_email_via_sql, remove_by_wave: 1, reason: "verification email arrives with WS-14 MVP-035 in W1"}
