@@ -90,3 +90,10 @@
 - aa9b12df7963634f6  Implement WS-18.2 (cloud)
 - aeaef5f4e8c4a6669  Review WS-18.1 spec+lifecycle
 - aab28375805adac70  Review WS-18.1 security+PHI
+- ab8c499651d08fc26  Implement WS-12.17 (cloud)
+- a4837427cad22ffb0  Review WS-15.2 spec
+- a03cc47fa0f20af70  Review WS-15.2 security
+- a122fb1bd0078a57c  Implement WS-17.19 (cloud)
+- aac6365f9eb54ed83  Review WS-17.2 security+spec
+- a0aa066c54efa69f9  Review WS-17.2 real-PG reproduce
+- a78d6ec8c3f18133b  Skeptic WS-18.1
