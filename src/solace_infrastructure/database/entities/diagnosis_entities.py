@@ -301,7 +301,8 @@ class DiagnosisRecord(ClinicalBase):
         ForeignKey("diagnosis_sessions.id", ondelete="CASCADE"),
         nullable=False, index=True,
     )
-    primary_diagnosis: Mapped[str] = mapped_column(String(300), nullable=False)
+    # REV-13: Text, not String(300) — encrypted PHI ciphertext overflows a bounded column.
+    primary_diagnosis: Mapped[str] = mapped_column(Text, nullable=False)
     dsm5_code: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
     icd11_code: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)

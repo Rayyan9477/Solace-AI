@@ -40,7 +40,19 @@ class AuthSettings(BaseSettings):
         description="JWT signing key (min 32 bytes). Set via AUTH_SECRET_KEY env var.",
         min_length=32,
     )
-    algorithm: str = Field(default="HS256")
+    algorithm: str = Field(default="HS256", description="HS256 (default) or RS256")
+    # RS256 asymmetric signing (C.3). private_key_pem + active_kid are the ISSUER's signing
+    # key; public_keys_json is the {kid: public_pem} verification keyset every service loads.
+    private_key_pem: SecretStr | None = Field(default=None, description="RS256 private key PEM (issuer only)")
+    active_kid: str | None = Field(default=None, description="Key id stamped in newly-issued RS256 tokens")
+    public_keys_json: str | None = Field(default=None, description="JSON {kid: public_pem} verification keyset")
+    # P1-1 rollout posture: dual-accept is the DEFAULT so flipping a validator into RS256
+    # mode does not instantly reject still-live legacy HS256 user tokens. RS256-STRICT
+    # rejection (False) is an explicit OPS/CONFIG opt-in (AUTH_ACCEPT_LEGACY_HS256=false),
+    # performed only after issuance has fully migrated to RS256. The flag is inert while a
+    # validator is in plain HS256 mode (algorithm != RS256), so this default changes no
+    # current behavior — it only makes future RS256-mode validators dual-accept by default.
+    accept_legacy_hs256: bool = Field(default=True, description="Accept legacy HS256 user tokens during the RS256 transition")
     access_token_expire_minutes: int = Field(default=30)
     refresh_token_expire_days: int = Field(default=7)
     api_key_expire_days: int = Field(default=365)
@@ -55,8 +67,12 @@ class AuthSettings(BaseSettings):
     )
 
     @classmethod
-    def for_development(cls) -> "AuthSettings":
-        """Create settings with a development-only key. NOT FOR PRODUCTION."""
+    def for_development(cls, algorithm: str = "HS256") -> "AuthSettings":
+        """Create settings with a development-only key. NOT FOR PRODUCTION.
+
+        Pass algorithm="RS256" to exercise the asymmetric path; the KeyManager then
+        auto-generates an ephemeral dev keypair (never in production).
+        """
         import warnings
 
         env = os.environ.get("ENVIRONMENT", "development").lower()
@@ -70,7 +86,7 @@ class AuthSettings(BaseSettings):
             UserWarning,
             stacklevel=2,
         )
-        return cls(secret_key=SecretStr("dev-only-insecure-key-32-bytes!!"))
+        return cls(secret_key=SecretStr("dev-only-insecure-key-32-bytes!!"), algorithm=algorithm)
 
     def model_post_init(self, __context: Any) -> None:
         """Validate secret key after initialization."""
@@ -328,7 +344,10 @@ class RedisTokenBlacklist(TokenBlacklist):
     async def add(self, jti: str, expires_at: datetime) -> None:
         key = f"{self._prefix}{jti}"
         ttl_seconds = max(1, int((expires_at - datetime.now(timezone.utc)).total_seconds()))
-        await self._redis.set(key, "1", ttl=ttl_seconds)
+        # M1-gate R2 (P0): redis.asyncio.set uses ex= (seconds), not ttl=. With ttl=
+        # every add() raised TypeError → the JTI was never stored → ALL token
+        # revocation (logout/force-revoke) silently failed in production.
+        await self._redis.set(key, "1", ex=ttl_seconds)
 
     async def is_blacklisted(self, jti: str) -> bool:
         key = f"{self._prefix}{jti}"
@@ -380,6 +399,9 @@ class JWTManager:
     ) -> None:
         self._settings = settings or AuthSettings()
         self._secret = self._settings.secret_key.get_secret_value()
+        # RS256 signing/verification keyset (C.3). Empty in HS256 mode.
+        from .keys import KeyManager
+        self._keys = KeyManager.from_settings(self._settings)
         if token_blacklist is None:
             raise ValueError("token_blacklist is required for JWTManager. Pass a TokenBlacklist implementation.")
         self._blacklist = token_blacklist
@@ -499,16 +521,45 @@ class JWTManager:
     def decode_token_sync(
         self, token: str, expected_type: TokenType | None = None
     ) -> AuthenticationResult:
-        """Decode and validate a JWT token synchronously, with best-effort revocation check."""
+        """Decode and validate a JWT token synchronously, with best-effort revocation check.
+
+        Algorithm-aware (C.3): RS256 tokens verify against the public keyset by ``kid``;
+        HS256 is accepted only for SERVICE tokens or while the legacy transition flag is on.
+        The two paths use disjoint key material + a single-algorithm allowlist, which blocks
+        the RS256/HS256 confusion attack.
+        """
         try:
-            decoded = jwt.decode(
-                token,
-                self._secret,
-                algorithms=[self._settings.algorithm],
+            header = jwt.get_unverified_header(token)
+            alg = header.get("alg")
+            common = dict(
                 issuer=self._settings.issuer,
                 audience=self._settings.audience,
                 leeway=self._settings.clock_skew_seconds,
             )
+            if alg == "RS256":
+                public_pem = self._keys.public_pem_for(header.get("kid"))
+                if not public_pem:
+                    logger.debug("jwt_unknown_kid", kid=header.get("kid"))
+                    return AuthenticationResult.fail("INVALID_TOKEN", "Unknown signing key id")
+                decoded = jwt.decode(token, public_pem, algorithms=["RS256"], **common)
+            elif alg == "HS256":
+                decoded = jwt.decode(token, self._secret, algorithms=["HS256"], **common)
+                # Once RS256 is the active algorithm, HS256 is allowed only for service
+                # tokens or user tokens during the transition window — so a compromised
+                # service can no longer forge HS256 user tokens. In plain HS256 mode
+                # (algorithm != RS256) HS256 user tokens are the norm and are accepted.
+                if (
+                    self._settings.algorithm == "RS256"
+                    and decoded.get("type") != TokenType.SERVICE.value
+                    and not self._settings.accept_legacy_hs256
+                ):
+                    logger.warning("hs256_user_token_rejected", token_type=decoded.get("type"))
+                    return AuthenticationResult.fail(
+                        "INVALID_TOKEN", "HS256 user tokens are no longer accepted"
+                    )
+            else:
+                logger.debug("jwt_unsupported_alg", alg=alg)
+                return AuthenticationResult.fail("INVALID_TOKEN", f"Unsupported algorithm: {alg}")
             payload = TokenPayload(**decoded)
             if expected_type and payload.type != expected_type:
                 return AuthenticationResult.fail(
@@ -564,6 +615,12 @@ class JWTManager:
     def validate_access_token(self, token: str) -> AuthenticationResult:
         return self.decode_token(token, TokenType.ACCESS)
 
+    async def validate_access_token_async(self, token: str) -> AuthenticationResult:
+        """Async access-token validation WITH revocation check. Works with async
+        blacklists (Redis) where the sync best-effort check cannot — the request
+        auth path must use this so revoked tokens are actually rejected (REV-06)."""
+        return await self.decode_token_async(token, TokenType.ACCESS)
+
     def validate_refresh_token(self, token: str) -> AuthenticationResult:
         return self.decode_token(token, TokenType.REFRESH)
 
@@ -605,9 +662,19 @@ class JWTManager:
         return new_pair, result
 
     def _encode(self, payload: TokenPayload) -> str:
-        return jwt.encode(
-            payload.model_dump(), self._secret, algorithm=self._settings.algorithm
-        )
+        claims = payload.model_dump()
+        # SERVICE tokens stay HS256 (shared service secret) pending mTLS (C.3-later/C.4).
+        if payload.type == TokenType.SERVICE:
+            return jwt.encode(claims, self._secret, algorithm="HS256")
+        # User tokens: RS256 when configured (issuer holds the private key), else HS256.
+        if self._settings.algorithm == "RS256":
+            if not self._keys.can_sign:
+                raise RuntimeError(
+                    "AUTH_ALGORITHM=RS256 but no signing key is configured "
+                    "(AUTH_PRIVATE_KEY_PEM + AUTH_ACTIVE_KID). This service cannot issue user tokens."
+                )
+            return self._keys.sign(claims)
+        return jwt.encode(claims, self._secret, algorithm="HS256")
 
 
 class APIKeyGenerator:
@@ -776,10 +843,13 @@ def validate_auth_settings(settings: AuthSettings) -> None:
         raise ValueError(
             f"AUTH_SECRET_KEY must be at least 32 bytes, got {len(key_value)}")
 
-    if settings.algorithm not in ("HS256", "HS384", "HS512"):
+    # RS256 is the asymmetric issuer algorithm (C.3 / Phase C P1-1). It must be
+    # allowed here or wiring this validator into startup would hard-reject the RS256
+    # rollout (a landmine flagged by the Wave-2 auth gate).
+    if settings.algorithm not in ("HS256", "HS384", "HS512", "RS256"):
         raise ValueError(
             f"Unsupported JWT algorithm: {settings.algorithm}. "
-            "Use HS256, HS384, or HS512.")
+            "Use HS256, HS384, HS512, or RS256.")
 
     if settings.access_token_expire_minutes < 5:
         raise ValueError("Access token TTL must be at least 5 minutes")

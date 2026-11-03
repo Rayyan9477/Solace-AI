@@ -153,6 +153,23 @@ class MemoryUserProfile(ClinicalBase):
     """
 
     __tablename__ = "memory_user_profiles"
+    # REV-14: this is a full longitudinal clinical profile — diagnoses, treatments,
+    # triggers, safety info — and previously declared NO PHI fields, so every column
+    # was written to the database in the clear. All user-specific content is PHI.
+    # JSONB dict/list values are encrypted into a ``v1$`` ciphertext string inside
+    # the JSONB envelope (proven pattern), so no schema/migration change is needed.
+    __phi_fields__: ClassVar[list[str]] = [
+        "personal_facts",
+        "therapeutic_context",
+        "communication_preferences",
+        "safety_information",
+        "diagnosed_conditions",
+        "current_treatments",
+        "support_network",
+        "triggers",
+        "coping_strategies",
+        "personality_traits",
+    ]
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False,
@@ -292,7 +309,8 @@ class TherapeuticEvent(ClinicalBase):
     severity: Mapped[str] = mapped_column(
         String(20), nullable=False, default="low",
     )
-    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    # REV-13: Text, not String(300) — encrypted PHI ciphertext overflows a bounded column.
+    title: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
 
     # Timing

@@ -121,7 +121,7 @@ class TreatmentPlan(ClinicalBase):
     )
 
     primary_diagnosis: Mapped[str] = mapped_column(
-        String(200), nullable=False,
+        Text, nullable=False,  # REV-13: Text — encrypted ciphertext overflows String(200)
         comment="Primary diagnosis (encrypted as PHI)"
     )
     secondary_diagnoses: Mapped[list[Any]] = mapped_column(
@@ -190,7 +190,7 @@ class TreatmentPlan(ClinicalBase):
         Boolean, nullable=False, default=True, index=True,
     )
     termination_reason: Mapped[str | None] = mapped_column(
-        String(500), nullable=True,
+        Text, nullable=True,  # REV-13: Text — encrypted ciphertext overflows String(500)
     )
 
     # Goals stored as JSONB array of goal objects

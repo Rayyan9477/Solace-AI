@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import os
+import re
 import secrets
 from datetime import UTC, datetime
 from enum import Enum
@@ -15,7 +16,7 @@ import structlog
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = structlog.get_logger(__name__)
@@ -25,6 +26,56 @@ TAG_SIZE = 16
 SALT_SIZE = 16
 KEY_SIZE = 32
 PBKDF2_ITERATIONS = 600000
+
+# MVP-092: accepted ENCRYPTION_MASTER_KEY encodings.
+_MASTER_KEY_BASE64_PREFIX = "base64:"
+_MASTER_KEY_HEX_PATTERN = re.compile(r"[0-9A-Fa-f]{64}")
+_STRICT_ENVIRONMENTS = frozenset({"staging", "production"})
+# Fixed text: it names the working formats and never includes the value, its length or a fragment.
+_MASTER_KEY_FORMAT_ERROR = (
+    "ENCRYPTION_MASTER_KEY must be exactly 32 bytes of key material: 64 hex characters "
+    '(generate with: python -c "import secrets; print(secrets.token_hex(32))") '
+    "or 'base64:' followed by base64 of 32 random bytes; a raw 32-character value "
+    "is accepted only in development and test."
+)
+
+
+def _strict_environment() -> bool:
+    """True in staging and production (the IF-01 ``is_strict_environment`` rule, read locally)."""
+    return os.environ.get("ENVIRONMENT", "development").strip().lower() in _STRICT_ENVIRONMENTS
+
+
+def parse_master_key(value: str, *, strict: bool) -> bytes:
+    """Decode an ENCRYPTION_MASTER_KEY value into exactly 32 bytes of AES-256 key material.
+
+    Accepted formats, checked in this order:
+
+    1. ``base64:`` followed by standard base64 (validated) that decodes to exactly 32 bytes.
+       A value carrying the prefix is always treated as base64; it never falls through.
+    2. Exactly 64 hex characters (``secrets.token_hex(32)``), decoded with ``bytes.fromhex``.
+    3. Only when ``strict`` is false: a value whose UTF-8 encoding is exactly 32 bytes, used
+       as-is (legacy development/test keys; byte-identical to the pre-MVP-092 derivation).
+
+    Raises ``ValueError`` with a fixed message that never contains the value.
+    """
+    if value.startswith(_MASTER_KEY_BASE64_PREFIX):
+        try:
+            decoded = base64.b64decode(value[len(_MASTER_KEY_BASE64_PREFIX):], validate=True)
+        except ValueError:  # binascii.Error, or non-ASCII input
+            decoded = b""
+        if len(decoded) != KEY_SIZE:
+            raise ValueError(_MASTER_KEY_FORMAT_ERROR) from None
+        return decoded
+    if _MASTER_KEY_HEX_PATTERN.fullmatch(value):
+        return bytes.fromhex(value)
+    if not strict:
+        try:
+            raw = value.encode("utf-8")
+        except UnicodeEncodeError:  # e.g. lone surrogates; its message would quote the value
+            raw = b""
+        if len(raw) == KEY_SIZE:
+            return raw
+    raise ValueError(_MASTER_KEY_FORMAT_ERROR) from None
 
 
 class EncryptionAlgorithm(str, Enum):
@@ -43,12 +94,18 @@ class EncryptionSettings(BaseSettings):
     """Encryption configuration from environment.
 
     SECURITY: master_key MUST be set via ENCRYPTION_MASTER_KEY environment variable.
-    The key must be exactly 32 bytes for AES-256 security.
+    It must carry exactly 32 bytes of key material for AES-256: 64 hex characters or
+    ``base64:<base64 of 32 bytes>``; a raw 32-character value is accepted only outside
+    staging/production (see ``parse_master_key``). The decoded bytes are exposed as
+    ``master_key_bytes``.
     """
 
     master_key: SecretStr = Field(
         ...,  # Required - no default for security
-        description="AES-256 master encryption key (exactly 32 bytes). Set via ENCRYPTION_MASTER_KEY env var.",
+        description=(
+            "AES-256 master encryption key: 64 hex characters or 'base64:<32 bytes>' "
+            "(raw 32-character value in development/test only). Set via ENCRYPTION_MASTER_KEY env var."
+        ),
     )
     algorithm: EncryptionAlgorithm = Field(default=EncryptionAlgorithm.AES_256_GCM)
     kdf: KeyDerivationFunction = Field(default=KeyDerivationFunction.PBKDF2_SHA256)
@@ -59,19 +116,43 @@ class EncryptionSettings(BaseSettings):
     )
     enable_key_rotation: bool = Field(default=True)
     key_rotation_days: int = Field(default=90)
+    # hide_input_in_errors: defence in depth for str()/repr() of any ValidationError built from
+    # this model; __init__ below keeps the ValidationError (whose errors()/json() still carry
+    # the input, i.e. the key material) from escaping at all.
     model_config = SettingsConfigDict(
-        env_prefix="ENCRYPTION_", env_file=".env", extra="ignore"
+        env_prefix="ENCRYPTION_", env_file=".env", extra="ignore", hide_input_in_errors=True
     )
+
+    def __init__(self, **values: Any) -> None:
+        """Build settings; a validation failure surfaces as a plain ValueError without input.
+
+        pydantic's ValidationError keeps the raw input (here: ENCRYPTION_MASTER_KEY, whether
+        passed as a kwarg or read from the environment) in ``errors()`` and ``json()``. Only
+        the messages are kept, and the ValueError is raised outside the ``except`` block so it
+        carries no ``__context__`` pointing back at the ValidationError.
+        """
+        failure: ValueError | None = None
+        try:
+            super().__init__(**values)
+        except ValidationError as exc:
+            failure = ValueError(
+                "; ".join(
+                    # Field names are not secret and make "Field required" actionable; values never appear.
+                    f"{'.'.join(str(p) for p in e['loc']) or 'settings'}: {e['msg']}"
+                    for e in exc.errors(include_input=False, include_context=False)
+                )
+            )
+        if failure is not None:
+            raise failure
 
     @classmethod
     def for_development(cls) -> EncryptionSettings:
-        """Create settings with a development-only key. NOT FOR PRODUCTION."""
+        """Create settings with a development-only key. NOT FOR STAGING OR PRODUCTION."""
         import warnings
 
-        env = os.environ.get("ENVIRONMENT", "development").lower()
-        if env == "production":
+        if _strict_environment():
             raise RuntimeError(
-                "EncryptionSettings.for_development() cannot be used in production. "
+                "EncryptionSettings.for_development() cannot be used in staging or production. "
                 "Set ENCRYPTION_MASTER_KEY environment variable with a secure key."
             )
         warnings.warn(
@@ -82,25 +163,23 @@ class EncryptionSettings(BaseSettings):
         return cls(master_key=SecretStr("dev-only-insecure-key-32-bytes!!"))
 
     def model_post_init(self, __context: Any) -> None:
-        """Validate master key after initialization.
+        """Validate the master key after initialization (fail at construction, not first use).
 
-        H-38: AES-256 needs exactly ``KEY_SIZE`` (32) BYTES of key material.
-        We must validate against the UTF-8 byte length, not the Python
-        ``len()`` which counts characters. A 32-character string with
-        multi-byte glyphs (e.g. accented letters, emoji) encodes to more
-        than 32 bytes and would either silently truncate downstream or
-        crash the cipher at use-time.
+        MVP-092: the value is decoded by ``parse_master_key`` (64 hex characters,
+        ``base64:`` + 32 bytes, or a legacy raw 32-byte value outside staging/production).
+        H-38: a legacy raw value is measured in UTF-8 BYTES, not characters, so a
+        32-character string with multi-byte glyphs is rejected.
         """
-        key_value = self.master_key.get_secret_value()
-        key_bytes = key_value.encode("utf-8")
-        if len(key_bytes) != KEY_SIZE:
-            raise ValueError(
-                f"ENCRYPTION_MASTER_KEY must be exactly {KEY_SIZE} bytes, "
-                f"got {len(key_bytes)} bytes ({len(key_value)} characters). "
-                f'Generate a secure key with: python -c "import secrets; '
-                f'print(secrets.token_bytes({KEY_SIZE}).hex())" '
-                "(hex-encoded 32-byte key, safe across encodings)."
-            )
+        parse_master_key(self.master_key.get_secret_value(), strict=_strict_environment())
+
+    @property
+    def master_key_bytes(self) -> bytes:
+        """The decoded 32-byte AES-256 master key material.
+
+        Re-derived on every access so it always matches ``master_key`` (``model_copy(update=...)``
+        skips ``model_post_init``); construction-time validation still happens in model_post_init.
+        """
+        return parse_master_key(self.master_key.get_secret_value(), strict=_strict_environment())
 
 
 class EncryptedData(BaseModel):
@@ -147,7 +226,7 @@ class KeyManager:
 
     def __init__(self, settings: EncryptionSettings | None = None) -> None:
         self._settings = settings or EncryptionSettings()
-        self._master_key = self._settings.master_key.get_secret_value().encode()
+        self._master_key = self._settings.master_key_bytes
         self._keys: dict[str, bytes] = {}
         self._current_key_id = "primary"
 

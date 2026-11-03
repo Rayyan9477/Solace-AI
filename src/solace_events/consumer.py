@@ -6,13 +6,16 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Awaitable, Callable, TypeVar
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypeVar
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 import structlog
 
 from .config import ConsumerSettings, KafkaSettings, SolaceTopic
 from .schemas import BaseEvent, deserialize_event
+
+if TYPE_CHECKING:
+    from .publisher import IdempotencyStore
 
 logger = structlog.get_logger(__name__)
 T = TypeVar("T", bound=BaseEvent)
@@ -46,6 +49,7 @@ class ConsumerMetrics:
     messages_processed: int = 0
     messages_failed: int = 0
     messages_retried: int = 0
+    messages_skipped_duplicate: int = 0
     last_message_at: datetime | None = None
     processing_time_ms_total: int = 0
     current_lag: int = 0
@@ -66,6 +70,12 @@ class ConsumerMetrics:
     def record_retry(self) -> None:
         """Record retry attempt."""
         self.messages_retried += 1
+
+    def record_duplicate(self) -> None:
+        """Record a duplicate (already-processed) event that was skipped."""
+        self.messages_received += 1
+        self.messages_skipped_duplicate += 1
+        self.last_message_at = datetime.now(timezone.utc)
 
     @property
     def avg_processing_time_ms(self) -> float:
@@ -291,10 +301,19 @@ class EventConsumer:
         consumer: KafkaConsumerAdapter,
         commit_interval_ms: int = 5000,
         max_poll_records: int = 100,
+        idempotency_store: "IdempotencyStore | None" = None,
+        consumer_group: str = "",
     ) -> None:
         self._consumer = consumer
         self._commit_interval_ms = commit_interval_ms
         self._max_poll_records = max_poll_records
+        # P2-8: dedup seam. The outbox is at-least-once (stale-claim reclaim can
+        # re-publish), so before firing side effects we atomically claim the
+        # (event_id, consumer_group) via the idempotency store; a duplicate
+        # delivery of the same event is skipped so a crisis handler cannot
+        # double-fire. None => legacy behavior (no dedup), for backward compat.
+        self._idempotency_store = idempotency_store
+        self._consumer_group = consumer_group
         self._handlers: dict[str, list[EventHandler]] = {}
         self._default_handlers: list[EventHandler] = []
         self._offset_tracker = OffsetTracker()
@@ -399,6 +418,31 @@ class EventConsumer:
                     status=ProcessingStatus.SKIP,
                     event_id=self._get_fallback_event_id(value, topic, partition, offset),
                 )
+            # P2-8: at-most-once side effects. Atomically claim this event_id for
+            # our consumer group BEFORE invoking handlers; if it was already
+            # processed (an at-least-once redelivery, e.g. from an outbox
+            # stale-claim reclaim) skip the handlers so the side effect (e.g. a
+            # crisis escalation) does not double-fire. The claim (mark_processed)
+            # returns True exactly once per (event_id, consumer_group).
+            if self._idempotency_store is not None:
+                first_seen = await self._idempotency_store.mark_processed(
+                    event.metadata.event_id, self._consumer_group
+                )
+                if not first_seen:
+                    self._metrics.record_duplicate()
+                    logger.info(
+                        "duplicate_event_skipped",
+                        event_type=event.event_type,
+                        event_id=str(event.metadata.event_id),
+                        consumer_group=self._consumer_group,
+                        topic=topic,
+                        partition=partition,
+                        offset=offset,
+                    )
+                    return ProcessingResult(
+                        status=ProcessingStatus.SKIP,
+                        event_id=event.metadata.event_id,
+                    )
             handlers = (
                 self._handlers.get(event.event_type, []) or self._default_handlers
             )
@@ -500,11 +544,22 @@ def create_consumer(
     kafka_settings: KafkaSettings | None = None,
     consumer_settings: ConsumerSettings | None = None,
     use_mock: bool = False,
+    idempotency_store: "IdempotencyStore | None" = None,
 ) -> EventConsumer:
-    """Factory function to create event consumer."""
+    """Factory function to create event consumer.
+
+    Pass ``idempotency_store`` (e.g. ``PostgresIdempotencyStore`` in prod, or
+    ``InMemoryIdempotencyStore`` for tests/dev) to guarantee at-most-once handler
+    firing under at-least-once redelivery (P2-8). ``group_id`` is threaded through
+    as the consumer group so the dedup ledger is keyed per (event_id, group).
+    """
     settings = consumer_settings or ConsumerSettings(group_id=group_id)
     if use_mock:
         adapter: KafkaConsumerAdapter = MockKafkaConsumerAdapter()
     else:
         adapter = AIOKafkaConsumerAdapter(kafka_settings or KafkaSettings(), settings)
-    return EventConsumer(adapter)
+    return EventConsumer(
+        adapter,
+        idempotency_store=idempotency_store,
+        consumer_group=settings.group_id,
+    )

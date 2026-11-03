@@ -25,6 +25,14 @@ Usage:
     # Get pool directly for advanced usage
     pool = await ConnectionPoolManager.get_pool("default")
 
+One default pool per service (IF-03, D-02; MVP-033):
+    ``get_pool("default")`` is the service's single pool, built from ``POSTGRES_*``. The legacy repository
+    names (``user_db``, ``diagnosis_db``, ``therapy_db``, ``personality_db``, ``safety_db``) are aliases of
+    it (:func:`canonical_pool_name`), so they share the one pool object. In staging and production a pool is
+    refused (:class:`~solace_infrastructure.postgres.DatabaseConfigError`, before any connection) for an unset
+    or local POSTGRES_HOST or a missing or empty POSTGRES_PASSWORD, and a new pool must log in as a plain
+    application role, as itself (:func:`verify_app_role`); a refused pool is closed.
+
 Connection Leak Detection:
     The manager tracks connection usage and warns about potential leaks:
     - Connections held > 30 seconds trigger warnings
@@ -43,20 +51,199 @@ Best Practices:
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Final
 
 import asyncpg
 import structlog
+from pydantic import ValidationError
 
 from solace_common.exceptions import DatabaseError
-from ..postgres import PostgresSettings
+
+from ..postgres import (
+    _SET_RLS_USER_SQL,
+    DatabaseConfigError,
+    PostgresSettings,
+    _is_strict_environment,
+    _reset_rls_user,
+)
 
 logger = structlog.get_logger(__name__)
+
+DEFAULT_POOL: Final = "default"
+LEGACY_POOL_ALIASES: Final = frozenset({"user_db", "diagnosis_db", "therapy_db", "personality_db", "safety_db"})
+# Predefined roles the PostgreSQL docs call superuser-equivalent: OS commands through COPY ... TO/FROM PROGRAM,
+# and reading or writing any file the server can reach, whatever RLS says. The one list in src/; the test suite
+# pins it equal to scripts/db/migrate.py's SUPERUSER_EQUIVALENT_ROLES (the migrate job refuses the same roles).
+SUPERUSER_EQUIVALENT_ROLES: Final = ("pg_execute_server_program", "pg_read_server_files", "pg_write_server_files")
+ROLE_CHECK_ACQUIRE_TIMEOUT_SECONDS: Final = 10.0
+POOL_DISCARD_TIMEOUT_SECONDS: Final = 10.0
+
+
+def canonical_pool_name(name: str) -> str:
+    """The pool a name refers to: ``"default"`` for the legacy per-repository names, else ``name`` itself."""
+    return DEFAULT_POOL if name in LEGACY_POOL_ALIASES else name
+
+
+def _json_encoder(value: Any) -> str:
+    return json.dumps(value, default=str)
+
+
+def _json_decoder(value: str) -> Any:
+    return json.loads(value)
+
+
+async def init_connection(conn: asyncpg.Connection) -> None:
+    """The pool ``init=`` hook: JSON and JSONB values travel as Python objects (``json.dumps(default=str)`` /
+    ``json.loads``). Public so other pools (WS-05.2's ``pg_migrated`` app pool) use the same codecs."""
+    await conn.set_type_codec("json", encoder=_json_encoder, decoder=_json_decoder, schema="pg_catalog")
+    await conn.set_type_codec("jsonb", encoder=_json_encoder, decoder=_json_decoder, schema="pg_catalog")
+
+
+# One row about the connection's roles: the session role (the one that logged in, which ``SET ROLE NONE`` and
+# ``RESET ROLE`` return to) and the current role (which a connection-time ``ALTER ROLE/DATABASE ... SET role``
+# can switch to). Both are tested (``login``): their own attributes, whether either is a member of the owner of
+# any table in schema public (owners bypass RLS, and any member can SET ROLE to the owner, so 'MEMBER' rather
+# than 'USAGE', which misses NOINHERIT membership), and whether either is a member of a superuser or BYPASSRLS
+# role. A role switched at login is refused outright: the plain app role logs in as itself (WS026-SEC-1).
+# Membership of any kind (direct, chained, INHERIT FALSE: 'MEMBER') in a superuser-equivalent predefined role
+# ($1, SUPERUSER_EQUIVALENT_ROLES) is refused too (WS026F1-CLO-1), and so is REPLICATION (hardening: the app
+# login is NOREPLICATION, as scripts/db/migrate.py requires of the platform roles).
+_APP_ROLE_SQL: Final = """
+WITH login AS (
+    SELECT r.oid, r.rolsuper, r.rolbypassrls, r.rolreplication
+    FROM pg_catalog.pg_roles r
+    WHERE r.rolname IN (session_user, current_user)
+)
+SELECT session_user::text AS login_role,
+       current_user::text AS effective_role,
+       (SELECT count(*) FROM login) AS roles_found,
+       session_user <> current_user AS role_switched,
+       EXISTS (SELECT 1 FROM login WHERE login.rolsuper) AS is_superuser,
+       EXISTS (SELECT 1 FROM login WHERE login.rolbypassrls) AS bypasses_rls,
+       EXISTS (
+           SELECT 1
+           FROM login l
+           CROSS JOIN pg_catalog.pg_class c
+           JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+           WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+             AND pg_catalog.pg_has_role(l.oid, c.relowner, 'MEMBER')
+       ) AS owns_public_tables,
+       EXISTS (
+           SELECT 1
+           FROM login l
+           CROSS JOIN pg_catalog.pg_roles p
+           WHERE p.oid <> l.oid AND (p.rolsuper OR p.rolbypassrls)
+             AND pg_catalog.pg_has_role(l.oid, p.oid, 'MEMBER')
+       ) AS member_of_privileged_role,
+       EXISTS (
+           SELECT 1
+           FROM login l
+           CROSS JOIN pg_catalog.pg_roles p
+           WHERE p.rolname = ANY($1::text[])
+             AND pg_catalog.pg_has_role(l.oid, p.oid, 'MEMBER')
+       ) AS member_of_superuser_equivalent_role,
+       EXISTS (SELECT 1 FROM login WHERE login.rolreplication) AS can_replicate
+"""
+_PRIVILEGE_REASONS: Final = (
+    ("is_superuser", "is a superuser"),
+    ("bypasses_rls", "has BYPASSRLS"),
+    ("owns_public_tables", "owns tables in schema public"),
+    ("member_of_privileged_role", "is a member of a superuser or BYPASSRLS role"),
+    ("member_of_superuser_equivalent_role",
+     "is a member of a superuser-equivalent role (" + ", ".join(SUPERUSER_EQUIVALENT_ROLES) + ")"),
+    ("can_replicate", "has REPLICATION"),
+    ("role_switched", "switched to another role at login"),
+)
+
+
+async def verify_app_role(conn: Any, *, environment: str | None = None) -> None:
+    """Strict environments: refuse a login role that row-level security does not apply to (D-02; MVP-041).
+
+    Both the session role (``session_user``, the role that logged in) and the current role are tested. Raises
+    :class:`DatabaseConfigError` when either is a superuser, has BYPASSRLS, is a member (inheriting or not) of the
+    owner of any table in schema ``public``, is a member of a superuser or BYPASSRLS role, is a member (direct,
+    chained or INHERIT FALSE) of a superuser-equivalent predefined role (:data:`SUPERUSER_EQUIVALENT_ROLES`), or
+    has REPLICATION, and when the two differ (a role switched at login by ``ALTER ROLE/DATABASE ... SET role``:
+    ``SET ROLE NONE`` returns to the session role). The message names POSTGRES_USER, the reasons and the role
+    names only, never a password or DSN. A no-op outside staging and production; ``environment`` None reads
+    ENVIRONMENT.
+    """
+    if not _is_strict_environment(environment):
+        return
+    row = await conn.fetchrow(_APP_ROLE_SQL, list(SUPERUSER_EQUIVALENT_ROLES))
+    if row is None or not row["roles_found"]:
+        reasons, roles = ["could not be read from pg_roles"], ""
+    else:
+        reasons = [text for key, text in _PRIVILEGE_REASONS if row[key]]
+        roles = f" (session_user {row['login_role']!r}, current_user {row['effective_role']!r})"
+    if reasons:
+        raise DatabaseConfigError(
+            f"The Postgres login role (POSTGRES_USER) {', '.join(reasons)}{roles}: staging and production services "
+            "log in as the application role itself (NOSUPERUSER, NOBYPASSRLS, owning no table, no role switch at "
+            "login), so row-level security applies to every query (D-02)",
+            operation="verify_app_role",
+        )
+
+
+async def _discard_pool(pool: Any) -> None:
+    """Close a pool that will not be used; terminate it when a graceful close fails or takes too long."""
+    try:
+        await asyncio.wait_for(pool.close(), timeout=POOL_DISCARD_TIMEOUT_SECONDS)
+    except Exception as exc:
+        logger.warning("pool_discard_failed", error=type(exc).__name__)
+        terminate = getattr(pool, "terminate", None)
+        if callable(terminate):
+            terminate()
+
+
+async def check_new_pool_role(pool: Any, *, environment: str | None = None) -> None:
+    """Strict environments: :func:`verify_app_role` on one connection of a newly created ``pool``.
+
+    On any failure (a refused role, or no connection) the pool is closed before the error propagates, so a
+    refused pool is never used or leaked. A no-op outside staging and production.
+    """
+    if not _is_strict_environment(environment):
+        return
+    try:
+        async with pool.acquire(timeout=ROLE_CHECK_ACQUIRE_TIMEOUT_SECONDS) as conn:
+            await verify_app_role(conn, environment=environment)
+    except BaseException:
+        await _discard_pool(pool)
+        raise
+
+
+def _validated_settings(settings: PostgresSettings | None) -> PostgresSettings:
+    """``settings``, or ``PostgresSettings()`` from POSTGRES_* (and .env), after ``validate_for_environment``.
+
+    A missing or invalid POSTGRES_* value (pydantic ``ValidationError``, e.g. an unset POSTGRES_PASSWORD) becomes
+    :class:`DatabaseConfigError` naming the variables, never their values; the pydantic error, whose text can
+    echo other settings, is not chained.
+    """
+    if settings is None:
+        try:
+            settings = PostgresSettings()
+        except ValidationError as exc:
+            names = sorted({f"POSTGRES_{str(error['loc'][0]).upper()}"
+                            for error in exc.errors(include_url=False, include_input=False) if error.get("loc")})
+            raise DatabaseConfigError(
+                f"{', '.join(names) or 'POSTGRES_*'} is not set or not valid: the service's database pool is "
+                "built from the POSTGRES_* variables",
+                operation="validate_settings",
+            ) from None
+    settings.validate_for_environment()
+    return settings
+
+
+def _connection_identity(settings: PostgresSettings) -> tuple[Any, ...]:
+    """Where and how a pool connects; two registrations of one name must agree on all of it."""
+    return (settings.host, settings.port, settings.database, settings.user, settings.password.get_secret_value(),
+            settings.ssl_mode, settings.ssl_root_cert)
 
 
 @dataclass
@@ -155,25 +342,30 @@ class ConnectionPoolManager:
         """Register a named pool configuration without creating the pool yet.
 
         Args:
-            name: Unique pool identifier (e.g., "default", "audit_db", "analytics_db")
-            settings: PostgreSQL settings for this pool (uses default if None)
+            name: Unique pool identifier (e.g., "default", "audit_db", "analytics_db"); a legacy alias
+                (:data:`LEGACY_POOL_ALIASES`) registers ``"default"``
+            settings: PostgreSQL settings for this pool (built from POSTGRES_* if None)
             min_size: Override minimum pool size
             max_size: Override maximum pool size
 
         Raises:
-            ValueError: If pool name is already registered with different settings
+            DatabaseConfigError: A POSTGRES_* value is missing or invalid (e.g. no POSTGRES_PASSWORD), or, in
+                staging and production, POSTGRES_HOST is unset or local or POSTGRES_PASSWORD is empty.
+            ValueError: If pool name is already registered with different settings (the message names the
+                pool, host and database only, never a DSN or password)
         """
-        pool_settings = settings or PostgresSettings()
+        name = canonical_pool_name(name)
+        pool_settings = _validated_settings(settings)
         config = ConnectionPoolConfig(name, pool_settings, min_size, max_size)
 
         # Check for conflicts
         if name in cls._pool_configs:
-            existing = cls._pool_configs[name]
-            if existing.settings.get_dsn() != config.settings.get_dsn():
+            existing = cls._pool_configs[name].settings
+            if _connection_identity(existing) != _connection_identity(pool_settings):
                 raise ValueError(
-                    f"Pool '{name}' already registered with different settings. "
-                    f"Existing DSN: {existing.settings.get_dsn()}, "
-                    f"New DSN: {config.settings.get_dsn()}"
+                    f"Pool '{name}' is already registered with different settings "
+                    f"(registered: host {existing.host}, database {existing.database}; "
+                    f"new: host {pool_settings.host}, database {pool_settings.database})"
                 )
 
         cls._pool_configs[name] = config
@@ -189,7 +381,11 @@ class ConnectionPoolManager:
         """Get or create connection pool for the specified database.
 
         Lazy initialization: pool is created on first access, not at registration.
-        Subsequent calls return the same pool instance (singleton pattern).
+        Subsequent calls return the same pool instance (singleton pattern). A legacy alias
+        (:data:`LEGACY_POOL_ALIASES`) returns the ``"default"`` pool.
+
+        In staging and production the new pool must pass :func:`verify_app_role` on one of its
+        connections; a refused pool is closed before the error is raised.
 
         Args:
             name: Pool identifier (defaults to "default")
@@ -198,9 +394,12 @@ class ConnectionPoolManager:
             asyncpg.Pool instance for the specified database
 
         Raises:
-            ValueError: If pool not registered
+            DatabaseConfigError: Unusable settings (see :meth:`register_pool`), a strict TLS problem, or, in
+                staging and production, a privileged login role. Raised before any connection, except the role
+                check, which needs one.
             DatabaseError: If pool creation fails
         """
+        name = canonical_pool_name(name)
         # Fast path: pool already exists
         if name in cls._pools:
             return cls._pools[name]
@@ -214,11 +413,11 @@ class ConnectionPoolManager:
 
             # Get configuration
             if name not in cls._pool_configs:
-                # Auto-register with default settings if not explicitly registered
-                logger.warning(
+                # Auto-register from POSTGRES_*: the designed path for the default pool.
+                (logger.info if name == DEFAULT_POOL else logger.warning)(
                     "pool_auto_registered",
                     pool_name=name,
-                    message="Pool not registered, using default settings",
+                    message="Pool not registered, using the POSTGRES_* settings",
                 )
                 await cls.register_pool(name)
 
@@ -251,6 +450,7 @@ class ConnectionPoolManager:
                     ),
                     timeout=30.0,
                 )
+                await check_new_pool_role(pool)  # strict only; closes the pool before raising
 
                 cls._pools[name] = pool
                 logger.info(
@@ -273,25 +473,12 @@ class ConnectionPoolManager:
 
     @classmethod
     async def _init_connection(cls, conn: asyncpg.Connection) -> None:
-        """Initialize each connection with type codecs.
+        """Initialize each connection with type codecs (delegates to :func:`init_connection`).
 
         Called automatically for each connection in the pool.
         Sets up JSON/JSONB encoding/decoding.
         """
-        import json
-
-        def json_encoder(value: Any) -> str:
-            return json.dumps(value, default=str)
-
-        def json_decoder(value: str) -> Any:
-            return json.loads(value)
-
-        await conn.set_type_codec(
-            "json", encoder=json_encoder, decoder=json_decoder, schema="pg_catalog"
-        )
-        await conn.set_type_codec(
-            "jsonb", encoder=json_encoder, decoder=json_decoder, schema="pg_catalog"
-        )
+        await init_connection(conn)
 
     @classmethod
     @asynccontextmanager
@@ -314,6 +501,7 @@ class ConnectionPoolManager:
             async with ConnectionPoolManager.acquire() as conn:
                 result = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
         """
+        pool_name = canonical_pool_name(pool_name)
         pool = await cls.get_pool(pool_name)
 
         # Track metrics
@@ -343,13 +531,28 @@ class ConnectionPoolManager:
                         stack_trace=cls._get_stack_trace(),
                     )
 
+                # C.2 RLS: set the per-request user GUC on this connection so Postgres
+                # RLS policies keyed on app.current_user_id enforce per-user row access.
+                # Session-level (is_local=false) so it survives the per-statement autocommits
+                # within this acquire; reset on release so it never leaks to the next
+                # borrower of this pooled connection; a connection whose reset fails is
+                # terminated instead (MVP-058). Unset => RLS returns no user rows (safe).
+                from solace_common.request_context import get_current_user_id
+
+                _rls_uid = get_current_user_id()
                 try:
+                    if _rls_uid:
+                        await conn.execute(_SET_RLS_USER_SQL, _rls_uid)
                     yield conn
                 finally:
-                    # Clean up tracking
-                    metrics.active_connections -= 1
-                    if conn_id in cls._active_connections:
-                        del cls._active_connections[conn_id]
+                    try:
+                        if _rls_uid:
+                            await _reset_rls_user(conn)  # re-raises only a cancellation
+                    finally:
+                        # Clean up tracking (also when the reset was cancelled)
+                        metrics.active_connections -= 1
+                        if conn_id in cls._active_connections:
+                            del cls._active_connections[conn_id]
 
         except asyncio.TimeoutError as e:
             metrics.connection_timeouts += 1
@@ -386,6 +589,7 @@ class ConnectionPoolManager:
                 await conn.execute("INSERT INTO audit_logs ...")
                 # Automatic commit on success, rollback on exception
         """
+        pool_name = canonical_pool_name(pool_name)
         async with cls.acquire(pool_name) as conn:
             async with conn.transaction(isolation=isolation):
                 yield conn
@@ -395,8 +599,9 @@ class ConnectionPoolManager:
         """Close and remove a specific pool.
 
         Args:
-            name: Pool identifier to close
+            name: Pool identifier to close (a legacy alias closes ``"default"``)
         """
+        name = canonical_pool_name(name)
         if name in cls._pools:
             pool = cls._pools[name]
             await pool.close()
@@ -429,6 +634,7 @@ class ConnectionPoolManager:
         Raises:
             ValueError: If pool doesn't exist
         """
+        name = canonical_pool_name(name)
         if name not in cls._pools:
             raise ValueError(f"Pool '{name}' does not exist")
 
@@ -469,6 +675,7 @@ class ConnectionPoolManager:
         Returns:
             Health status dictionary
         """
+        pool_name = canonical_pool_name(pool_name)
         try:
             async with cls.acquire(pool_name) as conn:
                 result = await conn.fetchrow("SELECT 1 as health, now() as server_time")
@@ -600,7 +807,7 @@ class ConnectionPoolManager:
         Returns:
             Connection metrics or None if pool doesn't exist
         """
-        return cls._metrics.get(pool_name)
+        return cls._metrics.get(canonical_pool_name(pool_name))
 
     @classmethod
     def get_all_metrics(cls) -> dict[str, ConnectionMetrics]:
@@ -619,6 +826,7 @@ class ConnectionPoolManager:
             pool_name: Pool to reset (None = reset all)
         """
         if pool_name:
+            pool_name = canonical_pool_name(pool_name)
             if pool_name in cls._metrics:
                 cls._metrics[pool_name] = ConnectionMetrics(pool_name=pool_name)
                 logger.info("metrics_reset", pool_name=pool_name)
@@ -643,8 +851,15 @@ async def get_connection_pool(name: str = "default") -> asyncpg.Pool:
 
 # Export public API
 __all__ = [
+    "DEFAULT_POOL",
+    "LEGACY_POOL_ALIASES",
+    "SUPERUSER_EQUIVALENT_ROLES",
     "ConnectionPoolManager",
     "ConnectionPoolConfig",
     "ConnectionMetrics",
+    "canonical_pool_name",
+    "check_new_pool_role",
     "get_connection_pool",
+    "init_connection",
+    "verify_app_role",
 ]

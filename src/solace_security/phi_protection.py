@@ -7,6 +7,8 @@ files. See also: user-service api.py _mask_email() for explicit masking.
 """
 
 from __future__ import annotations
+import contextvars
+import logging
 import re
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
@@ -17,6 +19,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
 
 logger = structlog.get_logger(__name__)
+# Gets the phi_detected counter while a log event is being sanitized (MVP-180).
+_chain_logger = logging.getLogger(__name__)
+
+# True while phi_sanitizer_processor sanitizes an event in this context (MVP-180). It is set
+# and reset by token. A callback scheduled meanwhile (call_soon copies the context) inherits
+# it; that callback's lines are then masked as nested events, never passed through.
+_phi_sanitizing: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "_phi_sanitizing", default=False
+)
 
 
 class PHIType(str, Enum):
@@ -48,11 +59,13 @@ class PHISettings(BaseSettings):
     enable_detection: bool = Field(default=True)
     enable_masking: bool = Field(default=True)
     mask_character: str = Field(default="*")
-    partial_mask_visible: int = Field(default=4)
+    # Trailing phone digits left visible. 0 masks every digit; above 4 is not partial masking.
+    partial_mask_visible: int = Field(default=4, ge=0, le=4)
     log_detections: bool = Field(default=True)
     strict_mode: bool = Field(default=False)
+    # hide_input_in_errors: a rejected setting is never echoed in the ValidationError text.
     model_config = SettingsConfigDict(
-        env_prefix="PHI_", env_file=".env", extra="ignore"
+        env_prefix="PHI_", env_file=".env", extra="ignore", hide_input_in_errors=True
     )
 
 
@@ -112,7 +125,9 @@ DEFAULT_PATTERNS: list[PHIPattern] = [
     ),
     PHIPattern(
         phi_type=PHIType.EMAIL,
-        pattern=r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+        # Bounded runs keep the scan linear: the unbounded form took about 17 s on 64 KB of
+        # "a." (MVP-180). No leading \b, so a local part over 64 characters is still masked.
+        pattern=r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24}\b",
         confidence=0.95,
         description="Email address",
     ),
@@ -216,6 +231,10 @@ class PHIMasker:
 
     def _mask_phone(self, phone: str, mask_char: str, visible: int) -> str:
         digits = re.sub(r"\D", "", phone)
+        if visible <= 0:
+            # digits[-0:] is the whole string, so 0 (or a value that skipped validation) would
+            # otherwise show every digit.
+            return mask_char * len(digits)
         if len(digits) <= visible:
             return mask_char * len(phone)
         masked = mask_char * (len(digits) - visible) + digits[-visible:]
@@ -225,6 +244,21 @@ class PHIMasker:
         if len(value) <= visible_chars:
             return mask_char * len(value)
         return value[:visible_chars] + mask_char * (len(value) - visible_chars)
+
+
+def _log_detection(count: int, phi_types: list[PHIType]) -> None:
+    """Log the ``phi_detected`` counter. It carries the count and the types, never a value.
+
+    While a log event is being sanitized, the counter goes to the stdlib logger at DEBUG. A
+    structlog line at that point would run the chain again, and ``merge_contextvars`` would
+    bring back the bound value that caused this detection, so every log call would recurse
+    until ``RecursionError`` (MVP-180).
+    """
+    types = sorted(t.value for t in phi_types)
+    if _phi_sanitizing.get():
+        _chain_logger.debug("phi_detected count=%d types=%s", count, ",".join(types))
+        return
+    logger.info("phi_detected", count=count, types=types)
 
 
 class PHIDetector:
@@ -271,11 +305,7 @@ class PHIDetector:
         )
         phi_types = list(set(m.phi_type for m in unique_matches))
         if unique_matches and self._settings.log_detections:
-            logger.info(
-                "phi_detected",
-                count=len(unique_matches),
-                types=[t.value for t in phi_types],
-            )
+            _log_detection(len(unique_matches), phi_types)
         return PHIDetectionResult(
             contains_phi=len(unique_matches) > 0,
             matches=unique_matches,
@@ -418,6 +448,18 @@ def mask_phi(text: str) -> str:
 
 
 _structlog_sanitizer: PHISanitizer | None = None
+# Masks events logged while another event is being sanitized. Its detector never logs, so it
+# cannot start another round of the chain (MVP-180).
+_nested_sanitizer: PHISanitizer | None = None
+# The _structlog_sanitizer that _nested_sanitizer was copied from.
+_nested_source: PHISanitizer | None = None
+
+
+def _quiet_copy(sanitizer: PHISanitizer) -> PHISanitizer:
+    """The same settings and patterns as ``sanitizer``, with detection logging off."""
+    detector = sanitizer._detector
+    settings = detector._settings.model_copy(update={"log_detections": False})
+    return PHISanitizer(PHIDetector(settings, detector._patterns))
 
 
 def phi_sanitizer_processor(
@@ -431,8 +473,30 @@ def phi_sanitizer_processor(
             phi_sanitizer_processor,
             structlog.processors.JSONRenderer(),
         ]
+
+    Re-entry guard (MVP-180). Lines can be logged while an event is being sanitized: the
+    stdlib DEBUG ``phi_detected`` counter, but also GC finalizers, ``__del__`` methods,
+    asyncio's exception handler, signal handlers, and callbacks scheduled from there (they
+    copy the context, guard included). Such a nested event is masked by ``_nested_sanitizer``.
+    That sanitizer's detector never logs, so the chain never recurses and nothing is emitted
+    unmasked.
     """
-    global _structlog_sanitizer
+    global _structlog_sanitizer, _nested_sanitizer, _nested_source
+    if _phi_sanitizing.get():
+        nested = _nested_sanitizer
+        if nested is None:
+            nested = _nested_sanitizer = PHISanitizer(
+                PHIDetector(PHISettings(log_detections=False))
+            )
+        return nested.sanitize_dict(event_dict)
     if _structlog_sanitizer is None:
         _structlog_sanitizer = PHISanitizer()
-    return _structlog_sanitizer.sanitize_dict(event_dict)
+    sanitizer = _structlog_sanitizer
+    if _nested_source is not sanitizer:
+        # Built here, outside the guard, so a nested call (a finalizer, say) never has to.
+        _nested_sanitizer, _nested_source = _quiet_copy(sanitizer), sanitizer
+    token = _phi_sanitizing.set(True)
+    try:
+        return sanitizer.sanitize_dict(event_dict)
+    finally:
+        _phi_sanitizing.reset(token)

@@ -241,7 +241,19 @@ class SafetyPlan(ClinicalBase):
     """
 
     __tablename__ = "safety_plans"
-    __phi_fields__: ClassVar[list[str]] = ["clinician_notes"]
+    # REV-14: the entire user-authored safety plan is PHI, not just the clinician
+    # notes. The list fields are JSONB but the encrypt path serializes them into a
+    # ``v1$`` ciphertext string that lives inside the JSONB envelope (same proven
+    # pattern as DiagnosisSession.messages), so no schema/migration change is needed.
+    __phi_fields__: ClassVar[list[str]] = [
+        "clinician_notes",
+        "warning_signs",
+        "coping_strategies",
+        "emergency_contacts",
+        "safe_environment_actions",
+        "reasons_to_live",
+        "professional_resources",
+    ]
 
     status: Mapped[str] = mapped_column(
         String(50),
@@ -334,6 +346,9 @@ class RiskFactor(ClinicalBase):
     """
 
     __tablename__ = "risk_factors"
+    # REV-14: the risk-factor description is clinical PHI and was stored in the
+    # clear (declared "encrypted" in the column comment but never listed here).
+    __phi_fields__: ClassVar[list[str]] = ["factor_description"]
 
     # Link to assessment
     assessment_id: Mapped[uuid.UUID] = mapped_column(

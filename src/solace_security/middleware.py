@@ -248,7 +248,10 @@ async def get_current_user(
     token = _extract_token(credentials)
     jwt_manager = _get_jwt_manager()
 
-    result = jwt_manager.validate_access_token(token)
+    # REV-06: use the async validation path so revocation is checked against the
+    # (async) Redis blacklist. The sync path's best-effort check silently returns
+    # False for Redis-backed blacklists, letting revoked tokens through.
+    result = await jwt_manager.validate_access_token_async(token)
     if not result.success or not result.payload:
         _handle_auth_failure(result)
 
@@ -259,6 +262,12 @@ async def get_current_user(
         token_type=result.payload.type.value,
         path=request.url.path,
     )
+
+    # C.2 RLS: publish the authenticated user into the request context so the DB layer
+    # sets the app.current_user_id GUC for row-level-security enforcement.
+    from solace_common.request_context import set_current_user_id
+
+    set_current_user_id(result.user_id)
 
     return AuthenticatedUser.from_payload(result.payload)
 
@@ -306,7 +315,11 @@ async def get_current_service(
     token = _extract_token(credentials)
     jwt_manager = _get_jwt_manager()
 
-    result = jwt_manager.decode_token(token, expected_type=TokenType.SERVICE)
+    # P2-3: use the ASYNC (Redis-aware) path so a revoked service token is actually
+    # rejected. The sync decode_token path's best-effort revocation check returns False
+    # against a RedisTokenBlacklist, so a blacklisted service token would still be
+    # accepted — mirror get_current_user and route through the async revocation check.
+    result = await jwt_manager.decode_token_async(token, expected_type=TokenType.SERVICE)
     if not result.success or not result.payload:
         _handle_auth_failure(result)
 
