@@ -122,9 +122,9 @@ def get_consumer() -> AnalyticsConsumer:
 
 
 def set_dependencies(
-    aggregator: AnalyticsAggregator,
-    report_service: ReportService,
-    consumer: AnalyticsConsumer,
+    aggregator: AnalyticsAggregator | None,
+    report_service: ReportService | None,
+    consumer: AnalyticsConsumer | None,
 ) -> None:
     """Set global dependencies for API routes."""
     global _analytics_aggregator, _report_service, _analytics_consumer

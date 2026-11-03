@@ -13,11 +13,11 @@ The register's statuses are derived from this file at each barrier (`fixed` when
 
 | Status | todo | in-progress | review | fixing | done | blocked | deferred | total |
 |---|---|---|---|---|---|---|---|---|
-| Tasks | 272 | 2 | 0 | 2 | 53 | 1 | 0 | 330 |
+| Tasks | 272 | 1 | 1 | 1 | 54 | 1 | 0 | 330 |
 
 | Wave | Phase A done / total | Phase B done / total | Active | Blocked |
 |---|---|---|---|---|
-| W0 | 35 / 39 | 12 / 16 | 4 | 1 |
+| W0 | 35 / 39 | 13 / 16 | 3 | 1 |
 | W1 | 0 / 34 | 0 / 35 | 0 | 0 |
 | W2 | 0 / 16 | 0 / 61 | 0 | 0 |
 | W3 | 0 / 24 | 0 / 40 | 0 | 0 |
@@ -43,9 +43,9 @@ The register's statuses are derived from this file at each barrier (`fixed` when
 | WS-15 | 2 / 23 |
 | WS-16 | 1 / 22 |
 | WS-17 | 2 / 19 |
-| WS-18 | 1 / 19 |
+| WS-18 | 2 / 19 |
 
-**Register entries:** 49 of 345 covered entries fixed (all their tasks done); 12 partly done.
+**Register entries:** 50 of 345 covered entries fixed (all their tasks done); 12 partly done.
 
 <!-- mvp:summary:end -->
 
@@ -115,7 +115,7 @@ Filled at each wave barrier (master plan, section 5.5). The tree zip is the only
 |---|---|---|---|---|---|---|---|---|---|
 | [WS-14.1](../superpowers/plans/2026-10-18-mvp-remediation/WS-14-accounts-roster-consent-erasure.md#task-ws-141-registration-writes-satisfy-the-migrated-schema-through-the-default-pool-and-under-the-new-users-rls-context) | Registration writes satisfy the migrated schema through the default pool and under the new user's RLS context | blocker | security-critical | Opus | yes | - | MVP-034 | `done` | head 7ff2a89 APPROVED (rls-security + spec); minors parked: update_preferences caller-context hazard, email in debug log (sanitizer masks) -> hand-offs |
 | [WS-13.1](../superpowers/plans/2026-10-18-mvp-remediation/WS-13-notification-alert-delivery.md#task-ws-131-one-module-path-package-relative-imports-bare-solace_events-no-f821) | One module path: package-relative imports, bare solace_events, no F821 | medium | standard | Sonnet | no | - | MVP-155 | `done` | head 630cfd8 APPROVED (spec + crisis-path); optional minor SPE-1 parked: only the AST flat-import test is a real RED guard |
-| [WS-14.2](../superpowers/plans/2026-10-18-mvp-remediation/WS-14-accounts-roster-consent-erasure.md#task-ws-142-adopt-the-if-01-runtime-fail-loud-datastores-one-redis-client-no-status-docs-off-in-strict) | Adopt the IF-01 runtime: fail-loud datastores, one Redis client, no /status, docs off in strict | high | security-critical | Opus | no | WS-14.1 | MVP-107, MVP-328 | `in-progress` | cloud resume lane |
+| [WS-14.2](../superpowers/plans/2026-10-18-mvp-remediation/WS-14-accounts-roster-consent-erasure.md#task-ws-142-adopt-the-if-01-runtime-fail-loud-datastores-one-redis-client-no-status-docs-off-in-strict) | Adopt the IF-01 runtime: fail-loud datastores, one Redis client, no /status, docs off in strict | high | security-critical | Opus | no | WS-14.1 | MVP-107, MVP-328 | `review` | impl ddd8766 |
 | [WS-15.1](../superpowers/plans/2026-10-18-mvp-remediation/WS-15-therapy-service.md#task-ws-151-adopt-the-if-01-runtime-in-therapy-and-build-the-session-store-from-the-runtimes-redis-client) | Adopt the IF-01 runtime in therapy and build the session store from the runtime's Redis client | high | standard | Sonnet | no | - | MVP-095, MVP-208 | `done` | fix1 e1d9508 (LLM/orchestrator closers registered right after initialize); controller-verified diff + tests; SPE-2 -> WS-06 follow-up; SPE-3 expected-red until WS-05.5 |
 | [WS-17.1](../superpowers/plans/2026-10-18-mvp-remediation/WS-17-memory-service.md#task-ws-171-adopt-the-if-01-runtime-in-memory-mainpy-keep-weaviate-off-by-default-and-take-redis-from-the-runtime) | Adopt the IF-01 runtime in memory main.py, keep Weaviate off by default and take Redis from the runtime | high | standard | Sonnet | no | - | MVP-270 | `done` | head 37aa63c APPROVED (2 lenses, 0 own defects); pre-existing minors routed: PostgresRepository private engine without TLS/role check -> WS-17.2 (must land before W0 exit), Weaviate init failure swallowed -> WS-17.11 |
 | [WS-11.1](../superpowers/plans/2026-10-18-mvp-remediation/WS-11-orchestrator-edge-contracts.md#task-ws-111-adopt-the-if-01-runtime-limiter-redis-from-redis_url-cors-from-cors_allowed_origins) | Adopt the IF-01 runtime; limiter Redis from REDIS_URL; CORS from CORS_ALLOWED_ORIGINS | blocker | security-critical | Opus | no | - | MVP-016, MVP-164 | `done` | fix1 dd06828 APPROVED (limiter fail-open, 0.5 s Redis timeouts; 0 findings); CORS_ALLOWED_ORIGINS for strict compose -> WS-03.5 |
@@ -128,7 +128,7 @@ Filled at each wave barrier (master plan, section 5.5). The tree zip is the only
 | [WS-17.19](../superpowers/plans/2026-10-18-mvp-remediation/WS-17-memory-service.md#task-ws-1719-memory-publishes-the-canonical-therapy-to-memory-context-examples) | Memory publishes the canonical therapy-to-memory context examples | medium | standard | Sonnet | no | WS-17.1 | MVP-357 | `done` | f06a395 approved |
 | [WS-17.2](../superpowers/plans/2026-10-18-mvp-remediation/WS-17-memory-service.md#task-ws-172-run-postgresrepository-on-the-shared-connectionpoolmanager-pool-transport-only) | Run PostgresRepository on the shared ConnectionPoolManager pool (transport only) | high | security-critical | Opus | no | WS-17.1 | support | `fixing` | fix1: W172-SEC-1 |
 | [WS-18.1](../superpowers/plans/2026-10-18-mvp-remediation/WS-18-personality-analytics.md#task-ws-181-personality-adopts-the-if-01-runtime-and-boots-without-the-unused-redis-and-db-passwords) | Personality adopts the IF-01 runtime and boots without the unused Redis and DB passwords | blocker | standard | Sonnet | no | - | MVP-027 | `done` | fix1 e3543f6 (W181-SPE-1 closed) |
-| [WS-18.2](../superpowers/plans/2026-10-18-mvp-remediation/WS-18-personality-analytics.md#task-ws-182-analytics-adopts-the-if-01-runtime-a-dead-kafka-consumer-shows-in-ready-the-lint-gate-is-clean) | Analytics adopts the IF-01 runtime; a dead Kafka consumer shows in /ready; the lint gate is clean | medium | standard | Sonnet | no | - | MVP-110 | `fixing` | fix1: W182-SPE-1, SPE-2 |
+| [WS-18.2](../superpowers/plans/2026-10-18-mvp-remediation/WS-18-personality-analytics.md#task-ws-182-analytics-adopts-the-if-01-runtime-a-dead-kafka-consumer-shows-in-ready-the-lint-gate-is-clean) | Analytics adopts the IF-01 runtime; a dead Kafka consumer shows in /ready; the lint gate is clean | medium | standard | Sonnet | no | - | MVP-110 | `done` | fix1 99a2e5a (W182-SPE-1, SPE-2 closed) |
 
 ### W0 Phase not scheduled yet: 6 tasks
 

@@ -138,9 +138,10 @@ def _set_services(aggregator, report_service, consumer) -> None:
     _analytics_aggregator, _report_service, _analytics_consumer = aggregator, report_service, consumer
 
 
-def _clear_services() -> None:
-    """Drop the module-level services on shutdown."""
+async def _clear_services() -> None:
+    """Drop the module-level services (main and api) on shutdown."""
     _set_services(None, None, None)
+    set_dependencies(None, None, None)
 
 
 def _create_services(settings: AnalyticsServiceSettings) -> tuple:
