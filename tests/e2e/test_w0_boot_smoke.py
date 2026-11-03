@@ -56,12 +56,57 @@ def _ps_rows(stack, *args: str) -> list[dict]:
     return rows
 
 
+class HttpResultStub:
+    def __init__(self, status, json=None):
+        self.status, self.json = status, json
+
+
 def test_w0_poll_returns_the_first_match_and_the_last_result_on_timeout():
     seen = iter([1, 2, 3])
     assert _poll(lambda: next(seen), until=lambda r: r == 2, timeout=5, interval=0) == 2
     assert _poll(lambda: 7, until=lambda r: False, timeout=0, interval=0) == 7
     with pytest.raises(ConnectionError):
         _poll(lambda: (_ for _ in ()).throw(ConnectionError("down")), until=lambda r: True, timeout=0, interval=0)
+
+
+def test_w0_poll_retries_compose_errors_and_reraises_the_last_one_on_timeout():
+    calls = iter([ComposeError("starting"), HttpResultStub(200)])
+
+    def fetch():
+        v = next(calls)
+        if isinstance(v, Exception):
+            raise v
+        return v
+
+    assert _poll(fetch, until=lambda r: r.status == 200, timeout=5, interval=0).status == 200
+    with pytest.raises(ComposeError, match="never up"):
+        _poll(lambda: (_ for _ in ()).throw(ComposeError("never up")), until=lambda r: True, timeout=0, interval=0)
+
+
+def test_w0_ready_check_rejects_empty_or_noncritical_checks():
+    def ok(checks):
+        return HttpResultStub(200, {"status": "ready", "service": "svc", "checks": checks})
+
+    _assert_ready(ok({"db": {"ok": True, "critical": True, "detail": ""}}), "svc")
+    for checks in ({}, {"cache": {"ok": True, "critical": False, "detail": ""}}):
+        with pytest.raises(AssertionError):
+            _assert_ready(ok(checks), "svc")
+    with pytest.raises(AssertionError):
+        _assert_ready(ok({"db": {"ok": False, "critical": True, "detail": ""}}), "svc")
+
+
+def test_w0_published_check_requires_the_expected_services_in_ps():
+    def row(svc, port=None):
+        return {"Service": svc, "Publishers": [{"PublishedPort": port}] if port else []}
+
+    full = [row(s) for s in MVP_SERVICES] + [row("caddy", 8080), row("mailpit", 8025)]
+    _assert_only_edge_published(full)
+    with pytest.raises(AssertionError):
+        _assert_only_edge_published([])                      # an empty ps must not pass
+    with pytest.raises(AssertionError):
+        _assert_only_edge_published([r for r in full if r["Service"] != "caddy"])
+    with pytest.raises(AssertionError):
+        _assert_only_edge_published(full + [row("postgres", 5432)])
 
 
 def test_w0_fallback_patterns_match_the_known_warnings_only():
