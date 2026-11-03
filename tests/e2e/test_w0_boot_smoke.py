@@ -14,7 +14,7 @@ from solace_infrastructure.database.schema_check import SCHEMA_HEAD
 from solace_testing.e2e import MVP_SERVICES, ComposeError, make_user
 from solace_testing.e2e_manifest import hop
 
-pytestmark = [pytest.mark.e2e, pytest.mark.integration, pytest.mark.timeout(1200)]
+pytestmark = [pytest.mark.e2e, pytest.mark.integration, pytest.mark.timeout(1200, func_only=True)]
 
 DB_SERVICES = ("orchestrator-service", "user-service", "safety-service", "notification-service", "diagnosis-service",
                "memory-service", "therapy-service", "personality-service", "analytics-service")

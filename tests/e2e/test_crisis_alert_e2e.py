@@ -33,7 +33,13 @@ from solace_testing.e2e import (
 from solace_testing.e2e_manifest import hop
 from tests.e2e.crisis_phrases_e2e import CRISIS_PHRASES
 
-pytestmark = [pytest.mark.e2e, pytest.mark.integration, pytest.mark.timeout(900)]
+# func_only: the test function is bounded, the session stack build (UP_TIMEOUT_S) is not (W056-CRI-2)
+pytestmark = [pytest.mark.e2e, pytest.mark.integration, pytest.mark.timeout(900, func_only=True),
+              pytest.mark.profile("dev")]   # W0/W1 entries are dev-only; strict widening is a W1 item (W056-CRI-3)
+
+LEVELS = ("HIGH", "CRITICAL")
+_SUBJECT_RE = re.compile(r"\[Solace CRISIS (HIGH|CRITICAL)\] action required - ref [0-9a-f]{8}")
+_POST_FORM_RE = re.compile(r"<form\b[^>]*\bmethod\s*=\s*[\"']?post\b", re.IGNORECASE)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -46,6 +52,24 @@ def oncall(e2e_stack):
 
 async def _chat(stack, user, text):
     return await stack.edge("POST", "/api/v1/orchestrator/chat", token=user.access_token, json={"message": text})
+
+
+def _assert_page_level(subject, max_level):
+    """The page's level is one the episode reached: at most its max_level (a same-turn rise pages again, F8)."""
+    match = _SUBJECT_RE.fullmatch(subject)
+    assert match, "page subject is not the IF-09 form"
+    assert LEVELS.index(match.group(1)) <= LEVELS.index(max_level), (match.group(1), max_level)
+
+
+async def _acknowledge(stack, user_id, msg):
+    """IF-09: GET shows a POST confirm form and changes nothing; POST acknowledges the episode."""
+    path = urlsplit(extract_link(msg.text, "/api/v1/notifications/crisis-alerts/ack/")).path
+    page = await stack.edge("GET", path)
+    assert page.status_code == 200
+    assert _POST_FORM_RE.search(page.text), "GET does not show a POST confirm form"
+    assert crisis_episodes(stack, user_id)[0]["status"] == "open", "GET changed the episode"
+    assert (await stack.edge("POST", path)).status_code in (200, 303)
+    assert crisis_episodes(stack, user_id)[0]["status"] == "acknowledged"
 
 
 def _assert_resources(crisis):
@@ -95,10 +119,13 @@ async def test_crisis_pages_the_oncall_clinician_once_without_message_text(e2e_s
     with hop("clinician_page"):
         (episode,) = crisis_episodes(e2e_stack, user.id, timeout=60)          # one episode for this user's turn
         msg = wait_for_episode_page(e2e_stack, oncall.email, episode["alert_id"], timeout=60)
-        assert re.fullmatch(r"\[Solace CRISIS (HIGH|CRITICAL)\] action required - ref [0-9a-f]{8}", msg.subject)
+        _assert_page_level(msg.subject, crisis_episodes(e2e_stack, user.id)[0]["max_level"])   # W056-CRI-6
         assert "alive anymore" not in msg.text and user.email not in msg.text
         await asyncio.sleep(15)
         pages = pages_for_episode(e2e_stack, oncall.email, episode["alert_id"])
+        max_level = crisis_episodes(e2e_stack, user.id)[0]["max_level"]
+        for page in pages:
+            _assert_page_level(page.subject, max_level)
         assert len(pages) == len({p.subject.split("]")[0] for p in pages}) <= 2   # one page per level (a same-turn rise pages again, F8)
 
 
@@ -110,7 +137,4 @@ async def test_ack_link_acknowledges_the_episode(e2e_stack, oncall):
         (episode,) = crisis_episodes(e2e_stack, user.id, timeout=60)
         msg = wait_for_episode_page(e2e_stack, oncall.email, episode["alert_id"], timeout=60)
     with hop("ack_link"):
-        path = urlsplit(extract_link(msg.text, "/api/v1/notifications/crisis-alerts/ack/")).path
-        assert (await e2e_stack.edge("GET", path)).status_code == 200
-        assert (await e2e_stack.edge("POST", path)).status_code in (200, 303)
-        assert crisis_episodes(e2e_stack, user.id)[0]["status"] == "acknowledged"
+        await _acknowledge(e2e_stack, user.id, msg)       # W056-CRI-1

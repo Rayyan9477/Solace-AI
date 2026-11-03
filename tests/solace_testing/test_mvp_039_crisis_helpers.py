@@ -183,3 +183,106 @@ def test_mvp_039_wait_for_episode_page_times_out_without_echoing_mail(no_sleep: 
 
 def test_mvp_039_crisis_helpers_are_exported() -> None:
     assert {"crisis_episodes", "pages_for_episode", "wait_for_episode_page"} <= set(e2e.__all__)
+
+
+# --------------------------------------------------------------------------------------------- suite structure (fix 1)
+
+import os  # noqa: E402
+import subprocess  # noqa: E402
+import sys  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from tests.e2e import test_crisis_alert_e2e as crisis_suite  # noqa: E402
+from tests.e2e import test_w0_boot_smoke as boot_suite  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[2]
+ACK_URL = "http://127.0.0.1:8080/api/v1/notifications/crisis-alerts/ack/tok-synthetic"
+
+
+def _marks(module, name: str) -> list:
+    return [m for m in module.pytestmark if m.name == name]
+
+
+@pytest.mark.parametrize("module", [crisis_suite, boot_suite], ids=["crisis", "boot_smoke"])
+def test_mvp_039_suite_timeouts_bound_the_function_only(module) -> None:
+    (timeout,) = _marks(module, "timeout")
+    assert timeout.kwargs.get("func_only") is True          # W056-CRI-2: the stack build (UP_TIMEOUT_S) is unbounded
+
+
+def test_mvp_039_crisis_suite_is_dev_only() -> None:
+    (profile,) = _marks(crisis_suite, "profile")
+    assert profile.args == ("dev",)                          # W056-CRI-3
+
+
+def _collect(profile: str) -> str:
+    env = {**os.environ, "SOLACE_E2E_PROFILE": profile, "PYTHONPATH": f"{ROOT}{os.pathsep}{ROOT / 'src'}"}
+    proc = subprocess.run([sys.executable, "-m", "pytest", "tests/e2e/test_crisis_alert_e2e.py", "--collect-only",
+                           "-q", "-o", "addopts=", "-p", "no:logging"], cwd=ROOT, env=env, capture_output=True,
+                          text=True, timeout=120)
+    return proc.stdout
+
+
+def test_mvp_039_strict_deselects_the_crisis_suite() -> None:
+    assert "8 tests collected" in _collect("dev")
+    assert "8 deselected" in _collect("strict")
+
+
+class _Resp:
+    def __init__(self, status_code: int, text: str = "") -> None:
+        self.status_code, self.text = status_code, text
+
+
+class AckStack(FakeStack):
+    """GET returns ``get_body``; POST acknowledges. ``get_flips`` makes the GET itself acknowledge (an IF-09 bug)."""
+
+    def __init__(self, get_body: str, *, get_flips: bool = False) -> None:
+        super().__init__()
+        self.status, self.get_body, self.get_flips, self.calls = "open", get_body, get_flips, []
+
+    async def edge(self, method: str, path: str, **_: object) -> _Resp:
+        self.calls.append((method, path))
+        if method == "GET":
+            if self.get_flips:
+                self.status = "acknowledged"
+            return _Resp(200, self.get_body)
+        self.status = "acknowledged"
+        return _Resp(303)
+
+    def sql(self, query: str, *params: str) -> list[dict]:
+        return [{**_row(ALERT_A, 1), "status": self.status}]
+
+
+CONFIRM_FORM = '<html><FORM Method="POST" action=""><button>Acknowledge</button></FORM></html>'
+
+
+def _ack_msg() -> MailMessage:
+    return _page(CLIN, ALERT_A, text=f"Acknowledge: {ACK_URL}")
+
+
+async def test_mvp_039_ack_hop_passes_for_a_confirm_form_then_post() -> None:
+    stack = AckStack(CONFIRM_FORM)
+    await crisis_suite._acknowledge(stack, uuid4(), _ack_msg())
+    assert [m for m, _ in stack.calls] == ["GET", "POST"] and stack.status == "acknowledged"
+    assert stack.calls[0][1] == "/api/v1/notifications/crisis-alerts/ack/tok-synthetic"
+
+
+async def test_mvp_039_ack_hop_fails_when_the_get_changes_state() -> None:
+    with pytest.raises(AssertionError):
+        await crisis_suite._acknowledge(AckStack(CONFIRM_FORM, get_flips=True), uuid4(), _ack_msg())
+
+
+async def test_mvp_039_ack_hop_fails_without_a_post_confirm_form() -> None:
+    for body in ("<p>Acknowledged</p>", '<form method="get"><button>ok</button></form>'):
+        with pytest.raises(AssertionError):
+            await crisis_suite._acknowledge(AckStack(body), uuid4(), _ack_msg())
+
+
+@pytest.mark.parametrize(("subject_level", "max_level", "ok"), [
+    ("HIGH", "HIGH", True), ("CRITICAL", "CRITICAL", True), ("HIGH", "CRITICAL", True), ("CRITICAL", "HIGH", False)])
+def test_mvp_039_page_level_is_tied_to_the_episode(subject_level: str, max_level: str, ok: bool) -> None:
+    subject = f"[Solace CRISIS {subject_level}] action required - ref {ALERT_A[:8]}"
+    if ok:
+        crisis_suite._assert_page_level(subject, max_level)
+    else:
+        with pytest.raises(AssertionError):
+            crisis_suite._assert_page_level(subject, max_level)
