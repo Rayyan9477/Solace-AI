@@ -10,14 +10,40 @@ Principles: 12-Factor App, Dependency Injection, Configuration Externalization
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
+
+from solace_events.config import KafkaSettings
+from solace_events.consumer import create_consumer as create_kafka_consumer
+from solace_infrastructure.runtime import (
+    ServiceRuntime,
+    ServiceRuntimeSpec,
+    StartupDependencyError,
+    create_service_app,
+    is_strict_environment,
+    service_runtime,
+)
+
+try:
+    from .api import router, set_dependencies
+except ImportError:
+    from api import router, set_dependencies
+
+if TYPE_CHECKING:
+    try:
+        from .aggregations import AnalyticsAggregator
+        from .consumer import AnalyticsConsumer
+        from .reports import ReportService
+    except ImportError:
+        from aggregations import AnalyticsAggregator
+        from consumer import AnalyticsConsumer
+        from reports import ReportService
 
 logger = structlog.get_logger(__name__)
 
@@ -29,12 +55,15 @@ _analytics_consumer: "AnalyticsConsumer | None" = None
 class ServiceConfig(BaseSettings):
     """Service configuration."""
     name: str = Field(default="analytics-service")
-    env: Literal["development", "staging", "production"] = Field(default="development")
+    env: Literal["development", "test", "staging", "production"] = Field(
+        default="development",
+        validation_alias=AliasChoices("ANALYTICS_SERVICE_ENV", "ENVIRONMENT", "env"),
+    )
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=8009, ge=1, le=65535)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(default="INFO")
 
-    model_config = SettingsConfigDict(env_prefix="ANALYTICS_SERVICE_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="ANALYTICS_SERVICE_", env_file=".env", extra="ignore", populate_by_name=True)
 
 
 class MetricsConfig(BaseSettings):
@@ -103,6 +132,17 @@ def get_analytics_consumer() -> "AnalyticsConsumer":
     return _analytics_consumer
 
 
+def _set_services(aggregator, report_service, consumer) -> None:
+    """Publish the composed services to the module-level getters."""
+    global _analytics_aggregator, _report_service, _analytics_consumer
+    _analytics_aggregator, _report_service, _analytics_consumer = aggregator, report_service, consumer
+
+
+def _clear_services() -> None:
+    """Drop the module-level services on shutdown."""
+    _set_services(None, None, None)
+
+
 def _create_services(settings: AnalyticsServiceSettings) -> tuple:
     """Create and configure analytics services."""
     try:
@@ -129,294 +169,156 @@ def _create_services(settings: AnalyticsServiceSettings) -> tuple:
     return aggregator, report_service, consumer
 
 
-def _setup_prometheus(app: FastAPI, settings: AnalyticsServiceSettings) -> None:
-    """Configure Prometheus metrics instrumentation."""
-    if not settings.observability.prometheus_enabled:
-        logger.info("prometheus_disabled")
+SETTINGS = AnalyticsServiceSettings.load()
+
+SPEC = ServiceRuntimeSpec(
+    service_name="analytics-service",
+    environment=SETTINGS.service.env,
+    version="1.0.0",
+    log_level=SETTINGS.service.log_level,
+    uses_postgres=True,
+    uses_redis=True,
+    event_plane="publish_consume",
+    handles_phi=False,
+    audited=False,
+    rate_limited=False,
+    edge=False,
+)
+
+
+async def start_kafka_ingestion(
+    runtime: ServiceRuntime,
+    consumer: AnalyticsConsumer,
+    settings: AnalyticsServiceSettings,
+) -> None:
+    """Wire the Kafka consumer into analytics and expose its state as the ``kafka_consumer`` check.
+
+    Strict environments refuse to start without a working consumer; development and test
+    report it as a failing readiness check instead. WS-18.9 replaces this with the event plane.
+    """
+    if not settings.consumer.kafka_enabled:
+        if is_strict_environment(settings.service.env):
+            raise StartupDependencyError(
+                "kafka", "analytics-service requires its Kafka consumer in strict environments"
+            )
+
+        async def _disabled() -> tuple[bool, str]:
+            return False, "kafka consumer disabled"
+
+        runtime.register_readiness_check("kafka_consumer", _disabled, critical=True)
         return
 
     try:
-        from prometheus_fastapi_instrumentator import Instrumentator
-
-        instrumentator = Instrumentator(
-            should_group_status_codes=True,
-            should_ignore_untemplated=True,
-            should_respect_env_var=True,
-            should_instrument_requests_inprogress=True,
-            excluded_handlers=["/health", "/ready", "/metrics"],
-            inprogress_name="analytics_http_requests_inprogress",
-            inprogress_labels=True,
+        kafka_settings = KafkaSettings(bootstrap_servers=settings.consumer.kafka_bootstrap_servers)
+        kafka_consumer = create_kafka_consumer(
+            group_id=settings.consumer.group_id,
+            kafka_settings=kafka_settings,
         )
 
-        instrumentator.instrument(app).expose(
-            app,
-            endpoint=settings.observability.prometheus_endpoint,
-            include_in_schema=False,
-        )
-        logger.info(
-            "prometheus_enabled",
-            endpoint=settings.observability.prometheus_endpoint,
-        )
-    except ImportError:
-        logger.warning("prometheus_not_available", reason="prometheus-fastapi-instrumentator not installed")
+        # Feed deserialized Kafka events into the analytics processor
+        async def _kafka_to_analytics(event):
+            await consumer.process_event(event.model_dump())
 
+        kafka_consumer.register_default_handler(_kafka_to_analytics)
 
-def _setup_opentelemetry(app: FastAPI, settings: AnalyticsServiceSettings) -> None:
-    """Configure OpenTelemetry tracing instrumentation."""
-    if not settings.observability.otel_enabled:
-        logger.info("opentelemetry_disabled")
-        return
+        # Wire DLQ handler for failed event processing
+        try:
+            from solace_events.dead_letter import create_dead_letter_handler
+            from solace_events.schemas import get_topic_for_event
+            dlq_pool = None
+            try:
+                from solace_infrastructure.database.connection_manager import ConnectionPoolManager
+                dlq_pool = await ConnectionPoolManager.get_pool()
+            except Exception:
+                pass
+            dlq_handler = create_dead_letter_handler(
+                consumer_group=settings.consumer.group_id,
+                postgres_pool=dlq_pool,
+            )
+            if hasattr(dlq_handler.store, "ensure_table"):
+                await dlq_handler.store.ensure_table()
 
-    try:
-        from opentelemetry import trace
-        from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor
-        from opentelemetry.sdk.resources import Resource, SERVICE_NAME
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+            async def _handle_dlq(event, error_msg):
+                topic = get_topic_for_event(event) or event.event_type
+                await dlq_handler.handle_failure(
+                    event=event, original_topic=topic, error=Exception(error_msg),
+                )
 
-        resource = Resource(attributes={
-            SERVICE_NAME: settings.observability.otel_service_name,
-            "service.version": "1.0.0",
-            "deployment.environment": settings.service.env,
-        })
+            kafka_consumer.set_dead_letter_handler(_handle_dlq)
+            logger.info("analytics_dlq_handler_configured", postgres=dlq_pool is not None)
+        except Exception as dlq_err:
+            logger.warning("analytics_dlq_handler_failed", error_type=type(dlq_err).__name__)
 
-        provider = TracerProvider(resource=resource)
-        exporter = OTLPSpanExporter(endpoint=settings.observability.otel_exporter_otlp_endpoint)
-        processor = BatchSpanProcessor(exporter)
-        provider.add_span_processor(processor)
-        trace.set_tracer_provider(provider)
+        try:
+            from .consumer import ConsumerConfig as DomainConsumerConfig
+        except ImportError:
+            from consumer import ConsumerConfig as DomainConsumerConfig
+        topics = DomainConsumerConfig().topics
+        await kafka_consumer.start(topics)
+        task = asyncio.create_task(kafka_consumer.consume_loop())
+        runtime.register_background_task("kafka_consumer", task)
+        runtime.register_shutdown("kafka_consumer", kafka_consumer.stop)
 
-        FastAPIInstrumentor.instrument_app(
-            app,
-            excluded_urls="health,ready,metrics",
-        )
+        async def _consuming() -> tuple[bool, str]:
+            return (not task.done()), ("consuming" if not task.done() else "kafka consumer stopped")
 
-        logger.info(
-            "opentelemetry_enabled",
-            service_name=settings.observability.otel_service_name,
-            endpoint=settings.observability.otel_exporter_otlp_endpoint,
-        )
-    except ImportError:
-        logger.warning("opentelemetry_not_available", reason="opentelemetry packages not installed")
+        runtime.register_readiness_check("kafka_consumer", _consuming, critical=True)
+        logger.info("analytics_kafka_consumer_started", topics=topics)
+    except Exception as exc:
+        if is_strict_environment(settings.service.env):
+            raise StartupDependencyError(
+                "kafka", "analytics-service could not start its Kafka consumer"
+            ) from exc
+        logger.error("analytics_kafka_consumer_failed", error_type=type(exc).__name__)
+
+        async def _not_started() -> tuple[bool, str]:
+            return False, "kafka consumer not started"
+
+        runtime.register_readiness_check("kafka_consumer", _not_started, critical=True)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan manager."""
-    global _analytics_aggregator, _report_service, _analytics_consumer
-
-    settings = AnalyticsServiceSettings.load()
-
-    # REV-32: fail loud at startup if this service's resolved environment disagrees with the
-    # deployment's bare ENVIRONMENT (a misnamed/unset ANALYTICS_SERVICE_ENV would silently pin
-    # the service to the development default, disabling the production fail-loud guards).
-    # Also runs the broader production-secret validation (self-skips outside prod/staging).
-    from solace_security.production_guards import ProductionGuards
-    ProductionGuards.assert_startup(settings.service.env, service_name="analytics-service")
-
-    # Configure structured logging with PHI sanitizer
-    try:
-        from solace_security.phi_protection import phi_sanitizer_processor
-        _phi_processor = phi_sanitizer_processor
-    except ImportError:
-        if settings.service.env == "production":
-            raise RuntimeError("PHI log sanitizer required in production - install solace_security")
-        _phi_processor = None
-    processors = [
-        structlog.contextvars.merge_contextvars,
-        structlog.processors.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-    ]
-    if _phi_processor:
-        processors.append(_phi_processor)
-    if settings.service.env == "development":
-        processors.append(structlog.dev.ConsoleRenderer())
-    else:
-        processors.append(structlog.processors.JSONRenderer())
-    structlog.configure(
-        processors=processors,
-        wrapper_class=structlog.make_filtering_bound_logger(
-            getattr(__import__("logging"), settings.service.log_level.upper(), __import__("logging").INFO)
-        ),
-        context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
-
-    logger.info(
-        "analytics_service_starting",
-        service=settings.service.name,
-        env=settings.service.env,
-        kafka_enabled=settings.consumer.kafka_enabled,
-    )
-
-    # REV-12: PHI-encryption exemption (documented). This service persists no
-    # ClinicalBase entities — analytics events live in ClickHouse (not SQLAlchemy).
-    # configure_phi_encryption() only affects ClinicalBase, so it is intentionally
-    # NOT configured here (least privilege: no PHI master key). Enforced by
-    # tests/integration/test_phi_encryption_activation.py.
-    _analytics_aggregator, _report_service, _analytics_consumer = _create_services(settings)
-
-    try:
-        from .api import set_dependencies
-    except ImportError:
-        from api import set_dependencies
-    set_dependencies(_analytics_aggregator, _report_service, _analytics_consumer)
-
-    await _analytics_consumer.start()
-
-    # Wire Kafka consumer when enabled - feeds real Kafka events into analytics
-    kafka_event_consumer = None
-    kafka_consume_task = None
-    if settings.consumer.kafka_enabled:
-        try:
-            from src.solace_events.consumer import create_consumer as create_kafka_consumer
-            from src.solace_events.config import KafkaSettings as EventKafkaSettings
-
-            kafka_settings = EventKafkaSettings(
-                bootstrap_servers=settings.consumer.kafka_bootstrap_servers,
-            )
-            kafka_event_consumer = create_kafka_consumer(
-                group_id=settings.consumer.group_id,
-                kafka_settings=kafka_settings,
-            )
-
-            # Feed deserialized Kafka events into the analytics processor
-            async def _kafka_to_analytics(event):
-                await _analytics_consumer.process_event(event.model_dump())
-
-            kafka_event_consumer.register_default_handler(_kafka_to_analytics)
-
-            # Wire DLQ handler for failed event processing
-            try:
-                from src.solace_events.dead_letter import create_dead_letter_handler
-                from src.solace_events.schemas import get_topic_for_event
-                _dlq_pool = None
-                try:
-                    from solace_infrastructure.database.connection_manager import ConnectionPoolManager
-                    _dlq_pool = await ConnectionPoolManager.get_pool()
-                except Exception:
-                    pass
-                dlq_handler = create_dead_letter_handler(
-                    consumer_group=settings.consumer.group_id,
-                    postgres_pool=_dlq_pool,
-                )
-                if hasattr(dlq_handler.store, "ensure_table"):
-                    await dlq_handler.store.ensure_table()
-
-                async def _handle_dlq(event, error_msg):
-                    topic = get_topic_for_event(event) or event.event_type
-                    await dlq_handler.handle_failure(
-                        event=event, original_topic=topic, error=Exception(error_msg),
-                    )
-
-                kafka_event_consumer.set_dead_letter_handler(_handle_dlq)
-                logger.info("analytics_dlq_handler_configured", postgres=_dlq_pool is not None)
-            except Exception as dlq_err:
-                logger.warning("analytics_dlq_handler_failed", error=str(dlq_err))
-
-            try:
-                from .consumer import ConsumerConfig as DomainConsumerConfig
-            except ImportError:
-                from consumer import ConsumerConfig as DomainConsumerConfig
-            topics = DomainConsumerConfig().topics
-            await kafka_event_consumer.start(topics)
-            kafka_consume_task = asyncio.create_task(kafka_event_consumer.consume_loop())
-            logger.info("analytics_kafka_consumer_started", topics=topics)
-        except Exception as e:
-            logger.error("analytics_kafka_consumer_failed", error=str(e))
-            kafka_event_consumer = None
-
-    logger.info("analytics_service_ready")
-
-    yield
-
-    logger.info("analytics_service_shutdown")
-    if kafka_consume_task:
-        kafka_consume_task.cancel()
-        try:
-            await kafka_consume_task
-        except asyncio.CancelledError:
-            pass
-    if kafka_event_consumer:
-        await kafka_event_consumer.stop()
-        logger.info("analytics_kafka_consumer_stopped")
-    await _analytics_consumer.stop()
-    _analytics_aggregator = None
-    _report_service = None
-    _analytics_consumer = None
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Application lifespan: the IF-01 runtime brackets the analytics composition."""
+    async with service_runtime(app, SPEC) as runtime:
+        settings = SETTINGS
+        logger.info(
+            "analytics_service_starting",
+            service=settings.service.name,
+            env=settings.service.env,
+            kafka_enabled=settings.consumer.kafka_enabled,
+        )
+        # REV-12: PHI-encryption exemption (documented). This service persists no
+        # ClinicalBase entities: analytics events live in ClickHouse (not SQLAlchemy).
+        # configure_phi_encryption() only affects ClinicalBase, so it is intentionally
+        # NOT configured here (handles_phi=False). Enforced by
+        # tests/integration/test_phi_encryption_activation.py.
+        aggregator, report_service, consumer = _create_services(settings)
+        _set_services(aggregator, report_service, consumer)
+        set_dependencies(aggregator, report_service, consumer)
+        runtime.register_shutdown("analytics_globals", _clear_services)
+        await consumer.start()
+        runtime.register_shutdown("analytics_consumer", consumer.stop)
+        await start_kafka_ingestion(runtime, consumer, settings)
+        logger.info("analytics_service_ready")
+        yield
 
 
-def create_app() -> FastAPI:
-    """Create and configure the FastAPI application."""
-    settings = AnalyticsServiceSettings.load()
-
-    app = FastAPI(
-        title="Solace-AI Analytics Service",
-        description="Real-time analytics for event processing, metrics aggregation, and report generation",
-        version="1.0.0",
-        lifespan=lifespan,
-        docs_url="/docs" if settings.service.env != "production" else None,
-        redoc_url="/redoc" if settings.service.env != "production" else None,
-    )
-
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["http://localhost:3000"] if settings.service.env == "development" else [],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
-    _setup_prometheus(app, settings)
-    _setup_opentelemetry(app, settings)
-
-    try:
-        from .api import router as analytics_router
-    except ImportError:
-        from api import router as analytics_router
-    app.include_router(analytics_router)
-
-    @app.get("/", tags=["health"])
-    async def root():
-        """Service information endpoint."""
-        return {
-            "service": settings.service.name,
-            "version": "1.0.0",
-            "status": "running",
-            "environment": settings.service.env,
-        }
-
-    @app.get("/health", tags=["health"])
-    async def health():
-        """Health check endpoint."""
-        return {"status": "healthy"}
-
-    @app.get("/ready", tags=["health"])
-    async def ready():
-        """Readiness probe endpoint."""
-        if _analytics_aggregator is None:
-            return {"status": "not_ready", "reason": "aggregator_not_initialized"}
-        if _analytics_consumer is None:
-            return {"status": "not_ready", "reason": "consumer_not_initialized"}
-        return {"status": "ready"}
-
-    return app
-
-
-app = create_app()
+app = create_service_app(
+    SPEC,
+    lifespan=lifespan,
+    routers=[(router, "")],
+    title="Solace-AI Analytics Service",
+)
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    settings = AnalyticsServiceSettings.load()
     uvicorn.run(
         "src.main:app",
-        host=settings.service.host,
-        port=settings.service.port,
-        reload=settings.service.env == "development",
-        log_level=settings.service.log_level.lower(),
+        host=SETTINGS.service.host,
+        port=SETTINGS.service.port,
+        reload=SETTINGS.service.env == "development",
+        log_level=SETTINGS.service.log_level.lower(),
     )

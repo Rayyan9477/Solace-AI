@@ -17,11 +17,12 @@
 # No service reads an env_file: each container receives only the variables listed for it here
 # and in the base file. Every source the registry marks required_in_strict uses ${SOURCE:?...},
 # so compose FAILS FAST when it is unset instead of falling back to a base-file dev default.
-# Caddy receives only DOMAIN, CADDY_ADMIN_EMAIL and BASIC_AUTH_HASH.
+# Caddy receives only DOMAIN, CADDY_ADMIN_EMAIL, BASIC_AUTH_HASH, CADDY_API_SITE and CADDY_AUTH_SITE
+# (the two sites are api.<DOMAIN> and auth.<DOMAIN>, never read from the env file).
 #
 # Adds:
-#   - Caddy as the TLS-terminating reverse proxy (the only container with
-#     exposed ports 80 / 443).
+#   - Caddy (defined in the base file) as the TLS-terminating reverse proxy: the only container
+#     with exposed ports, 80 / 443 here instead of the dev 127.0.0.1:8088.
 #   - Restart policies so services come back after host reboot.
 #   - Log rotation (json-file driver, 10 MB x 3) to avoid runaway disk use.
 #   - Resource limits to prevent any one service from starving the VPS.
@@ -35,7 +36,7 @@
 #   AUDIT_HMAC_KEY, POSTGRES_PASSWORD, POSTGRES_MIGRATOR_PASSWORD, POSTGRES_SUPERUSER_PASSWORD,
 #   REDIS_PASSWORD, USER_SERVICE_FIELD_ENCRYPTION_KEY, FERNET_TOKEN_KEY, FERNET_FIELD_KEY,
 #   WEAVIATE_API_KEY, GRAFANA_ADMIN_PASSWORD, DOMAIN, CADDY_ADMIN_EMAIL, BASIC_AUTH_HASH,
-#   SOLACE_SECRETS_DIR.
+#   CORS_ALLOWED_ORIGINS, SOLACE_SECRETS_DIR.
 # REDIS_PASSWORD must be URL-safe (for example python -c "import secrets; print(secrets.token_urlsafe(24))"):
 # it is written into REDIS_URL and SAFETY_REPO_REDIS_URL, and into the server's config file.
 #
@@ -84,9 +85,12 @@ x-strict-redis:
   password: &strict-redis-password ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
 
 services:
+  # The edge is defined in docker-compose.yml (WS-03.5); strict publishes 80/443 instead of the
+  # dev loopback port, pins the sites to plain hosts (automatic HTTPS; no env file can turn them
+  # into http:// addresses) and requires every Caddy source. BASIC_AUTH_HASH contains $: the env
+  # file must single-quote it (MVP-117).
   caddy:
-    image: caddy:2.8-alpine
-    ports:
+    ports: !reset
       - "80:80"
       - "443:443"
       - "443:443/udp"
@@ -94,17 +98,12 @@ services:
       DOMAIN: ${DOMAIN:?DOMAIN must be set}
       CADDY_ADMIN_EMAIL: ${CADDY_ADMIN_EMAIL:?CADDY_ADMIN_EMAIL must be set}
       BASIC_AUTH_HASH: ${BASIC_AUTH_HASH:?BASIC_AUTH_HASH must be set}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
+      CADDY_API_SITE: api.${DOMAIN:?DOMAIN must be set}
+      CADDY_AUTH_SITE: auth.${DOMAIN:?DOMAIN must be set}
     networks:
       - frontend
       - backend
       - monitoring
-    depends_on:
-      - orchestrator-service
-      - user-service
     logging: *default-logging
     <<: *default-restart
     deploy:
@@ -120,7 +119,11 @@ services:
       ORCHESTRATOR_ENVIRONMENT: ${ENVIRONMENT:?ENVIRONMENT must be set}
       # P2-12: Caddy appends exactly one X-Forwarded-For hop. With hops=0 the orchestrator
       # keys every anonymous request on Caddy's internal IP (one shared rate-limit bucket).
+      TRUSTED_PROXY_HOPS: "1"
       ORCHESTRATOR_TRUSTED_PROXY_HOPS: "1"
+      # MVP-225: an edge service refuses to start in strict without explicit origins (no dev default).
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?CORS_ALLOWED_ORIGINS must be set}
+      ORCHESTRATOR_CORS_ORIGINS: ${CORS_ALLOWED_ORIGINS:?CORS_ALLOWED_ORIGINS must be set}
       # PYSEC-2026-83: langgraph's strict msgpack checkpoint decoding is opt-in (WS-01.F2).
       LANGGRAPH_STRICT_MSGPACK: "true"
     logging: *default-logging
@@ -145,6 +148,9 @@ services:
       # The localhost OAuth defaults are development only; strict is empty unless set.
       GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-}
       OAUTH_ALLOWED_REDIRECT_ORIGINS: ${OAUTH_ALLOWED_REDIRECT_ORIGINS:-}
+      # MVP-225: edge service behind Caddy's one hop; explicit origins are required in strict.
+      TRUSTED_PROXY_HOPS: "1"
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?CORS_ALLOWED_ORIGINS must be set}
     logging: *default-logging
     <<: [*default-restart, *strict-db-client]
     deploy:
@@ -360,10 +366,6 @@ services:
 
   kafka-ui:
     ports: !reset []
-
-volumes:
-  caddy_data:
-  caddy_config:
 
 networks:
   frontend:

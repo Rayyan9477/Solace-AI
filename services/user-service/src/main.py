@@ -4,6 +4,12 @@ Solace-AI User Service - FastAPI Application Entry Point.
 Provides user authentication, profile management, preferences, and consent tracking.
 Implements JWT-based authentication with Argon2 password hashing.
 
+The app is built by the shared IF-01 runtime (``create_service_app``) and the lifespan is
+bracketed by ``service_runtime``. The runtime owns logging, the start-up guards, the Postgres
+pool, the one Redis client, the health/metrics routes, CORS and the exception handlers; this
+module composes the service from ``runtime.redis`` / ``runtime.pg_pool`` and registers every
+service-owned stop with ``runtime.register_shutdown`` (MVP-107, MVP-328).
+
 Architecture: Clean Architecture with DDD
 - Domain: Entities, Value Objects, Domain Services
 - Application: Use Cases, DTOs
@@ -12,24 +18,30 @@ Architecture: Clean Architecture with DDD
 """
 from __future__ import annotations
 
+import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
-from uuid import UUID
 
-from fastapi import FastAPI, Request, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, FastAPI, Request
 import structlog
 
-from cryptography.fernet import Fernet
+from solace_infrastructure.runtime import (
+    ServiceRuntimeSpec,
+    StartupDependencyError,
+    create_service_app,
+    is_strict_environment,
+    service_runtime,
+)
 
-from .config import UserServiceSettings, allow_special_use_tlds
+from .config import ServiceConfig, UserServiceSettings, allow_special_use_tlds
 from .api import router as api_router
-from .infrastructure.jwt_service import JWTService, JWTConfig, TokenInvalidError, TokenExpiredError
+from .oauth import oauth_router
+from .infrastructure.jwt_service import JWTService, JWTConfig
 from .infrastructure.password_service import PasswordService, PasswordConfig
-from .infrastructure.token_service import TokenService, TokenConfig, create_token_service
-from .infrastructure.encryption_service import EncryptionService, EncryptionConfig, create_encryption_service
+from .infrastructure.token_service import TokenService, create_token_service
+from .infrastructure.encryption_service import EncryptionService, create_encryption_service
 from .infrastructure.repository import (
     RepositoryFactory,
     RepositoryConfig,
@@ -42,6 +54,35 @@ from .domain.service import UserService
 from .auth import SessionManager, RedisSessionManager, SessionConfig, AuthenticationService
 
 logger = structlog.get_logger(__name__)
+
+_SERVICE_CONFIG = ServiceConfig()
+
+SPEC = ServiceRuntimeSpec(
+    service_name="user-service",
+    environment=_SERVICE_CONFIG.env,
+    log_level=_SERVICE_CONFIG.log_level,
+    uses_postgres=True,
+    uses_redis=True,
+    event_plane="publish_consume",
+    handles_phi=True,
+    audited=True,
+    rate_limited=True,
+    edge=True,
+)
+
+
+def _is_strict(environment: str | None) -> bool:
+    """Strict when the service's own environment OR the bare ``ENVIRONMENT`` is staging/production."""
+    return is_strict_environment(environment or "") or is_strict_environment()
+
+
+# The readiness check that reports a user event bridge that failed to start (outside strict).
+EVENT_BRIDGE_CHECK = "event_bridge"
+
+
+async def _event_bridge_unavailable() -> tuple[bool, str]:
+    """Readiness check for a user event bridge that did not start: never ready."""
+    return False, "unavailable"
 
 
 class ServiceState:
@@ -130,67 +171,38 @@ class ServiceState:
 _state: ServiceState | None = None
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """
-    Application lifespan manager.
+async def build_user_service_state(runtime: Any, app: FastAPI) -> ServiceState:
+    """Compose the user service from the runtime's datastores and store it on ``app.state.service``.
 
-    Initializes and tears down service dependencies following Clean Architecture:
-    1. Configuration
-    2. Infrastructure Layer (external services)
-    3. Repository Layer (data access)
-    4. Domain Layer (business logic)
-    5. Application Layer (use cases)
+    The token blacklist, the session manager and the OAuth state store all share the runtime's
+    one Redis client. Without it (no ``REDIS_URL``), a strict environment refuses to start; dev
+    and test log one ``identity_redis_unavailable`` warning and use in-memory stores.
+
+    Raises:
+        StartupDependencyError: in a strict environment when ``runtime.redis`` is None.
+        ValueError: when ``USER_EMAIL_ALLOW_SPECIAL_USE_TLDS`` names a non-special-use TLD.
+        RuntimeError: when ``FERNET_TOKEN_KEY`` or ``FERNET_FIELD_KEY`` is unset.
     """
     global _state
 
     # --- 1. Configuration ---
     settings = UserServiceSettings()
 
-    # REV-32: fail loud at startup if this service's resolved environment disagrees with the
-    # deployment's bare ENVIRONMENT (a misnamed/unset USER_SERVICE_ENV would silently pin the
-    # service to the development default, disabling the production fail-loud guards).
-    # Also runs the broader production-secret validation (self-skips outside prod/staging).
-    from solace_security.production_guards import ProductionGuards
-    ProductionGuards.assert_startup(settings.service.env, service_name="user-service")
-
     # Test-only (WS-05.4): USER_EMAIL_ALLOW_SPECIAL_USE_TLDS lets email addresses use the listed
     # special-use TLDs (the e2e harness registers at @test.invalid). Empty by default; a name that is not
     # a special-use name fails startup here, before any I/O.
     allow_special_use_tlds(settings.email_validation.allow_special_use_tlds)
 
-    # Configure structured logging with PHI sanitizer
-    import logging as _logging
-    try:
-        from solace_security.phi_protection import phi_sanitizer_processor
-        _phi_processor = phi_sanitizer_processor
-    except ImportError:
-        if settings.service.env == "production":
-            raise RuntimeError("PHI log sanitizer required in production - install solace_security")
-        _phi_processor = None
-    processors = [
-        structlog.contextvars.merge_contextvars,
-        structlog.processors.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-    ]
-    if _phi_processor:
-        processors.append(_phi_processor)
-    if settings.service.env == "development":
-        processors.append(structlog.dev.ConsoleRenderer())
-    else:
-        processors.append(structlog.processors.JSONRenderer())
-    structlog.configure(
-        processors=processors,
-        wrapper_class=structlog.make_filtering_bound_logger(
-            getattr(_logging, settings.service.log_level.upper(), _logging.INFO)
-        ),
-        context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
-
-    logger.info("user_service_starting")
+    # MVP-107: identity stores (blacklist, sessions, OAuth state) never silently fall back to
+    # process memory in strict: a revoked token or a session must hold across every instance.
+    redis_client = runtime.redis
+    if redis_client is None:
+        if _is_strict(runtime.spec.environment):
+            raise StartupDependencyError("redis", "user-service identity stores require REDIS_URL")
+        logger.warning(
+            "identity_redis_unavailable",
+            hint="Using in-memory token blacklist, sessions and OAuth state (dev/test only)",
+        )
 
     # REV-12: PHI-encryption exemption (documented). This service persists no
     # ClinicalBase entities — its User/Preferences/Consent models are its own and
@@ -249,21 +261,12 @@ async def lifespan(app: FastAPI):
         public_keys=rs256_public_keys,
         accept_legacy_hs256=accept_legacy_hs256,
     )
-    # Token blacklist (Redis-backed for production, in-memory fallback)
+    # Token blacklist on the runtime's Redis client (in-memory only outside strict).
     from .infrastructure.jwt_service import RedisTokenBlacklist, InMemoryTokenBlacklist
-    token_blacklist: Any = None
-    try:
-        import redis.asyncio as aioredis
-        redis_client = aioredis.from_url(
-            settings.redis.url,
-            decode_responses=True,
-            socket_timeout=settings.redis.timeout,
-        )
-        await redis_client.ping()
+    token_blacklist: Any
+    if redis_client is not None:
         token_blacklist = RedisTokenBlacklist(redis_client)
-        logger.info("token_blacklist_initialized", backend="redis")
-    except Exception as bl_err:
-        logger.warning("redis_blacklist_unavailable", error=str(bl_err), hint="Using in-memory blacklist")
+    else:
         token_blacklist = InMemoryTokenBlacklist()
 
     jwt_service = JWTService(jwt_config, blacklist=token_blacklist, key_manager=key_manager)
@@ -276,7 +279,6 @@ async def lifespan(app: FastAPI):
     password_service = PasswordService(password_config)
 
     # Load Fernet keys from environment (MUST be set — keys are persistent across restarts)
-    import os
     token_encryption_key = os.environ.get("FERNET_TOKEN_KEY")
     field_encryption_key = os.environ.get("FERNET_FIELD_KEY")
     if not token_encryption_key or not field_encryption_key:
@@ -284,21 +286,19 @@ async def lifespan(app: FastAPI):
             "FERNET_TOKEN_KEY and FERNET_FIELD_KEY environment variables must be set. "
             "Generate with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
         )
-    token_encryption_key = token_encryption_key.encode()
-    field_encryption_key = field_encryption_key.encode()
 
     token_service = create_token_service(
-        encryption_key=token_encryption_key,
+        encryption_key=token_encryption_key.encode(),
         email_verification_expire_hours=settings.verification_token_expiry_hours,
     )
 
     encryption_service = create_encryption_service(
-        encryption_key=field_encryption_key,
+        encryption_key=field_encryption_key.encode(),
     )
 
     # --- 3. Repository Layer ---
     # The repositories share the service's one "default" pool (ConnectionPoolManager, built from
-    # POSTGRES_* as solace_app; R-02.8). There is no private USER_DB_* client.
+    # POSTGRES_* as solace_app; R-02.8). There is no private per-service database client.
     repository_factory = RepositoryFactory(RepositoryConfig(use_postgres=True))
 
     user_repository = repository_factory.get_user_repository()
@@ -323,20 +323,10 @@ async def lifespan(app: FastAPI):
         refresh_token_expire_days=settings.refresh_token_expire_days,
         session_timeout_minutes=settings.service.session_timeout_minutes,
     )
-    # Use Redis-backed sessions when Redis is available, fall back to in-memory
     session_manager: SessionManager | RedisSessionManager
-    try:
-        import redis.asyncio as _aioredis
-        _session_redis = _aioredis.from_url(
-            settings.redis.url,
-            decode_responses=True,
-            socket_timeout=settings.redis.timeout,
-        )
-        await _session_redis.ping()
-        session_manager = RedisSessionManager(_session_redis, session_config)
-        logger.info("session_manager_initialized", backend="redis")
-    except Exception as _sess_err:
-        logger.warning("redis_session_unavailable", error=str(_sess_err), hint="Using in-memory session manager")
+    if redis_client is not None:
+        session_manager = RedisSessionManager(redis_client, session_config)
+    else:
         session_manager = SessionManager(session_config)
 
     auth_service = AuthenticationService(
@@ -347,33 +337,23 @@ async def lifespan(app: FastAPI):
 
     # --- Store in App State ---
     state = ServiceState()
-
-    # Configuration
     state.settings = settings
-
-    # Infrastructure
     state.jwt_service = jwt_service
     state.password_service = password_service
     state.token_service = token_service
     state.encryption_service = encryption_service
-
-    # Repositories
     state.repository_factory = repository_factory
     state.user_repository = user_repository
     state.preferences_repository = preferences_repository
     state.consent_repository = consent_repository
-
-    # Domain Services
     state.user_service = user_service
-
-    # Application Services
     state.session_manager = session_manager
     state.auth_service = auth_service
 
     # OAuth (REV-22, config-gated). Feature is OFF unless GOOGLE_OAUTH_CLIENT_ID +
     # GOOGLE_OAUTH_CLIENT_SECRET are set — otherwise oauth_settings stays None and the
-    # /auth/oauth/google/* routes 404. The state store prefers Redis (multi-instance
-    # callbacks land on any worker) and falls back to in-memory.
+    # /auth/oauth/google/* routes 404. The state store uses the runtime's Redis client
+    # (multi-instance callbacks land on any worker); in-memory only outside strict.
     from .oauth import (
         google_oauth_settings_from_env,
         default_httpx_client_factory,
@@ -384,81 +364,105 @@ async def lifespan(app: FastAPI):
 
     state.oauth_settings = google_oauth_settings_from_env()
     if state.oauth_settings is not None:
-        oauth_store: Any = InMemoryOAuthStateStore()
-        try:
-            import redis.asyncio as _oauth_aioredis
-            _oauth_redis = _oauth_aioredis.from_url(
-                settings.redis.url,
-                decode_responses=True,
-                socket_timeout=settings.redis.timeout,
-            )
-            await _oauth_redis.ping()
-            oauth_store = RedisOAuthStateStore(_oauth_redis)
-            logger.info("oauth_state_store_initialized", backend="redis")
-        except Exception as _oauth_redis_err:
-            logger.warning(
-                "oauth_state_store_redis_unavailable",
-                error=str(_oauth_redis_err),
-                hint="Using in-memory OAuth state store",
-            )
-        state.oauth_state_store = oauth_store
+        state.oauth_state_store = (
+            RedisOAuthStateStore(redis_client) if redis_client is not None else InMemoryOAuthStateStore()
+        )
         state.oauth_http_client_factory = default_httpx_client_factory
         state.oauth_id_token_verifier = _verify_google_id_token
         logger.info("google_oauth_enabled")
 
     state.initialized = True
     app.state.service = state
-
-    # Store in module-level for test access
     _state = state
-
-    # Initialize Kafka event bridge for cross-service event publishing
-    event_bridge = None
-    try:
-        from .infrastructure.event_bridge import initialize_event_bridge
-        # Get postgres pool for durable event outbox
-        _event_pool = None
-        try:
-            from solace_infrastructure.database.connection_manager import ConnectionPoolManager
-            _event_pool = await ConnectionPoolManager.get_pool()
-        except Exception:
-            logger.debug("event_outbox_pool_not_available", hint="Using in-memory outbox")
-        event_bridge = await initialize_event_bridge(postgres_pool=_event_pool)
-        state.event_bridge = event_bridge
-        logger.info("user_kafka_bridge_started")
-    except Exception as e:
-        logger.warning("user_kafka_bridge_not_configured", error=str(e))
 
     logger.info(
         "user_service_initialized",
-        jwt_algorithm=settings.jwt_algorithm,
+        identity_store_backend="redis" if redis_client is not None else "memory",
+        jwt_algorithm=jwt_algorithm,
         access_token_minutes=settings.access_token_expire_minutes,
         refresh_token_days=settings.refresh_token_expire_days,
         session_timeout_minutes=settings.service.session_timeout_minutes,
     )
+    return state
 
-    yield
 
-    # --- Cleanup ---
-    if event_bridge:
-        await event_bridge.stop()
-    logger.info("user_service_shutting_down", stats=state.stats)
-    state.initialized = False
-    _state = None
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Compose the user service inside the IF-01 runtime bracket."""
+    async with service_runtime(app, SPEC) as runtime:
+        state = await build_user_service_state(runtime, app)
+
+        async def _release_state() -> None:
+            global _state
+            logger.info("user_service_shutting_down", stats=state.stats)
+            state.initialized = False
+            _state = None
+
+        # Registered first so it runs last (closers run in reverse registration order).
+        runtime.register_shutdown("user_service_state", _release_state)
+
+        # Kafka event bridge for cross-service publishing, on the runtime's pool (durable outbox).
+        # Strict: a start failure stops the service (user lifecycle and consent events, incl.
+        # erasure, must reach their consumers). Dev/test: the service still boots without a
+        # broker, and a critical readiness check keeps /ready at 503 until it is fixed.
+        from .infrastructure.event_bridge import initialize_event_bridge
+
+        bridge = None
+        if _is_strict(SPEC.environment):
+            bridge = await initialize_event_bridge(postgres_pool=runtime.pg_pool)
+        else:
+            try:
+                bridge = await initialize_event_bridge(postgres_pool=runtime.pg_pool)
+            except Exception as exc:
+                # The exception text can carry a broker or database URL: class name only.
+                logger.warning("user_event_bridge_unavailable", error_type=type(exc).__name__)
+                runtime.register_readiness_check(EVENT_BRIDGE_CHECK, _event_bridge_unavailable, critical=True)
+        if bridge is not None:
+            state.event_bridge = bridge
+            runtime.register_shutdown("user_event_bridge", bridge.stop)
+        yield
+
+
+jwks_router = APIRouter()
+
+
+@jwks_router.get("/.well-known/jwks.json", tags=["Auth"], include_in_schema=False)
+async def jwks() -> dict[str, Any]:
+    """Publish the RS256 public verification keyset (JWKS) for token validation (C.3).
+
+    user-service is the token issuer, so it publishes its public keys here for external
+    consumers (frontend, OAuth). Internal services load the same keyset from
+    AUTH_PUBLIC_KEYS_JSON. Empty ({"keys": []}) while running in HS256 mode.
+    """
+    from solace_security.auth import AuthSettings
+    from solace_security.keys import KeyManager
+
+    try:
+        return KeyManager.from_settings(AuthSettings()).jwks()
+    except Exception as e:  # never let key config take down the endpoint
+        logger.warning("jwks_unavailable", error=str(e))
+        return {"keys": []}
+
+
+# The OAuth router (REV-22) is always registered; its handlers config-gate themselves
+# (404 when oauth_settings is None), so it is inert unless Google OAuth is set.
+ROUTERS: list[tuple[APIRouter, str]] = [
+    (api_router, "/api/v1"),
+    (oauth_router, "/api/v1"),
+    (jwks_router, ""),
+]
 
 
 def _rate_limiting_disabled() -> bool:
-    """Disable rate limiting only under a test harness — never in production.
+    """Disable rate limiting only under a test harness — never in a strict environment.
 
-    Production ALWAYS enforces (and fails loud below), regardless of a stray process-level
-    ENVIRONMENT. Outside production, a test context is detected from EITHER the service env
-    (USER_SERVICE_ENV) OR the process env (ENVIRONMENT, which the pytest harness sets),
+    Strict (staging/production, by USER_SERVICE_ENV OR the bare ENVIRONMENT) ALWAYS enforces
+    (and fails loud below). Outside strict, a test context is detected from EITHER the service
+    env (USER_SERVICE_ENV) OR the process env (ENVIRONMENT, which the pytest harness sets),
     accepting any value that starts with "test".
     """
-    import os
-
     service_env = os.getenv("USER_SERVICE_ENV", "development")
-    if service_env.lower() == "production":
+    if _is_strict(service_env):
         return False
     candidates = (service_env, os.getenv("ENVIRONMENT", ""))
     return any(str(v).lower().startswith("test") for v in candidates)
@@ -469,17 +473,15 @@ def _register_rate_limiting(app: FastAPI, redis_url: str) -> None:
 
     Mirrors the orchestrator's _register_rate_limiting: disabled only under a test harness
     (so the shared sliding-window counter cannot bleed across tests), enforced everywhere
-    else, and FAIL-LOUD in production if it cannot be configured. The user-service auth
-    endpoints (/auth/login, /auth/resend-verification) had NO rate limiting, leaving
+    else, and FAIL-LOUD in a strict environment if it cannot be configured. The user-service
+    auth endpoints (/auth/login, /auth/resend-verification) had NO rate limiting, leaving
     password-spray and email-bomb surfaces unbounded — these get their own tight per-IP
     policies below.
     """
-    import os
-
     if _rate_limiting_disabled():
         return
 
-    is_production = os.getenv("USER_SERVICE_ENV", "development").lower() == "production"
+    fail_loud = _is_strict(SPEC.environment)
     try:
         from infrastructure.api_gateway.rate_limiting import (
             create_solace_rate_limiter,
@@ -496,7 +498,7 @@ def _register_rate_limiting(app: FastAPI, redis_url: str) -> None:
             import redis.asyncio as _redis
 
             rl_redis = _redis.from_url(redis_url, decode_responses=True)
-        except Exception:  # noqa: BLE001 - prod fail-loud below handles None
+        except Exception:  # noqa: BLE001 - strict fail-loud below handles None
             rl_redis = None
 
         limiter = create_solace_rate_limiter(redis_client=rl_redis)
@@ -534,157 +536,15 @@ def _register_rate_limiting(app: FastAPI, redis_url: str) -> None:
         )
         logger.info("rate_limiting_enabled", service="user-service")
     except Exception as e:
-        if is_production:
-            raise RuntimeError(f"Rate limiting is required in production: {e}") from e
+        if fail_loud:
+            raise RuntimeError(f"Rate limiting is required in strict environments: {e}") from e
         logger.warning("rate_limiting_not_configured", error=str(e))
 
 
 def create_app() -> FastAPI:
-    """Create and configure FastAPI application."""
-    # Load settings early for CORS configuration
-    try:
-        settings = UserServiceSettings()
-        cors_config = settings.service.cors
-    except Exception:
-        # Fallback for when secrets aren't configured yet (e.g., during testing)
-        from .config import CORSConfig
-        cors_config = CORSConfig()
-
-    app = FastAPI(
-        title="Solace-AI User Service",
-        description="User authentication, profile management, and consent tracking",
-        version="1.0.0",
-        docs_url="/docs",
-        redoc_url="/redoc",
-        openapi_url="/openapi.json",
-        lifespan=lifespan,
-    )
-
-    # CORS middleware with secure configuration
-    # SECURITY: Never use "*" for origins when credentials are enabled
-    allowed_origins = cors_config.get_allowed_origins()
-    if "*" in allowed_origins and cors_config.allow_credentials:
-        logger.warning(
-            "cors_security_warning",
-            message="Using '*' for CORS origins with credentials is insecure. "
-                    "Falling back to localhost only."
-        )
-        allowed_origins = ["http://localhost:3000", "http://localhost:8080"]
-
-    # Rate limiting is registered BEFORE CORS so CORS ends up the OUTERMOST middleware and
-    # its headers are attached even to the limiter's 429 short-circuit (readable cross-origin).
-    try:
-        _redis_url = UserServiceSettings().redis.url
-    except Exception:
-        from .config import RedisConfig
-        _redis_url = RedisConfig().url
-    _register_rate_limiting(app, _redis_url)
-
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=allowed_origins,
-        allow_credentials=cors_config.allow_credentials,
-        allow_methods=cors_config.get_allowed_methods(),
-        allow_headers=cors_config.get_allowed_headers(),
-    )
-
-    # Exception handlers
-    @app.exception_handler(TokenExpiredError)
-    async def token_expired_handler(request: Request, exc: TokenExpiredError) -> JSONResponse:
-        """Handle expired token errors."""
-        return JSONResponse(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            content={"detail": "Token has expired", "error_code": "TOKEN_EXPIRED"},
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    @app.exception_handler(TokenInvalidError)
-    async def token_invalid_handler(request: Request, exc: TokenInvalidError) -> JSONResponse:
-        """Handle invalid token errors."""
-        return JSONResponse(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            content={"detail": str(exc), "error_code": "TOKEN_INVALID"},
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    @app.exception_handler(ValueError)
-    async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
-        """Handle validation errors."""
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={"detail": str(exc), "error_code": "VALIDATION_ERROR"},
-        )
-
-    @app.exception_handler(Exception)
-    async def general_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-        """Handle unexpected errors."""
-        logger.error("unhandled_exception", error=str(exc), path=request.url.path)
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"detail": "Internal server error", "error_code": "INTERNAL_ERROR"},
-        )
-
-    # Health endpoints
-    @app.get("/health", tags=["Health"])
-    async def health_check() -> dict[str, str]:
-        """Kubernetes liveness probe."""
-        return {"status": "healthy", "service": "user-service"}
-
-    @app.get("/ready", tags=["Health"])
-    async def readiness_check(request: Request) -> dict[str, Any]:
-        """Kubernetes readiness probe."""
-        state: ServiceState = request.app.state.service
-        if not state.initialized:
-            return JSONResponse(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                content={"status": "not_ready", "reason": "Service not initialized"},
-            )
-        return {
-            "status": "ready",
-            "service": "user-service",
-            "initialized": state.initialized,
-        }
-
-    @app.get("/status", tags=["Health"])
-    async def service_status(request: Request) -> dict[str, Any]:
-        """Get service status and statistics."""
-        state: ServiceState = request.app.state.service
-        return {
-            "status": "operational" if state.initialized else "initializing",
-            "service": "user-service",
-            "version": "1.0.0",
-            "statistics": state.stats,
-            "settings": {
-                "jwt_algorithm": state.settings.jwt_algorithm if state.settings else None,
-                "access_token_minutes": state.settings.access_token_expire_minutes if state.settings else None,
-            },
-        }
-
-    @app.get("/.well-known/jwks.json", tags=["Auth"], include_in_schema=False)
-    async def jwks() -> dict[str, Any]:
-        """Publish the RS256 public verification keyset (JWKS) for token validation (C.3).
-
-        user-service is the token issuer, so it publishes its public keys here for external
-        consumers (frontend, OAuth). Internal services load the same keyset from
-        AUTH_PUBLIC_KEYS_JSON. Empty ({"keys": []}) while running in HS256 mode.
-        """
-        from solace_security.auth import AuthSettings
-        from solace_security.keys import KeyManager
-
-        try:
-            return KeyManager.from_settings(AuthSettings()).jwks()
-        except Exception as e:  # never let key config take down the endpoint
-            logger.warning("jwks_unavailable", error=str(e))
-            return {"keys": []}
-
-    # Include API router
-    app.include_router(api_router, prefix="/api/v1")
-
-    # OAuth router (REV-22). Always registered; the handlers config-gate themselves
-    # (404 when oauth_settings is None), so this is inert unless Google OAuth is set.
-    from .oauth import oauth_router
-    app.include_router(oauth_router, prefix="/api/v1")
-
+    """Build a fresh user-service app on the shared IF-01 runtime."""
+    app = create_service_app(SPEC, lifespan=lifespan, routers=ROUTERS, title="Solace-AI User Service")
+    _register_rate_limiting(app, os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
     return app
 
 

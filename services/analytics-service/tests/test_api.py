@@ -279,19 +279,6 @@ class TestServiceStatsEndpoint:
         assert "consumer" in data
 
 
-class TestHealthEndpoint:
-    """Tests for analytics health endpoint."""
-
-    def test_analytics_health(self, client):
-        """Test analytics-specific health check."""
-        response = client.get("/api/v1/analytics/health")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert "status" in data
-        assert "timestamp" in data
-
-
 class TestQueryWithTimeRange:
     """Tests for metrics query with time ranges."""
 

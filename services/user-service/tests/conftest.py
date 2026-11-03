@@ -18,10 +18,6 @@ os.environ.setdefault("USER_SERVICE_FIELD_ENCRYPTION_KEY", _test_secret)
 # SecurityConfig (env_prefix="SECURITY_")
 os.environ.setdefault("SECURITY_JWT_SECRET", _test_secret)
 
-# DatabaseConfig requires USER_DB_PASSWORD; override root conftest value since
-# _is_unsafe_secret rejects strings containing "password"
-os.environ["USER_DB_PASSWORD"] = "test_db_credential_for_pytest_only"
-
 # Fernet keys required by lifespan() in main.py
 os.environ.setdefault("FERNET_TOKEN_KEY", Fernet.generate_key().decode())
 os.environ.setdefault("FERNET_FIELD_KEY", Fernet.generate_key().decode())

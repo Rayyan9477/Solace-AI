@@ -8,87 +8,11 @@ import os
 from unittest.mock import patch
 
 from src.config import (
-    DatabaseConfig,
-    RedisConfig,
     SecurityConfig,
     ServiceConfig,
     KafkaConfig,
     UserServiceSettings,
 )
-
-
-class TestDatabaseConfig:
-    """Test cases for DatabaseConfig."""
-
-    def test_database_config_defaults(self):
-        """Test database config with default values."""
-        with patch.dict(os.environ, {"USER_DB_PASSWORD": "test_password"}, clear=True):
-            config = DatabaseConfig()
-
-            assert config.host == "localhost"
-            assert config.port == 5432
-            assert config.name == "solace"
-            assert config.user == "postgres"
-            assert config.pool_size == 10
-
-    def test_database_url_generation(self):
-        """Test database URL generation."""
-        with patch.dict(os.environ, {"USER_DB_PASSWORD": "test_password"}, clear=True):
-            config = DatabaseConfig()
-
-            url = config.url
-
-            assert "postgresql+asyncpg://" in url
-            assert "test_password" in url
-            assert "solace" in url
-
-    def test_database_config_from_env(self):
-        """Test database config loaded from environment variables."""
-        with patch.dict(os.environ, {
-            "USER_DB_HOST": "db.example.com",
-            "USER_DB_PORT": "5433",
-            "USER_DB_NAME": "custom_db",
-            "USER_DB_USER": "custom_user",
-            "USER_DB_PASSWORD": "custom_password",
-        }, clear=True):
-            config = DatabaseConfig()
-
-            assert config.host == "db.example.com"
-            assert config.port == 5433
-            assert config.name == "custom_db"
-            assert config.user == "custom_user"
-
-
-class TestRedisConfig:
-    """Test cases for RedisConfig."""
-
-    def test_redis_config_defaults(self):
-        """Test redis config with default values."""
-        with patch.dict(os.environ, {}, clear=True):
-            config = RedisConfig()
-
-            assert config.host == "localhost"
-            assert config.port == 6379
-            assert config.db == 0
-            assert config.password is None
-
-    def test_redis_url_generation(self):
-        """Test redis URL generation."""
-        with patch.dict(os.environ, {}, clear=True):
-            config = RedisConfig()
-
-            url = config.url
-
-            assert url == "redis://localhost:6379/0"
-
-    def test_redis_url_with_password(self):
-        """Test redis URL generation with password."""
-        with patch.dict(os.environ, {"USER_REDIS_PASSWORD": "secret"}, clear=True):
-            config = RedisConfig()
-
-            url = config.url
-
-            assert ":secret@" in url
 
 
 class TestSecurityConfig:
@@ -189,15 +113,12 @@ class TestUserServiceSettings:
     def test_user_service_settings_loads_all_configs(self):
         """Test that user service settings loads all nested configs."""
         with patch.dict(os.environ, {
-            "USER_DB_PASSWORD": "test_db_credential_1234",
             "SECURITY_JWT_SECRET": "b" * 32,
             "USER_SERVICE_JWT_SECRET_KEY": "c" * 32,
             "USER_SERVICE_FIELD_ENCRYPTION_KEY": "d" * 32,
         }, clear=True):
             settings = UserServiceSettings()
 
-            assert settings.database is not None
-            assert settings.redis is not None
             assert settings.security is not None
             assert settings.service is not None
             assert settings.kafka is not None
@@ -205,7 +126,6 @@ class TestUserServiceSettings:
     def test_user_service_settings_load_method(self):
         """Test user service settings load method."""
         with patch.dict(os.environ, {
-            "USER_DB_PASSWORD": "test_db_credential_1234",
             "SECURITY_JWT_SECRET": "b" * 32,
             "USER_SERVICE_JWT_SECRET_KEY": "c" * 32,
             "USER_SERVICE_FIELD_ENCRYPTION_KEY": "d" * 32,

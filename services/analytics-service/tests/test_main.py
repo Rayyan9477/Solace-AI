@@ -48,10 +48,12 @@ class TestObservabilityConfig:
 class TestAnalyticsServiceSettings:
     """Tests for AnalyticsServiceSettings model."""
 
-    def test_default_settings(self):
+    def test_default_settings(self, monkeypatch):
         """Test default analytics service settings."""
         from main import AnalyticsServiceSettings
 
+        monkeypatch.delenv("ENVIRONMENT", raising=False)
+        monkeypatch.delenv("ANALYTICS_SERVICE_ENV", raising=False)
         settings = AnalyticsServiceSettings()
 
         assert settings.service.name == "analytics-service"
@@ -74,10 +76,12 @@ class TestAnalyticsServiceSettings:
 class TestServiceConfig:
     """Tests for ServiceConfig model."""
 
-    def test_default_values(self):
+    def test_default_values(self, monkeypatch):
         """Test default service configuration."""
         from main import ServiceConfig
 
+        monkeypatch.delenv("ENVIRONMENT", raising=False)
+        monkeypatch.delenv("ANALYTICS_SERVICE_ENV", raising=False)
         config = ServiceConfig()
 
         assert config.name == "analytics-service"
@@ -125,107 +129,6 @@ class TestConsumerConfigSettings:
         assert config.batch_timeout_ms == 5000
         assert config.kafka_enabled is False
         assert config.kafka_bootstrap_servers == "localhost:9092"
-
-
-class TestSetupPrometheus:
-    """Tests for Prometheus setup function."""
-
-    def test_prometheus_disabled(self):
-        """Test Prometheus setup when disabled."""
-        from main import _setup_prometheus, AnalyticsServiceSettings, ObservabilityConfig
-
-        app = FastAPI()
-        settings = AnalyticsServiceSettings()
-        settings.observability = ObservabilityConfig(prometheus_enabled=False)
-
-        _setup_prometheus(app, settings)
-
-        routes = [route.path for route in app.routes]
-        assert "/metrics" not in routes
-
-    def test_prometheus_enabled_without_package(self):
-        """Test Prometheus setup when package not installed."""
-        from main import _setup_prometheus, AnalyticsServiceSettings
-
-        app = FastAPI()
-        settings = AnalyticsServiceSettings()
-
-        with patch.dict('sys.modules', {'prometheus_fastapi_instrumentator': None}):
-            with patch('main.logger') as mock_logger:
-                _setup_prometheus(app, settings)
-
-
-class TestSetupOpenTelemetry:
-    """Tests for OpenTelemetry setup function."""
-
-    def test_otel_disabled(self):
-        """Test OpenTelemetry setup when disabled."""
-        from main import _setup_opentelemetry, AnalyticsServiceSettings
-
-        app = FastAPI()
-        settings = AnalyticsServiceSettings()
-
-        _setup_opentelemetry(app, settings)
-
-    def test_otel_enabled_without_package(self):
-        """Test OpenTelemetry setup when package not installed."""
-        from main import _setup_opentelemetry, AnalyticsServiceSettings, ObservabilityConfig
-
-        app = FastAPI()
-        settings = AnalyticsServiceSettings()
-        settings.observability = ObservabilityConfig(otel_enabled=True)
-
-        with patch.dict('sys.modules', {'opentelemetry': None}):
-            with patch('main.logger') as mock_logger:
-                _setup_opentelemetry(app, settings)
-
-
-class TestCreateApp:
-    """Tests for create_app function."""
-
-    def test_create_app_returns_fastapi(self):
-        """Test that create_app returns FastAPI instance."""
-        from main import create_app
-
-        app = create_app()
-
-        assert isinstance(app, FastAPI)
-        assert app.title == "Solace-AI Analytics Service"
-        assert app.version == "1.0.0"
-
-    def test_app_has_health_endpoints(self):
-        """Test that app has health endpoints."""
-        from main import create_app
-
-        app = create_app()
-        client = TestClient(app, raise_server_exceptions=False)
-
-        response = client.get("/health")
-        assert response.status_code == 200
-        assert response.json()["status"] == "healthy"
-
-    def test_app_has_root_endpoint(self):
-        """Test that app has root endpoint."""
-        from main import create_app
-
-        app = create_app()
-        client = TestClient(app, raise_server_exceptions=False)
-
-        response = client.get("/")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["service"] == "analytics-service"
-        assert data["status"] == "running"
-
-    def test_ready_endpoint_before_initialization(self):
-        """Test ready endpoint before services are initialized."""
-        from main import create_app
-
-        app = create_app()
-        client = TestClient(app, raise_server_exceptions=False)
-
-        response = client.get("/ready")
-        assert response.status_code == 200
 
 
 class TestDependencyGetters:

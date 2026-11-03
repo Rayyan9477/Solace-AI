@@ -1,6 +1,7 @@
 """
 Solace-AI Memory Service - PostgreSQL Repository.
-Async repository for structured memory storage using SQLAlchemy and asyncpg.
+Async repository for structured memory storage: SQLAlchemy Core statements run on the
+service's shared ConnectionPoolManager pool (IF-03).
 """
 from __future__ import annotations
 
@@ -14,8 +15,6 @@ from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 import structlog
-from pydantic import Field, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -35,8 +34,11 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
+from sqlalchemy.dialects.postgresql.asyncpg import PGDialect_asyncpg
+from sqlalchemy.sql.dml import Insert
+from sqlalchemy.sql.selectable import Select
+
+from solace_infrastructure.database.connection_manager import ConnectionPoolManager
 
 from ..domain.decay_manager import (
     NEVER_DECAY_CATEGORIES,
@@ -121,22 +123,77 @@ therapeutic_events = Table(
 )
 
 
-class PostgresSettings(BaseSettings):
-    """PostgreSQL connection configuration."""
-    host: str = Field(default="localhost", description="Database host")
-    port: int = Field(default=5432, description="Database port")
-    database: str = Field(default="solace_memory", description="Database name")
-    user: str = Field(default="solace", description="Database user")
-    password: SecretStr = Field(default="", description="Database password")
-    pool_size: int = Field(default=10, description="Connection pool size")
-    max_overflow: int = Field(default=5, description="Max pool overflow")
-    pool_timeout: int = Field(default=30, description="Pool timeout seconds")
-    echo_sql: bool = Field(default=False, description="Echo SQL statements")
-    model_config = SettingsConfigDict(env_prefix="POSTGRES_", env_file=".env", extra="ignore")
+_DIALECT = PGDialect_asyncpg()
 
-    @property
-    def connection_url(self) -> str:
-        return f"postgresql+asyncpg://{self.user}:{self.password.get_secret_value()}@{self.host}:{self.port}/{self.database}"
+
+class _CoreRow:
+    """One result row: ``_mapping`` by column name, plus positional access."""
+
+    __slots__ = ("_mapping", "_values")
+
+    def __init__(self, record: Any) -> None:
+        self._mapping: dict[str, Any] = dict(record.items())
+        self._values: tuple[Any, ...] = tuple(record.values())
+
+    def __getitem__(self, index: int) -> Any:
+        return self._values[index]
+
+
+class _CoreResult:
+    """The slice of SQLAlchemy's ``Result`` the repository uses."""
+
+    def __init__(self, rows: list[_CoreRow], rowcount: int) -> None:
+        self._rows = rows
+        self.rowcount = rowcount
+
+    def fetchone(self) -> _CoreRow | None:
+        return self._rows[0] if self._rows else None
+
+    def fetchall(self) -> list[_CoreRow]:
+        return list(self._rows)
+
+    def scalar(self) -> Any:
+        return self._rows[0][0] if self._rows else None
+
+
+def _rowcount(status: Any) -> int:
+    """Row count from an asyncpg command status such as ``"UPDATE 3"`` or ``"INSERT 0 1"``."""
+    try:
+        return int(str(status).rsplit(" ", 1)[-1])
+    except (TypeError, ValueError):
+        return 0
+
+
+class _CoreSession:
+    """Runs SQLAlchemy Core statements on one shared-pool asyncpg connection.
+
+    Statements compile with the asyncpg dialect to ``$n`` placeholders; values travel only as
+    bound arguments (never rendered into SQL or logged). JSON values go to the pool's own codecs.
+    """
+
+    def __init__(self, conn: Any) -> None:
+        self._conn = conn
+
+    async def execute(self, stmt: Any) -> _CoreResult:
+        compiled = stmt.compile(dialect=_DIALECT, compile_kwargs={"render_postcompile": True})
+        params = dict(compiled.params)
+        if isinstance(stmt, Insert):
+            explicit = {getattr(k, "key", k) for k in (getattr(stmt, "_values", None) or {})}
+            for name, value in params.items():
+                if value is not None or name in explicit or name not in stmt.table.c:
+                    continue
+                default = stmt.table.c[name].default
+                if default is not None and default.is_scalar:
+                    params[name] = default.arg
+                elif default is not None and default.is_callable:
+                    params[name] = default.arg(None)
+        args = [params[name] for name in (compiled.positiontup or ())]
+        if isinstance(stmt, Select):
+            records = await self._conn.fetch(compiled.string, *args)
+            rows = [_CoreRow(r) for r in records]
+            return _CoreResult(rows, len(rows))
+        status = await self._conn.execute(compiled.string, *args)
+        return _CoreResult([], _rowcount(status))
 
 
 class MemoryRecordProtocol(Protocol):
@@ -156,65 +213,34 @@ class MemoryRecordProtocol(Protocol):
 class PostgresRepository:
     """Async PostgreSQL repository for memory storage."""
 
-    def __init__(self, settings: PostgresSettings | None = None) -> None:
-        self._settings = settings or PostgresSettings()
-        engine_kwargs: dict[str, Any] = {
-            "echo": self._settings.echo_sql,
-        }
-        if self._settings.pool_size == 0:
-            engine_kwargs["poolclass"] = NullPool
-        else:
-            engine_kwargs["pool_size"] = self._settings.pool_size
-            engine_kwargs["max_overflow"] = self._settings.max_overflow
-            engine_kwargs["pool_timeout"] = self._settings.pool_timeout
-        self._engine = create_async_engine(self._settings.connection_url, **engine_kwargs)
-        self._session_factory = async_sessionmaker(self._engine, class_=AsyncSession, expire_on_commit=False)
+    def __init__(self, *, pool_name: str = "default") -> None:
+        # IF-03: no private engine. Every statement runs on the service's one shared
+        # ConnectionPoolManager pool (solace_app, verify-full TLS in strict), which the
+        # runtime opens and closes and which sets/resets app.current_user_id per acquire.
+        self._pool_name = pool_name
         self._background_tasks: set[asyncio.Task] = set()
         self._stats = {"inserts": 0, "updates": 0, "deletes": 0, "queries": 0}
 
     @asynccontextmanager
-    async def session(self) -> AsyncIterator[AsyncSession]:
-        """Provide a transactional session scope.
+    async def session(self) -> AsyncIterator[_CoreSession]:
+        """Provide a transactional scope on the shared pool.
 
-        C.2 RLS (Phase C P1-2 / P2-6): this repo owns its SQLAlchemy engine rather
-        than the shared PostgresClient, so it must set the per-request
-        ``app.current_user_id`` GUC on its OWN connection or RLS-protected memory
-        tables would be filtered to nothing (reads) / rejected (writes) — and an
-        admin-triggered GDPR erase would silently delete nothing while attesting
-        complete. Set it transaction-locally from the request context (auto-cleared
-        on commit/rollback, so it can never leak across pooled connections).
+        ``ConnectionPoolManager.transaction`` sets the RLS GUC ``app.current_user_id``
+        from the request context on acquire and resets it on release, commits on
+        success and rolls back on error.
         """
-        from sqlalchemy import text as _sql_text
-
-        from solace_common.request_context import get_current_user_id
-
-        async with self._session_factory() as session:
-            _rls_uid = get_current_user_id()
-            if _rls_uid:
-                # is_local=true -> scoped to THIS transaction; no pooled-conn leak.
-                await session.execute(
-                    _sql_text("SELECT set_config('app.current_user_id', :uid, true)"),
-                    {"uid": str(_rls_uid)},
-                )
-            try:
-                yield session
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
+        async with ConnectionPoolManager.transaction(self._pool_name) as conn:
+            yield _CoreSession(conn)
 
     async def initialize(self) -> None:
-        """Verify database connectivity. Table creation is handled by Alembic migrations."""
-        async with self._engine.begin() as conn:
-            # Table creation is now managed by Alembic migrations in the centralized ORM.
-            # Previously: await conn.run_sync(metadata.create_all)
-            await conn.execute(select(func.now()))
-        logger.info("postgres_initialized", database=self._settings.database)
+        """Verify connectivity on the shared pool. Table creation is handled by Alembic migrations."""
+        async with ConnectionPoolManager.acquire(self._pool_name) as conn:
+            await conn.fetchval("SELECT 1")
+        logger.info("postgres_initialized", pool=self._pool_name)
 
     async def close(self) -> None:
-        """Close database connections."""
-        await self._engine.dispose()
-        logger.info("postgres_closed")
+        """No-op: the runtime owns and closes the shared pool."""
+        logger.info("postgres_repository_released", pool=self._pool_name)
 
     async def store_memory_record(self, record: MemoryRecordProtocol) -> UUID:
         """Store a memory record."""
@@ -464,4 +490,4 @@ class PostgresRepository:
 
     def get_statistics(self) -> dict[str, Any]:
         """Get repository statistics."""
-        return {**self._stats, "database": self._settings.database, "host": self._settings.host}
+        return {**self._stats, "pool": self._pool_name}

@@ -270,6 +270,33 @@ def compose_project(tmp_path):
     finally:
         project.down()
 
+# --- caddy_adapt: the Caddyfile adapted to JSON by the pinned Caddy image (real infra, WS-03.5) -----
+
+CADDY_IMAGE = "caddy:2.8-alpine"
+
+@pytest.fixture
+def caddy_adapt():
+    """``caddy_adapt(env) -> dict``: ``caddy adapt`` of the repo Caddyfile with ``env`` as ``-e`` values.
+
+    Runs ``docker run --rm`` on the pinned image with the Caddyfile mounted read-only; nothing
+    else is mounted and nothing persists. Raises with caddy's stderr tail when adapting fails.
+    """
+    docker = shutil.which("docker") or "docker"
+
+    def _adapt(env: dict) -> dict:
+        cmd = [docker, "run", "--rm", "--network", "none",
+               "-v", f"{(REPO / 'Caddyfile').as_posix()}:/etc/caddy/Caddyfile:ro"]
+        for key, value in env.items():
+            cmd += ["-e", f"{key}={value}"]
+        cmd += [CADDY_IMAGE, "caddy", "adapt", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+        # S603: a docker argv list (no shell) built from the test code's own arguments
+        proc = subprocess.run(cmd, env=_scrubbed_env(), stdin=subprocess.DEVNULL, capture_output=True,  # noqa: S603
+                              text=True, encoding="utf-8", errors="replace", timeout=300, check=False)
+        if proc.returncode != 0:
+            raise RuntimeError(f"caddy adapt failed (exit {proc.returncode}):\n{_tail(proc.stderr)}")
+        return json.loads(proc.stdout)
+    return _adapt
+
 def strict_env_file(path: Path) -> dict:
     """Write a synthetic strict (production) env file for a ComposeProject over PROFILES["strict"].
 
