@@ -11,7 +11,7 @@ from collections.abc import Callable
 import pytest
 
 from solace_infrastructure.database.schema_check import SCHEMA_HEAD
-from solace_testing.e2e import MVP_SERVICES, make_user
+from solace_testing.e2e import MVP_SERVICES, ComposeError, make_user
 from solace_testing.e2e_manifest import hop
 
 pytestmark = [pytest.mark.e2e, pytest.mark.integration, pytest.mark.timeout(1200)]
@@ -26,22 +26,42 @@ PUBLISHERS_ALLOWED = {"caddy", "mailpit", "fake-llm"}
 def _poll(fetch: Callable, *, until: Callable[[object], bool], timeout: float, interval: float = 3.0):
     """Call ``fetch`` until ``until(result)`` holds or ``timeout`` seconds pass; return the last result.
 
-    A fetch that raises ConnectionError (service not up yet) counts as not ready.
+    A fetch that raises ConnectionError or ComposeError (service not up yet, as in e2e._wait_live) counts as not
+    ready. On timeout with no result ever obtained, the last exception is re-raised.
     """
     deadline = time.monotonic() + timeout
-    result = None
+    result, last_error = None, None
     while True:
         try:
             result = fetch()
             if until(result):
                 return result
-        except ConnectionError:
-            pass
+        except (ConnectionError, ComposeError) as exc:
+            last_error = exc
         if time.monotonic() >= deadline:
-            if result is None:
-                raise ConnectionError(f"no answer within {timeout:.0f}s")
+            if result is None and last_error is not None:
+                raise last_error
             return result
         time.sleep(interval)
+
+
+def _assert_ready(r, service: str) -> None:
+    """The IF-01 /ready body: ready, named, with at least one critical check and every critical check ok."""
+    assert r.status == 200 and r.json["status"] == "ready" and r.json["service"] == service
+    checks = r.json["checks"]
+    assert checks, f"{service}: /ready reports no checks"
+    critical = [c for c in checks.values() if c["critical"]]
+    assert critical, f"{service}: /ready reports no critical check"
+    assert all(c["ok"] for c in critical)
+
+
+def _assert_only_edge_published(ps: list[dict]) -> None:
+    """ps lists every MVP service and caddy, and only the allowed services publish a host port."""
+    listed = {p["Service"] for p in ps}
+    missing = (set(MVP_SERVICES) | {"caddy"}) - listed
+    assert not missing, f"ps does not list: {sorted(missing)}"
+    published = {p["Service"] for p in ps for pub in p.get("Publishers") or [] if pub.get("PublishedPort")}
+    assert published <= PUBLISHERS_ALLOWED, sorted(published - PUBLISHERS_ALLOWED)
 
 
 def _ps_rows(stack, *args: str) -> list[dict]:
@@ -127,8 +147,7 @@ def test_w0_migrate_job_completed(e2e_stack):
 def test_w0_service_ready_within_180s(e2e_stack, service):
     with hop("service_ready"):
         r = _poll(lambda: e2e_stack.call(service, "GET", "/ready"), until=lambda r: r.status == 200, timeout=180)
-        assert r.json["status"] == "ready" and r.json["service"] == service
-        assert all(c["ok"] for c in r.json["checks"].values() if c["critical"])
+        _assert_ready(r, service)
 
 
 @pytest.mark.parametrize("service", MVP_SERVICES)
@@ -151,8 +170,7 @@ def test_w0_strict_services_connect_as_solace_app_over_tls(e2e_stack):
 @pytest.mark.profile("strict")
 def test_w0_no_internal_port_published(e2e_stack):
     with hop("no_internal_ports"):
-        ps = _ps_rows(e2e_stack)
-        assert {p["Service"] for p in ps for pub in p.get("Publishers") or [] if pub.get("PublishedPort")} <= PUBLISHERS_ALLOWED
+        _assert_only_edge_published(_ps_rows(e2e_stack))
 
 
 @pytest.mark.profile("strict")
