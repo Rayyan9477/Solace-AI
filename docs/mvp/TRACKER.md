@@ -13,11 +13,11 @@ The register's statuses are derived from this file at each barrier (`fixed` when
 
 | Status | todo | in-progress | review | fixing | done | blocked | deferred | total |
 |---|---|---|---|---|---|---|---|---|
-| Tasks | 271 | 1 | 0 | 1 | 56 | 1 | 0 | 330 |
+| Tasks | 271 | 1 | 0 | 0 | 57 | 1 | 0 | 330 |
 
 | Wave | Phase A done / total | Phase B done / total | Active | Blocked |
 |---|---|---|---|---|
-| W0 | 35 / 39 | 15 / 16 | 2 | 1 |
+| W0 | 36 / 39 | 15 / 16 | 1 | 1 |
 | W1 | 0 / 34 | 0 / 35 | 0 | 0 |
 | W2 | 0 / 16 | 0 / 61 | 0 | 0 |
 | W3 | 0 / 24 | 0 / 40 | 0 | 0 |
@@ -28,7 +28,7 @@ The register's statuses are derived from this file at each barrier (`fixed` when
 |---|---|
 | WS-01 | 14 / 18 |
 | WS-02 | 7 / 9 |
-| WS-03 | 4 / 20 |
+| WS-03 | 5 / 20 |
 | WS-04 | 7 / 16 |
 | WS-05 | 3 / 22 |
 | WS-06 | 2 / 14 |
@@ -45,7 +45,7 @@ The register's statuses are derived from this file at each barrier (`fixed` when
 | WS-17 | 3 / 19 |
 | WS-18 | 2 / 19 |
 
-**Register entries:** 51 of 345 covered entries fixed (all their tasks done); 13 partly done.
+**Register entries:** 54 of 345 covered entries fixed (all their tasks done); 13 partly done.
 
 <!-- mvp:summary:end -->
 
@@ -101,7 +101,7 @@ Filled at each wave barrier (master plan, section 5.5). The tree zip is the only
 | [WS-01.14](../superpowers/plans/2026-10-18-mvp-remediation/WS-01-build-deps-ci.md#task-ws-0114-sops-aware-ignore-rules-build-context-exclusions-and-a-checkpoint-tree-secret-scan) | SOPS-aware ignore rules, build-context exclusions and a checkpoint-tree secret scan | blocker | security-critical | Opus | no | WS-01.1, WS-01.5 | MVP-008, MVP-348 | `done` | trees d03f5b8..deb166b (fix1); scoped re-review APPROVED |
 | [WS-02.6](../superpowers/plans/2026-10-18-mvp-remediation/WS-02-data-platform-schema.md#task-ws-026-one-default-pool-per-service-strict-environment-fail-loud-encoded-dsns-and-a-role-check) | One default pool per service, strict-environment fail-loud, encoded DSNs and a role check | blocker | security-critical | Opus | yes | WS-02.5 | MVP-033, MVP-041, MVP-058, MVP-273 | `done` | fix2 d3456a7 APPROVED (superuser-equivalent roles refused; 0 findings) |
 | [WS-02.7](../superpowers/plans/2026-10-18-mvp-remediation/WS-02-data-platform-schema.md#task-ws-027-lazy-exports-for-solace_infrastructuredatabase-supporting-mvp-269) | Lazy exports for solace_infrastructure.database (supporting MVP-269) | low | standard | Sonnet | no | WS-01.3 | MVP-269 | `done` | trees d3b3a8f..d8d2224; RED 2 -> GREEN 3; solace_infrastructure 860, memory 477 |
-| [WS-03.5](../superpowers/plans/2026-10-18-mvp-remediation/WS-03-deploy-secrets-backups.md#task-ws-035-edge-caddy-in-both-profiles-tolerant-live-health-checks-env-site-addresses-blocked-internal-paths-intact-basic_auth_hash-cors-and-proxy-hops) | Edge: Caddy in both profiles, tolerant /live health checks, env site addresses, blocked internal paths, intact BASIC_AUTH_HASH, CORS and proxy hops | medium | security-critical | Opus | yes | WS-03.4 | MVP-117, MVP-225, MVP-250 | `fixing` | fix1: W035-SPE-1 |
+| [WS-03.5](../superpowers/plans/2026-10-18-mvp-remediation/WS-03-deploy-secrets-backups.md#task-ws-035-edge-caddy-in-both-profiles-tolerant-live-health-checks-env-site-addresses-blocked-internal-paths-intact-basic_auth_hash-cors-and-proxy-hops) | Edge: Caddy in both profiles, tolerant /live health checks, env site addresses, blocked internal paths, intact BASIC_AUTH_HASH, CORS and proxy hops | medium | security-critical | Opus | yes | WS-03.4 | MVP-117, MVP-225, MVP-250 | `done` | fix1 898d343 (W035-SPE-1 closed) |
 | [WS-04.15](../superpowers/plans/2026-10-18-mvp-remediation/WS-04-service-runtime-observability.md#task-ws-0415-the-phi-activation-lock-accepts-the-runtime-spec-in-place-of-the-retired-configure_phi_encryption-call) | The PHI-activation lock accepts the runtime SPEC in place of the retired configure_phi_encryption call | high | security-critical | Sonnet | no | WS-04.5 | support | `done` | trees ccfac9a..684ad43; 8 passed; integration 236; RED shown retroactively (process deviation, test-only file) |
 | [WS-05.6](../superpowers/plans/2026-10-18-mvp-remediation/WS-05-realinfra-harness-e2e.md#task-ws-056-crisis-alert-e2e-written-red-at-documented-hops-dev-profile) | Crisis alert E2E written red at documented hops (dev profile) | high | safety-critical | Opus | yes | WS-05.5 | MVP-039 | `todo` |  |
 | [WS-06.2](../superpowers/plans/2026-10-18-mvp-remediation/WS-06-event-plane.md#task-ws-062-the-seven-bridges-import-bare-solace_events-and-stamp-their-own-service-on-outbox-rows) | The seven bridges import bare solace_events and stamp their own service on outbox rows | medium | safety-critical | Sonnet | no | WS-01.7, WS-06.1 | MVP-133 | `done` | head dd2f02b APPROVED (workflow: spec + crisis-path lenses, no findings) |
