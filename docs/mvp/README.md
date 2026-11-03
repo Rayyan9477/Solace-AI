@@ -31,8 +31,8 @@ The **method** is in the [master plan](../superpowers/plans/2026-10-18-mvp-remed
 
 <!-- mvp:summary:start -->
 
-- Tasks done: **52 / 330** (active 5, blocked 1, deferred 0).
-- Register entries fixed: **47 / 345**.
+- Tasks done: **53 / 330** (active 4, blocked 1, deferred 0).
+- Register entries fixed: **49 / 345**.
 - Per-wave and per-workstream counts: [TRACKER.md](TRACKER.md).
 
 <!-- mvp:summary:end -->
