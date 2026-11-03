@@ -106,3 +106,7 @@
 - aa9413114b7ecb737  Skeptic 1 batch1
 - ab1d7065656f93e06  Skeptic 2 batch1
 - a3530e5db3e4b3d89  Skeptic 3 batch1
+- ac40ee7fca67237af  Implement WS-14.3 (cloud)
+- aae92c6bf139ed115  Review WS-14.3 verbatim+security
+- a6e20de245b7ec27d  Review WS-14.3 spec
+- a588519a28e1d59ce  Implement WS-05.4 part 2 (cloud)

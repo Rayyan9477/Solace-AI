@@ -6,16 +6,16 @@
 - [ ] W4 backup task (WS-03 backup sidecar, from WS-03.2): the strict hostssl-only pg_hba has no replication rule; the backup sidecar task must add a hostssl replication rule for its role.
 - [ ] WS-03.15 (from WS-03.2): staging docs are stale vs the new data plane (migrate job, solace_app, Kafka required in dev).
 - [ ] Barrier note (from WS-03.2): dev postgres_data volumes created before WS-02.1 stay unhealthy -> LOG.md / README note: run `docker compose down -v` once.
-- [ ] WS-05.4 part 2: live stack self-test + XFAIL manifest after WS-03.5 (caddy both profiles) and WS-03.2 (SOLACE_SECRETS_DIR).
+- [x] (dispatched) WS-05.4 part 2: live stack self-test + XFAIL manifest after WS-03.5 (caddy both profiles) and WS-03.2 (SOLACE_SECRETS_DIR).
 - [x] W0 barrier (done in WS-01.9 fix3, 25/25; rerun at barrier anyway): WS-01.9 full 10-image clean-checkout proof + realinfra gate test (deferred by ruling from fix round 2).
 - [x] (resolved by WS-02.6 review: assert_startup enforces consistency; defence-in-depth only) WS-04 follow-up (from WS-02.6): one strictness source - get_pool / PostgresClient.connect use ENVIRONMENT, start_postgres uses spec_is_strict; also merge encryption._STRICT_ENVIRONMENTS into is_strict_environment (WS-03.1 note). Decide after the IF-01 audit + WS-02.6 review.
 - [ ] WS-02 follow-up (from WS-02.6): scripts/db/migrate.py builds its own URL instead of get_dsn(), so it misses the strict host/password refusals.
 - [ ] MVP-273 owners (from WS-02.6): per-service config.py files still interpolate raw passwords into DSNs.
 - [ ] WS-02 follow-up (from WS-02.6): get_pool DatabaseError embeds the driver error text, which SolaceError logs on construction - check for value leakage.
-- [ ] Phase-B adoptions (from WS-03.2 review SPE-2/OPS-1): user-service, notification-service and analytics-service must serve /live via the IF-01 runtime before any compose test waits for health on the full stack (WS-05.4 part 2).
+- [x] (met: WS-14.2, 13.2, 18.2) Phase-B adoptions (from WS-03.2 review SPE-2/OPS-1): user-service, notification-service and analytics-service must serve /live via the IF-01 runtime before any compose test waits for health on the full stack (WS-05.4 part 2).
 - [x] (in phaseB-common.md) Phase-B adoptions (from WS-04.F1): use the canonical lifespan form 'async with service_runtime(app, SPEC) as runtime:' from D:\tmp\mvp-exec\reports\WS-04.F1-shape.md.
 - [x] WS-14.1 (dispatched) (from WS-05.4, ruling): user-service setting USER_EMAIL_ALLOW_SPECIAL_USE_TLDS (default empty, comma list) - the email validator accepts those special-use TLDs (the e2e overlay sets 'invalid'); unit test default rejects @test.invalid, setting accepts it, other special-use TLDs stay rejected.
-- [ ] WS-05.4 part 2: overlay adds USER_EMAIL_ALLOW_SPECIAL_USE_TLDS=invalid on user-service (+ OVERLAY_ALLOWED_KEYS).
+- [x] (dispatched) WS-05.4 part 2: overlay adds USER_EMAIL_ALLOW_SPECIAL_USE_TLDS=invalid on user-service (+ OVERLAY_ALLOWED_KEYS).
 - [ ] CI (WS-01.8 owner, from WS-05.4): POSIX 0700/0600 e2e secrets dir may be unreadable by non-root container users on Linux CI - choose a group-readable mode or chown in the CI job.
 - [x] W0 barrier gate (from WS-17.1 review): WS-17.2 (memory PostgresRepository on the default pool: TLS verify-full, role check, hide_parameters) must be done before the W0 barrier is declared.
 - [x] WS-03.5 (from WS-11.1): strict compose must set CORS_ALLOWED_ORIGINS on orchestrator and user-service (edge services fail closed without it) before the W0 strict boot smoke (WS-05.5).
