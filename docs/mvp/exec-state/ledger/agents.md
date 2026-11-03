@@ -87,3 +87,6 @@
 - a2e142451a03b8af1  Implement WS-13.2 (cloud)
 - add8d8abea4b3039c  Implement WS-15.2 (cloud)
 - a266ed63162d99934  Implement WS-18.1 (cloud)
+- aa9b12df7963634f6  Implement WS-18.2 (cloud)
+- aeaef5f4e8c4a6669  Review WS-18.1 spec+lifecycle
+- aab28375805adac70  Review WS-18.1 security+PHI
