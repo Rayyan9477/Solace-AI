@@ -50,7 +50,7 @@ from solace_testing import realinfra as _realinfra
 from solace_testing.e2e_manifest import hop, shortcut_allowed
 
 if TYPE_CHECKING:
-    from solace_testing.realinfra import FakeLLMHandle, SmtpSink
+    from solace_testing.realinfra import FakeLLMHandle, MailMessage, SmtpSink
 
 _log = structlog.get_logger(__name__)
 
@@ -78,6 +78,8 @@ OVERLAY_APP_ENV_KEYS = frozenset({
     "NOTIFICATION_FALLBACK_ONCALL_EMAIL", "NOTIFICATION_ACK_BASE_URL",
     "WEAVIATE_ENABLED",
 })
+# user-service only: the test-only WS-14.1 setting that lets the harness's @test.invalid addresses register.
+OVERLAY_USER_ENV_KEYS = frozenset({"USER_EMAIL_ALLOW_SPECIAL_USE_TLDS"})
 OVERLAY_CADDY_ENV_KEYS = frozenset({"CADDY_API_SITE", "CADDY_AUTH_SITE"})
 # The one service key the overlay adds to the app services: ``secrets: [e2e-ca.crt]``, the per-run CA that
 # SSL_CERT_FILE names in strict, mounted at /run/secrets/e2e-ca.crt (both profiles, so one overlay serves both).
@@ -85,7 +87,7 @@ OVERLAY_APP_SECRET = "e2e-ca.crt"  # noqa: S105 - a compose secret name, not a s
 OVERLAY_APP_SERVICE_KEYS = frozenset({"secrets"})
 # Every key the overlay may add or change on a base or prod service: the environment keys above (app services and
 # caddy) and the app services' e2e CA mount.
-OVERLAY_ALLOWED_KEYS = OVERLAY_APP_ENV_KEYS | OVERLAY_CADDY_ENV_KEYS | OVERLAY_APP_SERVICE_KEYS
+OVERLAY_ALLOWED_KEYS = OVERLAY_APP_ENV_KEYS | OVERLAY_USER_ENV_KEYS | OVERLAY_CADDY_ENV_KEYS | OVERLAY_APP_SERVICE_KEYS
 
 EDGE_API_PORT = 8080
 EDGE_AUTH_PORT = 8081
@@ -935,6 +937,59 @@ def provision_clinician(stack: Stack, email: str, phone: str, on_call: bool = Tr
 
 
 # ---------------------------------------------------------------------------------------------------------------
+# Crisis episodes and their pages (WS-05.6, crisis-review F6)
+#
+# The stack, the on-call roster and the fallback mailbox are shared by the whole session, so a page assertion is
+# scoped to one user's episode (a crisis_alerts row) and never to a whole mailbox. IF-09 subjects end in
+# ``ref <first 8 hex of alert_id>``.
+# ---------------------------------------------------------------------------------------------------------------
+
+EPISODE_COLUMNS = ("alert_id", "status", "max_level", "sources", "page_count")
+EPISODE_POLL_S = 1.0
+_EPISODES_SQL = ("SELECT alert_id::text AS alert_id, status, max_level, sources, page_count, "
+                 "row_number() OVER (ORDER BY opened_at, alert_id) AS ord "
+                 "FROM crisis_alerts WHERE user_id = :'p1'::uuid ORDER BY opened_at, alert_id")
+
+
+def _episode_ref(alert_id: UUID | str) -> str:
+    """The IF-09 subject reference of an episode: the first 8 hex of its alert id (ValueError if not a UUID)."""
+    return str(alert_id if isinstance(alert_id, UUID) else UUID(str(alert_id)))[:8]
+
+
+def crisis_episodes(stack: Stack, user_id: UUID | str, *, timeout: float = 0.0) -> list[dict]:
+    """The user's crisis episodes (``crisis_alerts`` rows: alert_id as text, status, max_level, sources,
+    page_count), oldest ``opened_at`` first, read through ``Stack.sql``. Polled until at least one row exists or
+    ``timeout`` seconds pass (0: one read); an empty list after the timeout. SQL errors are raised, not retried."""
+    user = str(user_id if isinstance(user_id, UUID) else UUID(str(user_id)))
+    deadline = time.monotonic() + timeout
+    while True:
+        rows = stack.sql(_EPISODES_SQL, user)
+        if rows or time.monotonic() >= deadline:
+            # json_agg does not promise the CTE's order, so the row_number key restores it
+            return [{k: row[k] for k in EPISODE_COLUMNS} for row in sorted(rows, key=lambda r: r["ord"])]
+        time.sleep(min(EPISODE_POLL_S, max(deadline - time.monotonic(), 0.0)))
+
+
+def pages_for_episode(stack: Stack, address: str, alert_id: UUID | str) -> list[MailMessage]:
+    """Every captured mail to ``address`` whose subject contains ``ref <first 8 of alert_id>``, oldest first."""
+    return stack.mail.messages(address, f"ref {_episode_ref(alert_id)}")
+
+
+def wait_for_episode_page(stack: Stack, address: str, alert_id: UUID | str, timeout: float) -> MailMessage:
+    """The oldest page of this episode to ``address``; TimeoutError after ``timeout`` (names the ref only, never
+    any captured mail)."""
+    ref = _episode_ref(alert_id)
+    deadline = time.monotonic() + timeout
+    while True:
+        pages = pages_for_episode(stack, address, alert_id)
+        if pages:
+            return pages[0]
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"no page with 'ref {ref}' to the on-call address within {timeout:g}s")
+        time.sleep(min(EPISODE_POLL_S, max(deadline - time.monotonic(), 0.0)))
+
+
+# ---------------------------------------------------------------------------------------------------------------
 # Operator CLI (scripts/test/e2e_stack.ps1)
 # ---------------------------------------------------------------------------------------------------------------
 
@@ -977,6 +1032,7 @@ __all__ = [
     "OVERLAY_APP_SECRET",
     "OVERLAY_RESET_KEYS",
     "OVERLAY_SERVICES",
+    "OVERLAY_USER_ENV_KEYS",
     "SERVICE_PORTS",
     "ComposeError",
     "Faults",
@@ -985,10 +1041,12 @@ __all__ = [
     "StackConfig",
     "TestUser",
     "compose_config",
+    "crisis_episodes",
     "extract_link",
     "load_compose_yaml",
     "make_user",
     "new_email",
+    "pages_for_episode",
     "parse_consumer_groups_describe",
     "parse_provision_output",
     "provision_clinician",
@@ -997,6 +1055,7 @@ __all__ = [
     "services_allowed_down",
     "start_stack",
     "stop_stack",
+    "wait_for_episode_page",
 ]
 
 

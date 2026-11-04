@@ -363,8 +363,12 @@ def test_mvp_039_overlay_allowed_keys_are_exactly_what_the_overlay_sets():
     caddy_env = set(services["caddy"]["environment"])
     assert app_service_keys == {"secrets"}                     # the e2e CA mount, the one non-env key
     assert app_env | caddy_env | app_service_keys == set(e2e.OVERLAY_ALLOWED_KEYS)
+    # every app service gets the shared set; user-service also lets @test.invalid register (WS-14.1 setting)
+    assert e2e.OVERLAY_USER_ENV_KEYS == {"USER_EMAIL_ALLOW_SPECIAL_USE_TLDS"}
     for name in e2e.MVP_SERVICES:
-        assert set(services[name]["environment"]) == app_env, name
+        extra = e2e.OVERLAY_USER_ENV_KEYS if name == "user-service" else set()
+        assert set(services[name]["environment"]) == set(e2e.OVERLAY_APP_ENV_KEYS) | extra, name
+    assert services["user-service"]["environment"]["USER_EMAIL_ALLOW_SPECIAL_USE_TLDS"] == "invalid"
     assert services["user-service"]["environment"]["LLM_PORTKEY_GATEWAY_URL"] == "http://fake-llm:8080/v1"
     assert services["notification-service"]["environment"]["EMAIL_SMTP_HOST"] == "mailpit"
 

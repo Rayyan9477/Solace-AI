@@ -1,0 +1,390 @@
+{
+ "task": "WS-05.4-part1",
+ "results": [
+  {
+   "lens": "spec",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "CHANGES_REQUESTED",
+    "prior_findings": [],
+    "findings": [
+     {
+      "id": "WS054-SPE-1",
+      "severity": "important",
+      "file": "src/solace_testing/e2e.py",
+      "line": 569,
+      "problem": "Stack.kafka_lag parses `proc.stdout + proc.stderr`, so stderr text ends up after the GROUP table. kafka-consumer-groups writes \"Consumer group 'G' has no active members.\" (state Empty) and \"Warning: Consumer group 'G' is rebalancing.\" to stderr. parse_consumer_groups_describe accepts any line after the header that has more than 5 tokens and calls int() on token 5 ('active' / 'rebalancing.'). The result is ValueError instead of a lag map. The unit test misses this because its DESCRIBE fixture puts the warning before the header (terminal order) and calls the parser directly, never in kafka_lag's stdout-then-stderr order.",
+      "failure_scenario": "Later IF-19 consumers do fault.stop('notification-service') or fault.restart(...), then call e2e_stack.kafka_lag('solace-group-notification') to watch lag grow or drain. The group is Empty or rebalancing, the broker CLI exits 0 with the table on stdout and the warning on stderr, and kafka_lag raises `ValueError: invalid literal for int() with base 10: 'active'` (or 'rebalancing.'). The crisis-pipeline lag assertion fails for a harness reason.",
+      "fix": "Parse only stdout as the table and scan stderr+stdout for the 'does not exist' message (or at least concatenate stderr first). Also harden the parser: skip rows whose PARTITION column is not an integer or whose GROUP column is not the header group's value. Add a unit test that feeds the stdout-then-stderr order through the same code path kafka_lag uses (for example, factor the join into a helper).",
+      "evidence": "e2e.py:567-569 `proc = self.compose(\"exec\", \"-T\", \"kafka\", \"kafka-consumer-groups\", ... \"--describe\", \"--group\", group, timeout=120)` / `return parse_consumer_groups_describe(proc.stdout + proc.stderr)`. Parser lines 409-416: once the header is set, any line with len(cols) > max(TOPIC, CURRENT-OFFSET, LOG-END-OFFSET, LAG)=5 is parsed, and `int(lag)` runs when lag != '-'. Scratch probe with the same table: stderr-first gives {'solace.safety': 2}, while stdout+stderr gives `ValueError invalid literal for int() with base 10: 'active'`, and for the rebalancing warning `... 'rebalancing.'`. Kafka's ConsumerGroupCommand prints the Empty and rebalancing notices with Console.err / System.err."
+     },
+     {
+      "id": "WS054-SPE-2",
+      "severity": "minor",
+      "file": "tests/e2e/conftest.py",
+      "line": 81,
+      "problem": "The default pytest.mark.timeout(900) uses pytest-timeout's default func_only=False, so it also covers the setup phase of the first e2e test. That phase runs the session fixture start_stack. start_stack is designed to take longer than 900 s on a cold run: UP_TIMEOUT_S = 3600 ('the first run builds every image'), plus the 180 s live wait, two 60 s aux waits and the generator/config timeouts. The two budgets contradict each other.",
+      "failure_scenario": "First `make test-e2e` on a clean Windows host or uncached CI, where `up -d --build` of ~11 images plus the health waits exceeds 15 min. pytest-timeout fires during e2e_stack setup. On Windows (thread method) it calls os._exit, so the whole session dies with no teardown: containers stay up and the run dir with per-run secrets stays in %TEMP%. On Linux (signal method) the session fixture errors and every e2e test errors with a timeout instead of a hop-attributed stack_up failure.",
+      "fix": "Bound the stack build by start_stack's own timeouts and not by the per-test marker, for example `pytest.mark.timeout(900, func_only=True)` for the default. Alternatively, give the first item that uses e2e_stack a budget of UP_TIMEOUT_S plus the wait timeouts, or document and enforce a pre-built `make images` before test-e2e.",
+      "evidence": "conftest.py:80-81 adds `pytest.mark.timeout(_DEFAULT_TIMEOUT_S)` with _DEFAULT_TIMEOUT_S = 900 and no func_only. pytest.ini has no timeout_func_only. requirements-dev.lock pins pytest-timeout==2.4.0, whose runtest_protocol hookwrapper arms the timer over setup, call and teardown when func_only is False. e2e.py:105 `UP_TIMEOUT_S = 3600.0   # the first run builds every image`, :107 LIVE_TIMEOUT_S = 180.0, :108 AUX_READY_TIMEOUT_S = 60.0."
+     },
+     {
+      "id": "WS054-SPE-3",
+      "severity": "minor",
+      "file": "scripts/test/gen_e2e_env.py",
+      "line": 352,
+      "problem": "The strict operator-values check (`_strict_operator_values`, which can exit 2 with `no format rule for <SOURCE>`) runs after `_write_certs` has already written the CA, the mailpit key and the Postgres server key into DIR/secrets. The report says 'It checks every rule before writing anything', but that holds only for the secret rules.",
+      "failure_scenario": "A registry row is added that is required_in_strict, non-secret, has no strict_default and has no example. `gen_e2e_env --profile strict` then exits 2 but leaves key material in DIR/secrets with no e2e.env. A manual rerun without --rotate is refused ('refusing to overwrite the run'). The e2e fixture is not affected because it removes the run dir first.",
+      "fix": "Compute `_strict_operator_values(rows, {...base values...})` (or at least its missing-example check) together with the secret-rule check, before `out.mkdir`/`_write_certs`. Alternatively, remove the secrets dir on any _Exit raised after it was created.",
+      "evidence": "gen_e2e_env.py:310-315 check the secret rules (exit 2 before writes). :326-333 then mkdir, restrict and `_write_certs(command, secrets_dir, strict=strict)`. Only at :351-352 does `values.update(_strict_operator_values(rows, values))` run, and that function raises `_Exit(2, ...)` for a missing example (:183-184)."
+     },
+     {
+      "id": "WS054-SPE-4",
+      "severity": "minor",
+      "file": "tests/solace_testing/test_mvp_039_e2e_helpers.py",
+      "line": 265,
+      "problem": "Two assertions cannot fail for the defect they name. (a) test_mvp_039_realinfra_imports_on_its_own_and_pins_mailpit_from_the_overlay asserts IMAGE_REFS['mailpit'] equals the overlay's image, but realinfra.MAILPIT_FALLBACK_IMAGE is the same digest. If _image_refs ignored docker-compose.test.yml, the value would come from `refs.setdefault('mailpit', MAILPIT_FALLBACK_IMAGE)` and the test would still pass. (b) In tests/scripts/test_mvp_039_gen_e2e_env.py:47, the brief-verbatim 'values never printed' check looks for the `$$`-escaped file form of BASIC_AUTH_HASH. A generator that printed the raw `$2b$10$...` hash would still pass.",
+      "failure_scenario": "A regression drops the overlay from realinfra.COMPOSE_FILES, or a later overlay digest bump is not picked up (the fallback still matches today's digest). Separately, a regression that logs the bcrypt hash to stdout. Both tests stay green.",
+      "fix": "(a) Monkeypatch or compare against a temporary overlay with a different digest through `realinfra._image_refs([...])`, or assert that the overlay's mailpit image is read from the file (for example, `_image_refs([TEST_FILE])` without the setdefault, or a distinct test digest). (b) Also assert that the unescaped value (`v.strip('\"').replace('$$', '$')`) is absent from stdout.",
+      "evidence": "realinfra.py:78 MAILPIT_FALLBACK_IMAGE = \"axllent/mailpit@sha256:0790692b...0498\" and docker-compose.test.yml:63 has the same digest. realinfra.py:153 `refs.setdefault(\"mailpit\", MAILPIT_FALLBACK_IMAGE)`. test_mvp_039_gen_e2e_env.py:47 `assert all(v.strip('\"') not in r.stdout ...)`, where env['BASIC_AUTH_HASH'] holds `$$2b$$10$$...` (scratch e2e.env: BASIC_AUTH_HASH has$$=True)."
+     }
+    ]
+   },
+   "verified": [
+    {
+     "id": "WS054-SPE-1",
+     "severity": "important",
+     "file": "src/solace_testing/e2e.py",
+     "line": 569,
+     "problem": "Stack.kafka_lag parses `proc.stdout + proc.stderr`, so stderr text ends up after the GROUP table. kafka-consumer-groups writes \"Consumer group 'G' has no active members.\" (state Empty) and \"Warning: Consumer group 'G' is rebalancing.\" to stderr. parse_consumer_groups_describe accepts any line after the header that has more than 5 tokens and calls int() on token 5 ('active' / 'rebalancing.'). The result is ValueError instead of a lag map. The unit test misses this because its DESCRIBE fixture puts the warning before the header (terminal order) and calls the parser directly, never in kafka_lag's stdout-then-stderr order.",
+     "failure_scenario": "Later IF-19 consumers do fault.stop('notification-service') or fault.restart(...), then call e2e_stack.kafka_lag('solace-group-notification') to watch lag grow or drain. The group is Empty or rebalancing, the broker CLI exits 0 with the table on stdout and the warning on stderr, and kafka_lag raises `ValueError: invalid literal for int() with base 10: 'active'` (or 'rebalancing.'). The crisis-pipeline lag assertion fails for a harness reason.",
+     "fix": "Parse only stdout as the table and scan stderr+stdout for the 'does not exist' message (or at least concatenate stderr first). Also harden the parser: skip rows whose PARTITION column is not an integer or whose GROUP column is not the header group's value. Add a unit test that feeds the stdout-then-stderr order through the same code path kafka_lag uses (for example, factor the join into a helper).",
+     "evidence": "e2e.py:567-569 `proc = self.compose(\"exec\", \"-T\", \"kafka\", \"kafka-consumer-groups\", ... \"--describe\", \"--group\", group, timeout=120)` / `return parse_consumer_groups_describe(proc.stdout + proc.stderr)`. Parser lines 409-416: once the header is set, any line with len(cols) > max(TOPIC, CURRENT-OFFSET, LOG-END-OFFSET, LAG)=5 is parsed, and `int(lag)` runs when lag != '-'. Scratch probe with the same table: stderr-first gives {'solace.safety': 2}, while stdout+stderr gives `ValueError invalid literal for int() with base 10: 'active'`, and for the rebalancing warning `... 'rebalancing.'`. Kafka's ConsumerGroupCommand prints the Empty and rebalancing notices with Console.err / System.err.",
+     "lens": "spec",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The code matches the finding. Stack.kafka_lag (e2e.py:569) passes `proc.stdout + proc.stderr` to the parser, so stderr text comes after the table. parse_consumer_groups_describe (lines 402-422) handles any line after the GROUP header that has more than 5 tokens. A stderr notice such as \"Consumer group 'G' has no active members.\" has 7 tokens, and token 5 is 'active'. \"Warning: Consumer group 'G' is rebalancing.\" has 6 tokens, and token 5 is 'rebalancing.'. Neither is '-', so `int(lag)` raises ValueError. Nothing guards on a numeric PARTITION or a matching GROUP column. I did not run a probe. The Kafka CLI's use of stderr for these notices, as the finding claims, comes from my recollection of ConsumerGroupCommand, not from running it. The failure is reachable in the fault-injection scenario the finding describes, where a stopped consumer leaves the group Empty or rebalancing. I rate it important because it would fail a crisis-lag assertion for a harness reason."
+      },
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The defect is real in the code. Stack.kafka_lag (e2e.py:569) parses proc.stdout + proc.stderr. The parser (lines 409-416) accepts any line after the GROUP header with more than 5 tokens. It then calls int() on token 5, which is the LAG column index. A stderr line such as \"Consumer group 'G' has no active members.\" has 7 tokens, and token 5 is 'active', so int() raises ValueError. I confirmed this from the code and Kafka's behaviour but did not run a probe. As I recall, Kafka's ConsumerGroupCommand prints the Empty and rebalancing notices through its error stream. No brief text, IF-19 line or controller ruling makes this intended or out of scope. IF-19 only says kafka_lag(group) reads the broker CLI in the kafka container, and the harness parser is part of this task. The scenario that triggers it is a stopped service leaving its group Empty, and later tests that use fault.stop and then kafka_lag are what IF-19 is for. The task is therefore in scope and the finding stands, at important severity."
+      },
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "Confirmed in e2e.py. kafka_lag (line 569) passes `proc.stdout + proc.stderr` to parse_consumer_groups_describe. Once the GROUP header is seen (lines 406-409), the parser accepts any later line with more than 5 tokens and runs `int(lag)` on token 5 (lines 411-416). Kafka's kafka-consumer-groups prints \"Consumer group 'G' has no active members.\" and \"Warning: Consumer group 'G' is rebalancing.\" through its error printer, which writes to stderr. With stdout then stderr, those lines land after the table. They have more than 5 tokens, and token 5 is 'active' or 'rebalancing.', so int() raises ValueError. The terminal order puts the notice before the header, which is why a fixture in that order hides the bug. The kafka_lag path is exposed whenever a service is stopped and the group goes Empty or rebalances. That is the main use case for fault.stop/restart in the crisis-pipeline tests. This is a real harness defect that would give false failures. \"Important\" fits: it is not production code, but it breaks the safety-critical lag assertions."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "WS054-SPE-2",
+     "severity": "minor",
+     "file": "tests/e2e/conftest.py",
+     "line": 81,
+     "problem": "The default pytest.mark.timeout(900) uses pytest-timeout's default func_only=False, so it also covers the setup phase of the first e2e test. That phase runs the session fixture start_stack. start_stack is designed to take longer than 900 s on a cold run: UP_TIMEOUT_S = 3600 ('the first run builds every image'), plus the 180 s live wait, two 60 s aux waits and the generator/config timeouts. The two budgets contradict each other.",
+     "failure_scenario": "First `make test-e2e` on a clean Windows host or uncached CI, where `up -d --build` of ~11 images plus the health waits exceeds 15 min. pytest-timeout fires during e2e_stack setup. On Windows (thread method) it calls os._exit, so the whole session dies with no teardown: containers stay up and the run dir with per-run secrets stays in %TEMP%. On Linux (signal method) the session fixture errors and every e2e test errors with a timeout instead of a hop-attributed stack_up failure.",
+     "fix": "Bound the stack build by start_stack's own timeouts and not by the per-test marker, for example `pytest.mark.timeout(900, func_only=True)` for the default. Alternatively, give the first item that uses e2e_stack a budget of UP_TIMEOUT_S plus the wait timeouts, or document and enforce a pre-built `make images` before test-e2e.",
+     "evidence": "conftest.py:80-81 adds `pytest.mark.timeout(_DEFAULT_TIMEOUT_S)` with _DEFAULT_TIMEOUT_S = 900 and no func_only. pytest.ini has no timeout_func_only. requirements-dev.lock pins pytest-timeout==2.4.0, whose runtest_protocol hookwrapper arms the timer over setup, call and teardown when func_only is False. e2e.py:105 `UP_TIMEOUT_S = 3600.0   # the first run builds every image`, :107 LIVE_TIMEOUT_S = 180.0, :108 AUX_READY_TIMEOUT_S = 60.0.",
+     "lens": "spec",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The finding holds. tests/e2e/conftest.py:80-81 adds pytest.mark.timeout(900) with no func_only. pytest.ini and the other repo config I grepped set no timeout_func_only. pytest-timeout times setup, call and teardown when func_only is false. The session fixture e2e_stack runs start_stack during the first e2e test's setup. e2e.py:749 passes `up -d --build` a timeout of UP_TIMEOUT_S = 3600, so the 900 s marker and the start_stack budget conflict on a cold build. I did not run a cold build or a pytest-timeout test, so the Windows os._exit behaviour with no teardown comes from pytest-timeout's documented thread method, not from a run here. Minor severity fits: it only bites on a first, uncached run, and a pre-built or reused stack avoids it."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "WS054-SPE-3",
+     "severity": "minor",
+     "file": "scripts/test/gen_e2e_env.py",
+     "line": 352,
+     "problem": "The strict operator-values check (`_strict_operator_values`, which can exit 2 with `no format rule for <SOURCE>`) runs after `_write_certs` has already written the CA, the mailpit key and the Postgres server key into DIR/secrets. The report says 'It checks every rule before writing anything', but that holds only for the secret rules.",
+     "failure_scenario": "A registry row is added that is required_in_strict, non-secret, has no strict_default and has no example. `gen_e2e_env --profile strict` then exits 2 but leaves key material in DIR/secrets with no e2e.env. A manual rerun without --rotate is refused ('refusing to overwrite the run'). The e2e fixture is not affected because it removes the run dir first.",
+     "fix": "Compute `_strict_operator_values(rows, {...base values...})` (or at least its missing-example check) together with the secret-rule check, before `out.mkdir`/`_write_certs`. Alternatively, remove the secrets dir on any _Exit raised after it was created.",
+     "evidence": "gen_e2e_env.py:310-315 check the secret rules (exit 2 before writes). :326-333 then mkdir, restrict and `_write_certs(command, secrets_dir, strict=strict)`. Only at :351-352 does `values.update(_strict_operator_values(rows, values))` run, and that function raises `_Exit(2, ...)` for a missing example (:183-184).",
+     "lens": "spec",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The code matches the finding. Secret-rule validation (lines 312-315) exits before any write. Then `_write_certs` runs at line 333 and writes the CA and keys into DIR/secrets. `_strict_operator_values` runs only at line 352, and it raises `_Exit(2, \"no format rule ...\")` at line 184 when a required_in_strict, non-secret row has no strict_default and no example. Nothing cleans up on that path. A rerun without --rotate then hits `held` (the secrets dir is non-empty) and is refused at line 323-324. This is a latent, registry-dependent failure that leaves key material in a scratch directory and has an easy fix. Minor severity is right. I did not run the tests or render configs; this is from reading the code."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "WS054-SPE-4",
+     "severity": "minor",
+     "file": "tests/solace_testing/test_mvp_039_e2e_helpers.py",
+     "line": 265,
+     "problem": "Two assertions cannot fail for the defect they name. (a) test_mvp_039_realinfra_imports_on_its_own_and_pins_mailpit_from_the_overlay asserts IMAGE_REFS['mailpit'] equals the overlay's image, but realinfra.MAILPIT_FALLBACK_IMAGE is the same digest. If _image_refs ignored docker-compose.test.yml, the value would come from `refs.setdefault('mailpit', MAILPIT_FALLBACK_IMAGE)` and the test would still pass. (b) In tests/scripts/test_mvp_039_gen_e2e_env.py:47, the brief-verbatim 'values never printed' check looks for the `$$`-escaped file form of BASIC_AUTH_HASH. A generator that printed the raw `$2b$10$...` hash would still pass.",
+     "failure_scenario": "A regression drops the overlay from realinfra.COMPOSE_FILES, or a later overlay digest bump is not picked up (the fallback still matches today's digest). Separately, a regression that logs the bcrypt hash to stdout. Both tests stay green.",
+     "fix": "(a) Monkeypatch or compare against a temporary overlay with a different digest through `realinfra._image_refs([...])`, or assert that the overlay's mailpit image is read from the file (for example, `_image_refs([TEST_FILE])` without the setdefault, or a distinct test digest). (b) Also assert that the unescaped value (`v.strip('\"').replace('$$', '$')`) is absent from stdout.",
+     "evidence": "realinfra.py:78 MAILPIT_FALLBACK_IMAGE = \"axllent/mailpit@sha256:0790692b...0498\" and docker-compose.test.yml:63 has the same digest. realinfra.py:153 `refs.setdefault(\"mailpit\", MAILPIT_FALLBACK_IMAGE)`. test_mvp_039_gen_e2e_env.py:47 `assert all(v.strip('\"') not in r.stdout ...)`, where env['BASIC_AUTH_HASH'] holds `$$2b$$10$$...` (scratch e2e.env: BASIC_AUTH_HASH has$$=True).",
+     "lens": "spec",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The code supports both halves of the finding. I read the code and tests but did not run pytest or mutate anything.\n\n(a) `realinfra.py:78` defines `MAILPIT_FALLBACK_IMAGE`, and `realinfra.py:153` does `refs.setdefault(\"mailpit\", MAILPIT_FALLBACK_IMAGE)`. The test at `test_mvp_039_e2e_helpers.py:265` compares `IMAGE_REFS['mailpit']` to the overlay's mailpit image. The finding says the overlay carries the same digest as the fallback. Line 253 of the same file asserts `refs[\"mailpit\"] == realinfra.MAILPIT_FALLBACK_IMAGE`, which fits that claim. If `_image_refs` stopped reading the overlay, the fallback would still supply the same value and the test would pass.\n\n(b) `test_mvp_039_gen_e2e_env.py:47` checks only `v.strip('\"')`, which is the `$$`-escaped form for BASIC_AUTH_HASH. A raw `$2b$10$...` hash on stdout would not contain that string, so the check would pass.\n\nBoth are weak-assertion gaps in a test harness, not product defects, so \"minor\" fits."
+      }
+     ],
+     "survives": true
+    }
+   ]
+  },
+  {
+   "lens": "secrets",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "APPROVED",
+    "prior_findings": [],
+    "findings": [
+     {
+      "id": "WS054-SEC-1",
+      "severity": "minor",
+      "file": "src/solace_testing/e2e.py",
+      "line": 434,
+      "problem": "The function's docstring says parse_provision_output errors \"name the line keys only\", and its test says it \"never echoes the token\". In fact the error prints everything before the first '=' of every stdout line. A line with no '=' goes in whole, and so does a line that uses ':' as its separator. Either one can put the one-time set-password token into the ValueError. That error then reaches the HopFailure message and the CI log.",
+      "failure_scenario": "The IF-08 CLI (scripts.provision_clinician) does not exist yet. Suppose it, or anything it imports, writes a structlog JSON line to stdout that holds the link, such as {\"event\":\"account_setup_link_issued\",\"link\":\"http://x/account-setup/TOKEN\"}. Or suppose it prints 'set_password_url: http://x/account-setup/TOKEN'. Then keys = [<whole line>, ...] and the ValueError text holds the token. I ran a scratch probe of both shapes and the token was echoed each time (True). The existing test only covers lines that follow the key=value form.",
+      "fix": "Print only keys that match ^[a-z_]+$, and replace anything else with a placeholder such as '<unexpected line>'. Or report only the line count and the expected keys. Add the JSON-line and colon-separator cases to test_mvp_039_provision_output_must_be_exactly_two_lines_and_never_echoes_the_token.",
+      "evidence": "e2e.py:434-437: keys = [line.split('=', 1)[0] for line in lines]; raise ValueError(f\"... got the keys {keys}\"). The probe (scratch, since deleted) printed 'json log line on stdout -> token echoed: True' and 'colon separator -> token echoed: True'."
+     },
+     {
+      "id": "WS054-SEC-2",
+      "severity": "minor",
+      "file": "src/solace_testing/e2e.py",
+      "line": 787,
+      "problem": "_expect copies the first 300 characters of the response body into the AssertionError, which becomes the HopFailure message and the CI log. FastAPI 0.133 with pydantic 2.13 (both locked) echoes request input in its default 422 body, and user-service registers no RequestValidationError handler. So a schema mismatch on account-setup, register or login puts the one-time account-setup token and the generated password into the failure text. The same happens if login returns an unexpected 2xx whose body holds tokens.",
+      "failure_scenario": "provision_clinician POSTs {token, new_password} to /api/v1/users/account-setup. That route does not exist yet (IF-08/IF-17). If it lands expecting a field named 'password', FastAPI returns 422 with detail[0].input = {\"token\": \"<one-time token>\", \"new_password\": \"<pw>\"}. That body is inside the first 300 characters, so the clinician's set-password token and password are printed in the HopFailure.",
+      "fix": "Do not echo the body for auth flows. Report the status and, for a JSON error, only detail[*].type and detail[*].loc. Or pass the request's sensitive values to _scrub before formatting the body.",
+      "evidence": "e2e.py:785-787 raises AssertionError(f\"{what}: HTTP {response.status_code} (expected {statuses}): {response.text[:300]}\"). It is used at lines 800, 815, 819, 847 and 850. requirements.lock pins fastapi==0.133.0 and pydantic==2.13.4. A Grep of services/user-service finds no RequestValidationError handler."
+     },
+     {
+      "id": "WS054-SEC-3",
+      "severity": "minor",
+      "file": "src/solace_testing/e2e.py",
+      "line": 746,
+      "problem": "run_dir comes from SOLACE_E2E_RUN_DIR or the ps1 -RunDir, and nothing validates it. _start calls shutil.rmtree on it unconditionally before it generates anything, and _teardown (stop_stack, 'down') deletes it again. Neither checks that the directory is one the harness created, for example that it holds e2e.env or a marker. This skips the generator's own refuse-to-overwrite-without---rotate guard and can delete an arbitrary operator directory.",
+      "failure_scenario": "An operator reads 'RunDir' as a parent directory and runs '.\\scripts\\test\\e2e_stack.ps1 down -RunDir D:\\tmp', or sets SOLACE_E2E_RUN_DIR=D:\\tmp\\mvp-exec before a pytest run. _teardown or _start then runs shutil.rmtree('D:\\tmp...') and deletes the whole tree, including the mvp-exec state.",
+      "fix": "Before any rmtree, require that the directory is empty or holds the harness's e2e.env (or a marker file the generator writes). Otherwise raise. Or always use a project-named subdirectory under the configured base.",
+      "evidence": "e2e.py:743-747: if not (config.reuse and config.env_file.is_file()): _remove_project(config); if config.run_dir.exists(): shutil.rmtree(config.run_dir). e2e.py:649-650 does the same in _teardown. StackConfig.from_env (188-191) and __post_init__ (172-173) accept any path."
+     },
+     {
+      "id": "WS054-SEC-4",
+      "severity": "minor",
+      "file": "tests/solace_testing/test_mvp_039_e2e_helpers.py",
+      "line": 1,
+      "problem": "The report states, and the ComposeError docstring promises, that errors 'are scrubbed of every non-public e2e.env value'. No test covers this. Nothing exercises _scrub, _hidden_values, or the ComposeError, psql and call error paths with a generated env file, so a change that drops the hidden= argument or adds a key to _PUBLIC_ENV_KEYS would pass CI.",
+      "failure_scenario": "Suppose a later edit to _run or _compose stops passing hidden (for example while refactoring compose_config), or someone adds a secret key to _PUBLIC_ENV_KEYS. The next failing 'up' or 'config' would then print AUTH_SECRET_KEY, POSTGRES_* passwords or REDIS_URL from compose stderr or stdout (stdout is the fallback when stderr is empty), and no unit test would fail.",
+      "fix": "Add a pure test: write an e2e.env with known values and call _run on a stub argv (a Python one-liner that prints the values to stderr and exits 1). Assert that the ComposeError text holds '***' and none of the values, including a value that contains another (REDIS_URL and REDIS_PASSWORD). Also assert that _PUBLIC_ENV_KEYS has no registry secret source.",
+      "evidence": "A Grep for _scrub|_hidden_values over tests/ finds no test of either. Callers: e2e.py:241, 247-249, 259, 549, 558, 689, 717-722, 841."
+     }
+    ]
+   },
+   "verified": [
+    {
+     "id": "WS054-SEC-1",
+     "severity": "minor",
+     "file": "src/solace_testing/e2e.py",
+     "line": 434,
+     "problem": "The function's docstring says parse_provision_output errors \"name the line keys only\", and its test says it \"never echoes the token\". In fact the error prints everything before the first '=' of every stdout line. A line with no '=' goes in whole, and so does a line that uses ':' as its separator. Either one can put the one-time set-password token into the ValueError. That error then reaches the HopFailure message and the CI log.",
+     "failure_scenario": "The IF-08 CLI (scripts.provision_clinician) does not exist yet. Suppose it, or anything it imports, writes a structlog JSON line to stdout that holds the link, such as {\"event\":\"account_setup_link_issued\",\"link\":\"http://x/account-setup/TOKEN\"}. Or suppose it prints 'set_password_url: http://x/account-setup/TOKEN'. Then keys = [<whole line>, ...] and the ValueError text holds the token. I ran a scratch probe of both shapes and the token was echoed each time (True). The existing test only covers lines that follow the key=value form.",
+     "fix": "Print only keys that match ^[a-z_]+$, and replace anything else with a placeholder such as '<unexpected line>'. Or report only the line count and the expected keys. Add the JSON-line and colon-separator cases to test_mvp_039_provision_output_must_be_exactly_two_lines_and_never_echoes_the_token.",
+     "evidence": "e2e.py:434-437: keys = [line.split('=', 1)[0] for line in lines]; raise ValueError(f\"... got the keys {keys}\"). The probe (scratch, since deleted) printed 'json log line on stdout -> token echoed: True' and 'colon separator -> token echoed: True'.",
+     "lens": "secrets",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "e2e.py:433-437 matches the finding. `keys = [line.split(\"=\", 1)[0] for line in lines]` takes the whole line when it has no '='. That covers a JSON log line or a 'set_password_url: http://...' line. The `keys` list is then formatted straight into the ValueError text. The docstring claim \"line keys only\" is therefore false for those inputs, so a one-time token could reach the error message and the CI log. The path is a real leak, but it needs an unexpected stdout line from a CLI that doesn't exist yet. Minor severity is right. I did not run a probe or the tests. I confirmed by reading the code only."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "WS054-SEC-2",
+     "severity": "minor",
+     "file": "src/solace_testing/e2e.py",
+     "line": 787,
+     "problem": "_expect copies the first 300 characters of the response body into the AssertionError, which becomes the HopFailure message and the CI log. FastAPI 0.133 with pydantic 2.13 (both locked) echoes request input in its default 422 body, and user-service registers no RequestValidationError handler. So a schema mismatch on account-setup, register or login puts the one-time account-setup token and the generated password into the failure text. The same happens if login returns an unexpected 2xx whose body holds tokens.",
+     "failure_scenario": "provision_clinician POSTs {token, new_password} to /api/v1/users/account-setup. That route does not exist yet (IF-08/IF-17). If it lands expecting a field named 'password', FastAPI returns 422 with detail[0].input = {\"token\": \"<one-time token>\", \"new_password\": \"<pw>\"}. That body is inside the first 300 characters, so the clinician's set-password token and password are printed in the HopFailure.",
+     "fix": "Do not echo the body for auth flows. Report the status and, for a JSON error, only detail[*].type and detail[*].loc. Or pass the request's sensitive values to _scrub before formatting the body.",
+     "evidence": "e2e.py:785-787 raises AssertionError(f\"{what}: HTTP {response.status_code} (expected {statuses}): {response.text[:300]}\"). It is used at lines 800, 815, 819, 847 and 850. requirements.lock pins fastapi==0.133.0 and pydantic==2.13.4. A Grep of services/user-service finds no RequestValidationError handler.",
+     "lens": "secrets",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The code at e2e.py:785-787 puts response.text[:300] into the AssertionError with no _scrub. _scrub exists but is not applied here. user-service registers only TokenExpiredError, TokenInvalidError, ValueError and Exception handlers (main.py:605-632), so FastAPI's default RequestValidationError handler still returns the 422 body. RequestValidationError is not a ValueError subclass, so the ValueError handler does not catch it. For a missing-field error pydantic puts the whole request dict in \"input\", and that dict sits well within the first 300 characters. A schema mismatch on account-setup, register or login would therefore print the one-time token and generated password into the failure text and CI log. This is conditional: today the account-setup route returns 404, which leaks nothing. The secrets are also ephemeral, per-run test credentials. Minor severity is appropriate. I did not run pytest or render any compose config, because the code reading was enough."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "WS054-SEC-3",
+     "severity": "minor",
+     "file": "src/solace_testing/e2e.py",
+     "line": 746,
+     "problem": "run_dir comes from SOLACE_E2E_RUN_DIR or the ps1 -RunDir, and nothing validates it. _start calls shutil.rmtree on it unconditionally before it generates anything, and _teardown (stop_stack, 'down') deletes it again. Neither checks that the directory is one the harness created, for example that it holds e2e.env or a marker. This skips the generator's own refuse-to-overwrite-without---rotate guard and can delete an arbitrary operator directory.",
+     "failure_scenario": "An operator reads 'RunDir' as a parent directory and runs '.\\scripts\\test\\e2e_stack.ps1 down -RunDir D:\\tmp', or sets SOLACE_E2E_RUN_DIR=D:\\tmp\\mvp-exec before a pytest run. _teardown or _start then runs shutil.rmtree('D:\\tmp...') and deletes the whole tree, including the mvp-exec state.",
+     "fix": "Before any rmtree, require that the directory is empty or holds the harness's e2e.env (or a marker file the generator writes). Otherwise raise. Or always use a project-named subdirectory under the configured base.",
+     "evidence": "e2e.py:743-747: if not (config.reuse and config.env_file.is_file()): _remove_project(config); if config.run_dir.exists(): shutil.rmtree(config.run_dir). e2e.py:649-650 does the same in _teardown. StackConfig.from_env (188-191) and __post_init__ (172-173) accept any path.",
+     "lens": "secrets",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The code matches the finding. StackConfig accepts any run_dir from SOLACE_E2E_RUN_DIR or the ps1 -RunDir. __post_init__ and from_env do no validation. _start (e2e.py:745-746) and _teardown (649-650) call shutil.rmtree on that path with no check that the harness created it, such as an e2e.env marker. The default path is a project-named subdirectory, so the risk only arises when an operator explicitly overrides it with a parent directory. That is why it stays minor, and the stated severity fits. The finding is a valid hardening gap, not a refutable false positive."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "WS054-SEC-4",
+     "severity": "minor",
+     "file": "tests/solace_testing/test_mvp_039_e2e_helpers.py",
+     "line": 1,
+     "problem": "The report states, and the ComposeError docstring promises, that errors 'are scrubbed of every non-public e2e.env value'. No test covers this. Nothing exercises _scrub, _hidden_values, or the ComposeError, psql and call error paths with a generated env file, so a change that drops the hidden= argument or adds a key to _PUBLIC_ENV_KEYS would pass CI.",
+     "failure_scenario": "Suppose a later edit to _run or _compose stops passing hidden (for example while refactoring compose_config), or someone adds a secret key to _PUBLIC_ENV_KEYS. The next failing 'up' or 'config' would then print AUTH_SECRET_KEY, POSTGRES_* passwords or REDIS_URL from compose stderr or stdout (stdout is the fallback when stderr is empty), and no unit test would fail.",
+     "fix": "Add a pure test: write an e2e.env with known values and call _run on a stub argv (a Python one-liner that prints the values to stderr and exits 1). Assert that the ComposeError text holds '***' and none of the values, including a value that contains another (REDIS_URL and REDIS_PASSWORD). Also assert that _PUBLIC_ENV_KEYS has no registry secret source.",
+     "evidence": "A Grep for _scrub|_hidden_values over tests/ finds no test of either. Callers: e2e.py:241, 247-249, 259, 549, 558, 689, 717-722, 841.",
+     "lens": "secrets",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "Grep over the MVP-039 test files finds no reference to ComposeError, _scrub, _hidden_values, scrub, hidden or redact. The only '***' hit is in an unrelated realinfra fixture test. In e2e.py, _scrub (line 220), _hidden_values (296) and _PUBLIC_ENV_KEYS (126) exist, so the scrubbing the docstring promises is untested. A change that drops the hidden argument or adds a secret key to _PUBLIC_ENV_KEYS would not fail any test. The gap is real. It is a missing test, not a live leak, so minor is the right severity."
+      }
+     ],
+     "survives": true
+    }
+   ]
+  },
+  {
+   "lens": "harness",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "CHANGES_REQUESTED",
+    "prior_findings": [],
+    "findings": [
+     {
+      "id": "WS054-HAR-1",
+      "severity": "important",
+      "file": "scripts/test/gen_e2e_env.py",
+      "line": 285,
+      "problem": "On POSIX, _write_certs chmods every produced file to 0600, including e2e-ca.crt, mailpit.crt, postgres-ca.crt and server.crt. scripts/db/gen_certs.py deliberately writes the CAs and certs as 0644 and only the keys as 0600. Compose file-secrets in non-swarm mode are plain bind mounts that keep the host owner and mode. The app images run as appuser (uid 1000), and so does the migrate job.",
+      "failure_scenario": "On a Linux host whose uid is not 1000 (a GitHub-hosted runner is uid 1001), /run/secrets/postgres-ca.crt and /run/secrets/e2e-ca.crt are 0600 and owned by another uid. The app services and migrate cannot read the CA. In the strict profile, POSTGRES_SSL verify-full and SSL_CERT_FILE for mailpit STARTTLS then fail, so stack_up fails on CI. The Windows run cannot show this, and tests/scripts/test_mvp_039_gen_e2e_env.py asserts no file modes.",
+      "fix": "Keep the gen_certs modes: chmod 0644 for *.crt and 0600 only for *.key (or skip the second chmod pass for the certs). Add a POSIX-only test that asserts e2e-ca.crt and postgres-ca.crt are world-readable.",
+      "evidence": "gen_e2e_env.py lines 285-286 call _restrict_file (os.chmod 0o600 when os.name != 'nt') on all names from _write_certs. gen_certs.py line 54 sets _FILE_MODES = {CA_FILE: 0o644, CERT_FILE: 0o644, KEY_FILE: 0o600}. The service Dockerfiles use USER appuser with uid 1000. docker-compose.prod.yml mounts postgres-ca.crt into every client."
+     },
+     {
+      "id": "WS054-HAR-2",
+      "severity": "important",
+      "file": "tests/e2e/conftest.py",
+      "line": 81,
+      "problem": "The conftest adds pytest.mark.timeout(900) to every e2e item. The session-scoped e2e_stack fixture is set up inside the first requesting test, and pytest-timeout counts fixture setup toward that test's timeout. start_stack allows UP_TIMEOUT_S = 3600 for a cold build of every image, plus the 180 s /live wait. The two budgets are inconsistent.",
+      "failure_scenario": "On a cold run (CI without a layer cache, or the first run on a developer machine) the nine image builds plus startup run past 900 s inside the first test's setup. pytest-timeout is installed (2.4.0). On Windows only the thread method exists, and it dumps stacks and calls os._exit. Neither the fixture's finally nor start_stack's cleanup runs. The compose project and the run dir with its secrets are left behind, the first test is reported as a timeout, and the failure is not attributed to hop stack_up.",
+      "fix": "Give the fixture its own time budget: for example mark the fixture-requesting tests with a timeout above UP_TIMEOUT_S + LIVE_TIMEOUT_S, or set timeout_func_only so setup is excluded and let start_stack own the budget. Alternatively, start the stack in pytest_sessionstart or a hook that pytest-timeout does not cover. At least make the default exceed 3600 for the first item.",
+      "evidence": "conftest.py lines 25 and 80-81 apply _DEFAULT_TIMEOUT_S = 900 to every item without its own marker. test_mvp_039_stack_selftest.py has no timeout marker on its first test. pytest.ini has no timeout setting. e2e.py line 105 sets UP_TIMEOUT_S = 3600 with the comment 'the first run builds every image'."
+     },
+     {
+      "id": "WS054-HAR-3",
+      "severity": "minor",
+      "file": "src/solace_testing/e2e.py",
+      "line": 745,
+      "problem": "The harness runs shutil.rmtree on SOLACE_E2E_RUN_DIR with no check. Both _start (a fresh run) and _teardown (stop_stack and the 'down' command) do this, and StackConfig.__post_init__ validates nothing about the path.",
+      "failure_scenario": "An operator sets SOLACE_E2E_RUN_DIR (or passes -RunDir) to an existing directory that is not a previous harness run, for example a project folder or a home directory. 'up', the fixture's start and 'down' recursively delete it. _remove_project also creates and uses run_dir.parent as the working directory.",
+      "fix": "Only rmtree a run dir that the harness created. Refuse a non-empty run_dir that has no e2e.env, or write a marker file and check for it before deleting. Alternatively, restrict an override to a dedicated subdirectory.",
+      "evidence": "e2e.py lines 744-746 (rmtree of config.run_dir) and line 650 (_teardown rmtree). from_env at line 188 takes run_dir straight from the environment, and nothing in StackConfig validates it."
+     }
+    ]
+   },
+   "verified": [
+    {
+     "id": "WS054-HAR-1",
+     "severity": "important",
+     "file": "scripts/test/gen_e2e_env.py",
+     "line": 285,
+     "problem": "On POSIX, _write_certs chmods every produced file to 0600, including e2e-ca.crt, mailpit.crt, postgres-ca.crt and server.crt. scripts/db/gen_certs.py deliberately writes the CAs and certs as 0644 and only the keys as 0600. Compose file-secrets in non-swarm mode are plain bind mounts that keep the host owner and mode. The app images run as appuser (uid 1000), and so does the migrate job.",
+     "failure_scenario": "On a Linux host whose uid is not 1000 (a GitHub-hosted runner is uid 1001), /run/secrets/postgres-ca.crt and /run/secrets/e2e-ca.crt are 0600 and owned by another uid. The app services and migrate cannot read the CA. In the strict profile, POSTGRES_SSL verify-full and SSL_CERT_FILE for mailpit STARTTLS then fail, so stack_up fails on CI. The Windows run cannot show this, and tests/scripts/test_mvp_039_gen_e2e_env.py asserts no file modes.",
+     "fix": "Keep the gen_certs modes: chmod 0644 for *.crt and 0600 only for *.key (or skip the second chmod pass for the certs). Add a POSIX-only test that asserts e2e-ca.crt and postgres-ca.crt are world-readable.",
+     "evidence": "gen_e2e_env.py lines 285-286 call _restrict_file (os.chmod 0o600 when os.name != 'nt') on all names from _write_certs. gen_certs.py line 54 sets _FILE_MODES = {CA_FILE: 0o644, CERT_FILE: 0o644, KEY_FILE: 0o600}. The service Dockerfiles use USER appuser with uid 1000. docker-compose.prod.yml mounts postgres-ca.crt into every client.",
+     "lens": "harness",
+     "votes": [
+      {
+       "refuted": false,
+       "reason": "The code matches the finding. gen_e2e_env.py lines 285-286 call _restrict_file, which does os.chmod 0o600 on POSIX, for every name returned by _write_certs. That list includes mailpit.crt and, in the strict profile, the Postgres CA and server certs. e2e-ca.crt is among the mailpit files, so it is included too. scripts/db/gen_certs.py sets _FILE_MODES to 0o644 for the CA and cert files and 0o600 only for keys, so this pass narrows them on purpose-built 0644 files. The generator writes only these cert files into secrets/. Passwords go into e2e.env, so the certs are the only files the containers read from the secrets directory. The overlay mounts e2e-ca.crt as a compose file secret on all nine app services, and the service Dockerfiles use USER appuser. Non-swarm file secrets are bind mounts that keep the host owner and mode. A 0600 CA owned by a host uid other than the container's (a GitHub runner is uid 1001) is therefore unreadable inside the container. That breaks the CA trust the strict profile needs. I did not confirm appuser's uid is 1000 or run the stack. The failure also depends on the CI host uid differing from the container uid, so it is conditional. A developer host with uid 1000 would not hit it. The fix is simple (0644 for *.crt, 0600 for keys), and 'important' is reasonable for a CI-only break.",
+       "severity_ok": true
+      },
+      {
+       "refuted": true,
+       "severity_ok": false,
+       "reason": "The brief (line 52) says the generator restricts permissions and, on POSIX, uses \"modes 700/600\". gen_e2e_env.py does exactly that: 0700 on the directory and 0600 on files. The implementer's report (WS-05.4-report.md, item 4 under part 1b) records this risk, in the same words as the finding: compose file secrets keep the host uid and mode, so 0600 may block non-root container users on Linux CI. It marks this \"Verify on Linux in part 2\". The behaviour was therefore specified by the brief and the risk was already flagged and deferred. It is a known follow-up for part 2, whose live self-test cannot run now anyway. It is not an unnoticed part 1 defect, and \"important\" overstates it. I did not check whether the 0600 modes actually fail on a Linux host. Nothing in this lens settles that, so part 2 still needs to test it."
+      },
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The code confirms the claim. gen_e2e_env.py lines 285-286 call _restrict_file on every cert name, including the CA certs (e2e-ca.crt, mailpit.crt, postgres-ca.crt, server.crt). On POSIX that sets mode 0600. The overlay mounts e2e-ca.crt as a compose file secret on all nine app services. Non-swarm compose file secrets are bind mounts that keep the host owner and mode, and the app images run as a non-root appuser (uid 1000, per the finding; I did not re-check the Dockerfiles). A Linux CI runner with a different uid, such as 1001, would therefore leave the CA unreadable inside the containers. This is a real bug on the path the harness is built for (Linux CI), and it breaks stack_up in the strict profile. Important is the right severity: the failure is loud and test-only, and the fix is small (0644 for *.crt, 0600 for keys). I did not run the tests or inspect the generated file modes."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "WS054-HAR-2",
+     "severity": "important",
+     "file": "tests/e2e/conftest.py",
+     "line": 81,
+     "problem": "The conftest adds pytest.mark.timeout(900) to every e2e item. The session-scoped e2e_stack fixture is set up inside the first requesting test, and pytest-timeout counts fixture setup toward that test's timeout. start_stack allows UP_TIMEOUT_S = 3600 for a cold build of every image, plus the 180 s /live wait. The two budgets are inconsistent.",
+     "failure_scenario": "On a cold run (CI without a layer cache, or the first run on a developer machine) the nine image builds plus startup run past 900 s inside the first test's setup. pytest-timeout is installed (2.4.0). On Windows only the thread method exists, and it dumps stacks and calls os._exit. Neither the fixture's finally nor start_stack's cleanup runs. The compose project and the run dir with its secrets are left behind, the first test is reported as a timeout, and the failure is not attributed to hop stack_up.",
+     "fix": "Give the fixture its own time budget: for example mark the fixture-requesting tests with a timeout above UP_TIMEOUT_S + LIVE_TIMEOUT_S, or set timeout_func_only so setup is excluded and let start_stack own the budget. Alternatively, start the stack in pytest_sessionstart or a hook that pytest-timeout does not cover. At least make the default exceed 3600 for the first item.",
+     "evidence": "conftest.py lines 25 and 80-81 apply _DEFAULT_TIMEOUT_S = 900 to every item without its own marker. test_mvp_039_stack_selftest.py has no timeout marker on its first test. pytest.ini has no timeout setting. e2e.py line 105 sets UP_TIMEOUT_S = 3600 with the comment 'the first run builds every image'.",
+     "lens": "harness",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "Confirmed from the code. tests/e2e/conftest.py line 81 adds pytest.mark.timeout(900) to every e2e item that has no timeout marker. The session-scoped e2e_stack fixture (lines 89-97) calls start_stack inside the first requesting test's setup. pytest-timeout counts setup toward the item's timeout, because timeout_func_only is not set anywhere in pytest.ini or pyproject.toml. e2e.py line 749 gives `compose up --build` UP_TIMEOUT_S = 3600 s. A cold build can therefore exceed 900 s. On Windows the thread method calls os._exit, which skips the fixture's finally block and stop_stack. That would leave the project and the run dir with its secrets behind and would report a plain timeout instead of a stack_up failure. The 900 s cap is shorter than the 3600 s budget by design, so the two are inconsistent. I did not run a test."
+      },
+      {
+       "refuted": false,
+       "reason": "The brief (line 99) asks for a default pytest.mark.timeout(900) on e2e items. It says nothing about fixture setup, and no ruling or later plan task addresses it. The conftest applies 900 to every item without its own marker, and pytest.ini sets no timeout_func_only. The session-scoped e2e_stack fixture runs start_stack inside the first requesting test's setup, so pytest-timeout counts that time against the 900 s. e2e.py allows UP_TIMEOUT_S = 3600 for a cold `up --build`, plus 180 s for /live. A cold build over 900 s therefore hits the timeout first, and on Windows the thread method kills the process without running the fixture's finally. The mismatch is real. I did not run a cold build, so the leaked project and run dir are inferred from pytest-timeout's behaviour rather than observed. Severity \"important\" is fair, since it only triggers on cold or uncached runs.",
+       "severity_ok": true
+      },
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The code matches the finding. tests/e2e/conftest.py line 81 adds timeout(900) to every e2e item that has no timeout marker of its own. pytest.ini has no timeout or timeout_func_only setting, so pytest-timeout's default applies and it counts fixture setup toward the first requesting test. The session-scoped e2e_stack fixture calls start_stack, whose `compose up --build` runs under UP_TIMEOUT_S = 3600 (e2e.py lines 105 and 749). A cold build of nine images can plausibly take longer than 900 s. I did not run a cold build, so that is an estimate. On timeout, the thread method calls os._exit on Windows. That skips the fixture's finally block and stop_stack, which leaves the compose project and the secrets run dir behind. The failure would show up as a timeout in the first test, not as a stack_up failure. A mismatch like this in a harness the first cold run depends on is a real defect, and \"important\" fits."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "WS054-HAR-3",
+     "severity": "minor",
+     "file": "src/solace_testing/e2e.py",
+     "line": 745,
+     "problem": "The harness runs shutil.rmtree on SOLACE_E2E_RUN_DIR with no check. Both _start (a fresh run) and _teardown (stop_stack and the 'down' command) do this, and StackConfig.__post_init__ validates nothing about the path.",
+     "failure_scenario": "An operator sets SOLACE_E2E_RUN_DIR (or passes -RunDir) to an existing directory that is not a previous harness run, for example a project folder or a home directory. 'up', the fixture's start and 'down' recursively delete it. _remove_project also creates and uses run_dir.parent as the working directory.",
+     "fix": "Only rmtree a run dir that the harness created. Refuse a non-empty run_dir that has no e2e.env, or write a marker file and check for it before deleting. Alternatively, restrict an override to a dedicated subdirectory.",
+     "evidence": "e2e.py lines 744-746 (rmtree of config.run_dir) and line 650 (_teardown rmtree). from_env at line 188 takes run_dir straight from the environment, and nothing in StackConfig validates it.",
+     "lens": "harness",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The code matches the finding. `_start` (e2e.py 745-746) and `_teardown` (649-650) call `shutil.rmtree(config.run_dir)` on any existing path. `StackConfig.__post_init__` (159-173) validates only profile, environment and lane. `from_env` (188-191) passes `SOLACE_E2E_RUN_DIR` straight through, and `_remove_project` uses `run_dir.parent` as its cwd. Nothing checks for an `e2e.env` file or a marker before deleting. The default path is safe, a temp-dir `solace-e2e/<project>` folder, and the problem only arises when an operator explicitly points the override at a non-harness directory. Minor severity fits."
+      }
+     ],
+     "survives": true
+    }
+   ]
+  }
+ ]
+}

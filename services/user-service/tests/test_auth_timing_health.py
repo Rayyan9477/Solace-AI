@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from src.api import (
+from src.api_auth import (
     LoginRequest,
     ResendVerificationRequest,
     login,
@@ -104,7 +104,7 @@ async def test_login_blocked_account_runs_dummy_verify() -> None:
 async def test_resend_verification_per_account_throttle_bounds_sends() -> None:
     """P2-4: repeated resend requests for the SAME address are bounded per-account, and
     every request still returns 204 (enumeration-safe — over-limit just skips the send)."""
-    import src.api as api
+    import src.api_auth as api
 
     api._reset_resend_throttle()
 
@@ -130,7 +130,7 @@ async def test_resend_verification_per_account_throttle_bounds_sends() -> None:
 async def test_resend_verification_throttle_is_per_account() -> None:
     """The throttle keys on the address, so bombing one victim does not consume another
     account's budget."""
-    import src.api as api
+    import src.api_auth as api
 
     api._reset_resend_throttle()
 

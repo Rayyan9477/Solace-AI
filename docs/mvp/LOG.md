@@ -11,6 +11,20 @@ Entry format:
 - Links: <files>.
 ```
 
+## 2026-11-03: W0 code-complete; live runs and barrier wait on egress
+- WS-05.5 (boot smoke + in-process /live smoke, tests/system green) and WS-05.6 (crisis alert E2E, dev profile, helpers) are code-complete and reviewed; all 12 W0 tasks are now code-complete.
+- Still open: the live runs (WS-05.4 self-test, WS-05.5 dev/strict boot smoke and manifest, WS-05.6 crisis E2E) and the barrier record. All need the service images, which cannot build until the owner allows pkg-containers.githubusercontent.com.
+- PR to main waits for the owner's approval and repo push access.
+
+## 2026-11-03: W0 resumed in a cloud session; barrier blocked on environment
+- 11 of the 12 remaining W0 tasks done (WS-03.5, 12.17, 13.2, 14.2, 14.3, 15.2, 17.2, 17.19, 18.1, 18.2; WS-05.4 part 2 code) plus bug-round fix WS-15.F1. WS-17.2 barrier gate met. Each task reviewed by two lenses with 3-skeptic panels; fix rounds on WS-12.17, 14.2, 17.2, 18.1, 18.2, 03.5.
+- Blocked: WS-05.4 live self-test, WS-05.5, WS-05.6 and the strict boot smoke. All 10 Dockerfiles copy uv from a digest-pinned ghcr.io image, and the cloud environment's network policy refuses pkg-containers.githubusercontent.com. Owner action: allow that host.
+- W0 bug-finding round: 3 hunters, 17 findings, all real; 16 already owned by planned tasks (highest impact: orchestrator never authenticates to safety, WS-10.4), 1 fixed in W0 (WS-15.F1), 1 parked (cosmetic).
+- Full regression (per suite): only known baseline red (kafka test_topics 12, tests/system /health 3, safety neutral-text WS-12.6, .env-absent 1) plus image-build tests blocked by the same egress rule. All 10 services pass conformance (tests/bootstrap 260 passed).
+- Commits are local on mvp-remediation (pre-barrier tree a6171c8); push is refused by the session's git proxy until the owner grants repo access.
+- Barrier note (from WS-03.2): dev postgres_data volumes created before WS-02.1 stay unhealthy; run `docker compose down -v` once.
+- Detail: [progress ledger](exec-state/ledger/progress.md), [hand-offs](exec-state/ledger/handoffs.md).
+
 ## 2026-11-03: W0 checkpoint 1; execution paused at the owner's request
 - **What the owner asked:** "complete the nearest checkpoint and then stop", then "no new task, just wrap up existing ones". Every started task was reviewed and fixed until done, and no new task was dispatched. The tree is `edba7d7`, zipped to `D:\tmp\mvp-exec\barriers\W0-checkpoint-1-edba7d7.zip`.
 - **Counts:** W0 is 48 / 61 done, with 1 blocked (WS-05.4 part 2 waits for WS-03.5) and 12 not started. The whole program is 48 / 330 done.

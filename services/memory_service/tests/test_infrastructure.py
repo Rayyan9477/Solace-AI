@@ -10,7 +10,7 @@ from uuid import uuid4
 import math
 
 from services.memory_service.src.infrastructure.postgres_repo import (
-    PostgresSettings, PostgresRepository, memory_records, session_summaries,
+    PostgresRepository, memory_records, session_summaries,
 )
 from services.memory_service.src.infrastructure.weaviate_repo import (
     WeaviateSettings, WeaviateRepository, VectorRecord, SearchResult, CollectionName,
@@ -28,30 +28,11 @@ from services.memory_service.src.infrastructure.rag_pipeline import (
 )
 
 
-class TestPostgresSettings:
-    """Tests for PostgreSQL settings."""
-
-    def test_default_settings(self) -> None:
-        settings = PostgresSettings(password="test_password")
-        assert settings.host == "localhost"
-        assert settings.port == 5432
-        assert settings.database == "solace_memory"
-        assert settings.pool_size == 10
-
-    def test_connection_url(self) -> None:
-        settings = PostgresSettings(user="test", password="pass", database="testdb")
-        assert "postgresql+asyncpg://" in settings.connection_url
-        assert "test:pass" in settings.connection_url
-        assert "testdb" in settings.connection_url
-
-
 class TestPostgresRepository:
     """Tests for PostgreSQL repository."""
 
     def test_repository_initialization(self) -> None:
-        settings = PostgresSettings(pool_size=0)
-        repo = PostgresRepository(settings)
-        assert repo._settings.database == "solace_memory"
+        repo = PostgresRepository()
         assert repo._stats["inserts"] == 0
 
     def test_statistics_tracking(self) -> None:
@@ -59,7 +40,7 @@ class TestPostgresRepository:
         stats = repo.get_statistics()
         assert "inserts" in stats
         assert "queries" in stats
-        assert "database" in stats
+        assert stats["pool"] == "default"
 
 
 class TestWeaviateSettings:

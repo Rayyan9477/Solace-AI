@@ -1,16 +1,24 @@
-# Solace-AI production Caddyfile.
+# Solace-AI edge Caddyfile (both compose profiles, WS-03.5).
 #
-# Caddy terminates TLS via automatic Let's Encrypt and reverse-proxies
-# to the internal services on the docker-compose `backend` + `monitoring`
-# networks. Internal ports are not exposed to the host — only Caddy's
-# 80/443 face the internet.
+# Caddy is the only service that publishes host ports. It reverse-proxies to the internal
+# services on the docker-compose `backend` (and, in strict, `monitoring`) networks.
 #
-# Environment variables (set in .env.prod or docker-compose.prod.yml):
-#   DOMAIN              e.g. solace-demo.example
-#   CADDY_ADMIN_EMAIL   letsencrypt contact
-#   BASIC_AUTH_HASH     bcrypt hash for ops dashboards
+# Environment variables (compose sets them; see deploy/env/env-contract.yaml):
+#   CADDY_API_SITE      the orchestrator site address. Strict: api.<DOMAIN> (a plain host, so
+#                       automatic HTTPS applies). Dev: http://api.localhost:8088 (plain HTTP).
+#   CADDY_AUTH_SITE     the user-service site address: auth.<DOMAIN> / http://auth.localhost:8088
+#   DOMAIN              the primary domain (ops dashboards and the apex)
+#   CADDY_ADMIN_EMAIL   the ACME (Let's Encrypt) contact
+#   BASIC_AUTH_HASH     bcrypt hash for the ops dashboards (single-quote it in the env file)
 #
-# Substitute at startup: `caddy run --envfile /etc/caddy/.env`.
+# Rules (MVP-250, IF-18):
+#   - upstream health checks probe /live, which never depends on downstream services, and
+#     tolerate slow probes (health_fails 3) and short gaps (lb_try_duration);
+#   - internal paths are never routed (never_routed is imported first inside a `route`
+#     block, so the 404 comes before the proxy in literal order);
+#   - X-Forwarded-For: Caddy trusts no incoming XFF (no trusted_proxies) and appends exactly
+#     one hop, so the apps run with TRUSTED_PROXY_HOPS=1 in strict (D-26);
+#   - no access log: request lines can carry identifiers.
 
 {
     email {$CADDY_ADMIN_EMAIL}
@@ -18,75 +26,80 @@
     # acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
 }
 
-# ---- Primary API ----------------------------------------------------------
-# Orchestrator is the public-facing entry point. Clients go here.
-api.{$DOMAIN} {
-    encode gzip zstd
+# Paths the edge never forwards: metrics, API docs, status pages and the internal API.
+(never_routed) {
+    @never_routed path /metrics /metrics/* /docs /docs/* /redoc /redoc/* /openapi.json /status /status/* /api/v1/internal /api/v1/internal/*
+    respond @never_routed 404
+}
 
+(security_headers) {
     header {
-        # HSTS for 6 months with preload
+        # HSTS for 6 months with preload (browsers ignore it on the plain-HTTP dev sites)
         Strict-Transport-Security "max-age=15768000; includeSubDomains; preload"
         X-Content-Type-Options "nosniff"
-        X-Frame-Options "DENY"
         Referrer-Policy "strict-origin-when-cross-origin"
         -Server
     }
+}
 
-    # Orchestrator routes everything to downstream services internally.
-    reverse_proxy orchestrator-service:8000 {
-        health_uri /health
-        health_interval 30s
-        health_timeout 5s
+# ---- Primary API ----------------------------------------------------------
+# Orchestrator is the public-facing entry point. Clients go here.
+{$CADDY_API_SITE} {
+    encode zstd gzip
+    import security_headers
+    header X-Frame-Options "DENY"
+
+    route {
+        import never_routed
+        reverse_proxy orchestrator-service:8000 {
+            health_uri /live
+            health_interval 10s
+            health_timeout 5s
+            health_fails 3
+            health_passes 1
+            lb_try_duration 10s
+            lb_try_interval 250ms
+        }
     }
-
-    # Per-IP rate limit (Caddy built-in rate_limit, not global-keyed).
-    # Strict on unauthenticated endpoints; AuthN happens inside orchestrator.
-    # Tune after load-testing demo.
 }
 
 # ---- User / auth service --------------------------------------------------
-# Direct access for Google OAuth callback (Sprint 8 Day 2).
-auth.{$DOMAIN} {
-    encode gzip zstd
+# Direct access for the Google OAuth callback; paths are not rewritten.
+{$CADDY_AUTH_SITE} {
+    encode zstd gzip
+    import security_headers
 
-    header {
-        Strict-Transport-Security "max-age=15768000; includeSubDomains; preload"
-        X-Content-Type-Options "nosniff"
-        Referrer-Policy "strict-origin-when-cross-origin"
-        -Server
-    }
-
-    # OAuth callbacks MUST land on the user-service without rewriting path.
-    reverse_proxy user-service:8001 {
-        health_uri /health
-        health_interval 30s
+    route {
+        import never_routed
+        reverse_proxy user-service:8001 {
+            health_uri /live
+            health_interval 10s
+            health_timeout 5s
+            health_fails 3
+            health_passes 1
+            lb_try_duration 10s
+            lb_try_interval 250ms
+        }
     }
 }
 
 # ---- Observability dashboards (basic-auth protected) ----------------------
 grafana.{$DOMAIN} {
-    basicauth {
+    basic_auth {
         admin {$BASIC_AUTH_HASH}
     }
     reverse_proxy grafana:3000
 }
 
 jaeger.{$DOMAIN} {
-    basicauth {
+    basic_auth {
         admin {$BASIC_AUTH_HASH}
     }
     reverse_proxy jaeger:16686
 }
 
-kafka.{$DOMAIN} {
-    basicauth {
-        admin {$BASIC_AUTH_HASH}
-    }
-    reverse_proxy kafka-ui:8080
-}
-
 # ---- Default (apex) -------------------------------------------------------
 # Return a plain 200 on the apex so TLS probes pass; no content is served.
 {$DOMAIN} {
-    respond "Solace-AI demo — use api.{$DOMAIN} for the REST API." 200
+    respond "Solace-AI: use the api. host for the REST API." 200
 }

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, Request, status, Depends
 from pydantic import BaseModel, Field, EmailStr
 import structlog
 
@@ -188,10 +188,16 @@ class HealthResponse(BaseModel):
     channels: dict[str, bool]
 
 
-def _get_notification_service() -> NotificationService:
-    """Dependency to get notification service instance."""
-    from .main import get_notification_service
-    return get_notification_service()
+def _get_notification_service(request: Request) -> NotificationService:
+    """Dependency: the notification service the lifespan composed on ``app.state``.
+
+    Raises:
+        HTTPException: 503 when the lifespan has not (or no longer) set the service.
+    """
+    service = getattr(request.app.state, "notification_service", None)
+    if service is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "notification service not initialized")
+    return service
 
 
 def _result_to_response(result: NotificationResult) -> NotificationResponse:

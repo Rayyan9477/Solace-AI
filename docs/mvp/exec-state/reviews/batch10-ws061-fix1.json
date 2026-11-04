@@ -1,0 +1,68 @@
+{
+ "task": "WS-06.1-fix1",
+ "results": [
+  {
+   "lens": "closure",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "APPROVED",
+    "prior_findings": [
+     {
+      "id": "WS-06.1-R1",
+      "closed": true,
+      "note": "Closed on every current write path. In src/solace_events/postgres_stores.py:136-154, PostgresOutboxStore.save raises OutboxOwnershipError(ValueError) before acquiring a connection when record.source_service is not None and differs from the store's validated name. Otherwise it stamps the record and binds self._source_service, not the record field, as $2. A concurrent mutation of the record during acquire therefore cannot change the row's owner (probe: the row owner stayed 'svc-a' after the record was set to 'svc-b' mid-acquire). Case, NFD, fullwidth, zero-width-suffix, NBSP-padded and int owners were all refused with 0 SQL calls. A repo-wide case-insensitive grep for INSERT INTO / COPY into event_outbox and copy_records_to_table finds only save and test fixtures. publisher.py has no SQL, every publish and publish_batch goes through OutboxRecord.from_event (source_service None) and then save, and no connection-taking transactional helper exists. flush_outbox retries only use id-keyed UPDATEs, and none of get_pending, mark_published, reset_to_pending, mark_failed or increment_retry writes source_service. Nothing calls process_retriable or registers a DLQ retry handler, so no redrive re-enters the outbox. All seven bridges pass a literal source_service and none passes an explicit outbox_store. Non-vacuous: against base tree 29de224 the 6 parametrized refusal tests fail with DID NOT RAISE and the pickle test fails with ImportError (7 failed, matching the report). The current tests/solace_events run gives 241 passed. InMemoryOutboxStore is left unchanged, as R1's fix asked."
+     }
+    ],
+    "findings": [
+     {
+      "id": "WS061F1-CLO-1",
+      "severity": "minor",
+      "file": "tests/solace_events/test_mvp_266_verify_only_ensure_table.py",
+      "line": 311,
+      "problem": "The single-insert-path guard catches far less than claimed. The claim is that it fails if a second event_outbox INSERT appears, but `inspect.getsource(postgres_stores).count(\"INSERT INTO event_outbox\") == 1` only matches that exact uppercase, single-space, unqualified literal, and only inside postgres_stores.py. It misses an insert in lowercase, with a line break between INSERT INTO and the table name, built by an f-string, schema-qualified (public.event_outbox), done through COPY (copy_records_to_table), or placed in any other module. Every one of those would bypass the R1 ownership check without turning the guard red.",
+      "failure_scenario": "A later lane (for example WS-06.5's batch or in-transaction write) adds `save_many` that runs `conn.executemany(\"insert into event_outbox (id, source_service, ...) values ...\", [(r.id, r.source_service, ...)])`. The guard still passes, so a foreign-owned row (which another service's poller would publish) or a blank-owned row (which no poller can ever claim, leaving a crisis event in PENDING) can again reach event_outbox, and no test reports it. Today there is only one insert path, so nothing is wrong yet; the risk is a future regression the guard does not catch.",
+      "fix": "Make the guard normalisation-tolerant and broader. Search the source of every module under src/solace_events (and ideally services/*/src) with `re.compile(r\"insert\\s+into\\s+(?:\\\"?\\w+\\\"?\\.)?\\\"?event_outbox\\b|copy_(?:records_)?to_table\\(\\s*['\\\"]event_outbox\", re.I)`, and assert exactly one match, located inside PostgresOutboxStore.save. Also assert that the module has no JoinedStr (f-string) whose literal parts contain 'insert into' (via ast). Alternatively, route every insert through one private helper that does the ownership check and assert by AST that only that helper calls execute/executemany/copy with an event_outbox statement.",
+      "evidence": "Mutation run, scratch dir since deleted: copies of the current solace_events package, each with one extra PostgresOutboxStore.save_many method, run against test_mvp_133_r1_save_is_the_outbox_store_s_only_insert_path. Results: 'exact' (\"INSERT INTO event_outbox ...\") => 1 failed (caught). 'lower' (\"insert into event_outbox\") => 1 passed. 'fstring' (f\"INSERT INTO {table}\") => 1 passed. 'newline' (\"INSERT INTO\\n   event_outbox\") => 1 passed. 'qualified' (\"INSERT INTO public.event_outbox\") => 1 passed. 'copy' (conn.copy_records_to_table(\"event_outbox\", ...)) => 1 passed."
+     }
+    ]
+   },
+   "verified": [
+    {
+     "id": "WS061F1-CLO-1",
+     "severity": "minor",
+     "file": "tests/solace_events/test_mvp_266_verify_only_ensure_table.py",
+     "line": 311,
+     "problem": "The single-insert-path guard catches far less than claimed. The claim is that it fails if a second event_outbox INSERT appears, but `inspect.getsource(postgres_stores).count(\"INSERT INTO event_outbox\") == 1` only matches that exact uppercase, single-space, unqualified literal, and only inside postgres_stores.py. It misses an insert in lowercase, with a line break between INSERT INTO and the table name, built by an f-string, schema-qualified (public.event_outbox), done through COPY (copy_records_to_table), or placed in any other module. Every one of those would bypass the R1 ownership check without turning the guard red.",
+     "failure_scenario": "A later lane (for example WS-06.5's batch or in-transaction write) adds `save_many` that runs `conn.executemany(\"insert into event_outbox (id, source_service, ...) values ...\", [(r.id, r.source_service, ...)])`. The guard still passes, so a foreign-owned row (which another service's poller would publish) or a blank-owned row (which no poller can ever claim, leaving a crisis event in PENDING) can again reach event_outbox, and no test reports it. Today there is only one insert path, so nothing is wrong yet; the risk is a future regression the guard does not catch.",
+     "fix": "Make the guard normalisation-tolerant and broader. Search the source of every module under src/solace_events (and ideally services/*/src) with `re.compile(r\"insert\\s+into\\s+(?:\\\"?\\w+\\\"?\\.)?\\\"?event_outbox\\b|copy_(?:records_)?to_table\\(\\s*['\\\"]event_outbox\", re.I)`, and assert exactly one match, located inside PostgresOutboxStore.save. Also assert that the module has no JoinedStr (f-string) whose literal parts contain 'insert into' (via ast). Alternatively, route every insert through one private helper that does the ownership check and assert by AST that only that helper calls execute/executemany/copy with an event_outbox statement.",
+     "evidence": "Mutation run, scratch dir since deleted: copies of the current solace_events package, each with one extra PostgresOutboxStore.save_many method, run against test_mvp_133_r1_save_is_the_outbox_store_s_only_insert_path. Results: 'exact' (\"INSERT INTO event_outbox ...\") => 1 failed (caught). 'lower' (\"insert into event_outbox\") => 1 passed. 'fstring' (f\"INSERT INTO {table}\") => 1 passed. 'newline' (\"INSERT INTO\\n   event_outbox\") => 1 passed. 'qualified' (\"INSERT INTO public.event_outbox\") => 1 passed. 'copy' (conn.copy_records_to_table(\"event_outbox\", ...)) => 1 passed.",
+     "lens": "closure",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The guard at tests/solace_events/test_mvp_266_verify_only_ensure_table.py:311 is only `inspect.getsource(postgres_stores).count(\"INSERT INTO event_outbox\") == 1`. That is an exact, case-sensitive substring count inside one module. I grepped the code and confirmed that postgres_stores.py has one such literal, at line 148 in save, so the guard passes today. A lowercase insert, a line break after INSERT INTO, an f-string, a schema-qualified name, a COPY call, or an insert in another module would not change the count or fail the guard. The finding's mutation runs showed this. I did not rerun them. The finding is real but low impact: today there is only one insert path, and the risk is a future regression that the guard fails to catch. Minor severity fits."
+      }
+     ],
+     "survives": true
+    }
+   ]
+  },
+  {
+   "lens": "regression",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "APPROVED",
+    "prior_findings": [
+     {
+      "id": "WS-06.1-R1",
+      "closed": true,
+      "note": "PostgresOutboxStore.save now raises OutboxOwnershipError for any non-None owner that differs from the store's service, which covers a foreign owner, a blank owner, and padded owners. It then writes self._source_service, so no foreign or blank row can reach the table. The unit tests cover foreign, empty, whitespace and padded owners and assert conn.calls == []. tests/solace_events passes (241). I did not run the real-PG test."
+     }
+    ],
+    "findings": []
+   },
+   "verified": []
+  }
+ ]
+}

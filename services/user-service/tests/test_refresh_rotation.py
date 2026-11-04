@@ -12,7 +12,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
-from src.api import RefreshRequest, refresh_token
+from src.api_auth import RefreshRequest, refresh_token
 from src.infrastructure.jwt_service import (
     JWTConfig,
     JWTService,

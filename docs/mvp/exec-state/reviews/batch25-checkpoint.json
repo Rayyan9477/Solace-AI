@@ -1,0 +1,707 @@
+[
+ {
+  "task": "WS-04.F1",
+  "lens": "lifecycle",
+  "review": {
+   "spec_verdict": "PASS",
+   "quality_verdict": "APPROVED",
+   "prior_findings": [
+    {
+     "id": "IF01-LIF-1",
+     "closed": true,
+     "note": "`service_runtime` exists in bootstrap.py:516-535 and is exported. I ran in-process uvicorn 0.40 probes with a fake asyncpg-like pool held in the real ConnectionPoolManager registry. Composition raising inside the bracket gave consumer.cleanup, redis.aclose, pg.close, with nothing pending and the runtime detached. Cancelling at asyncio.run teardown ran svc.close, redis.aclose and pg.close, both during startup and while serving. A registered service stop that raised did not skip the redis or pg closers. The conformance check rejects the bare shape. The reference app and the docstring use form (a). Removing the finally from service_runtime turns 2 LIF-1 tests red. One minor gap remains, the new WS04F1-LIF-1: the check still accepts stop code placed after the yield."
+    },
+    {
+     "id": "IF01-LIF-2",
+     "closed": true,
+     "note": "register_background_task now registers a cancel-and-await step (bootstrap.py:190, 334-341). In the uvicorn shutdown probe, a pool-using consumer task was cancelled and its finally ran a pool query successfully before redis.aclose and pg.close. Nothing was pending afterwards, and the same held on the composition-failure path. Removing the canceller turns the LIF-2 test red."
+    },
+    {
+     "id": "IF01-LIF-3",
+     "closed": true,
+     "note": "_run_closer now waits a grace of SHUTDOWN_CANCEL_GRACE_SECONDS=1.0 after cancelling a timed-out closer (bootstrap.py:550-557). In the uvicorn probe the step timeout was 0.3 s. The event_plane closer timed out, its finally ran a pool query successfully, and only then did the next closers (consumer stop, task cancel, redis, pg) start. The unit test also shows that a closer which swallows cancellation is abandoned after the timeout plus the 1 s grace. Removing the grace turns both LIF-3 tests red."
+    },
+    {
+     "id": "IF01-LIF-4",
+     "closed": true,
+     "note": "_close_postgres_pools empties the registry in a finally (datastores.py:165-192). Uvicorn probe: a pool with a connection that is never released timed out under the 0.3 s step. The pool was terminated, and _pools, _pool_configs and _locks were all empty afterwards. A second uvicorn lifespan in the same process then built a new pool through get_pool's slow path, the query returned 1, and /ready showed postgres connected on the new pool. Removing the finally turns the LIF-4 test red. connection_manager.py was not touched."
+    },
+    {
+     "id": "IF01-LIF-5",
+     "closed": true,
+     "note": "_begin_stopping, the _stopping short-circuit in evaluate_readiness, and _detach are all present. Uvicorn probe: /ready returned 200 while serving. Called over ASGI from inside a closer during the stop, it returned 503 with checks {} and solace_service_ready at 0. After the stop it returned 503, the gauge stayed 0, and app.state.runtime was gone. After a TestClient lifespan, a plain TestClient GET /ready returned 503. Reverting the flag or the detach turns the LIF-5 tests red."
+    },
+    {
+     "id": "IF01-PHI-1",
+     "closed": true,
+     "note": "Outside the lifecycle lens, so I did not re-probe it here. The basis is that the dedicated tests pass: /chained, /implicit, /group, the dead background task (direct and chained), stdlib and structlog .exception, and the copied-traceback backstop. They assert that no patient text reaches the rendered stdout/stderr and that there is no exception key (55/55 passed)."
+    },
+    {
+     "id": "IF01-PHI-2",
+     "closed": true,
+     "note": "Outside the lifecycle lens, not re-probed. Basis: the tests assert that a warning becomes a JSON line on stdout with stderr empty and the email and phone masked, that a pydantic serializer warning becomes python_warning_redacted, and that py.warnings is routed. They pass."
+    },
+    {
+     "id": "IF01-PHI-3",
+     "closed": true,
+     "note": "Outside the lifecycle lens, not re-probed. Basis: the parametrized tests (exception, tuple, frozenset, set, bytes, dict keys, nested, object, plus a stdlib %s tuple) assert that no email or phone number appears in the rendered output. They pass."
+    },
+    {
+     "id": "IF01-PHI-4",
+     "closed": true,
+     "note": "Outside the lifecycle lens, not re-probed. Basis: the tests assert that the extra_forbidden key is logged as field '[key]' in the 500 summary (top-level and chained) and in the lifespan summary. They pass."
+    },
+    {
+     "id": "IF01-HTT-2",
+     "closed": true,
+     "note": "Outside the lifecycle lens, not re-probed. Basis: tests that drive raw ASGI and TestClient pass: an oversized Content-Length gets 413 with receive never called, a chunked body of 1 048 577 bytes gets 413 with at most the limit buffered, a body of exactly the limit is served, the spec override works, and invalid limits are rejected. The envelope code is still lower case; see WS04F1-HTT-1."
+    }
+   ],
+   "findings": [
+    {
+     "id": "WS04F1-LIF-1",
+     "severity": "minor",
+     "file": "tests/bootstrap/test_service_conformance.py",
+     "line": 220,
+     "problem": "`_bracket_form` accepts service stop code after the `yield`. Form (a) only requires that the `async with` body contains a yield somewhere, and form (b) only requires that the try body does. So a lifespan that writes `await consumer.stop()` after the `yield` passes the gate. The brief defines form (a) as having every service-owned stop registered with `runtime.register_shutdown`. The shape note (WS-04.F1-shape.md, \"Rules the conformance check enforces\": \"no service stop code after the `yield`\") and the bootstrap.py docstring (\"no service stop code follows the `yield` ... accepts these two shapes and nothing else\") both say the check enforces this, and it does not. NEAR_MISSES has no case for it.",
+     "failure_scenario": "Shapes the check accepts, shown by a probe that fed snippets to `_assert_lifespan_bracketed`: `async with service_runtime(app, SPEC) as runtime: consumer.start(); producer.start(); yield; await consumer.stop(); await producer.stop()`. The form (b) equivalent with stops after the yield inside the try is accepted too. Probes driven through app.router.lifespan_context: (1) producer.start() raised after consumer.start(). Events were ['consumer.start', 'redis.aclose', 'pg.close', 'lifespan_raised:RuntimeError']: consumer.stop never ran, so a Kafka consumer stays in its group with its fetch tasks live. (2) consumer.stop() raised. Events were [..., 'consumer.stop', 'redis.aclose', 'pg.close', 'lifespan_raised:ConnectionError']: producer.stop was skipped and the lifespan shutdown failed. On cancellation every stop after the yield is skipped. The datastore closers still run, so the damage is limited to service-owned components (the W1 event plane, consumers, outbox flush). It is latent: the five adopted mains (safety, therapy, diagnosis, memory, orchestrator) put nothing after the yield, but the gate would not catch a later one that did.",
+     "fix": "In both branches of `_bracket_form`, require the yield to be the last statement of the bracket body. For form (a) that is `body[0].body[-1]`, for form (b) it is `body[1].body[-1]`. It must be `ast.Expr(value=ast.Yield(value=None))`, and no earlier statement may contain a yield. Alternatively, reject any statement that follows the statement containing the yield. Add NEAR_MISSES cases `stop_code_after_the_yield_in_form_a` and `stop_code_after_the_yield_in_form_b`.",
+     "evidence": "test_service_conformance.py:216-230 checks only `_contains_yield(body[0].body)` and `_contains_yield(body[1].body)`. Scratch probe (since deleted), accept/reject results: form_a ACCEPTED, form_b ACCEPTED, a_stop_code_after_yield_inside_with ACCEPTED, b_stop_code_after_yield_inside_try ACCEPTED, bare_last_statement rejected, b_statement_between_start_and_try rejected. Runtime probe output: `composition_fails_after_consumer_started ['consumer.start', 'redis.aclose', 'pg.close', 'lifespan_raised:RuntimeError']` and `first_stop_raises ['consumer.start', 'producer.start', 'consumer.stop', 'redis.aclose', 'pg.close', 'lifespan_raised:ConnectionError']`. The enforcement claim appears at WS-04.F1-shape.md:43-44 and bootstrap.py:30-37."
+    },
+    {
+     "id": "WS04F1-HTT-1",
+     "severity": "minor",
+     "file": "src/solace_infrastructure/runtime/http.py",
+     "line": 115,
+     "problem": "The pending controller ruling asks for upper case. The 413 envelope code is still lower case: `REQUEST_TOO_LARGE_CODE = \"request_too_large\"`. The other envelope codes are upper case (`INTERNAL_ERROR`, `BAD_REQUEST`, `VALIDATION_ERROR`, http.py:109-113).",
+     "failure_scenario": "A client or gateway that branches on `error.code` with the upper-case convention gets `{\"error\":{\"code\":\"request_too_large\",...}}` for an oversized body. That code is the only one out of line with every other runtime envelope, and the tests pin the lower-case value as the contract.",
+     "fix": "Set `REQUEST_TOO_LARGE_CODE = \"REQUEST_TOO_LARGE\"`. Update the assertions at tests/bootstrap/test_if01_audit_hardening.py:915 and :964, and the docstrings that quote the code: http.py:22 and :390, spec.py:30, bootstrap.py:13.",
+     "evidence": "http.py:109-116 (INTERNAL_ERROR, BAD_REQUEST and VALIDATION_ERROR are upper case; request_too_large is lower case). test_if01_audit_hardening.py:915 `\"code\": \"request_too_large\"` and :964 `== \"request_too_large\"`. The report's Concerns section flags the same thing."
+    }
+   ]
+  },
+  "verified": [
+   {
+    "id": "WS04F1-LIF-1",
+    "severity": "minor",
+    "file": "tests/bootstrap/test_service_conformance.py",
+    "line": 220,
+    "problem": "`_bracket_form` accepts service stop code after the `yield`. Form (a) only requires that the `async with` body contains a yield somewhere, and form (b) only requires that the try body does. So a lifespan that writes `await consumer.stop()` after the `yield` passes the gate. The brief defines form (a) as having every service-owned stop registered with `runtime.register_shutdown`. The shape note (WS-04.F1-shape.md, \"Rules the conformance check enforces\": \"no service stop code after the `yield`\") and the bootstrap.py docstring (\"no service stop code follows the `yield` ... accepts these two shapes and nothing else\") both say the check enforces this, and it does not. NEAR_MISSES has no case for it.",
+    "failure_scenario": "Shapes the check accepts, shown by a probe that fed snippets to `_assert_lifespan_bracketed`: `async with service_runtime(app, SPEC) as runtime: consumer.start(); producer.start(); yield; await consumer.stop(); await producer.stop()`. The form (b) equivalent with stops after the yield inside the try is accepted too. Probes driven through app.router.lifespan_context: (1) producer.start() raised after consumer.start(). Events were ['consumer.start', 'redis.aclose', 'pg.close', 'lifespan_raised:RuntimeError']: consumer.stop never ran, so a Kafka consumer stays in its group with its fetch tasks live. (2) consumer.stop() raised. Events were [..., 'consumer.stop', 'redis.aclose', 'pg.close', 'lifespan_raised:ConnectionError']: producer.stop was skipped and the lifespan shutdown failed. On cancellation every stop after the yield is skipped. The datastore closers still run, so the damage is limited to service-owned components (the W1 event plane, consumers, outbox flush). It is latent: the five adopted mains (safety, therapy, diagnosis, memory, orchestrator) put nothing after the yield, but the gate would not catch a later one that did.",
+    "fix": "In both branches of `_bracket_form`, require the yield to be the last statement of the bracket body. For form (a) that is `body[0].body[-1]`, for form (b) it is `body[1].body[-1]`. It must be `ast.Expr(value=ast.Yield(value=None))`, and no earlier statement may contain a yield. Alternatively, reject any statement that follows the statement containing the yield. Add NEAR_MISSES cases `stop_code_after_the_yield_in_form_a` and `stop_code_after_the_yield_in_form_b`.",
+    "evidence": "test_service_conformance.py:216-230 checks only `_contains_yield(body[0].body)` and `_contains_yield(body[1].body)`. Scratch probe (since deleted), accept/reject results: form_a ACCEPTED, form_b ACCEPTED, a_stop_code_after_yield_inside_with ACCEPTED, b_stop_code_after_yield_inside_try ACCEPTED, bare_last_statement rejected, b_statement_between_start_and_try rejected. Runtime probe output: `composition_fails_after_consumer_started ['consumer.start', 'redis.aclose', 'pg.close', 'lifespan_raised:RuntimeError']` and `first_stop_raises ['consumer.start', 'producer.start', 'consumer.stop', 'redis.aclose', 'pg.close', 'lifespan_raised:ConnectionError']`. The enforcement claim appears at WS-04.F1-shape.md:43-44 and bootstrap.py:30-37.",
+    "votes": [
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "`_bracket_form` in tests/bootstrap/test_service_conformance.py (lines 213-231) only requires `_contains_yield(...)` somewhere in the `async with` body (form a) or the try body (form b). It never requires the yield to be the last statement. Stop code written after the yield would therefore pass the gate, so the gap is real. The finding's runtime probes were not re-run. Their outcomes follow from how `async with` and try/finally unwind after an exception or cancellation. I could not find the quoted docstring and shape-note wording (\"no service stop code after the yield\") by grep, so I did not confirm that the docs claim this check enforces it. Severity \"minor\" is fair: it is a latent gap in a test gate, and none of the five adopted mains has code after the yield."
+     }
+    ],
+    "survives": true
+   },
+   {
+    "id": "WS04F1-HTT-1",
+    "severity": "minor",
+    "file": "src/solace_infrastructure/runtime/http.py",
+    "line": 115,
+    "problem": "The pending controller ruling asks for upper case. The 413 envelope code is still lower case: `REQUEST_TOO_LARGE_CODE = \"request_too_large\"`. The other envelope codes are upper case (`INTERNAL_ERROR`, `BAD_REQUEST`, `VALIDATION_ERROR`, http.py:109-113).",
+    "failure_scenario": "A client or gateway that branches on `error.code` with the upper-case convention gets `{\"error\":{\"code\":\"request_too_large\",...}}` for an oversized body. That code is the only one out of line with every other runtime envelope, and the tests pin the lower-case value as the contract.",
+    "fix": "Set `REQUEST_TOO_LARGE_CODE = \"REQUEST_TOO_LARGE\"`. Update the assertions at tests/bootstrap/test_if01_audit_hardening.py:915 and :964, and the docstrings that quote the code: http.py:22 and :390, spec.py:30, bootstrap.py:13.",
+    "evidence": "http.py:109-116 (INTERNAL_ERROR, BAD_REQUEST and VALIDATION_ERROR are upper case; request_too_large is lower case). test_if01_audit_hardening.py:915 `\"code\": \"request_too_large\"` and :964 `== \"request_too_large\"`. The report's Concerns section flags the same thing.",
+    "votes": [
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "The code at http.py:115 still reads REQUEST_TOO_LARGE_CODE = \"request_too_large\". The lower-case string also appears in the docstrings at http.py:22 and :390, spec.py:30 and bootstrap.py:13. The brief (line 18) specifies the code as lower-case `request_too_large`, so the implementation matches the brief. It conflicts with the controller ruling quoted in the task, which asks for upper case like the other envelope codes. I did not view http.py:109-113 or the test assertions, so I did not re-check that the other codes are upper case or what the tests pin. The finding is real and low impact, and a minor severity is appropriate. The fix is a trivial constant change plus matching test and docstring updates."
+     }
+    ],
+    "survives": true
+   }
+  ]
+ },
+ {
+  "task": "WS-04.F1",
+  "lens": "phi-http",
+  "review": {
+   "spec_verdict": "PASS",
+   "quality_verdict": "CHANGES_REQUESTED",
+   "prior_findings": [
+    {
+     "id": "IF01-LIF-1",
+     "closed": true,
+     "note": "Not this lens, so not probed. service_runtime exists (bootstrap.py:516-535) with stop in a finally, and is exported. Conformance accepts only forms (a) and (b). Its LIF-1 cases pass (55/55 in test_if01_audit_hardening.py). tests/bootstrap: 8 failed / 196 passed / 1 skipped, and every failure is a per-service conformance case still waiting on phase B (analytics, notification, personality, user)."
+    },
+    {
+     "id": "IF01-LIF-2",
+     "closed": true,
+     "note": "Not probed in this lens. register_background_task now registers a _task_canceller step (bootstrap.py:334-341), bounded by _run_closer's timeout plus grace. The LIF-2 test passes."
+    },
+    {
+     "id": "IF01-LIF-3",
+     "closed": true,
+     "note": "Not probed in this lens. _run_closer cancels a timed-out closer, then waits SHUTDOWN_CANCEL_GRACE_SECONDS=1.0 (bootstrap.py:550-557). Both LIF-3 tests pass."
+    },
+    {
+     "id": "IF01-LIF-4",
+     "closed": true,
+     "note": "Not probed in this lens. datastores._forget_postgres_pools runs in a finally (datastores.py:178-181). The LIF-4 test passes. tests/solace_infrastructure: 936 passed, 12 failed, and the failures are only the ruled kafka/test_topics.py cases (localhost:9092 refused)."
+    },
+    {
+     "id": "IF01-LIF-5",
+     "closed": true,
+     "note": "Not probed in this lens. _begin_stopping makes /ready 503 and sets the gauge to 0. _detach removes app.state.runtime after the closers run (bootstrap.py:321-331, 504-512). Both LIF-5 tests pass."
+    },
+    {
+     "id": "IF01-PHI-1",
+     "closed": true,
+     "note": "The audit's scenarios are fixed. Probes and tests show no input text for raise-from, implicit __context__, TaskGroup ExceptionGroup, a dead background task (direct and chained), stdlib and structlog .exception, and asyncio 'Exception in callback'. Each of these logs error_type, validation_errors and origin, with no traceback. Two nearby paths still leak and are raised as new findings: WS04F1-PHI-1 (FastAPI ResponseValidationError) and WS04F1-PHI-2 (the event text of asyncio 'Task exception was never retrieved')."
+    },
+    {
+     "id": "IF01-PHI-2",
+     "closed": true,
+     "note": "Probe after a strict configure_service_logging: warnings.warn with an email and a phone gave one JSON line on stdout, masked to j*******@example.com and ******5309, with nothing on stderr. Five pydantic 2.13 serializer warnings (enum, int, date, list, model_dump_json) were each rewritten to python_warning_redacted with warning_category=UserWarning. py.warnings is routed."
+    },
+    {
+     "id": "IF01-PHI-3",
+     "closed": true,
+     "note": "Probe of exception, tuple, set, frozenset, bytes, bytearray, memoryview, email/phone dict keys, nested list/dict/tuple, model_construct object, and stdlib %s/%r tuple and set arguments: every email and phone was masked before rendering, and the keys became [key] and [key]#2."
+    },
+    {
+     "id": "IF01-PHI-4",
+     "closed": true,
+     "note": "An extra_forbidden key is logged as field '[key]' on the top-level 500 line, the chained 500 line and the lifespan filter (tests pass). The 422 body uses the same _masked_field_path."
+    },
+    {
+     "id": "IF01-HTT-2",
+     "closed": true,
+     "note": "Real uvicorn 0.40 raw-socket probe, all confirmed. Content-Length 1048577 with headers only: 413 with the inbound X-Request-ID echoed in header and body, Connection: close, no SENTINEL echo, and the app never ran. Expect: 100-continue: 413 with no 100 sent. Chunked 1048577: 413 on both the stream and JSON routes. Exactly 1048576 bytes: 200 (declared and chunked). Spec override of 64: 64 gives 200, 65 gives 413 (declared and chunked). 30 MiB chunked: the app saw at most 1048576 bytes. The only gap left is the code's casing (WS04F1-HTT-1). Earlier PHI fixes did not regress: test_mvp_180_logging 32 passed, test_mvp_180_sanitizer_reentrancy 24 passed."
+    }
+   ],
+   "findings": [
+    {
+     "id": "WS04F1-PHI-1",
+     "severity": "important",
+     "file": "src/solace_infrastructure/runtime/http.py",
+     "line": 508,
+     "problem": "FastAPI's ResponseValidationError is not a pydantic ValidationError. FastAPI also raises it outside the except block that caught the pydantic error, so nothing links it to one. _find_validation_error therefore returns None, and _log_server_fault logs it with exc_info=exc. _ValidationSafeExceptionRenderer then renders the full traceback. The exception's message lists each error dict with 'input': <value>, and the text backstop only looks for pydantic's 'input_value=' marker, so it misses this. The runtime's own unhandled_exception line carries the response content verbatim. Here that content is stored patient data that no longer fits the response model, which is the same 'stored data that no longer validates' case PHI-1 exists for. The report says 'PHI-1 covers every path', but no test covers response models.",
+     "failure_scenario": "A route declares response_model=Age, or returns '-> Model', and returns a stored row {'age': 'Margaret Hollis reports chest pain'}. The client gets a correct 500 INTERNAL_ERROR envelope. But the strict stdout line is {\"error_type\": \"ResponseValidationError\", \"event\": \"unhandled_exception\", \"exception\": \"...fastapi.exceptions.ResponseValidationError: 1 validation error:\\n  {'type': 'int_parsing', 'loc': ('response', 'age'), ..., 'input': 'Margaret Hollis reports chest pain'}...\"}. The regex sanitizer cannot mask the free text. The repo has 83 response_model= routes across 11 services, and no ResponseValidationError handler anywhere.",
+     "fix": "Treat FastAPI's ValidationException family (ResponseValidationError, RequestValidationError and WebSocketRequestValidationError, imported lazily with ImportError tolerated) like pydantic's ValidationError in logging._validation_error_types and _find_validation_error. Give _validation_error_fields a branch for it: FastAPI's .errors() takes no keyword arguments and returns dicts with type and loc, which are then masked with _masked_field_path. Also extend the text backstop to FastAPI's \"'input':\" rendering, which covers RuntimeError(f'... {exc.errors()}') too. Add a test with a response_model route that returns patient text, asserting there is no input text and that validation_errors is present.",
+     "evidence": "In-process probe: create_service_app with a strict spec, configure_service_logging(strict) and TestClient(raise_server_exceptions=False). GET /p/response-model returned 500, and its unhandled_exception line held 'input': 'Margaret Hollis reports chest pain'. FastAPI 0.133 exceptions.py:204-209 (ValidationException.__str__ formats each err dict), routing.py:274-289 (serialize_response raises ResponseValidationError after field.validate has returned, so there is no __context__). logging.py:316-322 (only pydantic.ValidationError) and 427 (backstop marker 'input_value=' only). A grep of the repo finds ResponseValidationError in no .py file, and tests/bootstrap has no response_model case."
+    },
+    {
+     "id": "WS04F1-HTT-1",
+     "severity": "important",
+     "file": "src/solace_infrastructure/runtime/http.py",
+     "line": 115,
+     "problem": "The 413 envelope code is still lower case: REQUEST_TOO_LARGE_CODE = \"request_too_large\". The other envelope codes are INTERNAL_ERROR, BAD_REQUEST and VALIDATION_ERROR. The controller's pending ruling for this fix round is upper case REQUEST_TOO_LARGE. Clients and the phase-B adoptions are about to pin the code, so the mixed case breaks the uniform-envelope contract.",
+     "failure_scenario": "Real uvicorn probe: an oversized Content-Length or chunked body gets {\"error\":{\"code\":\"request_too_large\",\"message\":\"Request body too large\",\"request_id\":...}}. A client or gateway that matches upper-case envelope codes, as for every other error, misses it.",
+     "fix": "Set REQUEST_TOO_LARGE_CODE = \"REQUEST_TOO_LARGE\". Update the docstrings that quote it (http.py:22 and 390, bootstrap.py:13, spec.py:30) and the test assertions (test_if01_audit_hardening.py:915 and 964).",
+     "evidence": "http.py:109-116 constants. Probe 413 bodies on port 18731 show code 'request_too_large'. The report's Concerns section names the same gap."
+    },
+    {
+     "id": "WS04F1-PHI-2",
+     "severity": "minor",
+     "file": "src/solace_infrastructure/runtime/logging.py",
+     "line": 427,
+     "problem": "The 'input_value=' backstop and the ValidationError rule only cover exc_info and the rendered 'exception' field. Text outside that field is still rendered verbatim. (1) asyncio's default exception handler puts repr(task) into the record message. For a Task, that repr includes exception=<repr(exc)>, and for pydantic v2 repr(ValidationError) is the full message with input_value='...'. The renderer drops exc_info and adds validation_errors, but 'event' keeps the patient text. (2) An exception object passed as an event value (log.error('x', error=exc)) is turned by the new PHI-3 normaliser (_renderable) into repr(exc), which is the full ValidationError text. The report says asyncio's handler is covered, but no test exercises 'Task exception was never retrieved'.",
+     "failure_scenario": "Strict configure. A fire-and-forget task (not registered with the runtime) raises a ValidationError on patient text and is garbage-collected. The root handler then writes {\"event\": \"Task exception was never retrieved\\nfuture: <Task finished ... exception=1 validation error for Age ... [type=int_parsing, input_value='Margaret Hollis reports chest pain', input_type=str]...>\", \"error_type\": \"ValidationError\", \"validation_errors\": [...]}. Similarly, structlog .error('consumer_failed', error=ve) renders \"error\": \"1 validation error for Age ... input_value='Margaret Hollis reports chest pain'...\".",
+     "fix": "Keep pydantic input out of every rendered string, not only 'exception'. In the format_exc_info step, when a ValidationError is found or the event text contains 'input_value=', cut the event down to its first line or a fixed text. In _redact, summarise BaseException values through _find_validation_error (type plus validation_errors) instead of repr, and drop or replace any string value that contains 'input_value='. Alternatively, add a _WarningFilter-style rewrite on the asyncio logger. Add tests for 'Task exception was never retrieved' and for error=exc.",
+     "evidence": "In-process probe: asyncio.create_task(bad()), then del and gc.collect(), gave the event text above with input_value='Margaret Hollis reports chest pain'. log.error('consumer_failed', error=ve) and errors=[ve] gave the same text. logging.py:416-430 (backstop checks only event_dict['exception']) and 528-539/570-582 (_redact/_renderable use repr for exception values). The latent trigger is a fire-and-forget task or error=exc call site. Today services mostly pass str(e), which the runtime cannot fix."
+    }
+   ]
+  },
+  "verified": [
+   {
+    "id": "WS04F1-PHI-1",
+    "severity": "important",
+    "file": "src/solace_infrastructure/runtime/http.py",
+    "line": 508,
+    "problem": "FastAPI's ResponseValidationError is not a pydantic ValidationError. FastAPI also raises it outside the except block that caught the pydantic error, so nothing links it to one. _find_validation_error therefore returns None, and _log_server_fault logs it with exc_info=exc. _ValidationSafeExceptionRenderer then renders the full traceback. The exception's message lists each error dict with 'input': <value>, and the text backstop only looks for pydantic's 'input_value=' marker, so it misses this. The runtime's own unhandled_exception line carries the response content verbatim. Here that content is stored patient data that no longer fits the response model, which is the same 'stored data that no longer validates' case PHI-1 exists for. The report says 'PHI-1 covers every path', but no test covers response models.",
+    "failure_scenario": "A route declares response_model=Age, or returns '-> Model', and returns a stored row {'age': 'Margaret Hollis reports chest pain'}. The client gets a correct 500 INTERNAL_ERROR envelope. But the strict stdout line is {\"error_type\": \"ResponseValidationError\", \"event\": \"unhandled_exception\", \"exception\": \"...fastapi.exceptions.ResponseValidationError: 1 validation error:\\n  {'type': 'int_parsing', 'loc': ('response', 'age'), ..., 'input': 'Margaret Hollis reports chest pain'}...\"}. The regex sanitizer cannot mask the free text. The repo has 83 response_model= routes across 11 services, and no ResponseValidationError handler anywhere.",
+    "fix": "Treat FastAPI's ValidationException family (ResponseValidationError, RequestValidationError and WebSocketRequestValidationError, imported lazily with ImportError tolerated) like pydantic's ValidationError in logging._validation_error_types and _find_validation_error. Give _validation_error_fields a branch for it: FastAPI's .errors() takes no keyword arguments and returns dicts with type and loc, which are then masked with _masked_field_path. Also extend the text backstop to FastAPI's \"'input':\" rendering, which covers RuntimeError(f'... {exc.errors()}') too. Add a test with a response_model route that returns patient text, asserting there is no input text and that validation_errors is present.",
+    "evidence": "In-process probe: create_service_app with a strict spec, configure_service_logging(strict) and TestClient(raise_server_exceptions=False). GET /p/response-model returned 500, and its unhandled_exception line held 'input': 'Margaret Hollis reports chest pain'. FastAPI 0.133 exceptions.py:204-209 (ValidationException.__str__ formats each err dict), routing.py:274-289 (serialize_response raises ResponseValidationError after field.validate has returned, so there is no __context__). logging.py:316-322 (only pydantic.ValidationError) and 427 (backstop marker 'input_value=' only). A grep of the repo finds ResponseValidationError in no .py file, and tests/bootstrap has no response_model case.",
+    "votes": [
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "I could not refute it. In the repo venv, FastAPI 0.133.0's ResponseValidationError is not a pydantic ValidationError. Its MRO is ValidationException, Exception. _find_validation_error returns None for it, and its text contains the input ('Margaret' appears in str(e)). logging.py:316-322 only registers pydantic's ValidationError, and the backstop at line 427 only looks for 'input_value='. So the renderer falls through to the normal traceback, and the stored text reaches the log line. Severity \"important\" is reasonable. The data is PHI, and the repo has many response_model routes."
+     },
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "No brief, ruling or later task covers this. The brief for PHI-1 (WS-04.F1-brief.md:28) names only a pydantic ValidationError in the exception chain, so a strict reading puts FastAPI's ResponseValidationError outside it. But the ledger entry and the report (\"PHI-1 covers every path\") state the intent as logging no stored or user input on validation failure. logging.py:316-322 matches only pydantic.ValidationError, and the text backstop marker at line 97 is only \"input_value=\". A grep of the PHI-1 and response_model mentions under D:\\tmp\\mvp-exec found nothing that defers or excludes response-model validation. FastAPI's ResponseValidationError str() embeds each error dict with an 'input' key, so a response_model route returning stored patient text would log it verbatim. I did not run the probe myself. I judge this a real gap in a PHI-handling fix, and important severity is reasonable."
+     },
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "I reproduced it with the venv's FastAPI. A response_model route that returns {'age': 'Margaret Hollis reports chest pain'} raises ResponseValidationError. Its str() contains \"'input': 'Margaret Hollis reports chest pain'\", and both __cause__ and __context__ are None. logging.py _validation_error_types returns only pydantic's ValidationError, so _find_validation_error returns None for it. _log_server_fault (http.py:508) then logs with exc_info=exc, and _ValidationSafeExceptionRenderer's backstop only checks for the 'input_value=' marker (logging.py:97), so the traceback text with the patient string gets through. No handler for ResponseValidationError appeared in my grep of the runtime package (it matched only the old marker and helper names). 'Important' is reasonable. It leaks PHI into logs, which the PHI-1 fix was meant to prevent, and it needs stored data that no longer validates against a response model, a case the repo already treats as realistic."
+     }
+    ],
+    "survives": true
+   },
+   {
+    "id": "WS04F1-HTT-1",
+    "severity": "important",
+    "file": "src/solace_infrastructure/runtime/http.py",
+    "line": 115,
+    "problem": "The 413 envelope code is still lower case: REQUEST_TOO_LARGE_CODE = \"request_too_large\". The other envelope codes are INTERNAL_ERROR, BAD_REQUEST and VALIDATION_ERROR. The controller's pending ruling for this fix round is upper case REQUEST_TOO_LARGE. Clients and the phase-B adoptions are about to pin the code, so the mixed case breaks the uniform-envelope contract.",
+    "failure_scenario": "Real uvicorn probe: an oversized Content-Length or chunked body gets {\"error\":{\"code\":\"request_too_large\",\"message\":\"Request body too large\",\"request_id\":...}}. A client or gateway that matches upper-case envelope codes, as for every other error, misses it.",
+    "fix": "Set REQUEST_TOO_LARGE_CODE = \"REQUEST_TOO_LARGE\". Update the docstrings that quote it (http.py:22 and 390, bootstrap.py:13, spec.py:30) and the test assertions (test_if01_audit_hardening.py:915 and 964).",
+    "evidence": "http.py:109-116 constants. Probe 413 bodies on port 18731 show code 'request_too_large'. The report's Concerns section names the same gap.",
+    "votes": [
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "I checked the code and the finding holds. http.py:115 sets REQUEST_TOO_LARGE_CODE = \"request_too_large\". The other envelope codes at lines 109-113 are upper case: INTERNAL_ERROR, BAD_REQUEST and VALIDATION_ERROR. _send_request_too_large (line 383) puts this constant straight into the error body, so a 413 returns the lower-case code. The same string appears in the docstrings at http.py:22 and 390, bootstrap.py:13 and spec.py:30. The task text says the controller ruling is upper case REQUEST_TOO_LARGE and asks for this to be noted as a finding while it is still lower case. \"Important\" fits a small, one-line contract fix. I did not run the uvicorn probe or the tests. The check was a read of the code only."
+     },
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "The code at http.py:115 still has REQUEST_TOO_LARGE_CODE = \"request_too_large\". The brief at WS-04.F1-brief.md:18 specified lower case, but the controller ruling at ledger/progress.md line 212 overrides it: \"Ruling: rename to REQUEST_TOO_LARGE in the fix round - consistency for clients\". The other envelope codes are upper case. The docstrings at http.py:22 and 390, bootstrap.py:13 and spec.py:30 also quote the lower-case code. Nothing makes the lower-case form intended or out of scope. Important severity fits a small contract fix."
+     },
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "I confirmed it in the code. http.py:115 still has REQUEST_TOO_LARGE_CODE = \"request_too_large\". The other envelope codes at http.py:109-114 are upper case: INTERNAL_ERROR, BAD_REQUEST and VALIDATION_ERROR. The task states the controller ruling is upper case, and says to note the finding if the code is still lower case. The docstrings at http.py:22 and 390 also quote the lower-case form. I did not run the probe or check the other files named in the fix. Severity \"important\" holds: no data is exposed, but the code is about to be pinned by clients and phase-B adoptions, so changing it later would be a breaking change. The fix is a one-line change."
+     }
+    ],
+    "survives": true
+   },
+   {
+    "id": "WS04F1-PHI-2",
+    "severity": "minor",
+    "file": "src/solace_infrastructure/runtime/logging.py",
+    "line": 427,
+    "problem": "The 'input_value=' backstop and the ValidationError rule only cover exc_info and the rendered 'exception' field. Text outside that field is still rendered verbatim. (1) asyncio's default exception handler puts repr(task) into the record message. For a Task, that repr includes exception=<repr(exc)>, and for pydantic v2 repr(ValidationError) is the full message with input_value='...'. The renderer drops exc_info and adds validation_errors, but 'event' keeps the patient text. (2) An exception object passed as an event value (log.error('x', error=exc)) is turned by the new PHI-3 normaliser (_renderable) into repr(exc), which is the full ValidationError text. The report says asyncio's handler is covered, but no test exercises 'Task exception was never retrieved'.",
+    "failure_scenario": "Strict configure. A fire-and-forget task (not registered with the runtime) raises a ValidationError on patient text and is garbage-collected. The root handler then writes {\"event\": \"Task exception was never retrieved\\nfuture: <Task finished ... exception=1 validation error for Age ... [type=int_parsing, input_value='Margaret Hollis reports chest pain', input_type=str]...>\", \"error_type\": \"ValidationError\", \"validation_errors\": [...]}. Similarly, structlog .error('consumer_failed', error=ve) renders \"error\": \"1 validation error for Age ... input_value='Margaret Hollis reports chest pain'...\".",
+    "fix": "Keep pydantic input out of every rendered string, not only 'exception'. In the format_exc_info step, when a ValidationError is found or the event text contains 'input_value=', cut the event down to its first line or a fixed text. In _redact, summarise BaseException values through _find_validation_error (type plus validation_errors) instead of repr, and drop or replace any string value that contains 'input_value='. Alternatively, add a _WarningFilter-style rewrite on the asyncio logger. Add tests for 'Task exception was never retrieved' and for error=exc.",
+    "evidence": "In-process probe: asyncio.create_task(bad()), then del and gc.collect(), gave the event text above with input_value='Margaret Hollis reports chest pain'. log.error('consumer_failed', error=ve) and errors=[ve] gave the same text. logging.py:416-430 (backstop checks only event_dict['exception']) and 528-539/570-582 (_redact/_renderable use repr for exception values). The latent trigger is a fire-and-forget task or error=exc call site. Today services mostly pass str(e), which the runtime cannot fix.",
+    "votes": [
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "Reproduced. I ran redact_credentials on {\"event\":\"x\",\"error\":<ValidationError>} and the output \"error\" string still contained input_value='Margaret Hollis reports chest pain'. _redact falls back to _renderable, which uses repr(exc). The input_value= backstop at logging.py:427 only checks event_dict[\"exception\"], so it does not cover event values. The asyncio \"Task exception was never retrieved\" path puts repr(task) into the event text, so the same text would pass through there too; I did not run that path. The \"minor\" rating fits: it needs a fire-and-forget task or an error=exc call site, and most services pass str(e)."
+     }
+    ],
+    "survives": true
+   }
+  ]
+ },
+ {
+  "task": "WS-02.6-fix2",
+  "lens": "closure",
+  "review": {
+   "spec_verdict": "PASS",
+   "quality_verdict": "APPROVED",
+   "prior_findings": [
+    {
+     "id": "WS026F1-CLO-1",
+     "closed": true,
+     "note": "Closed. _APP_ROLE_SQL (connection_manager.py:117-152) gains member_of_superuser_equivalent_role: pg_catalog.pg_has_role(l.oid, p.oid, 'MEMBER') for p.rolname = ANY($1::text[]), over the login CTE that holds both session_user and current_user. Since role_switched already refuses any session/current difference, both roles are covered. verify_app_role binds list(SUPERUSER_EQUIVALENT_ROLES) as $1 (line 179), and the reason text is built from the same tuple, so src/ has one functional copy (line 83). test_ws026_superuser_equivalent_roles_match_the_migrate_job pins it equal to scripts/db/migrate.py:109.\n\nI ran head verify_app_role against a throwaway local PostgreSQL 16.9 cluster (D:\\PostgreSQL\\16, 127.0.0.1 only, under scratch; stopped and deleted afterwards; no container).\n\nRefused, each with only the superuser-equivalent reason:\n- direct GRANT of pg_execute_server_program, of pg_read_server_files, and of pg_write_server_files;\n- a chain through a NOLOGIN link granted WITH INHERIT FALSE;\n- a two-level chain WITH INHERIT FALSE, SET TRUE (where SET ROLE to the link succeeds);\n- a direct grant WITH INHERIT FALSE, SET FALSE (fails closed);\n- a grant WITH ADMIN TRUE, INHERIT FALSE, SET FALSE.\n\nAlso refused:\n- a LOGIN REPLICATION role, with only 'has REPLICATION';\n- check_new_pool_role on a real asyncpg pool of the direct member, with the pool closing.\n\nStill accepted, as it should be: a plain login.\n\nThe same probe against the f925f2f sources accepted every one of these.\n\nBypass attempts, all refused by PG16:\n- GRANT ... TO PUBLIC: role \"public\" does not exist.\n- GRANT ... TO pg_database_owner: cannot be a member of any role.\n- ALTER ROLE pg_execute_server_program RENAME, which would defeat the name lookup: refused, the name is reserved.\n- A CREATEROLE login granting itself, or a new role, any of the three: refused, because only ADMIN holders may grant them. The bundled image is postgres:16-alpine.\n\nNOREPLICATION pin:\n- Services log in as solace_app (docker-compose.yml:64), which infrastructure/init-db/01-roles.sh creates NOREPLICATION. solace_migrator is NOREPLICATION and is never checked by verify_app_role; migrate.py has its own _check_roles.\n- The only callers are ConnectionPoolManager.get_pool and PostgresClient.connect. No other suite fakes the role row, and no fake fetchrow rejects the new bind argument.\n\nMessages carry only the reason texts (which name the three predefined roles) plus repr'd session_user/current_user. They never carry a password or DSN.\n\nTests:\n- Head: the two unit files give 156 passed.\n- With the two f925f2f source blobs shadowed via git archive in scratch: 6 failed, 150 passed. The failures are the [member_of_superuser_equivalent_role] and [can_replicate] params, every-reason, the migrate-equality test, the bind-arg/shape test and the docstring contract."
+    }
+   ],
+   "findings": []
+  },
+  "verified": []
+ },
+ {
+  "task": "WS-03.3-fix1",
+  "lens": "closure",
+  "review": {
+   "spec_verdict": "PASS",
+   "quality_verdict": "APPROVED",
+   "prior_findings": [
+    {
+     "id": "WS033-SEC-1",
+     "closed": true,
+     "note": "Closed. The case guard (empty or any char outside [A-Za-z0-9_-], newline included) runs before umask and printf and before any config write. It prints a fixed message to stderr and exits 1, so the value is never echoed. Strict synthetic passwords come from token_urlsafe, which stays inside the allowed set. The unit test checks the guard comes before printf and that the message is fixed. The e2e test checks the rejected value is absent from the output."
+    },
+    {
+     "id": "WS033-SEC-2",
+     "closed": true,
+     "note": "Closed. The strict-only wrapper sets entrypoint on grafana in docker-compose.prod.yml. It pipes printf '%s' of the variable into 'grafana cli ... admin reset-admin-password --password-from-stdin', so the password is in neither argv nor logs, and all CLI output goes to /dev/null. A failed reset exits 1 with a fixed message. The compose ':?' on GRAFANA_ADMIN_PASSWORD rejects an empty value at render time. On success it execs /run.sh. Dev has no entrypoint override. I could not run the container, so grafana 10.1.0's flag support is taken from the implementer's note."
+    },
+    {
+     "id": "WS033-SPE-1",
+     "closed": false,
+     "note": "Partly closed. user, safety, diagnosis, memory and therapy now wait for redis service_healthy. The orchestrator is still missing: its SPEC has uses_redis=True, so it pings Redis during startup, and its depends_on has no redis (see WS033F1-CLO-1)."
+    }
+   ],
+   "findings": [
+    {
+     "id": "WS033F1-CLO-1",
+     "severity": "minor",
+     "file": "docker-compose.yml",
+     "line": 626,
+     "problem": "orchestrator-service reads Redis at startup but has no depends_on redis. Its depends_on is <<: *app-depends-on (migrate and kafka) plus optional peers. The new test omits it from STARTUP_REDIS_READERS on the claim that its limiter client is lazy. That claim is wrong, because the runtime pings Redis for any service whose SPEC sets uses_redis.",
+     "failure_scenario": "services/orchestrator_service/src/main.py sets uses_redis=True. start_service_runtime calls start_redis, which pings Redis within REDIS_STARTUP_TIMEOUT_SECONDS. If the orchestrator starts before redis is healthy, strict raises StartupDependencyError and the container exits, then relies on restart. Outside strict the Redis check is left degraded, so /ready returns 503 until the refresher recovers. This is the same startup race WS033-SPE-1 reported, left open for the edge service.",
+     "fix": "Add 'redis: {condition: service_healthy}' to the orchestrator-service depends_on. Add 'orchestrator-service' to STARTUP_REDIS_READERS and correct the comment. Better, derive the list from every SPEC with uses_redis=True so it cannot drift.",
+     "evidence": "git show 7ff2a89:services/orchestrator_service/src/main.py has uses_redis=True at line 81. git show 7ff2a89:src/solace_infrastructure/runtime/bootstrap.py runs 'if spec.uses_redis: runtime.redis = await start_redis(...)', and datastores.start_redis does 'await asyncio.wait_for(_ping(client), ...)'. docker-compose.yml orchestrator-service depends_on at lines 626-632 lists only app-depends-on and the optional peers. docker-compose.prod.yml does not add a redis dependency."
+    },
+    {
+     "id": "WS033F1-CLO-2",
+     "severity": "minor",
+     "file": "tests/deploy/conftest.py",
+     "line": 152,
+     "problem": "On the second communicate() timeout in ComposeProject.run, the code only calls proc.kill() and raises. It never reaps the process or closes its pipes.",
+     "failure_scenario": "If the compose CLI ignores the container removal and then also ignores kill (the Windows compose plugin case the comment describes), the Popen child and its two pipe handles stay open until garbage collection. The raise itself cannot hang, so only a small resource leak remains. A KeyboardInterrupt during communicate() skips the cleanup entirely.",
+     "fix": "After kill(), call proc.communicate(timeout=5) inside a suppress(Exception), or use 'with Popen(...) as proc'. Wrap the call in try/finally so any exception removes the one-off container.",
+     "evidence": "The diff of tests/deploy/conftest.py shows 'except subprocess.TimeoutExpired: proc.kill()' directly followed by 'raise ComposeProjectError', and no wait or communicate after the kill."
+    }
+   ]
+  },
+  "verified": [
+   {
+    "id": "WS033F1-CLO-1",
+    "severity": "minor",
+    "file": "docker-compose.yml",
+    "line": 626,
+    "problem": "orchestrator-service reads Redis at startup but has no depends_on redis. Its depends_on is <<: *app-depends-on (migrate and kafka) plus optional peers. The new test omits it from STARTUP_REDIS_READERS on the claim that its limiter client is lazy. That claim is wrong, because the runtime pings Redis for any service whose SPEC sets uses_redis.",
+    "failure_scenario": "services/orchestrator_service/src/main.py sets uses_redis=True. start_service_runtime calls start_redis, which pings Redis within REDIS_STARTUP_TIMEOUT_SECONDS. If the orchestrator starts before redis is healthy, strict raises StartupDependencyError and the container exits, then relies on restart. Outside strict the Redis check is left degraded, so /ready returns 503 until the refresher recovers. This is the same startup race WS033-SPE-1 reported, left open for the edge service.",
+    "fix": "Add 'redis: {condition: service_healthy}' to the orchestrator-service depends_on. Add 'orchestrator-service' to STARTUP_REDIS_READERS and correct the comment. Better, derive the list from every SPEC with uses_redis=True so it cannot drift.",
+    "evidence": "git show 7ff2a89:services/orchestrator_service/src/main.py has uses_redis=True at line 81. git show 7ff2a89:src/solace_infrastructure/runtime/bootstrap.py runs 'if spec.uses_redis: runtime.redis = await start_redis(...)', and datastores.start_redis does 'await asyncio.wait_for(_ping(client), ...)'. docker-compose.yml orchestrator-service depends_on at lines 626-632 lists only app-depends-on and the optional peers. docker-compose.prod.yml does not add a redis dependency.",
+    "votes": [
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "Confirmed from `git show 7ff2a89` that orchestrator-service has `uses_redis=True`, which makes `bootstrap.py` call `start_redis` and ping Redis once with no retry. Its compose `depends_on` has no redis entry (only `app-depends-on` and optional peers), and `REDIS_URL` reaches it through the merged `data-plane-env`. The test's `STARTUP_REDIS_READERS` omits it, and its comment calls the limiter client lazy, which the startup ping contradicts. The race is real and recoverable through the restart policy, so minor severity is right."
+     }
+    ],
+    "survives": true
+   },
+   {
+    "id": "WS033F1-CLO-2",
+    "severity": "minor",
+    "file": "tests/deploy/conftest.py",
+    "line": 152,
+    "problem": "On the second communicate() timeout in ComposeProject.run, the code only calls proc.kill() and raises. It never reaps the process or closes its pipes.",
+    "failure_scenario": "If the compose CLI ignores the container removal and then also ignores kill (the Windows compose plugin case the comment describes), the Popen child and its two pipe handles stay open until garbage collection. The raise itself cannot hang, so only a small resource leak remains. A KeyboardInterrupt during communicate() skips the cleanup entirely.",
+    "fix": "After kill(), call proc.communicate(timeout=5) inside a suppress(Exception), or use 'with Popen(...) as proc'. Wrap the call in try/finally so any exception removes the one-off container.",
+    "evidence": "The diff of tests/deploy/conftest.py shows 'except subprocess.TimeoutExpired: proc.kill()' directly followed by 'raise ComposeProjectError', and no wait or communicate after the kill.",
+    "votes": [
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "The diff matches the finding. After the second communicate(timeout=60) times out, the code calls only proc.kill() and then raises ComposeProjectError. It never waits on the process and never closes the pipes, so the Popen child and its two pipe handles are left until garbage collection. The finding says this is only a small leak and that the raise cannot hang, and that holds. The leak sits in a rare test-helper path, so minor severity is right. I did not check the KeyboardInterrupt claim; the diff comment says the fixture teardown removes the container, which may cover that case."
+     }
+    ],
+    "survives": true
+   }
+  ]
+ },
+ {
+  "task": "WS-03.4",
+  "lens": "spec-ops",
+  "review": {
+   "spec_verdict": "PASS",
+   "quality_verdict": "APPROVED",
+   "prior_findings": [],
+   "findings": [
+    {
+     "id": "WS034-SPE-1",
+     "severity": "minor",
+     "file": "docker-compose.yml",
+     "line": 528,
+     "problem": "WEAVIATE_ENABLED is not tied to the vector profile. With WEAVIATE_ENABLED=true but no --profile vector, memory-service gets WEAVIATE_HOST=weaviate, a host that does not exist. The reverse also holds: --profile vector alone leaves WEAVIATE_ENABLED=false, so Weaviate starts but nothing uses it. This follows the brief literally and does not break boot, so it is not a defect in this task. It is the implementer's second concern.",
+     "failure_scenario": "An operator sets WEAVIATE_ENABLED=true and forgets --profile vector. Weaviate connection attempts fail against a missing host. main.py degrades to keyword retrieval, but the failure is only visible in logs. In the other case, an operator runs --profile vector without the flag and pays for an idle Weaviate.",
+     "fix": "Document the pairing in the runbook and add a deploy check that fails when WEAVIATE_ENABLED=true is rendered without the weaviate service. Defer to a later WS-03 preflight or runbook task; no change is needed for this task's acceptance.",
+     "evidence": "Renders for dev, strict, strict+vector and dev+vector all show memory-service WEAVIATE_ENABLED='false'. memory-service depends_on is [kafka, migrate, redis] in every render, and WeaviateSettings (env_prefix WEAVIATE_, enabled=False) gates repo creation in main.py. Other checks: the 68 tests under tests/deploy pass with integration tests deselected; the strict kafka limit is 1073741824 against a 512m broker heap plus a 96m probe JVM (about 860 MiB estimated total); the zookeeper heap is 256m in a 512m limit; the weaviate healthcheck is wget with start_period 1m0s and retries 10; kafka-ui is pinned to v0.7.2. The strict WEAVIATE_API_KEY requirement is not a defect: memory-service needs the variable anyway and strict_env_file generates it. Tag-only pinning of kafka-ui matches the other images and the brief. I judged non-vacuity on base 7ff2a89 from the diff and did not run the tests against the base tree."
+    }
+   ]
+  },
+  "verified": [
+   {
+    "id": "WS034-SPE-1",
+    "severity": "minor",
+    "file": "docker-compose.yml",
+    "line": 528,
+    "problem": "WEAVIATE_ENABLED is not tied to the vector profile. With WEAVIATE_ENABLED=true but no --profile vector, memory-service gets WEAVIATE_HOST=weaviate, a host that does not exist. The reverse also holds: --profile vector alone leaves WEAVIATE_ENABLED=false, so Weaviate starts but nothing uses it. This follows the brief literally and does not break boot, so it is not a defect in this task. It is the implementer's second concern.",
+    "failure_scenario": "An operator sets WEAVIATE_ENABLED=true and forgets --profile vector. Weaviate connection attempts fail against a missing host. main.py degrades to keyword retrieval, but the failure is only visible in logs. In the other case, an operator runs --profile vector without the flag and pays for an idle Weaviate.",
+    "fix": "Document the pairing in the runbook and add a deploy check that fails when WEAVIATE_ENABLED=true is rendered without the weaviate service. Defer to a later WS-03 preflight or runbook task; no change is needed for this task's acceptance.",
+    "evidence": "Renders for dev, strict, strict+vector and dev+vector all show memory-service WEAVIATE_ENABLED='false'. memory-service depends_on is [kafka, migrate, redis] in every render, and WeaviateSettings (env_prefix WEAVIATE_, enabled=False) gates repo creation in main.py. Other checks: the 68 tests under tests/deploy pass with integration tests deselected; the strict kafka limit is 1073741824 against a 512m broker heap plus a 96m probe JVM (about 860 MiB estimated total); the zookeeper heap is 256m in a 512m limit; the weaviate healthcheck is wget with start_period 1m0s and retries 10; kafka-ui is pinned to v0.7.2. The strict WEAVIATE_API_KEY requirement is not a defect: memory-service needs the variable anyway and strict_env_file generates it. Tag-only pinning of kafka-ui matches the other images and the brief. I judged non-vacuity on base 7ff2a89 from the diff and did not run the tests against the base tree.",
+    "votes": [
+     {
+      "refuted": true,
+      "severity_ok": true,
+      "reason": "The mechanics are real. docker-compose.yml:528 sets WEAVIATE_ENABLED from a default-false env var, and line 530 hardcodes WEAVIATE_HOST: weaviate. The finding's own text says the pairing \"follows the brief literally and does not break boot, so it is not a defect in this task\". It also says memory-service no longer depends on Weaviate and falls back to keyword retrieval. That means the scenario is an opt-in misconfiguration that degrades gracefully, not a failure of the task's acceptance criteria. Its only proposed action is a later runbook or preflight item. I only grepped the compose file and did not re-render profiles or run tests. I rate it a non-defect for WS-03.4. If it is kept, it should stay at minor or lower."
+     }
+    ],
+    "survives": false
+   }
+  ]
+ },
+ {
+  "task": "WS-11.1",
+  "lens": "spec-lifecycle",
+  "review": {
+   "spec_verdict": "PASS",
+   "quality_verdict": "APPROVED",
+   "prior_findings": [],
+   "findings": [
+    {
+     "id": "WS111-SPE-1",
+     "severity": "minor",
+     "file": "services/orchestrator_service/src/main.py",
+     "line": 248,
+     "problem": "The W0 limiter builds its own Redis client with `redis_asyncio.from_url(redis_url, decode_responses=True)` and passes no socket timeouts. That puts a Redis round trip with no time bound in front of every non-exempt HTTP route, including POST /api/v1/orchestrator/chat (the crisis path). The runtime's own client for the same REDIS_URL uses `socket_connect_timeout` and `socket_timeout` of `REDIS_SOCKET_TIMEOUT_SECONDS` (5.0). Before this task the Redis-backed limiter could never be reached (`settings.redis_url` did not exist), so this dependency on the request path is new.",
+     "failure_scenario": "Redis is unreachable or stalls while the orchestrator is up (dev, or staging during a Redis failover). Each chat request waits on the limiter's connect or read before the graph runs, so the 2 s safety-check and 20 s turn budgets are bypassed. A half-open connection (socket_timeout=None) can hang a request indefinitely. When the error does surface, every non-exempt route returns 500. D-26 (WS-07, W1) sets the target for non-auth routes on a limiter-backend failure: pass, with a metric.",
+     "fix": "In `_register_rate_limiting`, build the client the way the runtime does: `redis_asyncio.from_url(redis_url, decode_responses=True, socket_connect_timeout=REDIS_SOCKET_TIMEOUT_SECONDS, socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS)`, importing the constant from `solace_infrastructure.runtime.datastores`. Optionally add a test that `app.state.rate_limit_redis.connection_pool.connection_kwargs` carries both timeouts. Fail-open with a metric stays WS-07/WS-11.3 (W1) scope.",
+     "evidence": "Scratch probe in dev with CORS_ALLOWED_ORIGINS set: `app.state.rate_limit_redis.connection_pool.connection_kwargs` gives socket_timeout=None and socket_connect_timeout=None. REDIS_URL pointed at 127.0.0.1:1 (refused): POST /chat returned 500 INTERNAL_ERROR after 3.1 s. Pointed at blackholed 10.255.255.1:6379: 500 after 22.0 s, the Windows connect timeout (Linux SYN retries give about 127 s). Compare src/solace_infrastructure/runtime/datastores.py:246-251 (runtime client with timeouts, REDIS_SOCKET_TIMEOUT_SECONDS = 5.0 at line 57) and the D-26 default in docs/superpowers/plans/2026-10-18-mvp-remediation/WS-07-service-auth-authz.md:633/883. Impact is limited because the code is W0-only (WS-11.3 deletes `_register_rate_limiting`) and the brief prescribed this exact `from_url` call, so this is minor."
+    }
+   ]
+  },
+  "verified": [
+   {
+    "id": "WS111-SPE-1",
+    "severity": "minor",
+    "file": "services/orchestrator_service/src/main.py",
+    "line": 248,
+    "problem": "The W0 limiter builds its own Redis client with `redis_asyncio.from_url(redis_url, decode_responses=True)` and passes no socket timeouts. That puts a Redis round trip with no time bound in front of every non-exempt HTTP route, including POST /api/v1/orchestrator/chat (the crisis path). The runtime's own client for the same REDIS_URL uses `socket_connect_timeout` and `socket_timeout` of `REDIS_SOCKET_TIMEOUT_SECONDS` (5.0). Before this task the Redis-backed limiter could never be reached (`settings.redis_url` did not exist), so this dependency on the request path is new.",
+    "failure_scenario": "Redis is unreachable or stalls while the orchestrator is up (dev, or staging during a Redis failover). Each chat request waits on the limiter's connect or read before the graph runs, so the 2 s safety-check and 20 s turn budgets are bypassed. A half-open connection (socket_timeout=None) can hang a request indefinitely. When the error does surface, every non-exempt route returns 500. D-26 (WS-07, W1) sets the target for non-auth routes on a limiter-backend failure: pass, with a metric.",
+    "fix": "In `_register_rate_limiting`, build the client the way the runtime does: `redis_asyncio.from_url(redis_url, decode_responses=True, socket_connect_timeout=REDIS_SOCKET_TIMEOUT_SECONDS, socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS)`, importing the constant from `solace_infrastructure.runtime.datastores`. Optionally add a test that `app.state.rate_limit_redis.connection_pool.connection_kwargs` carries both timeouts. Fail-open with a metric stays WS-07/WS-11.3 (W1) scope.",
+    "evidence": "Scratch probe in dev with CORS_ALLOWED_ORIGINS set: `app.state.rate_limit_redis.connection_pool.connection_kwargs` gives socket_timeout=None and socket_connect_timeout=None. REDIS_URL pointed at 127.0.0.1:1 (refused): POST /chat returned 500 INTERNAL_ERROR after 3.1 s. Pointed at blackholed 10.255.255.1:6379: 500 after 22.0 s, the Windows connect timeout (Linux SYN retries give about 127 s). Compare src/solace_infrastructure/runtime/datastores.py:246-251 (runtime client with timeouts, REDIS_SOCKET_TIMEOUT_SECONDS = 5.0 at line 57) and the D-26 default in docs/superpowers/plans/2026-10-18-mvp-remediation/WS-07-service-auth-authz.md:633/883. Impact is limited because the code is W0-only (WS-11.3 deletes `_register_rate_limiting`) and the brief prescribed this exact `from_url` call, so this is minor.",
+    "votes": [
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "services/orchestrator_service/src/main.py:248 calls `redis_asyncio.from_url(redis_url, decode_responses=True)` with no socket timeouts, so the limiter's Redis round trip has no time bound. The finding's own evidence shows the effect: a 3.1 s wait then a 500 with a refused connection, and 22 s with a blackholed host. I found no code that contradicts it. The finding rates it minor because the code is W0-only and the brief prescribed this call, which is the right severity. I did not run a probe of my own."
+     }
+    ],
+    "survives": true
+   }
+  ]
+ },
+ {
+  "task": "WS-11.1",
+  "lens": "crisis",
+  "review": {
+   "spec_verdict": "PASS",
+   "quality_verdict": "CHANGES_REQUESTED",
+   "prior_findings": [],
+   "findings": [
+    {
+     "id": "WS111-CRI-1",
+     "severity": "important",
+     "file": "services/orchestrator_service/src/main.py",
+     "line": 256,
+     "problem": "The rate limiter is now truly Redis-backed from REDIS_URL, but RateLimitMiddleware.dispatch (src/solace_security/rate_limit.py) does not guard the limiter call. Any Redis error raised by check_request_async/async_increment propagates and the request fails with a 500. In the base tree the same code read a missing settings.redis_url, so the limiter was effectively per-process in-memory and this path was unreachable. The adoption makes it reachable, and it covers every non-exempt route, including the HTTP chat route that carries crisis messages.",
+     "failure_scenario": "Production with REDIS_URL set. Redis has a failover or a network blip. A user in crisis POSTs to /api/v1/orchestrator/chat. The middleware raises ConnectionError and the client gets a bare 500. The message never reaches the safety pre-check, crisis_handler, or the safety service. I reproduced this in scratch with a fake Redis client that raises ConnectionError, plugged into create_solace_rate_limiter and RateLimitMiddleware: the response was 500 Internal Server Error. The scratch directory has been deleted.",
+     "fix": "Fail open on limiter backend errors. Wrap the limiter call in try/except: log the exception class only and call call_next. Put this in the shared middleware or in a thin wrapper that main.py installs, so a limiter outage cannot block the crisis path. Add a test that a raising Redis client still yields 200 on the chat route.",
+     "evidence": "Scratch run: POST /api/v1/orchestrator/chat through RateLimitMiddleware with the fake Redis printed '500 Internal Server Error'. rate_limit.py dispatch has no try/except around check_request_async. The base main.py used settings.redis_url, which the memory notes say was never defined, so rl_redis was None. The tests in services/orchestrator_service/tests/test_mvp_016_runtime_adoption.py cover only the Redis-backed store type and the strict failure when REDIS_URL is missing, not a Redis outage."
+    }
+   ]
+  },
+  "verified": [
+   {
+    "id": "WS111-CRI-1",
+    "severity": "important",
+    "file": "services/orchestrator_service/src/main.py",
+    "line": 256,
+    "problem": "The rate limiter is now truly Redis-backed from REDIS_URL, but RateLimitMiddleware.dispatch (src/solace_security/rate_limit.py) does not guard the limiter call. Any Redis error raised by check_request_async/async_increment propagates and the request fails with a 500. In the base tree the same code read a missing settings.redis_url, so the limiter was effectively per-process in-memory and this path was unreachable. The adoption makes it reachable, and it covers every non-exempt route, including the HTTP chat route that carries crisis messages.",
+    "failure_scenario": "Production with REDIS_URL set. Redis has a failover or a network blip. A user in crisis POSTs to /api/v1/orchestrator/chat. The middleware raises ConnectionError and the client gets a bare 500. The message never reaches the safety pre-check, crisis_handler, or the safety service. I reproduced this in scratch with a fake Redis client that raises ConnectionError, plugged into create_solace_rate_limiter and RateLimitMiddleware: the response was 500 Internal Server Error. The scratch directory has been deleted.",
+    "fix": "Fail open on limiter backend errors. Wrap the limiter call in try/except: log the exception class only and call call_next. Put this in the shared middleware or in a thin wrapper that main.py installs, so a limiter outage cannot block the crisis path. Add a test that a raising Redis client still yields 200 on the chat route.",
+    "evidence": "Scratch run: POST /api/v1/orchestrator/chat through RateLimitMiddleware with the fake Redis printed '500 Internal Server Error'. rate_limit.py dispatch has no try/except around check_request_async. The base main.py used settings.redis_url, which the memory notes say was never defined, so rl_redis was None. The tests in services/orchestrator_service/tests/test_mvp_016_runtime_adoption.py cover only the Redis-backed store type and the strict failure when REDIS_URL is missing, not a Redis outage.",
+    "votes": [
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "I could not refute it from the code. `RateLimitMiddleware.dispatch` in src/solace_security/rate_limit.py (lines 115-120) awaits `check_request_async` with no try/except. The only guarded call in `dispatch` is principal resolution. `RateLimiter.check_request_async` calls `RedisRateLimitStore.async_increment`, which awaits `self._redis.eval` and `ttl` directly (rate_limiting.py lines 219-220), with no error handling either. A Redis ConnectionError therefore propagates out of the middleware and the client gets a 500. Orchestrator main.py now builds a real `redis.asyncio` client from REDIS_URL and installs the middleware with `create_solace_rate_limiter(redis_client=...)` (lines 239-256). The client is lazy, so errors surface at request time. The middleware covers every non-exempt route, including the chat route. I did not run a test. The failure path is clear from reading the code, and the 500 on a Redis outage is a real regression for a safety-critical path."
+     },
+     {
+      "refuted": true,
+      "severity_ok": false,
+      "reason": "The defect is real but out of scope for WS-11.1. `RateLimitMiddleware.dispatch` in src/solace_security/rate_limit.py has no try/except around `check_request_async`, so a Redis exception does become a 500. The plan already assigns that fix to a later task. WS-07-service-auth-authz.md (line 1049) names MVP-185 as the cause: \"RateLimitMiddleware.dispatch has no handling for a limiter exception, so a Redis outage turns every login into a 500\". That task also adds `install_rate_limiting`. The 2026-10-18 master plan (line 185) and WS-04 decision D-26 (line 790) record the same limiter-outage question, and D-26's default is that auth routes fail closed on Redis failure. WS-11.1's brief consumes `create_solace_rate_limiter` and does not list the shared middleware as a file to change. The finding's own fix says to change that shared middleware. The gap is also known: the READINESS-REVIEW-FABLE finding and MVP-185 already describe the orchestrator 500-on-Redis-outage. So WS-11.1 did not introduce it, and its brief and the plan do not require WS-11.1 to fix it. The crisis-path concern is valid for the WS-07 follow-up, but it is not a defect in this task."
+     },
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "I read the code and the defect is real. `RateLimitMiddleware.dispatch` in src/solace_security/rate_limit.py (lines 115-120) calls `check_request_async` with no try/except. Only the principal resolution is guarded. `RateLimiter.check_request_async` and `RedisRateLimitStore.async_increment` in infrastructure/api_gateway/rate_limiting.py (lines 215-220, 311-334) also have no error handling around `redis.eval` or `ttl`. A Redis connection error therefore propagates out of the middleware as a 500. The orchestrator now installs the limiter with a real `redis_client` (main.py lines 249-256), so a Redis outage reaches the chat route. I did not re-run the finding's scratch reproduction. \"Important\" fits: Redis blips are plausible in production, and a 500 before the safety pre-check blocks crisis messages. It is not a blocker because it needs an infrastructure fault and the fix is a small fail-open guard."
+     }
+    ],
+    "survives": true
+   }
+  ]
+ },
+ {
+  "task": "WS-12.1",
+  "lens": "crisis-path",
+  "review": {
+   "spec_verdict": "PASS",
+   "quality_verdict": "CHANGES_REQUESTED",
+   "prior_findings": [],
+   "findings": [
+    {
+     "id": "WS121-CRI-1",
+     "severity": "important",
+     "file": "services/safety_service/src/main.py",
+     "line": 88,
+     "problem": "The strict delivery guard `_require_event_delivery_in_strict` only checks `kafka_enabled`. The lifespan then passes `use_mock=settings.kafka_use_mock` (main.py:177) to the bridge, and nothing refuses that in strict. `create_publisher` (publisher.py:687-688) builds `MockKafkaProducerAdapter` with no environment check. ProductionGuards' FORBIDDEN_FLAGS (production_guards.py:121-126) cover only DEBUG, TESTING, MOCK_SERVICES and USE_IN_MEMORY_DB. The env contract does not list SAFETY_KAFKA_USE_MOCK. So a staging or production safety service boots, reports ready, and its bridge delivers nothing. This breaks the guard's own docstring promise (main.py:80-83) that 'a misconfigured strict deploy cannot run a crisis-safety service with no event delivery', and the platform rule that strict environments fail closed.",
+     "failure_scenario": "ENVIRONMENT=production, SAFETY_ENVIRONMENT=production, SAFETY_KAFKA_ENABLED=true, SAFETY_KAFKA_USE_MOCK=true. The boot succeeds and safety registers no readiness failure. POST /api/v1/safety/check 'I want to kill myself' returns CRITICAL and writes the safety.crisis.detected row to the outbox owned by safety-service. The outbox poller claims that row and 'sends' it to the in-process mock list. `flush_outbox` (publisher.py:494-501) then marks it PUBLISHED. The crisis never reaches Kafka or notification-service, no human is paged, and because the row is PUBLISHED it is never redelivered after the config is fixed. This is the mock-producer loss mode the register records under MVP-133, here on safety's own rows.",
+     "fix": "In `_require_event_delivery_in_strict`, also raise `StartupDependencyError(EVENT_BRIDGE_CHECK, \"a mock Kafka producer is not allowed in staging and production (unset SAFETY_KAFKA_USE_MOCK)\")` when `is_strict_environment(settings.environment) and settings.kafka_use_mock`. Use `getattr(settings, 'kafka_use_mock', False)` if the SimpleNamespace guard tests should stay unchanged. Add a parametrized staging/production case to test_event_delivery_guard.py. WS-12.9 later retires SAFETY_KAFKA_* entirely, but until W1 lands this W0 composition is what ships.",
+     "evidence": "Scratch probe (deleted afterwards) under D:\\tmp\\mvp-exec\\scratch\\rr-WS-12.1-crisis. It mirrors the implementer's strict stand-in runtime: pool present, and the Postgres outbox replaced by an in-memory store that stamps owners the same way, so the real poller and flush_outbox ran. Result: 2 passed. Probe output: 'producer type: MockKafkaProducerAdapter', 'readiness checks registered by safety: {}', 'check is_safe: False level: CRITICAL', 'crisis rows PUBLISHED: 1 -> delivered only to the in-process mock: 1'. `_require_event_delivery_in_strict(SimpleNamespace(environment='production'|'staging', kafka_enabled=True, kafka_use_mock=True))` does not raise. A repo-wide grep finds SAFETY_KAFKA_USE_MOCK in no compose file and not in deploy/env/env-contract.yaml, and no strict check exists for it anywhere. This is not a regression from base, since base passed use_mock through too. But the guard is this task's own function, and the lens property 'no configuration lets strict boot with the bridge disabled' is refuted."
+    },
+    {
+     "id": "WS121-CRI-2",
+     "severity": "minor",
+     "file": "services/safety_service/src/domain/escalation.py",
+     "line": 856,
+     "problem": "Lens claim (d), that no crisis path swallows an exception and returns success, is refuted, but only by code that predates this task and sits outside its files. (1) `EscalationManager.escalate` catches `save_escalation` failures at escalation.py:856-861 and 875-880, and only logs them (escalation_persist_failed / escalation_final_persist_failed). It then returns an EscalationResult with an escalation_id, so POST /escalate answers 201 and the record lives only in the in-process `_active_escalations` dict, even in strict with PostgresEscalationRepository wired. (2) `SafetyEventPublisher.publish` (events.py:383-387) only puts the event on an in-memory queue, so /check returns before any outbox write. (3) `_dispatch_event` (events.py:405-417) swallows handler errors. (4) `KafkaEventBridge.handle` (event_bridge.py:111-129) catches outbox save failures as `kafka_publish_failed` and also drops events at debug level once the bridge is stopped (event_bridge.py:107-109). The closer order the brief prescribed (bridge stops before the publisher, main.py:140-143, pinned by test_mvp_088...:938-940) means events still queued at shutdown hit a stopped bridge. `SafetyEventPublisher.stop` then cancels the queue without draining it, so a crisis detected just before SIGTERM can be lost.",
+     "failure_scenario": "Strict, real Postgres: a transient DB error during `save_escalation` is logged, /escalate returns 201 with an escalation_id that was never stored, and a restart erases the record. Separately, an outbox INSERT failure inside `KafkaEventBridge.handle` (for example a DB blip) is logged as kafka_publish_failed while /check has already returned 200 CRITICAL: no outbox row, no page. A crisis queued in the last moments before shutdown is dropped silently.",
+     "fix": "No change in WS-12.1. These are owned by WS-12.8 (MVP-081: synchronous publish that re-raises EventPublishError, no queue) and WS-12.9 (MVP-088: record-and-publish in one transaction, background retry, `_active_escalations` deleted). The WS-12.9 plan's RED expectation states it directly: 'the failing save is swallowed and CrisisDetected is still published (MVP-088)'. The controller should check that WS-12.9's acceptance also covers the shutdown-drain case, which goes away once the queue is removed.",
+     "evidence": "escalation.py:856-861 and 875-880 (try/except around save_escalation, log only); events.py:383-387 and 393-417; event_bridge.py:105-129; main.py:140-143 and 194. Plan: docs/superpowers/plans/2026-10-18-mvp-remediation/WS-12-safety-detection-lexicon.md:956 (WS-12.8 RED: 'publish() only enqueues ... DID NOT RAISE') and :1110 (WS-12.9 RED: 'the failing save is swallowed'). Confirmed on the lens properties: in strict, runtime.pg_pool always comes from ConnectionPoolManager.get_pool('default'), and a failure there is fatal (datastores.py:195-222, component_start_failed). verify_app_role refuses a role that bypasses RLS (connection_manager.py:165-191). The escalations table has no RLS (migrations 006/008 defer it) and solace_app gets DML through migration 009. The probe showed both escalation INSERTs going through the runtime pool. One CrisisDetected per HIGH/CRITICAL /check (service.py:212-223) with a single bridge handler registration. The safety suite gave 472 passed, 1 xpassed. Also green: MVP-088 plus the guard tests (15 passed), conformance -k safety (2 passed), and test_phi_encryption_activation (8 passed)."
+    }
+   ]
+  },
+  "verified": [
+   {
+    "id": "WS121-CRI-1",
+    "severity": "important",
+    "file": "services/safety_service/src/main.py",
+    "line": 88,
+    "problem": "The strict delivery guard `_require_event_delivery_in_strict` only checks `kafka_enabled`. The lifespan then passes `use_mock=settings.kafka_use_mock` (main.py:177) to the bridge, and nothing refuses that in strict. `create_publisher` (publisher.py:687-688) builds `MockKafkaProducerAdapter` with no environment check. ProductionGuards' FORBIDDEN_FLAGS (production_guards.py:121-126) cover only DEBUG, TESTING, MOCK_SERVICES and USE_IN_MEMORY_DB. The env contract does not list SAFETY_KAFKA_USE_MOCK. So a staging or production safety service boots, reports ready, and its bridge delivers nothing. This breaks the guard's own docstring promise (main.py:80-83) that 'a misconfigured strict deploy cannot run a crisis-safety service with no event delivery', and the platform rule that strict environments fail closed.",
+    "failure_scenario": "ENVIRONMENT=production, SAFETY_ENVIRONMENT=production, SAFETY_KAFKA_ENABLED=true, SAFETY_KAFKA_USE_MOCK=true. The boot succeeds and safety registers no readiness failure. POST /api/v1/safety/check 'I want to kill myself' returns CRITICAL and writes the safety.crisis.detected row to the outbox owned by safety-service. The outbox poller claims that row and 'sends' it to the in-process mock list. `flush_outbox` (publisher.py:494-501) then marks it PUBLISHED. The crisis never reaches Kafka or notification-service, no human is paged, and because the row is PUBLISHED it is never redelivered after the config is fixed. This is the mock-producer loss mode the register records under MVP-133, here on safety's own rows.",
+    "fix": "In `_require_event_delivery_in_strict`, also raise `StartupDependencyError(EVENT_BRIDGE_CHECK, \"a mock Kafka producer is not allowed in staging and production (unset SAFETY_KAFKA_USE_MOCK)\")` when `is_strict_environment(settings.environment) and settings.kafka_use_mock`. Use `getattr(settings, 'kafka_use_mock', False)` if the SimpleNamespace guard tests should stay unchanged. Add a parametrized staging/production case to test_event_delivery_guard.py. WS-12.9 later retires SAFETY_KAFKA_* entirely, but until W1 lands this W0 composition is what ships.",
+    "evidence": "Scratch probe (deleted afterwards) under D:\\tmp\\mvp-exec\\scratch\\rr-WS-12.1-crisis. It mirrors the implementer's strict stand-in runtime: pool present, and the Postgres outbox replaced by an in-memory store that stamps owners the same way, so the real poller and flush_outbox ran. Result: 2 passed. Probe output: 'producer type: MockKafkaProducerAdapter', 'readiness checks registered by safety: {}', 'check is_safe: False level: CRITICAL', 'crisis rows PUBLISHED: 1 -> delivered only to the in-process mock: 1'. `_require_event_delivery_in_strict(SimpleNamespace(environment='production'|'staging', kafka_enabled=True, kafka_use_mock=True))` does not raise. A repo-wide grep finds SAFETY_KAFKA_USE_MOCK in no compose file and not in deploy/env/env-contract.yaml, and no strict check exists for it anywhere. This is not a regression from base, since base passed use_mock through too. But the guard is this task's own function, and the lens property 'no configuration lets strict boot with the bridge disabled' is refuted.",
+    "votes": [
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "Confirmed by reading the code. The guard at main.py:88 checks only kafka_enabled. main.py:177 passes kafka_use_mock to the bridge, and publisher.py:687 builds MockKafkaProducerAdapter on it. event_bridge.py has no strict check, and the only test that sets SAFETY_KAFKA_USE_MOCK sets it to true. A strict boot with kafka_enabled=true and kafka_use_mock=true therefore passes the guard and silently drops crisis events. The gap is real but needs an explicit misconfiguration and is not a regression, so \"important\" is appropriate."
+     },
+     {
+      "refuted": true,
+      "severity_ok": false,
+      "reason": "The brief sets the behaviour, so this is out of scope for WS-12.1. It tells the implementer to keep `_require_event_delivery_in_strict(settings)` and to call `initialize_notification_bridge(... use_mock=settings.kafka_use_mock, ...)` unchanged. Nothing in the brief asks the guard to reject a mock producer. The finding concedes this is not a regression: base passed `use_mock` through the same way. The guard keeps the one condition it had, `kafka_enabled`, and only its strict-environment test changed. The mock-producer loss mode is a register item (MVP-133), and the finding itself says WS-12.9 retires SAFETY_KAFKA_* later. Two points in the finding are real but do not change the verdict. The guard docstring over-claims, and `SAFETY_KAFKA_USE_MOCK=true` is not rejected in strict. It is also hard to set by accident, because the setting defaults to False and no compose file or env contract sets it. At most this is a minor hardening suggestion, not an important defect of this task. I did not find a controller ruling in progress.md that covers it, and I did not check whether MVP-133 or WS-12.9 lists a strict-mock guard."
+     },
+     {
+      "refuted": false,
+      "severity_ok": false,
+      "reason": "The gap is real. In main.py, `_require_event_delivery_in_strict` only checks `kafka_enabled`. `use_mock=settings.kafka_use_mock` is passed straight to the bridge at line 177, and nothing refuses it in a strict environment. But the severity is overstated. `kafka_use_mock` defaults to False. SAFETY_KAFKA_USE_MOCK is set in no compose file or env contract (a grep outside .md files found it only in a test). The scenario needs an operator to deliberately set a test-only flag in staging or production. It was not introduced by this task, since base passed the flag through too. The \"important\" label fits a reachable default or deploy path, not one that needs a deliberate, undocumented override. I rate it minor hardening: a cheap guard that fails closed, worth adding but not a blocker."
+     }
+    ],
+    "survives": true
+   },
+   {
+    "id": "WS121-CRI-2",
+    "severity": "minor",
+    "file": "services/safety_service/src/domain/escalation.py",
+    "line": 856,
+    "problem": "Lens claim (d), that no crisis path swallows an exception and returns success, is refuted, but only by code that predates this task and sits outside its files. (1) `EscalationManager.escalate` catches `save_escalation` failures at escalation.py:856-861 and 875-880, and only logs them (escalation_persist_failed / escalation_final_persist_failed). It then returns an EscalationResult with an escalation_id, so POST /escalate answers 201 and the record lives only in the in-process `_active_escalations` dict, even in strict with PostgresEscalationRepository wired. (2) `SafetyEventPublisher.publish` (events.py:383-387) only puts the event on an in-memory queue, so /check returns before any outbox write. (3) `_dispatch_event` (events.py:405-417) swallows handler errors. (4) `KafkaEventBridge.handle` (event_bridge.py:111-129) catches outbox save failures as `kafka_publish_failed` and also drops events at debug level once the bridge is stopped (event_bridge.py:107-109). The closer order the brief prescribed (bridge stops before the publisher, main.py:140-143, pinned by test_mvp_088...:938-940) means events still queued at shutdown hit a stopped bridge. `SafetyEventPublisher.stop` then cancels the queue without draining it, so a crisis detected just before SIGTERM can be lost.",
+    "failure_scenario": "Strict, real Postgres: a transient DB error during `save_escalation` is logged, /escalate returns 201 with an escalation_id that was never stored, and a restart erases the record. Separately, an outbox INSERT failure inside `KafkaEventBridge.handle` (for example a DB blip) is logged as kafka_publish_failed while /check has already returned 200 CRITICAL: no outbox row, no page. A crisis queued in the last moments before shutdown is dropped silently.",
+    "fix": "No change in WS-12.1. These are owned by WS-12.8 (MVP-081: synchronous publish that re-raises EventPublishError, no queue) and WS-12.9 (MVP-088: record-and-publish in one transaction, background retry, `_active_escalations` deleted). The WS-12.9 plan's RED expectation states it directly: 'the failing save is swallowed and CrisisDetected is still published (MVP-088)'. The controller should check that WS-12.9's acceptance also covers the shutdown-drain case, which goes away once the queue is removed.",
+    "evidence": "escalation.py:856-861 and 875-880 (try/except around save_escalation, log only); events.py:383-387 and 393-417; event_bridge.py:105-129; main.py:140-143 and 194. Plan: docs/superpowers/plans/2026-10-18-mvp-remediation/WS-12-safety-detection-lexicon.md:956 (WS-12.8 RED: 'publish() only enqueues ... DID NOT RAISE') and :1110 (WS-12.9 RED: 'the failing save is swallowed'). Confirmed on the lens properties: in strict, runtime.pg_pool always comes from ConnectionPoolManager.get_pool('default'), and a failure there is fatal (datastores.py:195-222, component_start_failed). verify_app_role refuses a role that bypasses RLS (connection_manager.py:165-191). The escalations table has no RLS (migrations 006/008 defer it) and solace_app gets DML through migration 009. The probe showed both escalation INSERTs going through the runtime pool. One CrisisDetected per HIGH/CRITICAL /check (service.py:212-223) with a single bridge handler registration. The safety suite gave 472 passed, 1 xpassed. Also green: MVP-088 plus the guard tests (15 passed), conformance -k safety (2 passed), and test_phi_encryption_activation (8 passed).",
+    "votes": [
+     {
+      "refused": "false",
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "I could not refute the scenario. I read only escalation.py and confirmed that part. The other call sites in the finding (events.py, event_bridge.py, main.py) I took on trust from its evidence.\n\nIn escalation.py, both `save_escalation` calls (lines 856-861 and 875-880) catch `Exception` and only log. `escalate` then continues and returns an `EscalationResult` with an `escalation_id`, so a transient DB failure leaves the record only in `_active_escalations`.\n\nThe finding itself says the code predates WS-12.1, sits outside its files, and needs no change in this task. It names WS-12.8 and WS-12.9 as the owners. \"Minor\" fits that: it is real but informational for this task, so it should be tracked rather than blocking."
+     }
+    ],
+    "survives": true
+   }
+  ]
+ },
+ {
+  "task": "WS-12.1",
+  "lens": "spec-lifecycle",
+  "review": {
+   "spec_verdict": "PASS",
+   "quality_verdict": "APPROVED",
+   "prior_findings": [],
+   "findings": []
+  },
+  "verified": []
+ },
+ {
+  "task": "WS-14.1",
+  "lens": "rls-security",
+  "review": {
+   "spec_verdict": "PASS",
+   "quality_verdict": "APPROVED",
+   "prior_findings": [],
+   "findings": []
+  },
+  "verified": []
+ },
+ {
+  "task": "WS-14.1",
+  "lens": "spec",
+  "review": {
+   "spec_verdict": "PASS",
+   "quality_verdict": "APPROVED",
+   "prior_findings": [],
+   "findings": [
+    {
+     "id": "WS141-SPE-1",
+     "severity": "minor",
+     "file": "services/user-service/src/domain/service.py",
+     "line": 862,
+     "problem": "The report hands the update_preferences existence-check hazard to WS-14.8/14.20, but neither task touches update_preferences. WS-14.8 is the roster API and WS-14.20 is user lookup by id. The only later WS-14 task that edits update_preferences is WS-14.5, and it only changes the error text. The deferral therefore has no owner in the plan.",
+     "failure_scenario": "The existence check (get_by_user_id) runs under the caller's RLS context, and only the save is wrapped in acting_as_user. A future cross-user caller would not see the target's existing row. The INSERT ... ON CONFLICT DO UPDATE would then reset the target's preferences to defaults. The hazard is latent: the only callers, services/user-service/src/api.py lines 815 and 840, pass current_user.user_id, so nothing is wrong today.",
+     "fix": "Record the hazard in the ledger handoffs as an explicit item for WS-14.5, since it already edits update_preferences, or add a one-line guard or comment there. Do not name WS-14.8/14.20.",
+     "evidence": "The grep of the WS-14 plan finds update_preferences only at lines 107 (WS-14.1), 652 and 684 and 722 (WS-14.5). The only callers in src are api.py:815 and api.py:840, both with current_user.user_id."
+    },
+    {
+     "id": "WS141-SPE-2",
+     "severity": "minor",
+     "file": "services/user-service/src/infrastructure/postgres_repository.py",
+     "line": 85,
+     "problem": "The user_saved_postgres debug log still passes email=user.email. The report lists it as a WS-14.5 item. WS-14.5's file list changes postgres_repository.py only for the shared INSERT SQL, the transaction and the unique-violation mapping. Its no-email-in-logs rule (plan line 653) is scoped to service.py. So nothing clearly owns this log line.",
+     "failure_scenario": "After WS-14.5 lands, the repository still emits the registrant's email in a log line unless that task also edits this line. The PHI log sanitizer is regex-only, so it is not a dependable backstop.",
+     "fix": "Add this line to WS-14.5's scope or to the ledger handoff list. This task could also drop the email from it, but doing so is optional.",
+     "evidence": "postgres_repository.py line 85 still has logger.debug('user_saved_postgres', ..., email=user.email). The grep for user_saved_postgres in the WS-14 plan returns no match. The email-in-logs rule at plan line 653 reads 'No log call in the module passes email=', in the bullet that modifies service.py."
+    }
+   ]
+  },
+  "verified": [
+   {
+    "id": "WS141-SPE-1",
+    "severity": "minor",
+    "file": "services/user-service/src/domain/service.py",
+    "line": 862,
+    "problem": "The report hands the update_preferences existence-check hazard to WS-14.8/14.20, but neither task touches update_preferences. WS-14.8 is the roster API and WS-14.20 is user lookup by id. The only later WS-14 task that edits update_preferences is WS-14.5, and it only changes the error text. The deferral therefore has no owner in the plan.",
+    "failure_scenario": "The existence check (get_by_user_id) runs under the caller's RLS context, and only the save is wrapped in acting_as_user. A future cross-user caller would not see the target's existing row. The INSERT ... ON CONFLICT DO UPDATE would then reset the target's preferences to defaults. The hazard is latent: the only callers, services/user-service/src/api.py lines 815 and 840, pass current_user.user_id, so nothing is wrong today.",
+    "fix": "Record the hazard in the ledger handoffs as an explicit item for WS-14.5, since it already edits update_preferences, or add a one-line guard or comment there. Do not name WS-14.8/14.20.",
+    "evidence": "The grep of the WS-14 plan finds update_preferences only at lines 107 (WS-14.1), 652 and 684 and 722 (WS-14.5). The only callers in src are api.py:815 and api.py:840, both with current_user.user_id.",
+    "votes": [
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "The code and plan facts in the finding hold. update_preferences (service.py:869-875) calls get_by_user_id outside acting_as_user, and only the default-row save is wrapped in it. The only callers are api.py:815 and api.py:840, and both pass current_user.user_id, so nothing is wrong today. In the WS-14 plan, update_preferences appears only at line 107 (WS-14.1) and at lines 652, 684 and 722 (WS-14.5, which only changes error text). That makes the claim that no task owns the hazard plausible. I did not open the report's handoff text to check which tasks it names. The finding is latent and process-level, so minor severity is right."
+     }
+    ],
+    "survives": true
+   },
+   {
+    "id": "WS141-SPE-2",
+    "severity": "minor",
+    "file": "services/user-service/src/infrastructure/postgres_repository.py",
+    "line": 85,
+    "problem": "The user_saved_postgres debug log still passes email=user.email. The report lists it as a WS-14.5 item. WS-14.5's file list changes postgres_repository.py only for the shared INSERT SQL, the transaction and the unique-violation mapping. Its no-email-in-logs rule (plan line 653) is scoped to service.py. So nothing clearly owns this log line.",
+    "failure_scenario": "After WS-14.5 lands, the repository still emits the registrant's email in a log line unless that task also edits this line. The PHI log sanitizer is regex-only, so it is not a dependable backstop.",
+    "fix": "Add this line to WS-14.5's scope or to the ledger handoff list. This task could also drop the email from it, but doing so is optional.",
+    "evidence": "postgres_repository.py line 85 still has logger.debug('user_saved_postgres', ..., email=user.email). The grep for user_saved_postgres in the WS-14 plan returns no match. The email-in-logs rule at plan line 653 reads 'No log call in the module passes email=', in the bullet that modifies service.py.",
+    "votes": [
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "Checked the code and the plan. Line 96 of postgres_repository.py still has `logger.debug(\"user_saved_postgres\", user_id=..., email=user.email)`. The WS-14.5 plan bullet (WS-14 plan, line 653) says \"No log call in the module passes `email=`\". That bullet sits under the service.py modification, so \"the module\" means service.py. The postgres_repository.py bullets (lines 646-649) list only the shared INSERT SQL, the transaction and the unique-violation mapping. No plan or doc other than the WS-14.1 report mentions `user_saved_postgres`, so no task is clearly assigned to this log line. The line is a pre-existing debug log, and the report already hands it to WS-14.5. The claim is a small ownership gap, not a defect in this task's behaviour, so I rate it minor."
+     }
+    ],
+    "survives": true
+   }
+  ]
+ },
+ {
+  "task": "WS-16.1",
+  "lens": "spec-lifecycle",
+  "review": {
+   "spec_verdict": "PASS",
+   "quality_verdict": "APPROVED",
+   "prior_findings": [],
+   "findings": []
+  },
+  "verified": []
+ }
+]

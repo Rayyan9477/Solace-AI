@@ -1,0 +1,5195 @@
+{
+ "WS-01.1": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   ".gitignore",
+   "suite:tests/build",
+   "tests/build/conftest.py"
+  ],
+  "height": 11,
+  "real_infra": false
+ },
+ "WS-01.2": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-01.1"
+  ],
+  "mutex": [
+   "pyproject.toml",
+   "requirements-dev.in",
+   "requirements.in",
+   "requirements.txt",
+   "scripts/ci/__init__.py",
+   "scripts/ci/clean_venv.py",
+   "scripts/ci/lock_delta.py",
+   "services/analytics-service/requirements.txt",
+   "services/diagnosis_service/requirements.txt",
+   "services/memory_service/requirements.txt",
+   "services/notification-service/requirements.txt",
+   "services/orchestrator_service/requirements.txt",
+   "services/personality_service/requirements.txt",
+   "services/safety_service/requirements.txt",
+   "services/therapy_service/requirements.txt",
+   "services/user-service/requirements.txt",
+   "suite:tests/build"
+  ],
+  "height": 10,
+  "real_infra": false
+ },
+ "WS-01.3": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-01.1"
+  ],
+  "mutex": [
+   "infrastructure/__init__.py",
+   "infrastructure/api_gateway/__init__.py",
+   "src/solace_infrastructure/__init__.py",
+   "suite:infrastructure/api_gateway",
+   "suite:src/solace_infrastructure",
+   "suite:tests/build"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-01.4": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-01.2"
+  ],
+  "mutex": [
+   "Makefile",
+   "pyproject.toml",
+   "pytest.ini",
+   "scripts/ci/ci_local.py",
+   "scripts/ci/run_suites.py",
+   "scripts/ci/suites.py",
+   "suite:tests/build"
+  ],
+  "height": 8,
+  "real_infra": false
+ },
+ "WS-01.5": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-01.2",
+   "WS-01.4"
+  ],
+  "mutex": [
+   ".dockerignore",
+   "scripts/ci/build_images.py",
+   "scripts/ci/dockerfiles.py",
+   "scripts/ci/images.py",
+   "services/analytics-service/Dockerfile",
+   "services/diagnosis_service/Dockerfile",
+   "services/memory_service/Dockerfile",
+   "services/notification-service/Dockerfile",
+   "services/orchestrator_service/Dockerfile",
+   "services/personality_service/Dockerfile",
+   "services/safety_service/Dockerfile",
+   "services/therapy_service/Dockerfile",
+   "services/user-service/Dockerfile",
+   "suite:tests/build"
+  ],
+  "height": 7,
+  "real_infra": false
+ },
+ "WS-01.6": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-01.5"
+  ],
+  "mutex": [
+   "docker/entrypoint.sh",
+   "suite:tests/build",
+   "tests/build/ws_probe_app.py"
+  ],
+  "height": 6,
+  "real_infra": true
+ },
+ "WS-01.7": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-01.1"
+  ],
+  "mutex": [
+   "src/__init__.py",
+   "suite:tests/build",
+   "tests/build/test_import_roots.py",
+   "tests/build/test_mvp_038_lint_gate.py"
+  ],
+  "height": 9,
+  "real_infra": false
+ },
+ "WS-01.8": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-01.4",
+   "WS-01.5",
+   "WS-01.7"
+  ],
+  "mutex": [
+   ".github/workflows/ci.yml",
+   "suite:tests/build"
+  ],
+  "height": 6,
+  "real_infra": true
+ },
+ "WS-01.9": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-01.6",
+   "WS-01.8",
+   "WS-02.3",
+   "WS-02.4"
+  ],
+  "mutex": [
+   "Makefile",
+   "scripts/ci/check_clean_checkout.ps1",
+   "scripts/ci/check_tracked_closure.py",
+   "scripts/ci/ci_local.py",
+   "scripts/ci/clean_checkout.py",
+   "scripts/ci/images.py",
+   "suite:tests/build"
+  ],
+  "height": 5,
+  "real_infra": true
+ },
+ "WS-01.14": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-01.1",
+   "WS-01.5"
+  ],
+  "mutex": [
+   ".dockerignore",
+   ".gitignore",
+   "scripts/ci/secret_scan.py",
+   "suite:tests/build"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-02.1": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-01.2"
+  ],
+  "mutex": [
+   "infrastructure/init-db/01-create-databases.sql",
+   "infrastructure/init-db/01-roles.sh",
+   "scripts/db/__init__.py",
+   "scripts/db/images.py",
+   "suite:infrastructure/init-db",
+   "suite:tests/migrations",
+   "tests/migrations/conftest.py"
+  ],
+  "height": 9,
+  "real_infra": true
+ },
+ "WS-02.2": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-01.7",
+   "WS-02.1"
+  ],
+  "mutex": [
+   "alembic.ini",
+   "migrations/env.py",
+   "migrations/versions/001_initial_schema.py",
+   "migrations/versions/007_outbox_claimed_at.py",
+   "suite:migrations",
+   "suite:tests/migrations",
+   "tests/migrations/conftest.py"
+  ],
+  "height": 8,
+  "real_infra": true
+ },
+ "WS-02.3": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-02.2"
+  ],
+  "mutex": [
+   "migrations/versions/009_platform_roles_rls.py",
+   "migrations/versions/010_event_plane.py",
+   "migrations/versions/011_audit_trail.py",
+   "migrations/versions/012_user_accounts.py",
+   "migrations/versions/013_identity_mfa.py",
+   "migrations/versions/014_safety.py",
+   "migrations/versions/015_notification.py",
+   "migrations/versions/016_orchestrator_threads.py",
+   "migrations/versions/017_orchestrator_checkpoints.py",
+   "migrations/versions/018_memory.py",
+   "migrations/versions/019_therapy.py",
+   "migrations/versions/020_diagnosis.py",
+   "migrations/versions/021_personality_analytics.py",
+   "src/solace_infrastructure/database/schema_check.py",
+   "suite:migrations",
+   "suite:src/solace_infrastructure",
+   "suite:tests/migrations"
+  ],
+  "height": 7,
+  "real_infra": true
+ },
+ "WS-02.4": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-02.3"
+  ],
+  "mutex": [
+   "scripts/db/migrate.py",
+   "suite:tests/migrations",
+   "tests/migrations/conftest.py"
+  ],
+  "height": 6,
+  "real_infra": true
+ },
+ "WS-02.5": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-01.7",
+   "WS-02.4"
+  ],
+  "mutex": [
+   "migrations/env.py",
+   "scripts/db/gen_certs.py",
+   "scripts/db/migrate.py",
+   "scripts/db/pg_tls_entrypoint.sh",
+   "src/solace_infrastructure/postgres.py",
+   "suite:migrations",
+   "suite:src/solace_infrastructure",
+   "suite:tests/migrations",
+   "suite:tests/solace_infrastructure"
+  ],
+  "height": 4,
+  "real_infra": true
+ },
+ "WS-02.6": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-02.5"
+  ],
+  "mutex": [
+   "src/solace_infrastructure/database/connection_manager.py",
+   "src/solace_infrastructure/postgres.py",
+   "suite:src/solace_infrastructure",
+   "suite:tests/migrations",
+   "suite:tests/solace_infrastructure"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-02.7": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-01.3"
+  ],
+  "mutex": [
+   "src/solace_infrastructure/database/__init__.py",
+   "suite:src/solace_infrastructure",
+   "suite:tests/solace_infrastructure"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-03.1": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   ".env.example",
+   "deploy/__init__.py",
+   "deploy/env/__init__.py",
+   "deploy/env/compose_render.py",
+   "deploy/env/env-contract.yaml",
+   "deploy/env/env_readers.py",
+   "deploy/env/registry.py",
+   "deploy/env/render_env_example.py",
+   "docker-compose.prod.yml",
+   "docker-compose.yml",
+   "suite:tests/deploy",
+   "suite:tests/security",
+   "tests/deploy/conftest.py",
+   "tests/deploy/test_env_contract.py",
+   "tests/security/test_config_secrets_hardening.py"
+  ],
+  "height": 5,
+  "real_infra": false
+ },
+ "WS-03.2": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-01.5",
+   "WS-01.6",
+   "WS-01.9",
+   "WS-03.1"
+  ],
+  "mutex": [
+   ".env.example",
+   "deploy/env/env-contract.yaml",
+   "docker-compose.prod.yml",
+   "docker-compose.yml",
+   "suite:tests/deploy",
+   "tests/deploy/conftest.py"
+  ],
+  "height": 4,
+  "real_infra": true
+ },
+ "WS-03.3": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-03.2"
+  ],
+  "mutex": [
+   ".env.example",
+   "deploy/env/env-contract.yaml",
+   "docker-compose.prod.yml",
+   "docker-compose.yml",
+   "suite:tests/deploy"
+  ],
+  "height": 3,
+  "real_infra": true
+ },
+ "WS-03.4": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-03.3"
+  ],
+  "mutex": [
+   ".env.example",
+   "deploy/env/compose_render.py",
+   "deploy/env/env-contract.yaml",
+   "docker-compose.prod.yml",
+   "docker-compose.yml",
+   "suite:tests/deploy"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-03.5": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-03.4"
+  ],
+  "mutex": [
+   ".env.example",
+   "Caddyfile",
+   "deploy/env/env-contract.yaml",
+   "docker-compose.prod.yml",
+   "docker-compose.yml",
+   "docs/STAGING-BRINGUP.md",
+   "suite:tests/deploy",
+   "tests/deploy/conftest.py"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-04.1": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_security/production_guards.py",
+   "suite:src/solace_security",
+   "suite:tests/bootstrap",
+   "tests/bootstrap/conftest.py"
+  ],
+  "height": 6,
+  "real_infra": false
+ },
+ "WS-04.2": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-04.1"
+  ],
+  "mutex": [
+   "src/solace_infrastructure/runtime/__init__.py",
+   "src/solace_infrastructure/runtime/logging.py",
+   "src/solace_infrastructure/runtime/spec.py",
+   "suite:src/solace_infrastructure",
+   "suite:tests/bootstrap"
+  ],
+  "height": 5,
+  "real_infra": false
+ },
+ "WS-04.3": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-04.2"
+  ],
+  "mutex": [
+   "src/solace_infrastructure/runtime/bootstrap.py",
+   "src/solace_infrastructure/runtime/health.py",
+   "src/solace_infrastructure/runtime/http.py",
+   "src/solace_infrastructure/runtime/metrics.py",
+   "suite:src/solace_infrastructure",
+   "suite:tests/bootstrap"
+  ],
+  "height": 4,
+  "real_infra": false
+ },
+ "WS-04.4": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-04.3"
+  ],
+  "mutex": [
+   "src/solace_infrastructure/runtime/bootstrap.py",
+   "src/solace_infrastructure/runtime/datastores.py",
+   "suite:src/solace_infrastructure",
+   "suite:tests/bootstrap",
+   "tests/bootstrap/conftest.py"
+  ],
+  "height": 3,
+  "real_infra": false
+ },
+ "WS-04.5": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-04.4"
+  ],
+  "mutex": [
+   "infrastructure/prometheus/prometheus.yml",
+   "suite:infrastructure/prometheus",
+   "suite:tests/bootstrap",
+   "tests/bootstrap/_conformance_probe.py",
+   "tests/bootstrap/fixtures/nonconforming_app.py",
+   "tests/bootstrap/fixtures/reference_app.py",
+   "tests/bootstrap/test_mvp_036_prometheus_scrape.py",
+   "tests/bootstrap/test_service_conformance.py"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-04.15": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-04.5"
+  ],
+  "mutex": [
+   "suite:tests/integration",
+   "tests/integration/test_phi_encryption_activation.py"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-05.1": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "infrastructure/test/README.md",
+   "infrastructure/test/fake-llm",
+   "infrastructure/test/fake-llm/Dockerfile",
+   "infrastructure/test/fake-llm/app.py",
+   "suite:infrastructure/test",
+   "suite:tests/solace_testing"
+  ],
+  "height": 5,
+  "real_infra": false
+ },
+ "WS-05.2": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-02.3",
+   "WS-02.4",
+   "WS-05.1"
+  ],
+  "mutex": [
+   "src/solace_testing/realinfra.py",
+   "suite:src/solace_testing",
+   "suite:tests/integration",
+   "suite:tests/realinfra",
+   "suite:tests/realinfra/realinfra-harness-e2e",
+   "tests/integration/test_persistence_roundtrip.py",
+   "tests/realinfra/conftest.py"
+  ],
+  "height": 4,
+  "real_infra": true
+ },
+ "WS-05.3": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_testing/e2e_manifest.py",
+   "suite:src/solace_testing",
+   "suite:tests/e2e",
+   "suite:tests/solace_testing",
+   "tests/conftest.py",
+   "tests/e2e/expected_failures.yaml"
+  ],
+  "height": 4,
+  "real_infra": false
+ },
+ "WS-05.4": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-02.5",
+   "WS-05.2",
+   "WS-05.3"
+  ],
+  "mutex": [
+   "docker-compose.test.yml",
+   "scripts/test/__init__.py",
+   "scripts/test/e2e_stack.ps1",
+   "scripts/test/gen_e2e_env.py",
+   "src/solace_testing/e2e.py",
+   "suite:src/solace_testing",
+   "suite:tests/e2e",
+   "suite:tests/scripts",
+   "tests/e2e/conftest.py",
+   "tests/e2e/expected_failures.yaml",
+   "tests/e2e/test_mvp_039_stack_selftest.py",
+   "tests/scripts/test_mvp_039_gen_e2e_env.py"
+  ],
+  "height": 3,
+  "real_infra": true
+ },
+ "WS-05.5": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-05.4"
+  ],
+  "mutex": [
+   "suite:tests/e2e",
+   "suite:tests/system",
+   "tests/e2e/expected_failures.yaml",
+   "tests/e2e/test_w0_boot_smoke.py",
+   "tests/system/test_smoke.py"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-05.6": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-05.5"
+  ],
+  "mutex": [
+   "src/solace_testing/e2e.py",
+   "suite:src/solace_testing",
+   "suite:tests/e2e",
+   "tests/e2e/crisis_phrases_e2e.py",
+   "tests/e2e/expected_failures.yaml",
+   "tests/e2e/test_crisis_alert_e2e.py"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-06.1": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-02.3",
+   "WS-05.2"
+  ],
+  "mutex": [
+   "migrations/versions/010_event_plane.py",
+   "src/solace_events/errors.py",
+   "src/solace_events/postgres_stores.py",
+   "src/solace_events/publisher.py",
+   "suite:migrations",
+   "suite:src/solace_events",
+   "suite:tests/realinfra/event-plane",
+   "suite:tests/solace_events",
+   "tests/solace_events/test_outbox_claim.py"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-06.2": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-01.7",
+   "WS-06.1"
+  ],
+  "mutex": [
+   "services/diagnosis_service/src/infrastructure/event_bridge.py",
+   "services/notification-service/src/infrastructure/event_bridge.py",
+   "services/orchestrator_service/src/infrastructure/event_bridge.py",
+   "services/personality_service/src/infrastructure/event_bridge.py",
+   "services/safety_service/src/infrastructure/event_bridge.py",
+   "services/therapy_service/src/infrastructure/event_bridge.py",
+   "services/user-service/src/infrastructure/event_bridge.py",
+   "suite:services/diagnosis_service",
+   "suite:services/notification-service",
+   "suite:services/orchestrator_service",
+   "suite:services/personality_service",
+   "suite:services/safety_service",
+   "suite:services/therapy_service",
+   "suite:services/user-service",
+   "suite:tests/solace_events"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-07.1": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_common/request_context.py",
+   "suite:src/solace_common",
+   "suite:tests/solace_common"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-09.1": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_security/encryption.py",
+   "suite:src/solace_security",
+   "suite:tests/solace_security"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-09.2": {
+  "wave": 0,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/shared/infrastructure/__init__.py",
+   "services/shared/infrastructure/llm_client.py",
+   "suite:services/shared",
+   "suite:tests/integration/phi-codec-audit-llm"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-11.1": {
+  "wave": 0,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/orchestrator_service/src/api.py",
+   "services/orchestrator_service/src/infrastructure/__init__.py",
+   "services/orchestrator_service/src/infrastructure/state.py",
+   "services/orchestrator_service/src/main.py",
+   "suite:services/orchestrator_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-12.1": {
+  "wave": 0,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/safety_service/src/domain/factory.py",
+   "services/safety_service/src/events.py",
+   "services/safety_service/src/main.py",
+   "services/safety_service/tests/test_event_delivery_guard.py",
+   "suite:services/safety_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-12.17": {
+  "wave": 0,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/safety_service/src/infrastructure/database.py",
+   "services/safety_service/tests/test_mvp_271_no_private_pool.py",
+   "suite:services/safety_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-13.1": {
+  "wave": 0,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/notification-service/src/api.py",
+   "services/notification-service/src/consumers.py",
+   "services/notification-service/src/events.py",
+   "services/notification-service/src/main.py",
+   "services/notification-service/tests/conftest.py",
+   "services/notification-service/tests/test_api.py",
+   "suite:services/notification-service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-13.2": {
+  "wave": 0,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-13.1"
+  ],
+  "mutex": [
+   "services/notification-service/src/api.py",
+   "services/notification-service/src/consumers.py",
+   "services/notification-service/src/main.py",
+   "services/notification-service/tests/test_crisis_consumer_required.py",
+   "services/notification-service/tests/test_if01_runtime_adoption.py",
+   "services/notification-service/tests/test_mvp_287_consumer_lifecycle.py",
+   "suite:services/notification-service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-14.1": {
+  "wave": 0,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/user-service/src/domain/service.py",
+   "services/user-service/src/infrastructure/postgres_repository.py",
+   "services/user-service/src/infrastructure/repository.py",
+   "services/user-service/src/main.py",
+   "suite:services/user-service",
+   "suite:tests/realinfra/accounts-roster-consent-erasure",
+   "tests/realinfra/accounts-roster-consent-erasure/conftest.py"
+  ],
+  "height": 3,
+  "real_infra": true
+ },
+ "WS-14.2": {
+  "wave": 0,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-14.1"
+  ],
+  "mutex": [
+   "services/user-service/src/config.py",
+   "services/user-service/src/events.py",
+   "services/user-service/src/main.py",
+   "services/user-service/tests/conftest.py",
+   "services/user-service/tests/runtime_fakes.py",
+   "services/user-service/tests/test_config.py",
+   "suite:services/user-service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-14.3": {
+  "wave": 0,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-14.2"
+  ],
+  "mutex": [
+   "services/user-service/src/api.py",
+   "services/user-service/src/api_auth.py",
+   "services/user-service/src/api_deps.py",
+   "services/user-service/src/identity_wiring.py",
+   "services/user-service/src/internal_api.py",
+   "services/user-service/src/main.py",
+   "services/user-service/tests",
+   "suite:services/user-service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-15.1": {
+  "wave": 0,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/therapy_service/src/events.py",
+   "services/therapy_service/src/infrastructure/redis_session_repository.py",
+   "services/therapy_service/src/main.py",
+   "suite:services/therapy_service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-15.2": {
+  "wave": 0,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-15.1"
+  ],
+  "mutex": [
+   "services/therapy_service/src/config.py",
+   "services/therapy_service/src/infrastructure/repository.py",
+   "services/therapy_service/src/main.py",
+   "suite:services/therapy_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-16.1": {
+  "wave": 0,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/diagnosis_service/src/config.py",
+   "services/diagnosis_service/src/domain/service.py",
+   "services/diagnosis_service/src/events.py",
+   "services/diagnosis_service/src/infrastructure/redis_session_repository.py",
+   "services/diagnosis_service/src/main.py",
+   "services/diagnosis_service/tests/test_batch_5_3.py",
+   "suite:services/diagnosis_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-17.1": {
+  "wave": 0,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/memory_service/src/events.py",
+   "services/memory_service/src/infrastructure/redis_cache.py",
+   "services/memory_service/src/infrastructure/weaviate_repo.py",
+   "services/memory_service/src/main.py",
+   "services/memory_service/tests/test_mvp_if01_runtime_adoption.py",
+   "suite:services/memory_service",
+   "suite:tests/bootstrap"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-17.2": {
+  "wave": 0,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-17.1"
+  ],
+  "mutex": [
+   "services/memory_service/src/infrastructure/postgres_repo.py",
+   "services/memory_service/src/main.py",
+   "services/memory_service/tests/conftest.py",
+   "services/memory_service/tests/test_infrastructure.py",
+   "services/memory_service/tests/test_mvp_if03_repo_shared_pool.py",
+   "suite:services/memory_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-17.19": {
+  "wave": 0,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-17.1"
+  ],
+  "mutex": [
+   "services/memory_service/src/schemas.py",
+   "services/memory_service/tests/test_mvp_357_context_schema_examples.py",
+   "suite:services/memory_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-18.1": {
+  "wave": 0,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/personality_service/src/config.py",
+   "services/personality_service/src/events.py",
+   "services/personality_service/src/main.py",
+   "services/personality_service/tests/test_infrastructure.py",
+   "services/personality_service/tests/test_mvp_027_runtime_adoption.py",
+   "suite:services/personality_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-18.2": {
+  "wave": 0,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/analytics-service/src/api.py",
+   "services/analytics-service/src/config.py",
+   "services/analytics-service/src/main.py",
+   "services/analytics-service/tests/test_api.py",
+   "services/analytics-service/tests/test_env_binding_p1_9.py",
+   "services/analytics-service/tests/test_main.py",
+   "services/analytics-service/tests/test_mvp_110_runtime_adoption.py",
+   "suite:services/analytics-service",
+   "suite:tests/build"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-03.6": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   ".env.example",
+   "Caddyfile",
+   "deploy/env/env-contract.yaml",
+   "docker-compose.prod.yml",
+   "docker-compose.yml",
+   "suite:tests/deploy",
+   "tests/deploy/test_env_contract.py"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-03.19": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-03.6",
+   "WS-09.18"
+  ],
+  "mutex": [
+   ".env.example",
+   "deploy/env/env-contract.yaml",
+   "deploy/env/registry.py",
+   "docker-compose.prod.yml",
+   "docker-compose.yml",
+   "suite:tests/deploy",
+   "tests/deploy/test_env_contract.py"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-04.6": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_infrastructure/runtime/bootstrap.py",
+   "suite:src/solace_infrastructure",
+   "suite:tests/bootstrap"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-04.7": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-03.6"
+  ],
+  "mutex": [
+   "docker-compose.observability.yml",
+   "docs/runbooks/alerting.md",
+   "infrastructure/alertmanager/alertmanager.yml.tmpl",
+   "infrastructure/alertmanager/render-config.sh",
+   "infrastructure/prometheus/prometheus.yml",
+   "infrastructure/prometheus/rules/solace.yml",
+   "infrastructure/prometheus/tests/solace_rules_test.yml",
+   "suite:infrastructure/alertmanager",
+   "suite:infrastructure/prometheus",
+   "suite:tests/bootstrap",
+   "suite:tests/e2e"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-05.7": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-12.2"
+  ],
+  "mutex": [
+   "src/solace_testing/__init__.py",
+   "src/solace_testing/contracts.py",
+   "suite:src/solace_testing",
+   "suite:tests/alignment",
+   "suite:tests/contracts",
+   "suite:tests/contracts/events",
+   "suite:tests/solace_testing",
+   "tests/alignment/test_api_contracts.py",
+   "tests/contracts/README.md",
+   "tests/contracts/contract.schema.json",
+   "tests/contracts/events/diagnosis__notification/safety.crisis.detected.json",
+   "tests/contracts/events/orchestrator__notification/safety.crisis.detected.json",
+   "tests/contracts/events/safety__notification/safety.assessment.completed.json",
+   "tests/contracts/events/safety__notification/safety.crisis.detected.json",
+   "tests/contracts/events/safety__notification/safety.escalation.triggered.json",
+   "tests/contracts/events/therapy__notification/safety.crisis.detected.json",
+   "tests/contracts/test_event_contract_files.py"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-05.8": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "docker-compose.test.yml",
+   "src/solace_testing/e2e.py",
+   "suite:src/solace_testing",
+   "suite:tests/e2e",
+   "tests/e2e/expected_failures.yaml",
+   "tests/e2e/test_w1_crisis_faults.py",
+   "tests/e2e/test_w1_negative_phrases.py"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-05.9": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-05.8"
+  ],
+  "mutex": [
+   "docker-compose.test.yml",
+   "src/solace_testing/e2e.py",
+   "suite:src/solace_testing",
+   "suite:tests/e2e",
+   "tests/e2e/expected_failures.yaml",
+   "tests/e2e/test_w1_crisis_alerting.py"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-05.20": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-09.3"
+  ],
+  "mutex": [
+   "suite:tests/integration",
+   "tests/integration/test_sprint7_portkey_fallback.py"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-05.21": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "docker-compose.test.yml",
+   "infrastructure/test/compose/llm-dev.yml",
+   "src/solace_testing/e2e.py",
+   "suite:infrastructure/test",
+   "suite:src/solace_testing",
+   "suite:tests/solace_testing",
+   "tests/solace_testing/test_mvp_039_overlay_w1_env.py"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-05.22": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-05.21",
+   "WS-05.8",
+   "WS-12.3"
+  ],
+  "mutex": [
+   "suite:tests/e2e",
+   "suite:tests/e2e/phrase_recall",
+   "tests/e2e/expected_failures.yaml",
+   "tests/e2e/phrase_recall/conftest.py",
+   "tests/e2e/phrase_recall/test_w1_phrase_set_deployed.py"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-06.3": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_events/__init__.py",
+   "src/solace_events/consumer.py",
+   "src/solace_events/dead_letter.py",
+   "src/solace_events/errors.py",
+   "src/solace_events/postgres_stores.py",
+   "suite:src/solace_events",
+   "suite:tests/solace_events",
+   "tests/solace_events/test_consumer.py"
+  ],
+  "height": 8,
+  "real_infra": false
+ },
+ "WS-06.4": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-06.3"
+  ],
+  "mutex": [
+   "src/solace_events/consumer.py",
+   "suite:src/solace_events",
+   "suite:tests/realinfra/event-plane",
+   "suite:tests/solace_events"
+  ],
+  "height": 5,
+  "real_infra": true
+ },
+ "WS-06.5": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-06.3"
+  ],
+  "mutex": [
+   "src/solace_events/postgres_stores.py",
+   "src/solace_events/publisher.py",
+   "suite:src/solace_events",
+   "suite:tests/realinfra/event-plane",
+   "suite:tests/solace_events"
+  ],
+  "height": 7,
+  "real_infra": true
+ },
+ "WS-06.6": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-06.5"
+  ],
+  "mutex": [
+   "src/solace_events/postgres_stores.py",
+   "src/solace_events/publisher.py",
+   "suite:src/solace_events",
+   "suite:tests/realinfra/event-plane",
+   "suite:tests/solace_events",
+   "tests/solace_events/test_outbox_claim.py"
+  ],
+  "height": 6,
+  "real_infra": true
+ },
+ "WS-06.7": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-06.6"
+  ],
+  "mutex": [
+   "src/solace_events/__init__.py",
+   "src/solace_events/dead_letter.py",
+   "src/solace_events/postgres_stores.py",
+   "src/solace_events/publisher.py",
+   "src/solace_events/reaper.py",
+   "suite:src/solace_events",
+   "suite:tests/realinfra/event-plane",
+   "suite:tests/solace_events"
+  ],
+  "height": 5,
+  "real_infra": true
+ },
+ "WS-06.8": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-06.4",
+   "WS-06.7"
+  ],
+  "mutex": [
+   "src/solace_events/__init__.py",
+   "src/solace_events/_env.py",
+   "src/solace_events/dead_letter.py",
+   "src/solace_events/publisher.py",
+   "src/solace_events/service_plane.py",
+   "suite:src/solace_events",
+   "suite:tests/realinfra/event-plane",
+   "suite:tests/solace_events"
+  ],
+  "height": 4,
+  "real_infra": true
+ },
+ "WS-06.9": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-06.8"
+  ],
+  "mutex": [
+   "services/diagnosis_service/src/infrastructure/event_bridge.py",
+   "services/notification-service/src/infrastructure/event_bridge.py",
+   "services/orchestrator_service/src/infrastructure/event_bridge.py",
+   "services/personality_service/src/infrastructure/event_bridge.py",
+   "services/safety_service/src/infrastructure/event_bridge.py",
+   "services/therapy_service/src/infrastructure/event_bridge.py",
+   "services/user-service/src/infrastructure/event_bridge.py",
+   "suite:services/diagnosis_service",
+   "suite:services/notification-service",
+   "suite:services/orchestrator_service",
+   "suite:services/personality_service",
+   "suite:services/safety_service",
+   "suite:services/therapy_service",
+   "suite:services/user-service"
+  ],
+  "height": 3,
+  "real_infra": false
+ },
+ "WS-06.10": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-06.9"
+  ],
+  "mutex": [
+   "src/solace_events/consumer.py",
+   "src/solace_events/metrics.py",
+   "src/solace_events/postgres_stores.py",
+   "src/solace_events/publisher.py",
+   "src/solace_events/service_plane.py",
+   "suite:src/solace_events",
+   "suite:tests/realinfra/event-plane",
+   "suite:tests/solace_events"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-06.14": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-06.10"
+  ],
+  "mutex": [
+   "src/solace_events/__init__.py",
+   "src/solace_events/config.py",
+   "src/solace_events/service_plane.py",
+   "src/solace_events/topics.py",
+   "src/solace_infrastructure/kafka",
+   "src/solace_infrastructure/kafka/topics.py",
+   "suite:src/solace_events",
+   "suite:src/solace_infrastructure",
+   "suite:tests/realinfra/event-plane",
+   "suite:tests/solace_events",
+   "suite:tests/solace_infrastructure",
+   "tests/solace_events/test_config.py",
+   "tests/solace_infrastructure",
+   "tests/solace_infrastructure/kafka/test_topics.py"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-07.2": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_security/auth.py",
+   "src/solace_security/middleware.py",
+   "suite:src/solace_security",
+   "suite:tests/solace_security"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-07.3": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_security/auth.py",
+   "src/solace_security/service_auth.py",
+   "suite:src/solace_security",
+   "suite:tests/integration",
+   "suite:tests/solace_security",
+   "tests/integration/test_service_integration.py"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-07.4": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-07.2",
+   "WS-07.3"
+  ],
+  "mutex": [
+   "src/solace_security/middleware.py",
+   "suite:src/solace_security",
+   "suite:tests/solace_security"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-07.5": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-07.2"
+  ],
+  "mutex": [
+   "src/solace_security/auth.py",
+   "src/solace_security/middleware.py",
+   "suite:src/solace_security",
+   "suite:tests/realinfra/service-auth-authz",
+   "suite:tests/solace_security"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-07.6": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "infrastructure/api_gateway/rate_limiting.py",
+   "suite:infrastructure/api_gateway"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-07.7": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-07.6"
+  ],
+  "mutex": [
+   "infrastructure/api_gateway/rate_limiting.py",
+   "src/solace_security/rate_limit.py",
+   "suite:infrastructure/api_gateway",
+   "suite:src/solace_security",
+   "suite:tests/realinfra/service-auth-authz",
+   "suite:tests/solace_security"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-09.3": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/shared/__init__.py",
+   "services/shared/infrastructure/__init__.py",
+   "services/shared/infrastructure/llm_client.py",
+   "suite:services/shared",
+   "suite:tests/integration/phi-codec-audit-llm"
+  ],
+  "height": 4,
+  "real_infra": false
+ },
+ "WS-09.4": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-09.18"
+  ],
+  "mutex": [
+   "services/shared/infrastructure/llm_client.py",
+   "suite:services/shared",
+   "suite:tests/integration/phi-codec-audit-llm"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-09.5": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-09.4"
+  ],
+  "mutex": [
+   "services/shared/infrastructure/llm_client.py",
+   "suite:services/shared",
+   "suite:tests/integration/phi-codec-audit-llm"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-09.18": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-09.3"
+  ],
+  "mutex": [
+   "services/shared/infrastructure/llm_client.py",
+   "suite:services/shared",
+   "suite:tests/integration/phi-codec-audit-llm",
+   "tests/integration/phi-codec-audit-llm/test_mvp_d04_bedrock_provider.py"
+  ],
+  "height": 3,
+  "real_infra": false
+ },
+ "WS-12.2": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_clinical/__init__.py",
+   "src/solace_clinical/escalation_reason.py",
+   "src/solace_clinical/fusion.py",
+   "src/solace_clinical/normalize.py",
+   "src/solace_clinical/resources.py",
+   "suite:src/solace_clinical",
+   "suite:tests/clinical"
+  ],
+  "height": 3,
+  "real_infra": false
+ },
+ "WS-12.3": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-12.2"
+  ],
+  "mutex": [
+   "docs/CLINICAL-VALIDATION.md",
+   "src/solace_clinical/__init__.py",
+   "src/solace_clinical/crisis_lexicon_v1.yaml",
+   "src/solace_clinical/lexicon.py",
+   "src/solace_clinical/phrases.py",
+   "src/solace_clinical/screen.py",
+   "suite:src/solace_clinical",
+   "suite:tests/clinical",
+   "tests/clinical/crisis_phrases_v1.yaml",
+   "tests/clinical/legacy_terms_v0.yaml"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-12.4": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "migrations/versions/014_safety.py",
+   "suite:migrations",
+   "suite:tests/realinfra/safety-detection-lexicon"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-13.3": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-12.4"
+  ],
+  "mutex": [
+   "migrations/versions/015_notification.py",
+   "suite:migrations",
+   "suite:tests/migrations",
+   "suite:tests/realinfra/notification-alert-delivery"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-14.4": {
+  "wave": 1,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "migrations/versions/012_user_accounts.py",
+   "suite:migrations",
+   "suite:tests/realinfra/accounts-roster-consent-erasure"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-10.1": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/orchestrator_service/src/langgraph/graph_builder.py",
+   "services/orchestrator_service/src/langgraph/state_schema.py",
+   "suite:services/orchestrator_service"
+  ],
+  "height": 6,
+  "real_infra": false
+ },
+ "WS-10.2": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-10.1"
+  ],
+  "mutex": [
+   "services/orchestrator_service/src/langgraph/crisis_screen.py",
+   "services/orchestrator_service/src/langgraph/graph_builder.py",
+   "services/orchestrator_service/src/langgraph/state_schema.py",
+   "services/orchestrator_service/src/langgraph/supervisor.py",
+   "suite:services/orchestrator_service",
+   "suite:tests/integration"
+  ],
+  "height": 5,
+  "real_infra": false
+ },
+ "WS-10.3": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/orchestrator_service/src/events.py",
+   "services/orchestrator_service/tests/test_mvp_167_crisis_event_contract.py",
+   "services/orchestrator_service/tests/test_mvp_357_event_contracts.py",
+   "suite:services/orchestrator_service",
+   "suite:tests/integration"
+  ],
+  "height": 5,
+  "real_infra": false
+ },
+ "WS-10.4": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-10.2",
+   "WS-10.3"
+  ],
+  "mutex": [
+   "services/orchestrator_service/src/agents/safety_agent.py",
+   "services/orchestrator_service/src/langgraph/crisis_screen.py",
+   "services/orchestrator_service/src/langgraph/graph_builder.py",
+   "suite:services/orchestrator_service"
+  ],
+  "height": 4,
+  "real_infra": false
+ },
+ "WS-10.5": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-10.1",
+   "WS-10.2",
+   "WS-10.3",
+   "WS-10.4"
+  ],
+  "mutex": [
+   "services/orchestrator_service/src/langgraph/__init__.py",
+   "services/orchestrator_service/src/langgraph/graph_builder.py",
+   "services/orchestrator_service/src/langgraph/state_schema.py",
+   "services/orchestrator_service/src/response/safety_copy.py",
+   "suite:services/orchestrator_service",
+   "suite:tests/integration"
+  ],
+  "height": 3,
+  "real_infra": false
+ },
+ "WS-10.6": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-10.5"
+  ],
+  "mutex": [
+   "services/orchestrator_service/src/langgraph/graph_builder.py",
+   "services/orchestrator_service/src/response/safety_copy.py",
+   "suite:services/orchestrator_service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-10.7": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-10.5"
+  ],
+  "mutex": [
+   "services/orchestrator_service/src/langgraph/supervisor.py",
+   "suite:services/orchestrator_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-10.8": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-10.6"
+  ],
+  "mutex": [
+   "services/orchestrator_service/src/langgraph/crisis_screen.py",
+   "services/orchestrator_service/src/langgraph/graph_builder.py",
+   "services/orchestrator_service/src/response/safety_copy.py",
+   "suite:services/orchestrator_service",
+   "suite:tests/integration"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-11.2": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-10.3",
+   "WS-10.4"
+  ],
+  "mutex": [
+   "services/orchestrator_service/src/agents/therapy_agent.py",
+   "services/orchestrator_service/src/infrastructure/clients.py",
+   "services/orchestrator_service/src/langgraph/memory_node.py",
+   "services/orchestrator_service/tests/test_mvp_020_agent_service_urls.py",
+   "services/orchestrator_service/tests/test_mvp_021_obo_headers.py",
+   "suite:services/orchestrator_service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-11.3": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-10.5",
+   "WS-11.2"
+  ],
+  "mutex": [
+   "services/orchestrator_service/src/main.py",
+   "suite:services/orchestrator_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-11.4": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-10.2",
+   "WS-10.5"
+  ],
+  "mutex": [
+   "services/orchestrator_service/src/api.py",
+   "suite:services/orchestrator_service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-11.5": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-10.5",
+   "WS-11.4"
+  ],
+  "mutex": [
+   "services/orchestrator_service/src/api.py",
+   "services/orchestrator_service/src/websocket.py",
+   "suite:services/orchestrator_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-12.5": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/safety_service/src/ml/llm_assessor.py",
+   "services/safety_service/tests/test_llm_assessor.py",
+   "suite:services/safety_service"
+  ],
+  "height": 6,
+  "real_infra": false
+ },
+ "WS-12.6": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-12.5"
+  ],
+  "mutex": [
+   "services/safety_service/src/config.py",
+   "services/safety_service/src/domain/crisis_detector.py",
+   "services/safety_service/src/domain/factory.py",
+   "services/safety_service/src/main.py",
+   "services/safety_service/tests/test_config.py",
+   "services/safety_service/tests/test_crisis_detector.py",
+   "services/safety_service/tests/test_crisis_detector_fusion.py",
+   "services/safety_service/tests/test_mvp_083_084_086_178_182_detector_fusion.py",
+   "services/safety_service/tests/test_mvp_090_history_signal.py",
+   "services/safety_service/tests/test_phrase_set_safety_detector.py",
+   "services/safety_service/tests/test_rev25_reconcile.py",
+   "suite:services/safety_service"
+  ],
+  "height": 5,
+  "real_infra": false
+ },
+ "WS-12.7": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-12.6"
+  ],
+  "mutex": [
+   "docs/CLINICAL-VALIDATION.md",
+   "services/safety_service/src/domain/service.py",
+   "services/safety_service/tests/test_service.py",
+   "suite:services/safety_service"
+  ],
+  "height": 4,
+  "real_infra": false
+ },
+ "WS-12.8": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-12.6"
+  ],
+  "mutex": [
+   "services/safety_service/src/events.py",
+   "services/safety_service/tests/test_crisis_event_flow.py",
+   "services/safety_service/tests/test_events.py",
+   "services/safety_service/tests/test_mvp_081_outbox_publisher.py",
+   "services/safety_service/tests/test_mvp_357_event_contracts.py",
+   "suite:services/safety_service"
+  ],
+  "height": 4,
+  "real_infra": false
+ },
+ "WS-12.9": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-12.7",
+   "WS-12.8"
+  ],
+  "mutex": [
+   "services/safety_service/src/config.py",
+   "services/safety_service/src/domain/escalation.py",
+   "services/safety_service/src/domain/factory.py",
+   "services/safety_service/src/domain/service.py",
+   "services/safety_service/src/infrastructure/clinician_registry.py",
+   "services/safety_service/src/main.py",
+   "services/safety_service/tests/conftest.py",
+   "services/safety_service/tests/test_escalation.py",
+   "services/safety_service/tests/test_event_delivery_guard.py",
+   "services/safety_service/tests/test_postgres_escalation_repo.py",
+   "services/safety_service/tests/test_service.py",
+   "suite:services/safety_service",
+   "suite:tests/integration",
+   "suite:tests/realinfra/safety-detection-lexicon",
+   "tests/integration/test_safety_service_e2e.py"
+  ],
+  "height": 3,
+  "real_infra": true
+ },
+ "WS-12.10": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-12.9"
+  ],
+  "mutex": [
+   "services/safety_service/src/api.py",
+   "services/safety_service/src/domain/service.py",
+   "services/safety_service/tests/test_api.py",
+   "services/safety_service/tests/test_if06_check_contract.py",
+   "services/safety_service/tests/test_mvp_017_contract_orchestrator_check.py",
+   "suite:services/safety_service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-12.11": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-12.10"
+  ],
+  "mutex": [
+   "services/safety_service/src/api.py",
+   "services/safety_service/tests/test_api.py",
+   "services/safety_service/tests/test_if06_check_contract.py",
+   "services/safety_service/tests/test_mvp_017_contract_orchestrator_check.py",
+   "suite:services/safety_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-12.18": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/safety_service/src/ml/keyword_detector.py",
+   "services/safety_service/src/ml/pattern_matcher.py",
+   "services/safety_service/src/ml/sentiment_analyzer.py",
+   "services/safety_service/tests/test_keyword_detector.py",
+   "services/safety_service/tests/test_mvp_086_ml_extras_parity.py",
+   "services/safety_service/tests/test_pattern_matcher.py",
+   "services/safety_service/tests/test_sentiment_analyzer.py",
+   "suite:services/safety_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-13.4": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/notification-service/src/domain/episodes.py",
+   "services/notification-service/src/infrastructure/crisis_alert_repository.py",
+   "services/notification-service/src/infrastructure/delivery_repository.py",
+   "services/notification-service/tests/notification_fakes.py",
+   "services/notification-service/tests/notification_repo_contract.py",
+   "suite:services/notification-service",
+   "suite:tests/realinfra/notification-alert-delivery",
+   "tests/realinfra/notification-alert-delivery/conftest.py"
+  ],
+  "height": 8,
+  "real_infra": true
+ },
+ "WS-13.5": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/notification-service/src/domain/alert_settings.py",
+   "services/notification-service/src/domain/recipients.py",
+   "suite:services/notification-service",
+   "suite:tests/contracts/notification__user",
+   "tests/contracts/notification__user/care-team-unknown-user.get.json",
+   "tests/contracts/notification__user/care-team.get.json",
+   "tests/contracts/notification__user/on-call.get.json"
+  ],
+  "height": 8,
+  "real_infra": false
+ },
+ "WS-13.6": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-13.4",
+   "WS-13.5",
+   "WS-13.7"
+  ],
+  "mutex": [
+   "services/notification-service/src/domain/alert_metrics.py",
+   "services/notification-service/src/domain/crisis_paging.py",
+   "services/notification-service/src/domain/episodes.py",
+   "services/notification-service/tests/notification_fakes.py",
+   "suite:services/notification-service"
+  ],
+  "height": 7,
+  "real_infra": false
+ },
+ "WS-13.7": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/notification-service/src/domain/channels.py",
+   "services/notification-service/src/domain/service.py",
+   "services/notification-service/src/domain/templates.py",
+   "services/notification-service/src/main.py",
+   "services/notification-service/tests/test_channels.py",
+   "services/notification-service/tests/test_templates.py",
+   "suite:services/notification-service"
+  ],
+  "height": 8,
+  "real_infra": false
+ },
+ "WS-13.8": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-13.13"
+  ],
+  "mutex": [
+   "services/notification-service/src/consumers.py",
+   "services/notification-service/src/domain/monitoring.py",
+   "services/notification-service/src/main.py",
+   "services/notification-service/tests/test_crisis_consumer.py",
+   "services/notification-service/tests/test_mvp_287_consumer_lifecycle.py",
+   "suite:services/notification-service",
+   "suite:tests/realinfra/notification-alert-delivery"
+  ],
+  "height": 5,
+  "real_infra": true
+ },
+ "WS-13.9": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-13.8"
+  ],
+  "mutex": [
+   "services/notification-service/src/api.py",
+   "services/notification-service/src/domain/ack_pages.py",
+   "services/notification-service/src/main.py",
+   "services/notification-service/tests/test_mvp_082_acknowledgement_api.py",
+   "suite:services/notification-service"
+  ],
+  "height": 4,
+  "real_infra": false
+ },
+ "WS-13.10": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-13.9"
+  ],
+  "mutex": [
+   "docs/runbooks/crisis-escalation.md",
+   "services/notification-service/src/domain/crisis_paging.py",
+   "services/notification-service/src/main.py",
+   "suite:services/notification-service",
+   "suite:tests/realinfra/notification-alert-delivery"
+  ],
+  "height": 3,
+  "real_infra": true
+ },
+ "WS-13.11": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-13.10"
+  ],
+  "mutex": [
+   "services/notification-service/src/api.py",
+   "services/notification-service/src/main.py",
+   "services/notification-service/tests/test_api.py",
+   "suite:services/notification-service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-13.12": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-13.11"
+  ],
+  "mutex": [
+   "services/notification-service/src/api.py",
+   "services/notification-service/src/domain/service.py",
+   "services/notification-service/src/main.py",
+   "services/notification-service/tests/test_api.py",
+   "suite:services/notification-service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-13.13": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-13.6"
+  ],
+  "mutex": [
+   "services/notification-service/src/consumers.py",
+   "suite:services/notification-service"
+  ],
+  "height": 6,
+  "real_infra": false
+ },
+ "WS-14.5": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/user-service/src/api.py",
+   "services/user-service/src/domain/service.py",
+   "services/user-service/src/infrastructure/postgres_repository.py",
+   "services/user-service/src/infrastructure/repository.py",
+   "services/user-service/tests/fixtures.py",
+   "suite:services/user-service",
+   "suite:tests/realinfra/accounts-roster-consent-erasure"
+  ],
+  "height": 3,
+  "real_infra": true
+ },
+ "WS-14.6": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-14.5"
+  ],
+  "mutex": [
+   "services/user-service/src/domain/service.py",
+   "services/user-service/src/infrastructure/postgres_repository.py",
+   "services/user-service/src/infrastructure/repository.py",
+   "services/user-service/src/main.py",
+   "services/user-service/tests/conftest.py",
+   "services/user-service/tests/fixtures.py",
+   "services/user-service/tests/test_resend_verification.py",
+   "services/user-service/tests/test_service.py",
+   "suite:services/user-service",
+   "suite:tests/realinfra/accounts-roster-consent-erasure"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-14.7": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/user-service/src/main.py",
+   "services/user-service/tests/test_rate_limiting.py",
+   "suite:services/user-service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-14.8": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-14.5"
+  ],
+  "mutex": [
+   "services/user-service/src/api.py",
+   "services/user-service/src/domain/service.py",
+   "services/user-service/src/domain/value_objects.py",
+   "services/user-service/src/infrastructure/postgres_repository.py",
+   "services/user-service/src/infrastructure/repository.py",
+   "services/user-service/src/internal_api.py",
+   "services/user-service/tests/fixtures.py",
+   "services/user-service/tests/test_api.py",
+   "suite:services/user-service",
+   "suite:tests/realinfra/accounts-roster-consent-erasure"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-14.9": {
+  "wave": 1,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-14.6",
+   "WS-14.8"
+  ],
+  "mutex": [
+   "docs/runbooks/clinician-onboarding.md",
+   "scripts/provision_clinician.py",
+   "services/user-service/src/api.py",
+   "services/user-service/src/domain/service.py",
+   "suite:services/user-service",
+   "suite:tests/realinfra/accounts-roster-consent-erasure",
+   "tests/realinfra/accounts-roster-consent-erasure/test_mvp_105_provision_cli_pg.py"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-02.8": {
+  "wave": 2,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_infrastructure/postgres.py",
+   "suite:src/solace_infrastructure",
+   "suite:tests/migrations",
+   "suite:tests/solace_infrastructure"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-02.9": {
+  "wave": 2,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-02.8"
+  ],
+  "mutex": [
+   "src/solace_infrastructure/database/connection_manager.py",
+   "suite:src/solace_infrastructure",
+   "suite:tests/solace_infrastructure"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-04.8": {
+  "wave": 2,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_infrastructure/runtime/bootstrap.py",
+   "suite:src/solace_infrastructure",
+   "suite:tests/bootstrap"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-04.9": {
+  "wave": 2,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_infrastructure/runtime/http.py",
+   "suite:src/solace_infrastructure",
+   "suite:tests/bootstrap"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-05.10": {
+  "wave": 2,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "suite:tests/contracts",
+   "suite:tests/contracts/client__orchestrator",
+   "suite:tests/contracts/therapy__memory",
+   "tests/contracts",
+   "tests/contracts/client__orchestrator/chat.foreign-thread.post.json",
+   "tests/contracts/client__orchestrator/chat.post.json",
+   "tests/contracts/client__orchestrator/history.get.json",
+   "tests/contracts/expected_failures.yaml",
+   "tests/contracts/test_contract_coverage.py",
+   "tests/contracts/therapy__memory/context.json"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-05.11": {
+  "wave": 2,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_testing/e2e.py",
+   "suite:src/solace_testing",
+   "suite:tests/e2e",
+   "tests/e2e/expected_failures.yaml",
+   "tests/e2e/test_w2_chat_journey.py"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-09.6": {
+  "wave": 2,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/shared/infrastructure/llm_client.py",
+   "suite:services/shared",
+   "suite:tests/integration/phi-codec-audit-llm"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-09.7": {
+  "wave": 2,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_security/encryption.py",
+   "src/solace_security/phi_codec.py",
+   "suite:src/solace_security",
+   "suite:tests/solace_security"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-09.8": {
+  "wave": 2,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-09.7"
+  ],
+  "mutex": [
+   "src/solace_security/encryption.py",
+   "src/solace_security/phi_codec.py",
+   "suite:src/solace_security",
+   "suite:tests/solace_security"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-10.9": {
+  "wave": 2,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-11.6"
+  ],
+  "mutex": [
+   "migrations/versions/017_orchestrator_checkpoints.py",
+   "suite:migrations",
+   "suite:services/orchestrator_service",
+   "suite:tests/realinfra/orchestrator-graph-crisis"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-11.6": {
+  "wave": 2,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-14.11"
+  ],
+  "mutex": [
+   "migrations/versions/016_orchestrator_threads.py",
+   "suite:migrations",
+   "suite:tests/realinfra/orchestrator-edge-contracts"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-14.11": {
+  "wave": 2,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "migrations/versions/012_user_accounts.py",
+   "suite:migrations",
+   "suite:tests/realinfra/accounts-roster-consent-erasure"
+  ],
+  "height": 3,
+  "real_infra": true
+ },
+ "WS-15.3": {
+  "wave": 2,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-17.3"
+  ],
+  "mutex": [
+   "migrations/versions/019_therapy.py",
+   "suite:migrations",
+   "suite:tests/realinfra/therapy-service"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-16.2": {
+  "wave": 2,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-15.3"
+  ],
+  "mutex": [
+   "migrations/versions/020_diagnosis.py",
+   "suite:migrations",
+   "suite:tests/realinfra/diagnosis-service"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-17.3": {
+  "wave": 2,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "migrations/versions/018_memory.py",
+   "suite:migrations",
+   "suite:tests/migrations",
+   "suite:tests/realinfra/memory-service",
+   "tests/realinfra/memory-service/conftest.py",
+   "tests/realinfra/memory-service/test_mvp_018_memory_slot.py"
+  ],
+  "height": 3,
+  "real_infra": true
+ },
+ "WS-18.3": {
+  "wave": 2,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "migrations/versions/021_personality_analytics.py",
+   "suite:migrations",
+   "suite:tests/migrations",
+   "suite:tests/realinfra/personality-analytics",
+   "tests/realinfra/personality-analytics/conftest.py",
+   "tests/realinfra/personality-analytics/test_mvp_021_personality_slot.py"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-08.1": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/user-service/src/domain/entities.py",
+   "suite:services/user-service"
+  ],
+  "height": 8,
+  "real_infra": false
+ },
+ "WS-08.2": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-08.1"
+  ],
+  "mutex": [
+   "services/user-service/src/api_auth.py",
+   "services/user-service/src/api_deps.py",
+   "services/user-service/tests/identity_testkit.py",
+   "services/user-service/tests/test_api.py",
+   "suite:services/user-service"
+  ],
+  "height": 7,
+  "real_infra": false
+ },
+ "WS-08.3": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-08.2"
+  ],
+  "mutex": [
+   "services/user-service/src/api_auth.py",
+   "services/user-service/src/infrastructure/password_service.py",
+   "services/user-service/src/oauth.py",
+   "services/user-service/tests/identity_testkit.py",
+   "services/user-service/tests/test_auth_timing_health.py",
+   "suite:services/user-service"
+  ],
+  "height": 6,
+  "real_infra": false
+ },
+ "WS-08.4": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-08.3"
+  ],
+  "mutex": [
+   "services/user-service/src/api_auth.py",
+   "services/user-service/src/api_deps.py",
+   "services/user-service/src/auth.py",
+   "services/user-service/src/identity_wiring.py",
+   "services/user-service/src/infrastructure/jwt_service.py",
+   "services/user-service/src/oauth.py",
+   "services/user-service/tests/identity_testkit.py",
+   "services/user-service/tests/test_refresh_rotation.py",
+   "suite:services/user-service",
+   "suite:tests/realinfra/identity-auth-mfa",
+   "tests/realinfra/identity-auth-mfa/conftest.py"
+  ],
+  "height": 5,
+  "real_infra": true
+ },
+ "WS-08.5": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-08.4"
+  ],
+  "mutex": [
+   "services/user-service/src/api_auth.py",
+   "services/user-service/src/auth.py",
+   "services/user-service/src/domain/entities.py",
+   "services/user-service/src/infrastructure/jwt_service.py",
+   "suite:services/user-service"
+  ],
+  "height": 4,
+  "real_infra": false
+ },
+ "WS-08.6": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-08.5"
+  ],
+  "mutex": [
+   "services/user-service/src/api_auth.py",
+   "services/user-service/src/api_deps.py",
+   "services/user-service/src/auth.py",
+   "services/user-service/src/identity_wiring.py",
+   "services/user-service/src/infrastructure/jwt_service.py",
+   "services/user-service/tests/identity_testkit.py",
+   "services/user-service/tests/test_refresh_rotation.py",
+   "suite:services/user-service",
+   "suite:tests/realinfra/identity-auth-mfa"
+  ],
+  "height": 3,
+  "real_infra": true
+ },
+ "WS-08.7": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-08.6"
+  ],
+  "mutex": [
+   "docs/api/auth.md",
+   "services/user-service/src/api_auth.py",
+   "services/user-service/src/domain/entities.py",
+   "services/user-service/tests/test_api.py",
+   "services/user-service/tests/test_oauth_endpoints.py",
+   "suite:services/user-service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-10.10": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/orchestrator_service/src/langgraph/checkpointer.py",
+   "services/orchestrator_service/src/langgraph/graph_builder.py",
+   "services/orchestrator_service/src/langgraph/state_schema.py",
+   "suite:services/orchestrator_service",
+   "suite:tests/realinfra/orchestrator-graph-crisis"
+  ],
+  "height": 6,
+  "real_infra": true
+ },
+ "WS-10.11": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/orchestrator_service/src/agents/chat_agent.py",
+   "suite:services/orchestrator_service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-10.12": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/orchestrator_service/src/agents/emotion_agent.py",
+   "suite:services/orchestrator_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-10.13": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-10.11"
+  ],
+  "mutex": [
+   "services/orchestrator_service/src/agents/chat_agent.py",
+   "suite:services/orchestrator_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-10.14": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/orchestrator_service/src/langgraph/supervisor.py",
+   "suite:services/orchestrator_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-10.15": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-10.10"
+  ],
+  "mutex": [
+   "services/orchestrator_service/src/langgraph/aggregator.py",
+   "services/orchestrator_service/src/langgraph/graph_builder.py",
+   "suite:services/orchestrator_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-10.16": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "suite:services/orchestrator_service",
+   "suite:tests/contracts/orchestrator__safety",
+   "tests/contracts/orchestrator__safety/check.json"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-11.7": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-10.10"
+  ],
+  "mutex": [
+   "services/orchestrator_service/src/api.py",
+   "services/orchestrator_service/src/infrastructure/__init__.py",
+   "services/orchestrator_service/src/infrastructure/thread_registry.py",
+   "services/orchestrator_service/src/main.py",
+   "suite:services/orchestrator_service",
+   "suite:tests/realinfra/orchestrator-edge-contracts"
+  ],
+  "height": 5,
+  "real_infra": true
+ },
+ "WS-11.8": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-11.7"
+  ],
+  "mutex": [
+   "services/orchestrator_service/src/agents/__init__.py",
+   "services/orchestrator_service/src/agents/therapy_agent.py",
+   "services/orchestrator_service/src/api.py",
+   "services/orchestrator_service/src/infrastructure/clients.py",
+   "services/orchestrator_service/src/langgraph/memory_node.py",
+   "services/orchestrator_service/src/main.py",
+   "suite:services/orchestrator_service"
+  ],
+  "height": 4,
+  "real_infra": false
+ },
+ "WS-11.9": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-11.7",
+   "WS-11.8"
+  ],
+  "mutex": [
+   "services/orchestrator_service/src/agents/therapy_agent.py",
+   "suite:services/orchestrator_service",
+   "suite:tests/contracts/orchestrator__therapy",
+   "tests/contracts/orchestrator__therapy/message.json",
+   "tests/contracts/orchestrator__therapy/session_start.json"
+  ],
+  "height": 3,
+  "real_infra": false
+ },
+ "WS-11.10": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-11.9"
+  ],
+  "mutex": [
+   "services/orchestrator_service/src/agents/assessment_agent.py",
+   "services/orchestrator_service/src/agents/diagnosis_agent.py",
+   "services/orchestrator_service/src/api.py",
+   "suite:services/orchestrator_service",
+   "suite:tests/contracts/orchestrator__diagnosis",
+   "tests/contracts/orchestrator__diagnosis/session_start.json"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-11.11": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-11.8"
+  ],
+  "mutex": [
+   "services/orchestrator_service/src/agents/personality_agent.py",
+   "suite:services/orchestrator_service",
+   "suite:tests/contracts/orchestrator__personality",
+   "tests/contracts/orchestrator__personality/detect.json",
+   "tests/contracts/orchestrator__personality/style.json"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-11.12": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-11.7",
+   "WS-11.8"
+  ],
+  "mutex": [
+   "services/orchestrator_service/src/api.py",
+   "services/orchestrator_service/src/langgraph/memory_node.py",
+   "services/orchestrator_service/src/main.py",
+   "suite:services/orchestrator_service",
+   "suite:tests/contracts/orchestrator__memory",
+   "tests/contracts/orchestrator__memory/context.json",
+   "tests/contracts/orchestrator__memory/session_message.json"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-11.13": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-11.10",
+   "WS-11.11",
+   "WS-11.12",
+   "WS-11.9"
+  ],
+  "mutex": [
+   "services/orchestrator_service/src/agents/therapy_agent.py",
+   "services/orchestrator_service/src/infrastructure/clients.py",
+   "services/orchestrator_service/src/langgraph/memory_node.py",
+   "suite:services/orchestrator_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-11.14": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-11.7"
+  ],
+  "mutex": [
+   "services/orchestrator_service/src/api.py",
+   "suite:services/orchestrator_service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-11.15": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-08.7",
+   "WS-11.12",
+   "WS-11.14",
+   "WS-11.7"
+  ],
+  "mutex": [
+   "docs/API-HANDOFF.md",
+   "docs/api/orchestrator.md",
+   "services/orchestrator_service/tests/test_mvp_072_client_contract.py",
+   "suite:services/orchestrator_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-14.10": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/user-service/README.md",
+   "services/user-service/src/config.py",
+   "services/user-service/src/infrastructure/postgres_repository.py",
+   "services/user-service/src/main.py",
+   "services/user-service/tests/conftest.py",
+   "suite:services/user-service",
+   "suite:tests/realinfra/accounts-roster-consent-erasure",
+   "tests/realinfra/accounts-roster-consent-erasure/conftest.py",
+   "tests/realinfra/accounts-roster-consent-erasure/test_mvp_105_provision_cli_pg.py"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-14.12": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-14.10"
+  ],
+  "mutex": [
+   "services/user-service/src/infrastructure/postgres_repository.py",
+   "suite:services/user-service",
+   "suite:tests/realinfra/accounts-roster-consent-erasure"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-15.4": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/therapy_service/src/domain/models.py",
+   "services/therapy_service/src/domain/service.py",
+   "suite:services/therapy_service"
+  ],
+  "height": 8,
+  "real_infra": false
+ },
+ "WS-15.5": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-15.4"
+  ],
+  "mutex": [
+   "services/therapy_service/src/api.py",
+   "services/therapy_service/src/domain/service.py",
+   "services/therapy_service/src/events.py",
+   "services/therapy_service/src/main.py",
+   "services/therapy_service/src/schemas.py",
+   "services/therapy_service/tests/test_mvp_357_event_contracts.py",
+   "suite:services/therapy_service"
+  ],
+  "height": 7,
+  "real_infra": false
+ },
+ "WS-15.6": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-15.5"
+  ],
+  "mutex": [
+   "services/therapy_service/src/domain/response_generator.py",
+   "services/therapy_service/src/domain/service.py",
+   "services/therapy_service/src/domain/session_manager.py",
+   "suite:services/therapy_service"
+  ],
+  "height": 6,
+  "real_infra": false
+ },
+ "WS-15.7": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-15.6"
+  ],
+  "mutex": [
+   "services/therapy_service/src/domain/response_generator.py",
+   "services/therapy_service/src/domain/service.py",
+   "services/therapy_service/src/main.py",
+   "suite:services/therapy_service"
+  ],
+  "height": 5,
+  "real_infra": false
+ },
+ "WS-15.8": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/therapy_service/src/infrastructure/postgres_repository.py",
+   "services/therapy_service/src/infrastructure/repository.py",
+   "services/therapy_service/src/main.py",
+   "suite:services/therapy_service",
+   "suite:tests/realinfra/therapy-service"
+  ],
+  "height": 5,
+  "real_infra": true
+ },
+ "WS-15.9": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-15.7",
+   "WS-15.8"
+  ],
+  "mutex": [
+   "services/therapy_service/src/domain/service.py",
+   "services/therapy_service/src/infrastructure/redis_session_repository.py",
+   "suite:services/therapy_service",
+   "suite:tests/realinfra/therapy-service"
+  ],
+  "height": 4,
+  "real_infra": true
+ },
+ "WS-15.10": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-15.9"
+  ],
+  "mutex": [
+   "services/therapy_service/src/api.py",
+   "services/therapy_service/src/domain/service.py",
+   "services/therapy_service/src/infrastructure/context_assembler.py",
+   "services/therapy_service/src/main.py",
+   "services/therapy_service/tests/test_mvp_194_memory_context_contract.py",
+   "suite:services/therapy_service"
+  ],
+  "height": 3,
+  "real_infra": false
+ },
+ "WS-15.11": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-11.9",
+   "WS-15.10"
+  ],
+  "mutex": [
+   "services/therapy_service/src/api.py",
+   "services/therapy_service/src/domain/models.py",
+   "services/therapy_service/src/domain/service.py",
+   "services/therapy_service/tests/test_mvp_022_contract_orchestrator_therapy.py",
+   "suite:services/therapy_service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-15.12": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-15.11"
+  ],
+  "mutex": [
+   "services/therapy_service/src/domain/response_generator.py",
+   "services/therapy_service/src/domain/service.py",
+   "suite:services/therapy_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-15.22": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/therapy_service/tests/test_llm_client.py",
+   "suite:services/therapy_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-16.3": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/diagnosis_service/src/api.py",
+   "services/diagnosis_service/src/domain/models.py",
+   "services/diagnosis_service/src/domain/risk.py",
+   "services/diagnosis_service/src/domain/service.py",
+   "services/diagnosis_service/src/domain/symptom_extractor.py",
+   "services/diagnosis_service/src/schemas.py",
+   "suite:services/diagnosis_service"
+  ],
+  "height": 10,
+  "real_infra": false
+ },
+ "WS-16.4": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-16.3"
+  ],
+  "mutex": [
+   "services/diagnosis_service/src/domain/differential.py",
+   "services/diagnosis_service/src/domain/risk.py",
+   "services/diagnosis_service/src/domain/service.py",
+   "services/diagnosis_service/src/domain/symptom_extractor.py",
+   "services/diagnosis_service/src/main.py",
+   "suite:services/diagnosis_service"
+  ],
+  "height": 9,
+  "real_infra": false
+ },
+ "WS-16.5": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-16.4"
+  ],
+  "mutex": [
+   "services/diagnosis_service/src/api.py",
+   "services/diagnosis_service/src/domain/service.py",
+   "services/diagnosis_service/src/events.py",
+   "services/diagnosis_service/src/main.py",
+   "services/diagnosis_service/tests/test_mvp_357_event_contracts.py",
+   "suite:services/diagnosis_service",
+   "suite:tests/integration"
+  ],
+  "height": 8,
+  "real_infra": false
+ },
+ "WS-16.6": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-16.5"
+  ],
+  "mutex": [
+   "services/diagnosis_service/src/domain/models.py",
+   "services/diagnosis_service/src/domain/service.py",
+   "services/diagnosis_service/src/infrastructure/redis_session_repository.py",
+   "suite:services/diagnosis_service"
+  ],
+  "height": 7,
+  "real_infra": false
+ },
+ "WS-16.7": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-16.6"
+  ],
+  "mutex": [
+   "services/diagnosis_service/src/api.py",
+   "services/diagnosis_service/src/domain/models.py",
+   "services/diagnosis_service/src/domain/service.py",
+   "services/diagnosis_service/src/infrastructure/redis_session_repository.py",
+   "suite:services/diagnosis_service"
+  ],
+  "height": 6,
+  "real_infra": false
+ },
+ "WS-16.8": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-16.7"
+  ],
+  "mutex": [
+   "services/diagnosis_service/src/domain/entities.py",
+   "services/diagnosis_service/src/domain/service.py",
+   "services/diagnosis_service/src/events.py",
+   "services/diagnosis_service/src/infrastructure/postgres_repository.py",
+   "services/diagnosis_service/src/infrastructure/repository.py",
+   "services/diagnosis_service/src/main.py",
+   "suite:services/diagnosis_service",
+   "suite:tests/realinfra/diagnosis-service"
+  ],
+  "height": 5,
+  "real_infra": true
+ },
+ "WS-16.9": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-16.8"
+  ],
+  "mutex": [
+   "services/diagnosis_service/src/domain/service.py",
+   "services/diagnosis_service/src/infrastructure/redis_session_repository.py",
+   "services/diagnosis_service/src/main.py",
+   "suite:services/diagnosis_service"
+  ],
+  "height": 4,
+  "real_infra": false
+ },
+ "WS-16.10": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-16.9"
+  ],
+  "mutex": [
+   "services/diagnosis_service/src/domain/differential.py",
+   "services/diagnosis_service/src/domain/service.py",
+   "services/diagnosis_service/src/domain/symptom_extractor.py",
+   "suite:services/diagnosis_service"
+  ],
+  "height": 3,
+  "real_infra": false
+ },
+ "WS-16.11": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-16.10"
+  ],
+  "mutex": [
+   "suite:tests/integration",
+   "tests/integration/test_diagnosis_vignette.py"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-16.12": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-11.10",
+   "WS-16.11"
+  ],
+  "mutex": [
+   "services/diagnosis_service/src/api.py",
+   "services/diagnosis_service/tests/test_mvp_022_contract_orchestrator_diagnosis.py",
+   "suite:services/diagnosis_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-17.4": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/memory_service/src/api.py",
+   "services/memory_service/tests/conftest.py",
+   "services/memory_service/tests/test_mvp_059_api_ownership.py",
+   "suite:services/memory_service"
+  ],
+  "height": 4,
+  "real_infra": false
+ },
+ "WS-17.5": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-17.4"
+  ],
+  "mutex": [
+   "services/memory_service/src",
+   "services/memory_service/src/api.py",
+   "services/memory_service/src/domain/models.py",
+   "services/memory_service/src/domain/service.py",
+   "services/memory_service/src/infrastructure/postgres_repo.py",
+   "services/memory_service/src/main.py",
+   "services/memory_service/tests/conftest.py",
+   "services/memory_service/tests/test_infrastructure.py",
+   "services/memory_service/tests/test_mvp_060_write_path.py",
+   "suite:services/memory_service",
+   "suite:tests/realinfra/memory-service",
+   "tests/realinfra/memory-service/test_mvp_060_memory_write_path.py"
+  ],
+  "height": 3,
+  "real_infra": true
+ },
+ "WS-17.6": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-17.5"
+  ],
+  "mutex": [
+   "services/memory_service/src/domain/service.py",
+   "services/memory_service/src/infrastructure/postgres_repo.py",
+   "services/memory_service/tests/test_mvp_061_read_path.py",
+   "suite:services/memory_service",
+   "suite:tests/realinfra/memory-service",
+   "tests/realinfra/memory-service/test_mvp_061_memory_read_path.py"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-17.7": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-17.5"
+  ],
+  "mutex": [
+   "services/memory_service/src/domain/service.py",
+   "services/memory_service/tests/test_mvp_144_crisis_retention.py",
+   "suite:services/memory_service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-17.8": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/memory_service/src/domain/context_assembler.py",
+   "services/memory_service/tests/test_mvp_147_context_order.py",
+   "suite:services/memory_service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-17.9": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-17.6",
+   "WS-17.7",
+   "WS-17.8"
+  ],
+  "mutex": [
+   "services/memory_service/src/domain/context_assembler.py",
+   "services/memory_service/src/domain/service.py",
+   "services/memory_service/src/infrastructure/postgres_repo.py",
+   "services/memory_service/tests/test_mvp_146_durable_context.py",
+   "suite:services/memory_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-17.17": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-11.12",
+   "WS-17.4"
+  ],
+  "mutex": [
+   "services/memory_service/tests/test_mvp_065_contract_orchestrator_memory.py",
+   "suite:services/memory_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-17.18": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-15.10",
+   "WS-17.4"
+  ],
+  "mutex": [
+   "services/memory_service/tests/test_mvp_if11_memory_provider_contract.py",
+   "suite:services/memory_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-18.4": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/personality_service/src/infrastructure/postgres_repository.py",
+   "services/personality_service/src/infrastructure/repository.py",
+   "services/personality_service/src/main.py",
+   "services/personality_service/tests/conftest.py",
+   "services/personality_service/tests/test_infrastructure.py",
+   "services/personality_service/tests/test_mvp_080_profile_persistence.py",
+   "suite:services/personality_service",
+   "suite:tests/realinfra/personality-analytics",
+   "tests/realinfra/personality-analytics/test_mvp_080_personality_repository.py"
+  ],
+  "height": 5,
+  "real_infra": true
+ },
+ "WS-18.5": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-18.4"
+  ],
+  "mutex": [
+   "services/personality_service/src/api.py",
+   "services/personality_service/src/domain/errors.py",
+   "services/personality_service/src/domain/service.py",
+   "services/personality_service/tests/test_mvp_304_persist_before_cache.py",
+   "services/personality_service/tests/test_persist_profile.py",
+   "suite:services/personality_service"
+  ],
+  "height": 4,
+  "real_infra": false
+ },
+ "WS-18.6": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-18.5"
+  ],
+  "mutex": [
+   "services/personality_service/src/domain/service.py",
+   "services/personality_service/src/domain/trait_detector.py",
+   "services/personality_service/src/main.py",
+   "services/personality_service/tests/test_mvp_171_detect_sources.py",
+   "suite:services/personality_service"
+  ],
+  "height": 3,
+  "real_infra": false
+ },
+ "WS-18.7": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-18.6"
+  ],
+  "mutex": [
+   "services/personality_service/src/api.py",
+   "services/personality_service/src/schemas.py",
+   "services/personality_service/tests/test_mvp_303_request_validation.py",
+   "suite:services/personality_service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-18.8": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-11.11",
+   "WS-18.7"
+  ],
+  "mutex": [
+   "services/personality_service/src/api.py",
+   "services/personality_service/src/domain/service.py",
+   "services/personality_service/tests/test_api.py",
+   "services/personality_service/tests/test_mvp_022_contract_orchestrator_personality.py",
+   "services/personality_service/tests/test_mvp_314_personality_route_permissions.py",
+   "suite:services/personality_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-18.9": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/analytics-service/src/consumer.py",
+   "services/analytics-service/src/main.py",
+   "services/analytics-service/tests/test_main.py",
+   "services/analytics-service/tests/test_mvp_108_plane_ingestion.py",
+   "services/analytics-service/tests/test_mvp_110_runtime_adoption.py",
+   "suite:services/analytics-service",
+   "suite:tests/realinfra/personality-analytics",
+   "tests/realinfra/personality-analytics/test_mvp_108_analytics_kafka_ingestion.py"
+  ],
+  "height": 3,
+  "real_infra": true
+ },
+ "WS-18.10": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-18.9"
+  ],
+  "mutex": [
+   "services/analytics-service/src/api.py",
+   "services/analytics-service/tests/test_api.py",
+   "services/analytics-service/tests/test_mvp_235_ingest_payload.py",
+   "suite:services/analytics-service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-18.11": {
+  "wave": 2,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-18.10"
+  ],
+  "mutex": [
+   "services/analytics-service/src/aggregations.py",
+   "services/analytics-service/src/api.py",
+   "services/analytics-service/src/consumer.py",
+   "services/analytics-service/src/reports.py",
+   "services/analytics-service/tests/test_mvp_237_event_time.py",
+   "suite:services/analytics-service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-03.7": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   ".env.example",
+   "deploy/env/compose_render.py",
+   "deploy/env/env-contract.yaml",
+   "deploy/env/generate_dev_env.py",
+   "deploy/env/registry.py",
+   "deploy/env/scan_env_file.py",
+   "docker-compose.prod.yml",
+   "docker-compose.yml",
+   "suite:tests/deploy",
+   "tests/deploy/conftest.py"
+  ],
+  "height": 4,
+  "real_infra": true
+ },
+ "WS-03.8": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-03.20"
+  ],
+  "mutex": [
+   ".env.example",
+   "deploy/env/env-contract.yaml",
+   "deploy/env/registry.py",
+   "deploy/render_secrets.py",
+   "deploy/sops/Dockerfile",
+   "deploy/sops/install_tools.sh",
+   "deploy/sops/tools.json",
+   "docs/KNOWN-LIMITATIONS.md",
+   "docs/STAGING-BRINGUP.md",
+   "docs/runbooks/secrets.md",
+   "infrastructure/aws-staging/DEPLOY.md",
+   "suite:infrastructure/aws-staging",
+   "suite:tests/deploy",
+   "suite:tests/security",
+   "tests/deploy/conftest.py",
+   "tests/deploy/test_mvp_348_secrets_store.py",
+   "tests/deploy/test_mvp_352_deploy_runbook.py",
+   "tests/security/test_config_secrets_hardening.py"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-03.20": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-03.7"
+  ],
+  "mutex": [
+   "infrastructure/aws-staging/DEPLOY.md",
+   "infrastructure/aws-staging/solace-staging-deployer-policy.json",
+   "infrastructure/aws-staging/solace-staging.yaml",
+   "suite:infrastructure/aws-staging",
+   "suite:tests/deploy",
+   "tests/deploy/conftest.py"
+  ],
+  "height": 3,
+  "real_infra": false
+ },
+ "WS-04.10": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_infrastructure/runtime/bootstrap.py",
+   "suite:src/solace_infrastructure",
+   "suite:tests/bootstrap"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-04.11": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-03.8"
+  ],
+  "mutex": [
+   "docker-compose.observability.yml",
+   "infrastructure/alertmanager/render-config.sh",
+   "src/solace_security/production_guards.py",
+   "suite:infrastructure/alertmanager",
+   "suite:src/solace_security",
+   "suite:tests/bootstrap"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-05.12": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "docker-compose.test.yml",
+   "infrastructure/test/stub-oidc/Dockerfile",
+   "infrastructure/test/stub-oidc/app.py",
+   "suite:infrastructure/test",
+   "suite:tests/solace_testing"
+  ],
+  "height": 4,
+  "real_infra": false
+ },
+ "WS-05.13": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-05.12"
+  ],
+  "mutex": [
+   "scripts/test/gen_e2e_env.py",
+   "src/solace_testing/e2e.py",
+   "suite:src/solace_testing",
+   "suite:tests/e2e",
+   "suite:tests/scripts",
+   "tests/e2e/expected_failures.yaml",
+   "tests/e2e/test_w3_secrets_injection.py",
+   "tests/scripts/test_mvp_039_gen_e2e_env.py"
+  ],
+  "height": 3,
+  "real_infra": true
+ },
+ "WS-05.14": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "suite:tests/contracts",
+   "tests/contracts/expected_failures.yaml",
+   "tests/contracts/test_contract_coverage.py",
+   "tests/contracts/test_event_contract_files.py"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-05.15": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-05.13"
+  ],
+  "mutex": [
+   "src/solace_testing/e2e.py",
+   "suite:src/solace_testing",
+   "suite:tests/e2e",
+   "tests/e2e/expected_failures.yaml",
+   "tests/e2e/test_w3_privacy.py"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-05.16": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-05.15"
+  ],
+  "mutex": [
+   "src/solace_testing/e2e.py",
+   "suite:src/solace_testing",
+   "suite:tests/e2e",
+   "tests/e2e/expected_failures.yaml",
+   "tests/e2e/test_w3_consent_oauth.py"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-06.11": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_events/__init__.py",
+   "src/solace_events/postgres_stores.py",
+   "src/solace_events/retention.py",
+   "src/solace_events/schemas.py",
+   "src/solace_events/service_plane.py",
+   "suite:src/solace_events",
+   "suite:tests/realinfra/event-plane",
+   "suite:tests/solace_events"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-06.12": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-06.11"
+  ],
+  "mutex": [
+   "src/solace_events/errors.py",
+   "src/solace_events/metrics.py",
+   "src/solace_events/payload_policy.py",
+   "src/solace_events/publisher.py",
+   "suite:src/solace_events",
+   "suite:tests/realinfra/event-plane",
+   "suite:tests/solace_events"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-07.8": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_security/authorization.py",
+   "src/solace_security/middleware.py",
+   "suite:src/solace_security",
+   "suite:tests/realinfra/service-auth-authz",
+   "suite:tests/solace_security",
+   "tests/realinfra/service-auth-authz/test_mvp_120_subject_access_checker.py",
+   "tests/solace_security/test_mvp_120_subject_scoping.py"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-07.12": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_security/auth.py",
+   "src/solace_security/middleware.py",
+   "suite:src/solace_security",
+   "suite:tests/solace_security",
+   "tests/solace_security/test_mvp_317_locale_claim.py"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-09.9": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_security/audit.py",
+   "suite:src/solace_security",
+   "suite:tests/solace_security"
+  ],
+  "height": 5,
+  "real_infra": false
+ },
+ "WS-09.10": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-09.9"
+  ],
+  "mutex": [
+   "migrations/versions/011_audit_trail.py",
+   "suite:migrations",
+   "suite:tests/realinfra/phi-codec-audit-llm"
+  ],
+  "height": 4,
+  "real_infra": true
+ },
+ "WS-09.11": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-09.10"
+  ],
+  "mutex": [
+   "src/solace_security/audit.py",
+   "src/solace_security/audit_runtime.py",
+   "suite:src/solace_security",
+   "suite:tests/realinfra/phi-codec-audit-llm",
+   "suite:tests/solace_security"
+  ],
+  "height": 3,
+  "real_infra": true
+ },
+ "WS-09.12": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-09.11"
+  ],
+  "mutex": [
+   "src/solace_security/audit_runtime.py",
+   "suite:src/solace_security",
+   "suite:tests/solace_security"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-09.13": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_security/phi_protection.py",
+   "suite:src/solace_security",
+   "suite:tests/solace_security"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-09.14": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-09.13"
+  ],
+  "mutex": [
+   "src/solace_security/phi_protection.py",
+   "suite:src/solace_security",
+   "suite:tests/solace_security"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-09.16": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-09.11",
+   "WS-09.12"
+  ],
+  "mutex": [
+   "src/solace_security/audit_runtime.py",
+   "suite:src/solace_security",
+   "suite:tests/realinfra/phi-codec-audit-llm",
+   "suite:tests/solace_security"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-09.17": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_security/phi_codec.py",
+   "suite:src/solace_security",
+   "suite:tests/solace_security"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-14.13": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-06.11",
+   "WS-09.11"
+  ],
+  "mutex": [
+   "src/solace_infrastructure/gdpr/consumer.py",
+   "suite:src/solace_infrastructure",
+   "suite:tests/solace_infrastructure"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-14.14": {
+  "wave": 3,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "migrations/versions/012_user_accounts.py",
+   "suite:migrations",
+   "suite:tests/realinfra/accounts-roster-consent-erasure"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-08.8": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-14.16"
+  ],
+  "mutex": [
+   "docs/api/auth.md",
+   "services/user-service/src/api_auth.py",
+   "services/user-service/src/api_deps.py",
+   "services/user-service/src/auth.py",
+   "services/user-service/src/identity_wiring.py",
+   "services/user-service/src/infrastructure/jwt_service.py",
+   "services/user-service/tests/identity_testkit.py",
+   "suite:services/user-service"
+  ],
+  "height": 9,
+  "real_infra": false
+ },
+ "WS-08.9": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-08.8"
+  ],
+  "mutex": [
+   "services/user-service/src/identity_wiring.py",
+   "services/user-service/src/infrastructure/oauth_google.py",
+   "services/user-service/src/oauth.py",
+   "services/user-service/tests/test_oauth_google.py",
+   "suite:services/user-service"
+  ],
+  "height": 8,
+  "real_infra": false
+ },
+ "WS-08.10": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-08.9"
+  ],
+  "mutex": [
+   "docs/api/auth.md",
+   "services/user-service/src/identity_wiring.py",
+   "services/user-service/src/oauth.py",
+   "services/user-service/tests/identity_testkit.py",
+   "services/user-service/tests/test_oauth_endpoints.py",
+   "suite:services/user-service"
+  ],
+  "height": 7,
+  "real_infra": false
+ },
+ "WS-08.11": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-08.10"
+  ],
+  "mutex": [
+   "services/user-service/src/api_auth.py",
+   "services/user-service/src/oauth.py",
+   "suite:services/user-service"
+  ],
+  "height": 6,
+  "real_infra": false
+ },
+ "WS-08.12": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-08.11"
+  ],
+  "mutex": [
+   "docs/api/auth.md",
+   "services/user-service/src/identity_wiring.py",
+   "services/user-service/src/infrastructure/oauth_account_repository.py",
+   "services/user-service/src/oauth.py",
+   "services/user-service/tests/identity_testkit.py",
+   "services/user-service/tests/test_oauth_endpoints.py",
+   "suite:services/user-service",
+   "suite:tests/realinfra/identity-auth-mfa",
+   "tests/realinfra/identity-auth-mfa/conftest.py"
+  ],
+  "height": 5,
+  "real_infra": true
+ },
+ "WS-08.13": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-08.12",
+   "WS-14.17"
+  ],
+  "mutex": [
+   "services/user-service/src/api_auth.py",
+   "services/user-service/src/auth.py",
+   "services/user-service/src/infrastructure/jwt_service.py",
+   "services/user-service/src/oauth.py",
+   "suite:services/user-service"
+  ],
+  "height": 4,
+  "real_infra": false
+ },
+ "WS-08.14": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-08.13"
+  ],
+  "mutex": [
+   "services/user-service/src/api_auth.py",
+   "services/user-service/src/auth.py",
+   "services/user-service/src/oauth.py",
+   "services/user-service/tests/identity_testkit.py",
+   "suite:services/user-service",
+   "suite:tests/realinfra/identity-auth-mfa"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-08.21": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-08.13"
+  ],
+  "mutex": [
+   "docs/api/auth.md",
+   "services/user-service/src/api_auth.py",
+   "services/user-service/src/auth.py",
+   "services/user-service/src/infrastructure/jwt_service.py",
+   "services/user-service/src/oauth.py",
+   "suite:services/user-service"
+  ],
+  "height": 3,
+  "real_infra": false
+ },
+ "WS-09.15": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-12.12"
+  ],
+  "mutex": [
+   "suite:tests/solace_security"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-11.16": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/orchestrator_service/src/api.py",
+   "suite:services/orchestrator_service"
+  ],
+  "height": 7,
+  "real_infra": false
+ },
+ "WS-11.17": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-11.16"
+  ],
+  "mutex": [
+   "services/orchestrator_service/src/api.py",
+   "services/orchestrator_service/src/main.py",
+   "services/orchestrator_service/src/websocket.py",
+   "suite:services/orchestrator_service"
+  ],
+  "height": 6,
+  "real_infra": false
+ },
+ "WS-11.18": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-11.17"
+  ],
+  "mutex": [
+   "services/orchestrator_service/src/infrastructure/thread_registry.py",
+   "services/orchestrator_service/src/main.py",
+   "suite:services/orchestrator_service",
+   "suite:tests/realinfra/orchestrator-edge-contracts"
+  ],
+  "height": 5,
+  "real_infra": true
+ },
+ "WS-11.19": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-11.18"
+  ],
+  "mutex": [
+   "docs/api/orchestrator.md",
+   "services/orchestrator_service/src/api.py",
+   "services/orchestrator_service/src/main.py",
+   "services/orchestrator_service/src/replay_buffer.py",
+   "suite:services/orchestrator_service"
+  ],
+  "height": 4,
+  "real_infra": false
+ },
+ "WS-11.20": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-08.13",
+   "WS-11.19"
+  ],
+  "mutex": [
+   "docs/API-HANDOFF.md",
+   "services/orchestrator_service/src/api.py",
+   "suite:services/orchestrator_service"
+  ],
+  "height": 3,
+  "real_infra": false
+ },
+ "WS-11.21": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-08.21",
+   "WS-11.20"
+  ],
+  "mutex": [
+   "docs/API-HANDOFF.md",
+   "services/orchestrator_service/src/agents/therapy_agent.py",
+   "services/orchestrator_service/src/api.py",
+   "suite:services/orchestrator_service",
+   "suite:tests/contracts/orchestrator__therapy",
+   "tests/contracts/orchestrator__therapy/message.json"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-12.12": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/safety_service/src/domain/escalation.py",
+   "services/safety_service/src/domain/service.py",
+   "services/safety_service/src/infrastructure/gdpr.py",
+   "services/safety_service/src/main.py",
+   "services/safety_service/tests/test_gdpr_erasure.py",
+   "suite:services/safety_service",
+   "suite:tests/integration",
+   "suite:tests/realinfra/safety-detection-lexicon",
+   "tests/integration/test_phi_encryption_activation.py"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-13.14": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/notification-service/src/domain/erasure.py",
+   "services/notification-service/src/infrastructure/crisis_alert_repository.py",
+   "services/notification-service/src/infrastructure/delivery_repository.py",
+   "services/notification-service/src/main.py",
+   "suite:services/notification-service",
+   "suite:tests/realinfra/notification-alert-delivery"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-13.15": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-13.14"
+  ],
+  "mutex": [
+   "services/notification-service/src/api.py",
+   "services/notification-service/src/domain/crisis_paging.py",
+   "suite:services/notification-service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-14.15": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/user-service/src/domain/erasure.py",
+   "services/user-service/src/domain/service.py",
+   "services/user-service/tests/test_gdpr_erasure.py",
+   "suite:services/user-service",
+   "suite:tests/realinfra/accounts-roster-consent-erasure"
+  ],
+  "height": 11,
+  "real_infra": true
+ },
+ "WS-14.16": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-14.15"
+  ],
+  "mutex": [
+   "services/user-service/src/api.py",
+   "services/user-service/src/domain/erasure.py",
+   "services/user-service/src/domain/service.py",
+   "services/user-service/src/events.py",
+   "services/user-service/src/infrastructure/postgres_repository.py",
+   "services/user-service/src/infrastructure/repository.py",
+   "services/user-service/src/main.py",
+   "services/user-service/tests/fixtures.py",
+   "suite:services/user-service",
+   "suite:tests/realinfra/accounts-roster-consent-erasure"
+  ],
+  "height": 10,
+  "real_infra": true
+ },
+ "WS-14.17": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-14.16"
+  ],
+  "mutex": [
+   "services/user-service/src/__init__.py",
+   "services/user-service/src/api.py",
+   "services/user-service/src/domain/__init__.py",
+   "services/user-service/src/domain/consent.py",
+   "services/user-service/src/domain/service.py",
+   "services/user-service/src/domain/value_objects.py",
+   "services/user-service/tests/test_consent.py",
+   "suite:services/user-service"
+  ],
+  "height": 5,
+  "real_infra": false
+ },
+ "WS-14.18": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-14.16",
+   "WS-14.17"
+  ],
+  "mutex": [
+   "scripts/provision_clinician.py",
+   "services/user-service/src/api.py",
+   "services/user-service/src/domain/service.py",
+   "services/user-service/src/internal_api.py",
+   "suite:services/user-service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-14.19": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/user-service/src/api.py",
+   "services/user-service/src/domain/service.py",
+   "suite:services/user-service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-14.20": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-14.18"
+  ],
+  "mutex": [
+   "services/user-service/src/api.py",
+   "suite:services/user-service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-14.22": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-14.19"
+  ],
+  "mutex": [
+   "services/user-service/src/api.py",
+   "suite:services/user-service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-15.13": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/therapy_service/src/domain/homework.py",
+   "services/therapy_service/src/domain/progress.py",
+   "services/therapy_service/src/domain/service.py",
+   "services/therapy_service/src/domain/technique_selector.py",
+   "services/therapy_service/src/domain/treatment_planner.py",
+   "services/therapy_service/src/events.py",
+   "services/therapy_service/src/infrastructure/gdpr.py",
+   "services/therapy_service/src/main.py",
+   "suite:services/therapy_service",
+   "suite:tests/realinfra/therapy-service"
+  ],
+  "height": 4,
+  "real_infra": true
+ },
+ "WS-15.14": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-15.13"
+  ],
+  "mutex": [
+   "services/therapy_service/src/api.py",
+   "services/therapy_service/src/domain/models.py",
+   "services/therapy_service/src/domain/service.py",
+   "suite:services/therapy_service"
+  ],
+  "height": 3,
+  "real_infra": false
+ },
+ "WS-15.15": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-15.14"
+  ],
+  "mutex": [
+   "services/therapy_service/src/api.py",
+   "services/therapy_service/src/domain/service.py",
+   "services/therapy_service/src/domain/treatment_planner.py",
+   "suite:services/therapy_service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-15.16": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-15.15"
+  ],
+  "mutex": [
+   "services/therapy_service/src/infrastructure/redis_session_repository.py",
+   "services/therapy_service/src/main.py",
+   "suite:services/therapy_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-15.23": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-11.21"
+  ],
+  "mutex": [
+   "services/therapy_service/src/api.py",
+   "services/therapy_service/src/schemas.py",
+   "suite:services/therapy_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-16.13": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/diagnosis_service/src/domain/service.py",
+   "services/diagnosis_service/src/events.py",
+   "services/diagnosis_service/src/infrastructure/postgres_repository.py",
+   "services/diagnosis_service/src/main.py",
+   "suite:services/diagnosis_service",
+   "suite:tests/realinfra/diagnosis-service"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-16.14": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-16.13"
+  ],
+  "mutex": [
+   "services/diagnosis_service/src/api.py",
+   "services/diagnosis_service/src/domain/service.py",
+   "services/diagnosis_service/src/domain/symptom_extractor.py",
+   "suite:services/diagnosis_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-17.10": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/memory_service/src/domain/service.py",
+   "services/memory_service/src/infrastructure/hybrid_search.py",
+   "services/memory_service/src/main.py",
+   "services/memory_service/tests/test_mvp_280_per_user_ranking.py",
+   "suite:services/memory_service"
+  ],
+  "height": 5,
+  "real_infra": false
+ },
+ "WS-17.11": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-17.10"
+  ],
+  "mutex": [
+   "services/memory_service/src/api.py",
+   "services/memory_service/src/domain/erasure.py",
+   "services/memory_service/src/domain/service.py",
+   "services/memory_service/src/infrastructure/postgres_repo.py",
+   "services/memory_service/src/infrastructure/redis_cache.py",
+   "services/memory_service/src/infrastructure/weaviate_repo.py",
+   "services/memory_service/src/main.py",
+   "services/memory_service/tests/test_gdpr_erasure.py",
+   "services/memory_service/tests/test_mvp_062_erasure_every_store.py",
+   "suite:services/memory_service",
+   "suite:tests/realinfra/memory-service",
+   "tests/realinfra/memory-service/test_mvp_062_memory_erasure.py"
+  ],
+  "height": 4,
+  "real_infra": true
+ },
+ "WS-17.12": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-17.11"
+  ],
+  "mutex": [
+   "services/memory_service/src/api.py",
+   "services/memory_service/src/domain/models.py",
+   "services/memory_service/src/domain/service.py",
+   "services/memory_service/src/schemas.py",
+   "services/memory_service/tests/test_mvp_143_session_ownership.py",
+   "suite:services/memory_service"
+  ],
+  "height": 3,
+  "real_infra": false
+ },
+ "WS-17.13": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-17.12"
+  ],
+  "mutex": [
+   "services/memory_service/src/api.py",
+   "services/memory_service/src/domain/service.py",
+   "services/memory_service/src/main.py",
+   "services/memory_service/tests/test_mvp_145_no_phi_egress.py",
+   "suite:services/memory_service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-17.14": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-17.13"
+  ],
+  "mutex": [
+   "services/memory_service/src/api.py",
+   "services/memory_service/tests/test_mvp_091_memory_phi_audit.py",
+   "suite:services/memory_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-18.12": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/personality_service/src/api.py",
+   "services/personality_service/src/domain/errors.py",
+   "services/personality_service/src/domain/service.py",
+   "services/personality_service/src/infrastructure/postgres_repository.py",
+   "services/personality_service/src/main.py",
+   "services/personality_service/tests/fixtures.py",
+   "services/personality_service/tests/test_mvp_172_erasure_tombstone.py",
+   "suite:services/personality_service",
+   "suite:tests/realinfra/personality-analytics",
+   "tests/realinfra/personality-analytics/test_mvp_172_personality_erasure.py"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-18.13": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/analytics-service/src/consumer.py",
+   "services/analytics-service/tests/test_mvp_109_no_payload_logging.py",
+   "suite:services/analytics-service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-18.14": {
+  "wave": 3,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-18.13"
+  ],
+  "mutex": [
+   "services/analytics-service/src/api.py",
+   "services/analytics-service/tests/test_mvp_234_staff_only_reads.py",
+   "suite:services/analytics-service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-01.10": {
+  "wave": 4,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   ".github/dependabot.yml",
+   ".github/workflows/ci.yml",
+   "Makefile",
+   "scripts/ci/accepted_vulns.yaml",
+   "scripts/ci/ci_local.py",
+   "scripts/ci/supply_chain.py",
+   "suite:tests/build"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-01.13": {
+  "wave": 4,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-01.10",
+   "WS-03.11"
+  ],
+  "mutex": [
+   ".github/workflows/ci.yml",
+   "Makefile",
+   "scripts/ci/ci_local.py",
+   "scripts/ci/iac_lint.py",
+   "suite:tests/build"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-03.9": {
+  "wave": 4,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   ".env.example",
+   "deploy/backup/Dockerfile",
+   "deploy/backup/solace-backup.sh",
+   "deploy/backup/solace-restore.sh",
+   "deploy/env/env-contract.yaml",
+   "deploy/env/generate_dev_env.py",
+   "docker-compose.backup.yml",
+   "docker-compose.prod.yml",
+   "docker-compose.yml",
+   "docs/runbooks/backup-restore.md",
+   "suite:tests/deploy",
+   "tests/deploy/conftest.py"
+  ],
+  "height": 5,
+  "real_infra": true
+ },
+ "WS-03.10": {
+  "wave": 4,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-03.9"
+  ],
+  "mutex": [
+   "deploy/backup/solace-backup.sh",
+   "deploy/backup/solace-restore.sh",
+   "deploy/env/generate_dev_env.py",
+   "deploy/key_escrow.py",
+   "deploy/key_ids.py",
+   "deploy/render_secrets.py",
+   "docker-compose.backup.yml",
+   "docs/runbooks/backup-restore.md",
+   "docs/runbooks/secrets.md",
+   "suite:tests/deploy",
+   "tests/deploy/conftest.py",
+   "tests/deploy/test_mvp_348_secrets_store.py"
+  ],
+  "height": 4,
+  "real_infra": true
+ },
+ "WS-03.11": {
+  "wave": 4,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-03.10"
+  ],
+  "mutex": [
+   "infrastructure/aws-staging/DEPLOY.md",
+   "infrastructure/aws-staging/solace-staging-deployer-host-policy.json",
+   "infrastructure/aws-staging/solace-staging.yaml",
+   "suite:infrastructure/aws-staging",
+   "suite:tests/deploy"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-03.12": {
+  "wave": 4,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "Caddyfile",
+   "suite:tests/deploy"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-03.13": {
+  "wave": 4,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-03.10"
+  ],
+  "mutex": [
+   "docker-compose.backup.yml",
+   "docker-compose.prod.yml",
+   "docker-compose.yml",
+   "suite:tests/deploy"
+  ],
+  "height": 3,
+  "real_infra": true
+ },
+ "WS-03.14": {
+  "wave": 4,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-03.13",
+   "WS-07.10"
+  ],
+  "mutex": [
+   ".env.example",
+   "deploy/env/env-contract.yaml",
+   "deploy/env/generate_dev_env.py",
+   "deploy/render_secrets.py",
+   "docker-compose.prod.yml",
+   "docker-compose.yml",
+   "docs/runbooks/secrets.md",
+   "suite:tests/deploy"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-03.16": {
+  "wave": 4,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-03.13"
+  ],
+  "mutex": [
+   "deploy/backup/Dockerfile",
+   "deploy/backup/solace-backup-cli.sh",
+   "deploy/backup/solace-backup.sh",
+   "docker-compose.backup.yml",
+   "docs/runbooks/backup-restore.md",
+   "suite:tests/deploy",
+   "tests/deploy/conftest.py"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-03.17": {
+  "wave": 4,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-03.14",
+   "WS-03.16"
+  ],
+  "mutex": [
+   "deploy/backup/Dockerfile",
+   "docker-compose.backup.yml",
+   "docker-compose.prod.yml",
+   "docker-compose.yml",
+   "suite:tests/deploy"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-04.12": {
+  "wave": 4,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-03.9"
+  ],
+  "mutex": [
+   "docker-compose.observability.yml",
+   "docs/runbooks/alerting.md",
+   "infrastructure/prometheus/prometheus.yml",
+   "infrastructure/prometheus/rules/solace.yml",
+   "infrastructure/prometheus/tests/solace_rules_test.yml",
+   "suite:infrastructure/prometheus",
+   "suite:tests/bootstrap"
+  ],
+  "height": 3,
+  "real_infra": true
+ },
+ "WS-04.13": {
+  "wave": 4,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-03.13",
+   "WS-04.12"
+  ],
+  "mutex": [
+   "docker-compose.observability.yml",
+   "docs/runbooks/alerting.md",
+   "infrastructure/prometheus/rules/solace.yml",
+   "infrastructure/prometheus/tests/solace_rules_test.yml",
+   "suite:infrastructure/prometheus",
+   "suite:tests/bootstrap",
+   "suite:tests/e2e"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-04.14": {
+  "wave": 4,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-04.13"
+  ],
+  "mutex": [
+   "docker-compose.observability.yml",
+   "docs/runbooks/alerting.md",
+   "infrastructure/grafana/loki/loki-config.yml",
+   "infrastructure/grafana/provisioning/datasources/loki.yml",
+   "suite:infrastructure/grafana",
+   "suite:tests/bootstrap",
+   "suite:tests/e2e"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-05.17": {
+  "wave": 4,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "scripts/test/restore_drill.py",
+   "src/solace_testing/e2e.py",
+   "suite:src/solace_testing",
+   "suite:tests/e2e",
+   "tests/e2e/expected_failures.yaml",
+   "tests/e2e/test_w4_enterprise.py"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-05.18": {
+  "wave": 4,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-05.17"
+  ],
+  "mutex": [
+   "src/solace_testing/e2e.py",
+   "suite:src/solace_testing",
+   "suite:tests/e2e",
+   "tests/e2e/expected_failures.yaml",
+   "tests/e2e/test_w4_enterprise.py"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-07.9": {
+  "wave": 4,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "suite:tests/security",
+   "tests/security/test_mvp_314_service_routes_guarded.py"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-07.10": {
+  "wave": 4,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "scripts/generate_jwt_keys.py",
+   "src/solace_security/auth.py",
+   "src/solace_security/keys.py",
+   "src/solace_security/service_auth.py",
+   "suite:src/solace_security",
+   "suite:tests/solace_security"
+  ],
+  "height": 3,
+  "real_infra": false
+ },
+ "WS-07.11": {
+  "wave": 4,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_security/middleware.py",
+   "suite:src/solace_security",
+   "suite:tests/solace_security",
+   "tests/solace_security/test_mvp_120_subject_scoping.py"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-08.15": {
+  "wave": 4,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "migrations/versions/013_identity_mfa.py",
+   "suite:migrations",
+   "suite:tests/realinfra/identity-auth-mfa"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-08.16": {
+  "wave": 4,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "docs/api/auth.md",
+   "services/user-service/src/api_auth.py",
+   "services/user-service/src/api_deps.py",
+   "services/user-service/src/identity_wiring.py",
+   "services/user-service/src/infrastructure/jwt_service.py",
+   "services/user-service/src/infrastructure/mfa_repository.py",
+   "services/user-service/src/mfa.py",
+   "services/user-service/src/oauth.py",
+   "services/user-service/tests/identity_testkit.py",
+   "suite:services/user-service"
+  ],
+  "height": 5,
+  "real_infra": false
+ },
+ "WS-08.17": {
+  "wave": 4,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-08.16"
+  ],
+  "mutex": [
+   "docs/api/auth.md",
+   "services/user-service/src/api_auth.py",
+   "services/user-service/src/identity_wiring.py",
+   "services/user-service/src/infrastructure/mfa_repository.py",
+   "services/user-service/src/mfa.py",
+   "suite:services/user-service",
+   "suite:tests/realinfra/identity-auth-mfa"
+  ],
+  "height": 4,
+  "real_infra": true
+ },
+ "WS-08.18": {
+  "wave": 4,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-08.17"
+  ],
+  "mutex": [
+   "docs/api/auth.md",
+   "services/user-service/src/api_auth.py",
+   "services/user-service/src/domain/entities.py",
+   "services/user-service/src/identity_wiring.py",
+   "services/user-service/src/password_reset.py",
+   "services/user-service/tests/identity_testkit.py",
+   "suite:services/user-service",
+   "suite:tests/realinfra/identity-auth-mfa"
+  ],
+  "height": 3,
+  "real_infra": true
+ },
+ "WS-08.19": {
+  "wave": 4,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-08.18"
+  ],
+  "mutex": [
+   "services/user-service/src/identity_wiring.py",
+   "services/user-service/src/infrastructure/jwt_service.py",
+   "services/user-service/tests/test_rs256_issuer_migration.py",
+   "suite:services/user-service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-08.20": {
+  "wave": 4,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-08.18",
+   "WS-08.19"
+  ],
+  "mutex": [
+   "docs/api/auth.md",
+   "services/user-service/src/api_auth.py",
+   "suite:services/user-service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-13.16": {
+  "wave": 4,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/notification-service/src/api.py",
+   "services/notification-service/tests/test_mvp_082_acknowledgement_api.py",
+   "suite:services/notification-service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-14.21": {
+  "wave": 4,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/user-service/src/api.py",
+   "suite:services/user-service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-01.11": {
+  "wave": 5,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   ".github/workflows/ci.yml",
+   "Makefile",
+   "pyproject.toml",
+   "pytest.ini",
+   "scripts/ci/ci_local.py",
+   "scripts/ci/coverage_gate.py",
+   "scripts/ci/run_suites.py",
+   "suite:tests/build"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-01.12": {
+  "wave": 5,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "suite:tests/build"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-03.15": {
+  "wave": 5,
+  "phase": "A",
+  "deps_same_phase": [
+   "WS-03.18"
+  ],
+  "mutex": [
+   ".env.example",
+   "README.md",
+   "deploy/env/env-contract.yaml",
+   "docker-compose.prod.yml",
+   "docker-compose.yml",
+   "docs/KNOWN-LIMITATIONS.md",
+   "docs/STAGING-BRINGUP.md",
+   "docs/SYSTEM-DESIGN-SUMMARY.md",
+   "docs/runbooks/deploy.md",
+   "suite:tests/deploy",
+   "system-design/README.md",
+   "tests/deploy/conftest.py"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-03.18": {
+  "wave": 5,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "docker-compose.prod.yml",
+   "suite:tests/deploy"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-05.19": {
+  "wave": 5,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "docs/release/PRR.md",
+   "scripts/test/release_gate.ps1",
+   "scripts/test/release_gate.py",
+   "suite:tests/e2e",
+   "tests/e2e/expected_failures.yaml",
+   "tests/e2e/test_release_gate.py"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-06.13": {
+  "wave": 5,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "src/solace_events/consumer.py",
+   "suite:src/solace_events",
+   "suite:tests/solace_events"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-12.14": {
+  "wave": 5,
+  "phase": "A",
+  "deps_same_phase": [],
+  "mutex": [
+   "migrations/versions/014_safety.py",
+   "suite:migrations",
+   "suite:tests/realinfra/safety-detection-lexicon"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-12.13": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/safety_service/README.md",
+   "services/safety_service/config/clinical_lexicon.json",
+   "services/safety_service/config/keywords.json",
+   "services/safety_service/config/patterns.json",
+   "services/safety_service/db/schema/contraindication_rules.sql",
+   "services/safety_service/db/seeds/contraindication_rules_seed.sql",
+   "services/safety_service/src/db/__init__.py",
+   "services/safety_service/src/db/contraindication_db.py",
+   "services/safety_service/src/infrastructure/__init__.py",
+   "services/safety_service/src/infrastructure/database.py",
+   "services/safety_service/src/ml/__init__.py",
+   "services/safety_service/src/ml/contraindication.py",
+   "services/safety_service/src/ml/keyword_detector.py",
+   "services/safety_service/src/ml/pattern_matcher.py",
+   "services/safety_service/src/ml/sentiment_analyzer.py",
+   "services/safety_service/src/observability/__init__.py",
+   "services/safety_service/tests/test_batch_3_3_integration.py",
+   "services/safety_service/tests/test_contraindication.py",
+   "services/safety_service/tests/test_keyword_detector.py",
+   "services/safety_service/tests/test_mvp_083_084_086_178_182_detector_fusion.py",
+   "services/safety_service/tests/test_mvp_086_ml_extras_parity.py",
+   "services/safety_service/tests/test_mvp_090_history_signal.py",
+   "services/safety_service/tests/test_mvp_271_no_private_pool.py",
+   "services/safety_service/tests/test_pattern_matcher.py",
+   "services/safety_service/tests/test_sentiment_analyzer.py",
+   "suite:services/safety_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-12.15": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/safety_service/src/domain/crisis_detector.py",
+   "services/safety_service/src/domain/service.py",
+   "services/safety_service/src/infrastructure/gdpr.py",
+   "services/safety_service/src/infrastructure/repository.py",
+   "services/safety_service/src/main.py",
+   "suite:services/safety_service",
+   "suite:tests/realinfra/safety-detection-lexicon"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-12.16": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-12.15"
+  ],
+  "mutex": [
+   "services/safety_service/src/domain/service.py",
+   "suite:services/safety_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-13.17": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/notification-service/src/domain/channels.py",
+   "services/notification-service/src/domain/crisis_paging.py",
+   "services/notification-service/tests/notification_fakes.py",
+   "suite:services/notification-service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-13.18": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-13.17"
+  ],
+  "mutex": [
+   "services/notification-service/src/api.py",
+   "services/notification-service/src/domain/service.py",
+   "services/notification-service/src/main.py",
+   "services/notification-service/tests/test_channels.py",
+   "suite:services/notification-service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-15.17": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/therapy_service/src/domain/service.py",
+   "services/therapy_service/src/domain/technique_selector.py",
+   "suite:services/therapy_service"
+  ],
+  "height": 5,
+  "real_infra": false
+ },
+ "WS-15.18": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-15.17"
+  ],
+  "mutex": [
+   "services/therapy_service/src/domain/response_generator.py",
+   "services/therapy_service/src/domain/service.py",
+   "services/therapy_service/src/domain/treatment_planner.py",
+   "services/therapy_service/src/schemas.py",
+   "suite:services/therapy_service"
+  ],
+  "height": 4,
+  "real_infra": false
+ },
+ "WS-15.19": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-15.18"
+  ],
+  "mutex": [
+   "services/therapy_service/src/domain/service.py",
+   "suite:services/therapy_service"
+  ],
+  "height": 3,
+  "real_infra": false
+ },
+ "WS-15.20": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-15.19"
+  ],
+  "mutex": [
+   "services/therapy_service/src/domain/service.py",
+   "services/therapy_service/src/domain/session_manager.py",
+   "services/therapy_service/src/infrastructure/postgres_repository.py",
+   "services/therapy_service/src/infrastructure/redis_session_repository.py",
+   "services/therapy_service/src/infrastructure/repository.py",
+   "suite:services/therapy_service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-15.21": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-15.20"
+  ],
+  "mutex": [
+   "services/therapy_service/src/domain/homework.py",
+   "services/therapy_service/src/domain/service.py",
+   "services/therapy_service/src/domain/session_manager.py",
+   "services/therapy_service/src/schemas.py",
+   "suite:services/therapy_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-16.15": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/diagnosis_service/src/domain/differential.py",
+   "services/diagnosis_service/src/domain/models.py",
+   "services/diagnosis_service/src/domain/service.py",
+   "services/diagnosis_service/src/infrastructure/redis_session_repository.py",
+   "services/diagnosis_service/src/schemas.py",
+   "suite:services/diagnosis_service"
+  ],
+  "height": 8,
+  "real_infra": false
+ },
+ "WS-16.16": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-16.15"
+  ],
+  "mutex": [
+   "services/diagnosis_service/src/domain/symptom_extractor.py",
+   "suite:services/diagnosis_service"
+  ],
+  "height": 7,
+  "real_infra": false
+ },
+ "WS-16.17": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-16.16"
+  ],
+  "mutex": [
+   "services/diagnosis_service/src/domain/symptom_extractor.py",
+   "suite:services/diagnosis_service"
+  ],
+  "height": 6,
+  "real_infra": false
+ },
+ "WS-16.18": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-16.17"
+  ],
+  "mutex": [
+   "services/diagnosis_service/src/domain/differential.py",
+   "services/diagnosis_service/src/domain/symptom_extractor.py",
+   "suite:services/diagnosis_service"
+  ],
+  "height": 5,
+  "real_infra": false
+ },
+ "WS-16.19": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-16.18"
+  ],
+  "mutex": [
+   "services/diagnosis_service/src/domain/models.py",
+   "services/diagnosis_service/src/domain/service.py",
+   "services/diagnosis_service/src/events.py",
+   "services/diagnosis_service/src/infrastructure/redis_session_repository.py",
+   "services/diagnosis_service/src/schemas.py",
+   "suite:services/diagnosis_service"
+  ],
+  "height": 4,
+  "real_infra": false
+ },
+ "WS-16.20": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-16.19"
+  ],
+  "mutex": [
+   "services/diagnosis_service/src/domain/differential.py",
+   "services/diagnosis_service/src/domain/symptom_extractor.py",
+   "suite:services/diagnosis_service"
+  ],
+  "height": 3,
+  "real_infra": false
+ },
+ "WS-16.21": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-16.20"
+  ],
+  "mutex": [
+   "services/diagnosis_service/src/api.py",
+   "services/diagnosis_service/src/domain/models.py",
+   "services/diagnosis_service/src/domain/service.py",
+   "suite:services/diagnosis_service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-16.22": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-16.21"
+  ],
+  "mutex": [
+   "services/diagnosis_service/src/domain/clinical_codes.py",
+   "services/diagnosis_service/src/domain/evidence.py",
+   "services/diagnosis_service/src/domain/severity.py",
+   "services/diagnosis_service/src/domain/value_objects.py",
+   "suite:services/diagnosis_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-17.15": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/memory_service/src/domain/consolidation.py",
+   "services/memory_service/src/domain/service.py",
+   "services/memory_service/src/infrastructure/postgres_repo.py",
+   "services/memory_service/tests/test_mvp_142_previous_session_consolidation.py",
+   "suite:services/memory_service",
+   "suite:tests/realinfra/memory-service",
+   "tests/realinfra/memory-service/test_mvp_142_unsummarized_session.py"
+  ],
+  "height": 2,
+  "real_infra": true
+ },
+ "WS-17.16": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-17.15"
+  ],
+  "mutex": [
+   "services/memory_service/src/domain/decay_manager.py",
+   "services/memory_service/src/domain/models.py",
+   "services/memory_service/src/domain/service.py",
+   "services/memory_service/src/infrastructure/postgres_repo.py",
+   "services/memory_service/tests/test_mvp_276_decay_rules.py",
+   "suite:services/memory_service",
+   "suite:tests/realinfra/memory-service",
+   "tests/realinfra/memory-service/test_mvp_275_batch_decay.py"
+  ],
+  "height": 1,
+  "real_infra": true
+ },
+ "WS-18.15": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/personality_service/src/domain/service.py",
+   "services/personality_service/src/domain/trait_detector.py",
+   "services/personality_service/src/ml/roberta_model.py",
+   "services/personality_service/tests/test_mvp_300_no_fabricated_evidence.py",
+   "services/personality_service/tests/test_service.py",
+   "services/personality_service/tests/test_trait_detector.py",
+   "suite:services/personality_service"
+  ],
+  "height": 3,
+  "real_infra": false
+ },
+ "WS-18.16": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-18.15"
+  ],
+  "mutex": [
+   "services/personality_service/src/domain/service.py",
+   "services/personality_service/tests/test_mvp_301_profile_cache.py",
+   "suite:services/personality_service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-18.17": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-18.16"
+  ],
+  "mutex": [
+   "services/personality_service/src/domain/service.py",
+   "services/personality_service/src/main.py",
+   "services/personality_service/tests/test_mvp_302_profile_events.py",
+   "suite:services/personality_service"
+  ],
+  "height": 1,
+  "real_infra": false
+ },
+ "WS-18.18": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [],
+  "mutex": [
+   "services/analytics-service/src/aggregations.py",
+   "services/analytics-service/src/api.py",
+   "services/analytics-service/src/consumer.py",
+   "services/analytics-service/src/main.py",
+   "services/analytics-service/src/reports.py",
+   "services/analytics-service/tests/test_mvp_111_retention_and_coverage.py",
+   "suite:services/analytics-service"
+  ],
+  "height": 2,
+  "real_infra": false
+ },
+ "WS-18.19": {
+  "wave": 5,
+  "phase": "B",
+  "deps_same_phase": [
+   "WS-18.18"
+  ],
+  "mutex": [
+   "services/analytics-service/src/aggregations.py",
+   "services/analytics-service/src/consumer.py",
+   "services/analytics-service/src/reports.py",
+   "services/analytics-service/tests/test_mvp_238_report_correctness.py",
+   "suite:services/analytics-service"
+  ],
+  "height": 1,
+  "real_infra": false
+ }
+}

@@ -119,6 +119,17 @@ class SafetyEventConsumer:
         dlq_store: "DeadLetterStoreSeam | None" = None,
     ) -> None:
         self._user_service_settings = user_service_settings or UserServiceSettings()
+        # MVP-287: set every attribute stop() and the lifecycle properties read BEFORE the
+        # early return below, so a half-initialised consumer (no Kafka) stops cleanly.
+        self._notification_service = notification_service
+        self._running = False
+        self._stopped = False
+        self._consume_task: asyncio.Task | None = None
+        # M1-gate R2 (P0): without a dead-letter handler, a handler that raises (e.g.
+        # a crisis alert that failed on every channel, REV-35) is marked FAILED and its
+        # offset is COMMITTED — the event is silently dropped, not retried. Capture
+        # failed events durably so a crisis alert is never lost without a trace.
+        self._failed_events: list[dict[str, Any]] = []
 
         if not _KAFKA_AVAILABLE:
             logger.warning("kafka_not_available", reason="solace_events not installed")
@@ -126,26 +137,18 @@ class SafetyEventConsumer:
             self._dlq_store: "DeadLetterStoreSeam | None" = dlq_store
             return
 
-        self._notification_service = notification_service
         self._consumer = create_consumer(
             group_id="notification-service-safety-consumer",
             kafka_settings=kafka_settings,
             consumer_settings=consumer_settings,
             use_mock=use_mock,
         )
-        self._running = False
-        self._consume_task: asyncio.Task | None = None
 
         # Register handlers
         self._consumer.register_handler("safety.crisis.detected", self._handle_crisis_detected)
         self._consumer.register_handler("safety.escalation.triggered", self._handle_escalation_triggered)
         self._consumer.register_handler("safety.assessment.completed", self._handle_assessment_completed)
 
-        # M1-gate R2 (P0): without a dead-letter handler, a handler that raises (e.g.
-        # a crisis alert that failed on every channel, REV-35) is marked FAILED and its
-        # offset is COMMITTED — the event is silently dropped, not retried. Capture
-        # failed events durably so a crisis alert is never lost without a trace.
-        self._failed_events: list[dict[str, Any]] = []
         # Durable DLQ seam: a failed crisis/escalation alert that only lives in the
         # in-memory list above is LOST on a worker restart. Persist each failure
         # through an injectable store so a durable PostgresDLQStore CAN be wired in
@@ -191,17 +194,32 @@ class SafetyEventConsumer:
             )
 
         await self._consumer.start([SolaceTopic.SAFETY])
+        self._stopped = False
         self._running = True
         self._consume_task = asyncio.create_task(self._consume_loop())
         logger.info("safety_event_consumer_started", topic="solace.safety")
 
+    @property
+    def is_running(self) -> bool:
+        """True while the consume loop was started and has not been stopped or exited."""
+        return self._running and self._consume_task is not None and not self._consume_task.done()
+
+    @property
+    def consume_task(self) -> asyncio.Task | None:
+        """The consume-loop task, or None before start() and after stop()."""
+        return self._consume_task
+
     async def stop(self) -> None:
-        """Stop consuming events."""
+        """Stop consuming events. Idempotent: a second call (or a call before start) is a no-op."""
+        if self._stopped:
+            return
+        self._stopped = True
         self._running = False
-        if self._consume_task:
-            self._consume_task.cancel()
+        task, self._consume_task = self._consume_task, None
+        if task is not None and not task.done():
+            task.cancel()
             try:
-                await self._consume_task
+                await task
             except asyncio.CancelledError:
                 pass
         if self._consumer:
@@ -705,15 +723,26 @@ async def initialize_safety_consumer(
     in-memory default used in dev and tests.
     """
     global _safety_consumer
-    _safety_consumer = SafetyEventConsumer(
+    consumer = SafetyEventConsumer(
         notification_service=notification_service,
         kafka_settings=kafka_settings,
         use_mock=use_mock,
         user_service_settings=user_service_settings,
         dlq_store=dlq_store,
     )
-    await _safety_consumer.start()
-    return _safety_consumer
+    # MVP-287: publish the consumer to the module global only once start() returned, so a
+    # failed start never leaves a dead consumer behind for get_safety_consumer().
+    try:
+        await consumer.start()
+    except BaseException:
+        # Release whatever a partial start opened (the broker connection) before re-raising.
+        try:
+            await consumer.stop()
+        except Exception as exc:
+            logger.warning("safety_consumer_cleanup_failed", error_type=type(exc).__name__)
+        raise
+    _safety_consumer = consumer
+    return consumer
 
 
 async def shutdown_safety_consumer() -> None:

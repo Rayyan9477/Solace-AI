@@ -9,6 +9,7 @@ Principles: 12-Factor App, Configuration Externalization, Type Safety
 """
 from __future__ import annotations
 
+from datetime import timedelta
 from enum import Enum
 from typing import Literal
 
@@ -216,9 +217,8 @@ class AnalyticsServiceConfig(BaseSettings):
         """Check if running in production."""
         return self.service.env == Environment.PRODUCTION
 
-    def get_retention_timedelta(self) -> "timedelta":
+    def get_retention_timedelta(self) -> timedelta:
         """Get retention as timedelta."""
-        from datetime import timedelta
         return timedelta(hours=self.metrics_store.default_retention_hours)
 
 

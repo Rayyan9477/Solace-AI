@@ -63,12 +63,18 @@ ENCRYPTION_SEARCH_HASH_SALT=...
 POSTGRES_PASSWORD=...
 WEAVIATE_API_KEY=<random>    # REQUIRED (P2-16) — prod override guards it with :?; a missing key
                              # would otherwise boot Weaviate on the public dev default key.
-ORCHESTRATOR_TRUSTED_PROXY_HOPS=1   # P2-12 — Caddy appends one XFF hop; the prod override
-                             # already defaults this to 1, set here only to override.
+# TRUSTED_PROXY_HOPS / ORCHESTRATOR_TRUSTED_PROXY_HOPS: the prod override pins both to 1 (Caddy
+# appends exactly one XFF hop, P2-12, D-26); there is nothing to set here.
+CORS_ALLOWED_ORIGINS=https://app.solace-staging.local   # REQUIRED (MVP-225): comma-separated browser
+                             # origins; the strict render fails without it, and orchestrator and
+                             # user-service refuse to start with none, '*' or 'null'.
 PORTKEY_API_KEY=<from portkey.ai, for LLM calls>   # or leave LLM disabled for infra smoke
 DOMAIN=solace-staging.local
 CADDY_ADMIN_EMAIL=ops@example.com
-BASIC_AUTH_HASH=<caddy hash-password output, for Grafana/Jaeger>
+# REQUIRED (MVP-117): the `caddy hash-password` output for Grafana/Jaeger, in SINGLE quotes.
+# A bcrypt hash contains $ (e.g. $2a$14$...); unquoted or double-quoted, compose treats each $ as
+# an interpolation and the hash reaches Caddy mangled, so basic auth never matches.
+BASIC_AUTH_HASH='<caddy hash-password output>'
 # GOOGLE_OAUTH_CLIENT_ID / _SECRET — only needed once OAuth endpoints land (REV-22)
 ```
 Keep `.env.prod` OUT of git (already gitignored; never commit it).
@@ -89,7 +95,8 @@ docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod
 # Bring up infra + services (prod override: no mailhog/kafka-ui, secrets required, Caddy TLS):
 docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml up -d
 
-# For a plain internal staging WITHOUT Caddy/host-port-closing, the dev compose also works:
+# For a plain internal staging without TLS/host-port-closing, the dev compose also works; its
+# Caddy serves http://api.localhost:8088 and http://auth.localhost:8088 on 127.0.0.1 only:
 #   docker compose up -d --build           # (dev defaults; add --profile dev for mailhog/kafka-ui)
 ```
 

@@ -5,46 +5,11 @@ Service configuration with environment-based settings using pydantic-settings.
 from __future__ import annotations
 from functools import lru_cache
 from typing import Any
-from pydantic import Field, SecretStr
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
 
 logger = structlog.get_logger(__name__)
-
-
-class DatabaseSettings(BaseSettings):
-    """Database configuration for personality service."""
-    host: str = Field(default="localhost")
-    port: int = Field(default=5432)
-    name: str = Field(default="solace")
-    user: str = Field(default="solace")
-    password: SecretStr = Field(description="Database password - set via PERSONALITY_DB_PASSWORD env var")
-    pool_size: int = Field(default=10, ge=1, le=100)
-    max_overflow: int = Field(default=20, ge=0, le=100)
-    echo: bool = Field(default=False)
-    model_config = SettingsConfigDict(env_prefix="PERSONALITY_DB_", env_file=".env", extra="ignore")
-
-    @property
-    def connection_string(self) -> str:
-        """Get database connection string."""
-        return f"postgresql+asyncpg://{self.user}:{self.password.get_secret_value()}@{self.host}:{self.port}/{self.name}"
-
-
-class RedisSettings(BaseSettings):
-    """Redis cache configuration for personality service."""
-    host: str = Field(default="localhost")
-    port: int = Field(default=6379)
-    db: int = Field(default=3, ge=0, le=15)
-    password: SecretStr = Field(description="Redis password - set via PERSONALITY_REDIS_PASSWORD env var")
-    ttl_seconds: int = Field(default=3600, ge=60)
-    model_config = SettingsConfigDict(env_prefix="PERSONALITY_REDIS_", env_file=".env", extra="ignore")
-
-    @property
-    def url(self) -> str:
-        """Get Redis connection URL."""
-        pwd = self.password.get_secret_value()
-        auth = f":{pwd}@" if pwd else ""
-        return f"redis://{auth}{self.host}:{self.port}/{self.db}"
 
 
 class AISettings(BaseSettings):
@@ -119,8 +84,6 @@ class PersonalityServiceConfig(BaseSettings):
     debug: bool = Field(default=False)
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=8007, ge=1024, le=65535)
-    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
-    redis: RedisSettings = Field(default_factory=RedisSettings)
     ai: AISettings = Field(default_factory=AISettings)
     detection: TraitDetectionSettings = Field(default_factory=TraitDetectionSettings)
     style: StyleAdaptationSettings = Field(default_factory=StyleAdaptationSettings)

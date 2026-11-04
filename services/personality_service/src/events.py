@@ -156,7 +156,7 @@ def to_kafka_event(event: DomainEvent) -> Any:
     Returns None for internal-only events or if solace_events is not available.
     """
     try:
-        from src.solace_events.schemas import (
+        from solace_events.schemas import (
             EventMetadata as KafkaMetadata,
             PersonalityProfileUpdatedEvent as KafkaProfileUpdated,
             PersonalityTraitChangedEvent as KafkaTraitChanged,

@@ -386,6 +386,10 @@ services:
       GOOGLE_OAUTH_TOKEN_URL: https://oauth2.googleapis.com/token
       GOOGLE_OAUTH_JWKS_URL: https://www.googleapis.com/oauth2/v3/certs
       OAUTH_ALLOWED_REDIRECT_ORIGINS: ${OAUTH_ALLOWED_REDIRECT_ORIGINS:-http://localhost:3000}
+      # Edge (MVP-225): the browser origins CORS allows; no proxy hop is trusted in dev (the
+      # strict overlay requires the origins and trusts exactly Caddy's one hop).
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      TRUSTED_PROXY_HOPS: "0"
     ports:
       - "127.0.0.1:8001:8001"
     depends_on:
@@ -455,7 +459,11 @@ services:
       - "127.0.0.1:8003:8003"
     # Notification consumes crisis events from Kafka. mailhog is a DEV-only SMTP sink
     # (dev profile); a real relay is set through the SMTP_HOST interpolation source.
-    depends_on: *app-depends-on
+    depends_on:
+      <<: *app-depends-on
+      # IF-01 SPEC uses_redis=True: the runtime pings REDIS_URL at startup
+      redis:
+        condition: service_healthy
     healthcheck:
       <<: *live-healthcheck
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/live', timeout=3)"]
@@ -605,7 +613,11 @@ services:
       PERSONALITY_REDIS_PASSWORD: *redis-password
     ports:
       - "127.0.0.1:8007:8007"
-    depends_on: *app-depends-on
+    depends_on:
+      <<: *app-depends-on
+      # IF-01 SPEC uses_redis=True: the runtime pings REDIS_URL at startup
+      redis:
+        condition: service_healthy
     healthcheck:
       <<: *live-healthcheck
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8007/live', timeout=3)"]
@@ -636,6 +648,11 @@ services:
       ORCHESTRATOR_PERSONALITY_AGENT_SERVICE_URL: *personality-url
       ORCHESTRATOR_ASSESSMENT_AGENT_SERVICE_URL: *diagnosis-url
       SERVICE_TREATMENT_SERVICE_URL: *therapy-url
+      # Edge (MVP-225): as user-service; the ORCHESTRATOR_* names are legacy aliases of the same values.
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      ORCHESTRATOR_CORS_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      TRUSTED_PROXY_HOPS: "0"
+      ORCHESTRATOR_TRUSTED_PROXY_HOPS: "0"
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -684,7 +701,11 @@ services:
       CONSUMER_KAFKA_BOOTSTRAP_SERVERS: *kafka-bootstrap
     ports:
       - "127.0.0.1:8009:8009"
-    depends_on: *app-depends-on
+    depends_on:
+      <<: *app-depends-on
+      # IF-01 SPEC uses_redis=True: the runtime pings REDIS_URL at startup
+      redis:
+        condition: service_healthy
     healthcheck:
       <<: *live-healthcheck
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8009/live', timeout=3)"]
@@ -695,6 +716,39 @@ services:
 
   # config-service is not deployed in the MVP profiles (MVP-231, D-19: zero consumers, code
   # frozen under services/config_service).
+
+  # =============================================================================
+  # EDGE
+  # =============================================================================
+
+  # Caddy, the one edge in both profiles (WS-03.5, MVP-250). Dev serves plain HTTP on
+  # 127.0.0.1:8088 (http://api.localhost:8088, http://auth.localhost:8088); the strict overlay
+  # publishes 80/443 and pins the sites to api.<DOMAIN> and auth.<DOMAIN> (automatic HTTPS).
+  # Caddy gets only its own variables. The dev BASIC_AUTH_HASH is the bcrypt hash of a random
+  # password that was discarded, so no dev password opens the dashboards; every $ is escaped as $$.
+  caddy:
+    image: caddy:2.8-alpine
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+      CADDY_ADMIN_EMAIL: ${CADDY_ADMIN_EMAIL:-dev-ops@example.invalid}
+      BASIC_AUTH_HASH: ${BASIC_AUTH_HASH:-$$2a$$14$$/Jn6FNBQkYv/3QutdDyzjeg3AhRwCVGXSzsk.okBdnbT06rOAApZ6}
+      CADDY_API_SITE: ${CADDY_API_SITE:-http://api.localhost:8088}
+      CADDY_AUTH_SITE: ${CADDY_AUTH_SITE:-http://auth.localhost:8088}
+    ports:
+      - "127.0.0.1:8088:8088"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      orchestrator-service:
+        condition: service_started
+      user-service:
+        condition: service_started
+    restart: unless-stopped
 
   # =============================================================================
   # DEVELOPMENT TOOLS
@@ -749,6 +803,10 @@ volumes:
   prometheus_data:
     driver: local
   grafana_data:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
     driver: local
 
 # =============================================================================

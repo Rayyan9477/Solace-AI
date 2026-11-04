@@ -69,9 +69,15 @@ class ContraindicationRepository:
     Provides async operations with connection pooling and optional caching.
     """
 
-    def __init__(self, config: DatabaseConfig | None = None) -> None:
-        """Initialize database repository."""
+    def __init__(
+        self,
+        config: DatabaseConfig | None = None,
+        *,
+        pool: asyncpg.Pool | None = None,
+    ) -> None:
+        """Initialize database repository. The pool is injected (IF-01 ServiceRuntime.pg_pool)."""
         self._config = config or DatabaseConfig()
+        self._injected_pool = pool
         self._pool: asyncpg.Pool | None = None
         self._cache: dict[str, list[ContraindicationRuleRecord]] = {}
         self._cache_timestamp: datetime | None = None
@@ -82,45 +88,22 @@ class ContraindicationRepository:
 
     async def connect(self) -> bool:
         """
-        Initialize database connection pool.
+        Adopt the injected pool. Never opens a private pool (MVP-271).
 
         Returns:
-            True if initialization successful, False otherwise.
+            True only when a pool was injected.
         """
-        if not ASYNCPG_AVAILABLE:
-            logger.error("asyncpg_not_installed", message="Install asyncpg: pip install asyncpg")
+        self._pool = self._injected_pool
+        self._initialized = self._pool is not None
+        if not self._initialized:
+            logger.warning("contraindication_repository_without_pool")
             return False
-
-        try:
-            self._pool = await asyncpg.create_pool(
-                host=self._config.host,
-                port=self._config.port,
-                database=self._config.database,
-                user=self._config.user,
-                password=self._config.password.get_secret_value(),
-                min_size=self._config.min_pool_size,
-                max_size=self._config.max_pool_size,
-                command_timeout=self._config.command_timeout,
-                timeout=self._config.connection_timeout,
-            )
-            self._initialized = True
-            logger.info(
-                "database_connected",
-                host=self._config.host,
-                database=self._config.database,
-                pool_size=f"{self._config.min_pool_size}-{self._config.max_pool_size}"
-            )
-            return True
-
-        except Exception as e:
-            logger.error("database_connection_failed", error=str(e))
-            self._initialized = False
-            return False
+        logger.info("database_connected", source="injected_pool")
+        return True
 
     async def disconnect(self) -> None:
-        """Close database connection pool."""
-        if self._pool:
-            await self._pool.close()
+        """Drop the pool reference; the injected pool is owned by the runtime and is not closed."""
+        if self._pool is not None:
             self._pool = None
             self._initialized = False
             logger.info("database_disconnected")

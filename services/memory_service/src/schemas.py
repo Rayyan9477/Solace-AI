@@ -8,7 +8,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class MemoryTier(str, Enum):
@@ -86,8 +86,25 @@ class RetrieveMemoryResponse(BaseModel):
     tiers_searched: list[MemoryTier] = Field(default_factory=list)
 
 
+THERAPY_CONTEXT_REQUEST_EXAMPLE: dict[str, Any] = {
+    "user_id": "00000000-0000-4000-a000-000000000001",
+    "session_id": "00000000-0000-4000-b000-000000000001",
+    "current_message": "example message",
+}
+
+THERAPY_CONTEXT_RESPONSE_EXAMPLE: dict[str, Any] = {
+    "user_id": "00000000-0000-4000-a000-000000000001",
+    "assembled_context": "example context",
+    "total_tokens": 12,
+    "sources_used": ["tier_3_session"],
+    "assembly_time_ms": 3,
+    "retrieval_count": 1,
+}
+
+
 class ContextAssemblyRequest(BaseModel):
     """Request for LLM context assembly."""
+    model_config = ConfigDict(json_schema_extra={"examples": [THERAPY_CONTEXT_REQUEST_EXAMPLE]})
     user_id: UUID = Field(..., description="User identifier")
     session_id: UUID | None = Field(default=None, description="Current session")
     current_message: str | None = Field(default=None, description="Current user message")
@@ -100,6 +117,7 @@ class ContextAssemblyRequest(BaseModel):
 
 class ContextAssemblyResponse(BaseModel):
     """Response from context assembly."""
+    model_config = ConfigDict(json_schema_extra={"examples": [THERAPY_CONTEXT_RESPONSE_EXAMPLE]})
     context_id: UUID = Field(default_factory=uuid4)
     user_id: UUID = Field(...)
     assembled_context: str = Field(..., description="Final assembled context")

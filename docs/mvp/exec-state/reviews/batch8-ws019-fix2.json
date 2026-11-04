@@ -1,0 +1,154 @@
+[
+ {
+  "lens": "correctness",
+  "review": {
+   "quality_verdict": "CHANGES_REQUESTED",
+   "prior_findings": [
+    {
+     "id": "WS-01.9-fix1-N1",
+     "closed": false,
+     "note": "cleanup() is correct on its own. It inspects the ref, runs `docker rmi <ref>` without -f and without sha256 only while the ref still resolves to the recorded id, and the default tag is now unique per run (clean-<tree7>-<8 hex>). Probes still address the image by id. Docker here uses the overlay2 store, so `{{.Id}}` equals the iidfile digest and the equality check holds. The destructive `rmi -f <id>` is gone. The edge cases hold once wiring is fixed: a ref re-tagged to another id fails the inspect match and is skipped; a failed build records no pair; a failed inspect is skipped, which leaks but never deletes. However, the N1 fix's recording step in run() crashes (COR-1), so cleanup never receives the (ref, id) pairs. With --remove-images, run() raises TypeError in the finally block and leaks the image it built. The only N1 test calls cleanup() in isolation. Side note: the random default tag is never printed. Runs without --remove-images (the Makefile target and the ps1 default) leave tags that the output never names."
+    },
+    {
+     "id": "WS-01.9-fix1-C1",
+     "closed": true,
+     "note": "--require-registry-match is wired into the CLI, the Makefile clean-checkout target, check_clean_checkout.ps1 (on by default, -AllowRegistryDrift opts out) and the gate test. The gate's formula len(IMAGES) + sum((1 if module else 0) + len(probes)) equals verdict's len(steps) + sum(len(step.probes)), because probe_commands emits [module] (if any) plus probes. The test passes neither --compose nor --tests. With rc 0 the last stdout line is exactly 'N/N steps ok'. The test also asserts len(IMAGES) >= 10 and no drift warning. The c1 unit test fails on fix1 (no build_parser). The gate cannot actually pass until COR-1 is fixed."
+    },
+    {
+     "id": "WS-01.9-fix1-C2",
+     "closed": true,
+     "note": "GIT_* is stripped for resolve_tree, export_tree's git archive, both _git_context calls and tests_env. After init, --absolute-git-dir must resolve to out/.git. Run against the fix1 snapshot, the new test fails (`add -A` exit 128 after GIT_DIR turned the other repo bare); it passes now. checkpoint.ps1 overrides only GIT_INDEX_FILE and write-tree stores objects in the normal object store, so the stripping cannot hide checkpoint trees."
+    },
+    {
+     "id": "WS-01.9-fix1-N2",
+     "closed": true,
+     "note": "main() resolves the tree-ish once with `rev-parse --verify --quiet <tree>^{tree}`, with a GIT_*-free env. It passes the full id to resolve_out (default out path), default_tag and run(), and run() writes that id into the export marker. The ps1 forwards the raw -Tree, which main() then resolves. The test fails on fix1 (no resolve_tree). Gap: no test covers main()'s wiring, so a main() that went back to args.tree would still pass."
+    },
+    {
+     "id": "WS-01.9-fix1-N3",
+     "closed": true,
+     "note": "I exported the pre-R1 scripts/ci from tree 7879f89 to scratch and ran the current test file against it. test_mvp_008_r1_a_service_never_uses_another_services_roots fails at line 128 (assert 1 == 0). The untracked services/b/helper.py is reported under the old global roots. The test passes on the current checker. Non-vacuous."
+    }
+   ],
+   "findings": [
+    {
+     "id": "COR-1",
+     "severity": "important",
+     "file": "scripts/ci/clean_checkout.py",
+     "line": 238,
+     "problem": "Fix2 renamed the list of built (ref, id) pairs from `built_ids` to `built` (line 232), but the build loop already used `built` for the bool returned by `_run`. Line 238 rebinds `built` to True or False. After the first successful build, line 241 `built.append((ref, image_id))` raises AttributeError: 'bool' object has no attribute 'append'. With --remove-images, the finally block then calls `cleanup(built)` with a bool (line 257) and raises TypeError: 'bool' object is not iterable.",
+     "failure_scenario": "Every real proof crashes with a traceback and exit 1 right after `[ok] build orchestrator-service`, before any probe runs or any other image is built. That covers `make clean-checkout TREE=...`, check_clean_checkout.ps1, the realinfra gate test test_mvp_008_tree_builds_and_probes_from_clean_checkout and the W0 barrier run `clean_checkout.py --tree <barrier tree> --compose`. With --remove-images (which the gate test always passes), cleanup also crashes, so the built image is leaked. Even a run where every build fails (the negative-control shape) ends in TypeError when --remove-images is set. MVP-008 cannot close on this tool, and the C1 gate cannot pass.",
+     "fix": "Use a separate name for the build result: `ok = _run(f\"build {step.image.name}\", ...)` and `image_id = ... if ok and iid.is_file() else \"\"`. Add a unit test that drives run(), or main() so that N2's wiring is also covered, with a fake subprocess layer: a fake `docker build` writes the --iidfile, and probes return rc 0. Assert rc 0 and the last line 'N/N steps ok' with N = images + modules + probes. With remove_images=True, assert that cleanup receives the (ref, id) pairs and issues `docker rmi <ref>` only.",
+     "evidence": "In a scratch dir (now deleted), a harness replaced clean_checkout.subprocess.run with a fake (no Docker calls) and export_tree with a no-op, then called run() on the working-tree file. The working tree matches fix2 tree 0fb06ba blob for blob (clean_checkout.py a438f23). Output: `[ok] build orchestrator-service`, then `AttributeError: 'bool' object has no attribute 'append'` at clean_checkout.py line 241, with 1 build call and 0 probe calls. With remove_images=True there was a second traceback, `TypeError: 'bool' object is not iterable` at line 257 `cleanup(built)`. The same harness on the fix1 tree 684ad43 snapshot gave rc 0 with 10 builds and 15 probes. A copy of fix2 with only the bool renamed gave `25/25 steps ok`, rc 0, and 10 `docker rmi <ref>` calls. The unit suite stays green (86 passed, 1 skipped) because no test calls run() past plan(). The report's fix2 Docker probe exercised cleanup() on its own and never ran run()."
+    }
+   ]
+  },
+  "verified": [
+   {
+    "id": "COR-1",
+    "severity": "important",
+    "file": "scripts/ci/clean_checkout.py",
+    "line": 238,
+    "problem": "Fix2 renamed the list of built (ref, id) pairs from `built_ids` to `built` (line 232), but the build loop already used `built` for the bool returned by `_run`. Line 238 rebinds `built` to True or False. After the first successful build, line 241 `built.append((ref, image_id))` raises AttributeError: 'bool' object has no attribute 'append'. With --remove-images, the finally block then calls `cleanup(built)` with a bool (line 257) and raises TypeError: 'bool' object is not iterable.",
+    "failure_scenario": "Every real proof crashes with a traceback and exit 1 right after `[ok] build orchestrator-service`, before any probe runs or any other image is built. That covers `make clean-checkout TREE=...`, check_clean_checkout.ps1, the realinfra gate test test_mvp_008_tree_builds_and_probes_from_clean_checkout and the W0 barrier run `clean_checkout.py --tree <barrier tree> --compose`. With --remove-images (which the gate test always passes), cleanup also crashes, so the built image is leaked. Even a run where every build fails (the negative-control shape) ends in TypeError when --remove-images is set. MVP-008 cannot close on this tool, and the C1 gate cannot pass.",
+    "fix": "Use a separate name for the build result: `ok = _run(f\"build {step.image.name}\", ...)` and `image_id = ... if ok and iid.is_file() else \"\"`. Add a unit test that drives run(), or main() so that N2's wiring is also covered, with a fake subprocess layer: a fake `docker build` writes the --iidfile, and probes return rc 0. Assert rc 0 and the last line 'N/N steps ok' with N = images + modules + probes. With remove_images=True, assert that cleanup receives the (ref, id) pairs and issues `docker rmi <ref>` only.",
+    "evidence": "In a scratch dir (now deleted), a harness replaced clean_checkout.subprocess.run with a fake (no Docker calls) and export_tree with a no-op, then called run() on the working-tree file. The working tree matches fix2 tree 0fb06ba blob for blob (clean_checkout.py a438f23). Output: `[ok] build orchestrator-service`, then `AttributeError: 'bool' object has no attribute 'append'` at clean_checkout.py line 241, with 1 build call and 0 probe calls. With remove_images=True there was a second traceback, `TypeError: 'bool' object is not iterable` at line 257 `cleanup(built)`. The same harness on the fix1 tree 684ad43 snapshot gave rc 0 with 10 builds and 15 probes. A copy of fix2 with only the bool renamed gave `25/25 steps ok`, rc 0, and 10 `docker rmi <ref>` calls. The unit suite stays green (86 passed, 1 skipped) because no test calls run() past plan(). The report's fix2 Docker probe exercised cleanup() on its own and never ran run().",
+    "lens": "correctness",
+    "votes": [
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "Confirmed from source. `_run` returns a bool (line 188). Line 232 makes `built` a list, but line 238 rebinds it to that bool. A successful build then hits `built.append(...)` at line 241 and raises AttributeError on a bool. With `--remove-images`, the `finally` block calls `cleanup(built)` at line 257. `cleanup` iterates with `dict.fromkeys(built)` (line 75), which raises TypeError on a bool. A failed build gives `built == False`, so the `finally` block still hits the TypeError. Every real proof crashes after the first build. That blocks MVP-008 and the C1 gate, so \"important\" is right."
+     },
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "Confirmed from the code. Line 232 sets `built` to a list. Line 238 rebinds it to the return value of `_run`, which returns the bool `ok` (line 188). After the first successful build, line 241 calls `built.append(...)` on a bool and raises AttributeError. With `--remove-images`, the `finally` block calls `cleanup(built)` with a bool, and `for ... in dict.fromkeys(built)` raises TypeError. Every real proof therefore crashes after the first build, and the images are not cleaned up. No brief or ruling makes this intended. I did not run the code; this rests on reading it. The \"important\" severity fits, because the tool cannot complete any proof."
+     },
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "The finding is real. In scripts/ci/clean_checkout.py, line 232 declares `built: list[tuple[str, str]] = []`. Line 238 then assigns `built = _run(...)`, which rebinds the name to a bool. Line 241 `built.append(...)` raises AttributeError after the first successful build. Line 257 `cleanup(built)` would raise TypeError on a bool. Every real run crashes right after the first build, so the proof tool is unusable and the C1 gate cannot pass. \"Important\" is the right severity: it blocks the whole task deliverable, and no test covers run()."
+     }
+    ],
+    "survives": true
+   }
+  ]
+ },
+ {
+  "lens": "isolation-security",
+  "review": {
+   "quality_verdict": "CHANGES_REQUESTED",
+   "prior_findings": [
+    {
+     "id": "N1",
+     "closed": false,
+     "note": "The cleanup() design is right: it untags by reference, without -f, and only while the ref still points at the recorded id. But run() never reaches it, because the variable `built` is shadowed. The fix is unreachable and is untested."
+    },
+    {
+     "id": "C1",
+     "closed": true,
+     "note": "--require-registry-match is wired into the Makefile and the PowerShell wrapper, which defaults to strict and has an explicit -AllowRegistryDrift opt-out. The realinfra gate test pins the exact step count from len(IMAGES) and asserts len(IMAGES) >= 10. A shrunken registry cannot pass it."
+    },
+    {
+     "id": "C2",
+     "closed": true,
+     "note": "git_env() strips GIT_* from resolve_tree, git archive and _git_context. tests_env also drops GIT_*, and _git_context asserts the absolute git dir is out/.git. The c2 test covers GIT_DIR and GIT_INDEX_FILE."
+    },
+    {
+     "id": "N2",
+     "closed": true,
+     "note": "resolve_tree() resolves any tree-ish to a full tree id, and default_tag yields a valid docker tag of the form clean-<7>-<8hex>."
+    },
+    {
+     "id": "N3",
+     "closed": true,
+     "note": "The r1 test now places helper.py at services/b/helper.py, so it is no longer vacuous."
+    }
+   ],
+   "findings": [
+    {
+     "id": "ISO-1",
+     "severity": "important",
+     "file": "scripts/ci/clean_checkout.py",
+     "line": 238,
+     "problem": "In run(), the list `built: list[tuple[str, str]]` (line 232) is rebound inside the step loop by `built = _run(...)`, which returns a bool. Line 241 then calls `built.append((ref, image_id))` on that bool, and the finally block calls `cleanup(built)` with the same variable.",
+     "failure_scenario": "The first successful `docker build` sets built=True and image_id is non-empty. `built.append` then raises AttributeError ('bool' object has no attribute 'append'). The run aborts mid-way, so no later image is built or probed and no verdict is printed. If --remove-images is set, cleanup(True) in the finally block raises TypeError from dict.fromkeys(True), which masks the original error. The N1 untag-by-ref fix therefore never executes. Images already built are left behind with their random tags, which is the operator-safety problem N1 was meant to close. The offline unit tests call cleanup() directly and never exercise run(), so they stay green. The real-infra gate test would fail, but only when a lane runs it. fix1 used a separate `built_ids` list and did not have this bug, so it is a fix2 regression.",
+     "fix": "Rename the bool, e.g. `ok = _run(...)` and `image_id = ... if ok and iid.is_file() else \"\"`, and keep `built` as the list. Add an offline test that drives run() with subprocess.run, export_tree and load_registry monkeypatched (a fake docker that writes the iidfile). It should assert that cleanup receives the (ref, id) pairs and that `docker rmi <ref>` is issued without -f.",
+     "evidence": "clean_checkout.py lines 232 (`built: list[tuple[str, str]] = []`), 238 (`built = _run(f\"build {step.image.name}\", ...)`), 239 (`... if built and iid.is_file()`), 241 (`built.append((ref, image_id))`) and 257 (`cleanup(built)`). _run returns the bool `ok`, as the `-> bool` annotation in the diff shows."
+    }
+   ]
+  },
+  "verified": [
+   {
+    "id": "ISO-1",
+    "severity": "important",
+    "file": "scripts/ci/clean_checkout.py",
+    "line": 238,
+    "problem": "In run(), the list `built: list[tuple[str, str]]` (line 232) is rebound inside the step loop by `built = _run(...)`, which returns a bool. Line 241 then calls `built.append((ref, image_id))` on that bool, and the finally block calls `cleanup(built)` with the same variable.",
+    "failure_scenario": "The first successful `docker build` sets built=True and image_id is non-empty. `built.append` then raises AttributeError ('bool' object has no attribute 'append'). The run aborts mid-way, so no later image is built or probed and no verdict is printed. If --remove-images is set, cleanup(True) in the finally block raises TypeError from dict.fromkeys(True), which masks the original error. The N1 untag-by-ref fix therefore never executes. Images already built are left behind with their random tags, which is the operator-safety problem N1 was meant to close. The offline unit tests call cleanup() directly and never exercise run(), so they stay green. The real-infra gate test would fail, but only when a lane runs it. fix1 used a separate `built_ids` list and did not have this bug, so it is a fix2 regression.",
+    "fix": "Rename the bool, e.g. `ok = _run(...)` and `image_id = ... if ok and iid.is_file() else \"\"`, and keep `built` as the list. Add an offline test that drives run() with subprocess.run, export_tree and load_registry monkeypatched (a fake docker that writes the iidfile). It should assert that cleanup receives the (ref, id) pairs and that `docker rmi <ref>` is issued without -f.",
+    "evidence": "clean_checkout.py lines 232 (`built: list[tuple[str, str]] = []`), 238 (`built = _run(f\"build {step.image.name}\", ...)`), 239 (`... if built and iid.is_file()`), 241 (`built.append((ref, image_id))`) and 257 (`cleanup(built)`). _run returns the bool `ok`, as the `-> bool` annotation in the diff shows.",
+    "lens": "isolation-security",
+    "votes": [
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "Confirmed in D:\\Repo\\Contextual-Chatbot\\scripts\\ci\\clean_checkout.py. Line 232 declares `built` as a list. Line 238 rebinds it with `built = _run(...)`, and `_run` returns the bool `ok` (line 188). On a successful build, line 239 reads the iidfile and gives a non-empty `image_id`. Line 241 then calls `built.append(...)` on a bool, which raises AttributeError. The `finally` block calls `cleanup(built)` with the bool when --remove-images is set, so `dict.fromkeys(True)` raises TypeError and masks the original error. The run aborts after the first image, and the untag-by-ref cleanup never runs on the real path. This is a fix2 regression, and it should be rated important."
+     },
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "In scripts/ci/clean_checkout.py, line 232 declares `built` as a list. Line 238 rebinds it to the bool returned by `_run`. Line 241 then calls `built.append(...)`, and line 257 passes `built` to `cleanup`. A successful build with a non-empty image id raises AttributeError on the bool. With --remove-images, `cleanup(True)` in the finally block fails as well, and that error masks the original one. This breaks the fix2 untag-by-ref cleanup and the whole run. The brief and the prior accepted fix text give no reason to treat this as intended or out of scope. I confirmed it by reading the code. I did not run the tests."
+     },
+     {
+      "refuted": false,
+      "severity_ok": true,
+      "reason": "Confirmed at clean_checkout.py lines 232-257. `built` is declared as a list at line 232, then rebound to a bool at line 238 by `_run`, which returns `ok`. On a successful build, line 241 calls `built.append(...)` on a bool and raises AttributeError. On a failed build, `built` is False and the later `cleanup(built)` fails the same way. The run aborts, and `cleanup(True)` in the finally block raises TypeError from `dict.fromkeys(True)` when --remove-images is set. That masks the original error, and no cleanup happens. This breaks the main path of the gate and the N1 fix. The offline tests call cleanup() directly and never drive run(), so they would not catch it. Severity \"important\" fits."
+     }
+    ],
+    "survives": true
+   }
+  ]
+ }
+]

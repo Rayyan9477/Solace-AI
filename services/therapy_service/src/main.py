@@ -136,7 +136,18 @@ async def build_therapy_components(
     except Exception as e:
         logger.warning("context_assembler_init_failed", error=str(e))
 
-    unit_of_work = create_unit_of_work()
+    # MVP-191: strict raises instead of falling back to in-memory repositories.
+    unit_of_work = create_unit_of_work(environment=settings.environment)
+    memory_not_ready = (
+        unit_of_work.backend == "memory" and settings.environment.strip().lower() != "test"
+    )
+
+    async def _repository_ready() -> tuple[bool, str]:
+        if memory_not_ready:
+            return False, "in-memory repositories"
+        return True, unit_of_work.backend
+
+    runtime.register_readiness_check("therapy_repository", _repository_ready, critical=True)
 
     # GDPR right-to-erasure (REV-17) across the Postgres tables and the durable Redis store.
     user_data_erasure = None
@@ -202,6 +213,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan: the runtime brackets it; this composes the therapy service."""
     async with service_runtime(app, SPEC) as runtime:
         settings = TherapyServiceAppSettings()
+        # WS-15.F1: a mock producer "sends" events to an in-process list, so they never reach the
+        # broker. Strict = the service's own environment OR the bare ENVIRONMENT.
+        if settings.kafka_use_mock and (
+            is_strict_environment(settings.environment) or is_strict_environment()
+        ):
+            raise StartupDependencyError(
+                "events",
+                "a mock Kafka producer is not allowed in staging and production "
+                "(unset THERAPY_KAFKA_USE_MOCK)",
+            )
         components = await build_therapy_components(runtime, settings)
         app.state.settings = settings
         app.state.therapy_orchestrator = components.orchestrator

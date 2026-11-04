@@ -91,7 +91,7 @@ async def test_resend_by_email_already_verified_is_noop(monkeypatch) -> None:
 async def test_resend_endpoint_returns_204_without_nameerror() -> None:
     """The unauthenticated endpoint handler must return cleanly (204), not raise a
     NameError from stale current_user/token references (Phase C gate finding)."""
-    from src.api import ResendVerificationRequest, resend_verification
+    from src.api_auth import ResendVerificationRequest, resend_verification
 
     class _FakeService:
         called_with: list[str] = []

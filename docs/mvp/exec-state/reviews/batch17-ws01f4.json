@@ -1,0 +1,213 @@
+{
+ "task": "WS-01.F4",
+ "results": [
+  {
+   "lens": "security",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "CHANGES_REQUESTED",
+    "prior_findings": [],
+    "findings": [
+     {
+      "id": "WS01F4-SEC-1",
+      "severity": "important",
+      "file": "docker/migrate.Dockerfile",
+      "line": 18,
+      "problem": "The brief's Produces line says \"/app and /app/docker are root-owned in every image\". The tenth image that ships the same NAME_FILE loader, migrate, still has `COPY --from=builder --chown=appuser:appuser /build/entrypoint.sh /app/docker/entrypoint.sh`. That makes /app, /app/docker and the loader owned by appuser and writable by it. The new F4 tests cannot see this: APP_IMAGES (`[i for i in IMAGES if i.module]`) drops migrate because its module field is \"\". Both the static no-chown test and the built-image root-owned test therefore pass while one registered image is still affected.",
+      "failure_scenario": "Process running as appuser inside the migrate container (which handles the solace_migrator DDL credential): it can overwrite /app/docker/entrypoint.sh or swap /app/docker. compose `up` restarts the same container, keeping its writable layer, so the modified loader runs with the secrets on the next start. That is the persistence F4 removed from the nine service images. Checked on the existing local image solace/migrate:dev (built 2026-11-02 from this Dockerfile, blob 5b423f1, the same in the base and head trees): stat gives `appuser:appuser 755` for /app, /app/docker and /app/docker/entrypoint.sh. As appuser, `test -w` reports all three writable.",
+      "fix": "Remove `--chown=appuser:appuser` from line 18 of docker/migrate.Dockerfile. Parametrize test_f4_entrypoint_copy_is_not_chowned_to_the_app_user and test_f4_built_image_loader_and_app_dirs_are_root_owned over every IMAGES entry whose final stage COPYs the entrypoint (not over APP_IMAGES), so migrate is covered. This file belongs to the WS-01.9 lane, which is in `fixing`. The controller can extend F4's declared paths, route the change to WS-01.9, or narrow the Produces wording to the nine service images and record the gap.",
+      "evidence": "docker/migrate.Dockerfile:18 has `--chown=appuser:appuser` on the entrypoint COPY. scripts/ci/images.py:39 has `Image(\"migrate\", \"docker/migrate.Dockerfile\", \"\", None, ...)`. tests/build/test_mvp_211_container_entry.py:21 has `APP_IMAGES = [i for i in IMAGES if i.module]`. `docker run --rm --entrypoint stat solace/migrate:dev -c \"%U:%G %a %n\" /app /app/docker /app/docker/entrypoint.sh` printed appuser:appuser for all three. As appuser in the same image, the shell printed `entrypoint-writable-by-appuser`, `docker-dir-writable` and `app-dir-writable`. `git ls-tree` shows docker/migrate.Dockerfile at blob 5b423f1 in both base c02017c and head 7ee5acd. The F4 report lists the nine service Dockerfiles and config_service but does not mention migrate."
+     },
+     {
+      "id": "WS01F4-SEC-2",
+      "severity": "minor",
+      "file": "tests/build/test_mvp_211_container_entry.py",
+      "line": 122,
+      "problem": "The CRLF guard does not cover infrastructure/init-db/01-roles.sh. Compose uses that script through the directory mount `./infrastructure/init-db:/docker-entrypoint-initdb.d:ro`, which the `\\./...\\.sh` regex cannot match. The `.gitattributes *.sh eol=lf` assertion does not cover it either: all three .sh files are untracked in this no-commit program, so eol=lf never applies to the working-tree bytes that a compose bind mount uses. The controller asked for a guard on every *.sh used by images or compose.",
+      "failure_scenario": "An editor on the Windows dev box saves 01-roles.sh with CRLF. test_f4_shell_scripts_keep_lf_line_endings still passes, because the script is not in its set. On an empty data directory, the postgres init then runs the script with stray carriage returns and fails, so solace_app and solace_migrator are never created and the stack does not come up (it fails closed, so this costs availability, not security).",
+      "fix": "Also collect *.sh files under every directory that a compose file bind-mounts (resolve each `./dir:` volume source and glob `*.sh`), or simply check every *.sh in the repo outside .venv and .git. At minimum, add infrastructure/init-db/01-roles.sh to the explicit set.",
+      "evidence": "Running _shell_scripts_shipped() returns only ['docker\\\\entrypoint.sh', 'scripts\\\\db\\\\pg_tls_entrypoint.sh']. `git ls-files --others --exclude-standard` lists docker/entrypoint.sh, infrastructure/init-db/01-roles.sh and scripts/db/pg_tls_entrypoint.sh, so all three are untracked. docker-compose.yml mounts `./infrastructure/init-db:/docker-entrypoint-initdb.d:ro`. All three files are LF today, so this is a coverage gap, not a current breakage."
+     },
+     {
+      "id": "WS01F4-SEC-3",
+      "severity": "minor",
+      "file": "docker/entrypoint.sh",
+      "line": 42,
+      "problem": "The NUL check and the value read can read different bytes. In the check, the shell opens the path for `tr` and `wc` through redirections before those programs exec. The value read is `cat -- \"$_path\"`, which opens the path itself after exec. For files whose content depends on the reader, such as /proc/self/environ, either named directly or through a symlink, both counters get 0 bytes (the fd was opened against the pre-exec mm), so `[ 0 -ne 0 ]` is false and the check passes. cat then reads the real content, which contains NULs, and dash drops them silently, which is exactly what F4 is meant to prevent. Each file is also read three times, which leaves a check-versus-read race.",
+      "failure_scenario": "AUTH_SECRET_KEY_FILE points at a symlink to /proc/self/environ, or at that path directly. The entrypoint exits 0 and exports AUTH_SECRET_KEY as the container environment with its NUL separators stripped (319 bytes in the probe), when it should exit 1 with 'contains a NUL byte'. Exploiting this requires control of a *_FILE variable, so no privilege boundary is crossed. The fail-closed contract is still broken for a symlinked *_FILE.",
+      "fix": "Count NULs in one pass through a reader that opens the path itself, for example `[ \"$(cat -- \"$_path\" | tr -cd '\\000' | wc -c)\" -eq 0 ] || _fail \"${_name}_FILE contains a NUL byte\"`. This covers procfs-style files, reads the file once instead of twice for the check, and keeps the message limited to the variable name. Add a realinfra case with a symlink to /proc/self/environ.",
+      "evidence": "dash harness in python:3.12-slim@b18b261e (/bin/sh -> dash, GNU coreutils 9.7), run as uid 1000 with synthetic values. NUL at start, at end, only NUL, mid-file, before the trailing newline, at the end of a 64 MiB file, and a symlink to a NUL file all gave rc=1 with only 'entrypoint: AUTH_SECRET_KEY_FILE contains a NUL byte' and no marker in the output. A symlink to /proc/self/environ gave `rc=0 exported_len=319`. Debug in the same image: `tr -d '\\000' < /proc/self/environ | wc -c` = 0 and `wc -c < /proc/self/environ` = 0, but `cat /proc/self/environ | wc -c` = 293. Unreadable (root 0600), directory, /dev/null and a path containing a space all behaved correctly. A failed `tr` fails closed (0 is not equal to N). A failed `wc` makes `[` error out (status 2, treated as no NUL), but then `cat` also fails and _fail('could not be read') runs."
+     },
+     {
+      "id": "WS01F4-SEC-4",
+      "severity": "minor",
+      "file": "services/orchestrator_service/Dockerfile",
+      "line": 19,
+      "problem": "With a root-owned loader, the app user can no longer tamper with the entrypoint, but it can still tamper with startup through the PYTHONPATH. All nine images keep `COPY --chown=appuser:appuser src/ ./src/` (and the services/*, infrastructure/* code) with PYTHONPATH=/app:/app/src. The compose files set no `read_only: true`. A compromised app process can therefore write /app/src/sitecustomize.py, which Python imports on every start, before the app and with every loaded secret in its environment. That is the same persistence-across-restart path F4 closed for the loader. This was already the case before F4 and is outside its declared files, but it limits what F4 actually achieves.",
+      "failure_scenario": "An RCE in a service as appuser writes /app/src/sitecustomize.py. On the next container restart, which keeps the writable layer (restart: unless-stopped), the planted code runs first with AUTH_SECRET_KEY, ENCRYPTION_MASTER_KEY and the other secrets, even though /app/docker/entrypoint.sh is root-owned and unmodified.",
+      "fix": "Follow-up task, not F4: copy application code without --chown so it is root-owned and read-only to appuser (the code needs read access only), and/or set `read_only: true` with tmpfs for /tmp in the compose app services. Extend the root-owned built-image test to /app/src and /app/services.",
+      "evidence": "In an ephemeral `--rm` container of solace/migrate:dev, which uses the same code-COPY pattern, appuser wrote /app/src/sitecustomize.py and `python -c 'pass'` printed PLANTED-SITECUSTOMIZE-RAN. All nine service Dockerfiles have `COPY --chown=appuser:appuser src/ ./src/`. No compose file contains `read_only`. /opt/venv/bin is root:root 755, so the tools the loader uses (tr, wc, sed, cat) cannot be shadowed through PATH."
+     }
+    ]
+   },
+   "verified": [
+    {
+     "id": "WS01F4-SEC-1",
+     "severity": "important",
+     "file": "docker/migrate.Dockerfile",
+     "line": 18,
+     "problem": "The brief's Produces line says \"/app and /app/docker are root-owned in every image\". The tenth image that ships the same NAME_FILE loader, migrate, still has `COPY --from=builder --chown=appuser:appuser /build/entrypoint.sh /app/docker/entrypoint.sh`. That makes /app, /app/docker and the loader owned by appuser and writable by it. The new F4 tests cannot see this: APP_IMAGES (`[i for i in IMAGES if i.module]`) drops migrate because its module field is \"\". Both the static no-chown test and the built-image root-owned test therefore pass while one registered image is still affected.",
+     "failure_scenario": "Process running as appuser inside the migrate container (which handles the solace_migrator DDL credential): it can overwrite /app/docker/entrypoint.sh or swap /app/docker. compose `up` restarts the same container, keeping its writable layer, so the modified loader runs with the secrets on the next start. That is the persistence F4 removed from the nine service images. Checked on the existing local image solace/migrate:dev (built 2026-11-02 from this Dockerfile, blob 5b423f1, the same in the base and head trees): stat gives `appuser:appuser 755` for /app, /app/docker and /app/docker/entrypoint.sh. As appuser, `test -w` reports all three writable.",
+     "fix": "Remove `--chown=appuser:appuser` from line 18 of docker/migrate.Dockerfile. Parametrize test_f4_entrypoint_copy_is_not_chowned_to_the_app_user and test_f4_built_image_loader_and_app_dirs_are_root_owned over every IMAGES entry whose final stage COPYs the entrypoint (not over APP_IMAGES), so migrate is covered. This file belongs to the WS-01.9 lane, which is in `fixing`. The controller can extend F4's declared paths, route the change to WS-01.9, or narrow the Produces wording to the nine service images and record the gap.",
+     "evidence": "docker/migrate.Dockerfile:18 has `--chown=appuser:appuser` on the entrypoint COPY. scripts/ci/images.py:39 has `Image(\"migrate\", \"docker/migrate.Dockerfile\", \"\", None, ...)`. tests/build/test_mvp_211_container_entry.py:21 has `APP_IMAGES = [i for i in IMAGES if i.module]`. `docker run --rm --entrypoint stat solace/migrate:dev -c \"%U:%G %a %n\" /app /app/docker /app/docker/entrypoint.sh` printed appuser:appuser for all three. As appuser in the same image, the shell printed `entrypoint-writable-by-appuser`, `docker-dir-writable` and `app-dir-writable`. `git ls-tree` shows docker/migrate.Dockerfile at blob 5b423f1 in both base c02017c and head 7ee5acd. The F4 report lists the nine service Dockerfiles and config_service but does not mention migrate.",
+     "lens": "security",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "I confirmed the finding in the code. docker/migrate.Dockerfile line 18 still has `COPY --from=builder --chown=appuser:appuser /build/entrypoint.sh /app/docker/entrypoint.sh`, and `USER appuser` is set at line 25. scripts/ci/images.py:39 registers migrate with an empty module, so the `APP_IMAGES` filter drops it from the F4 tests. The brief's Produces line says \"/app and /app/docker are root-owned in every image\", which migrate violates. The file is untracked in git status, so it belongs to the WS-01.9 lane. The brief's Modify list names only the nine service Dockerfiles, so the gap is a coverage and ownership problem the controller needs to route, not a defect in the implementer's declared work. I did not rerun the stat or `test -w` checks from the finding, so the writable result in the existing local image is unverified by me. The Dockerfile makes it expected, since the chown'd COPY and the non-root user are both present. \"Important\" fits: exploiting it needs code execution as appuser in the migrate container, which holds the DDL credential."
+      },
+      {
+       "refuted": true,
+       "severity_ok": false,
+       "reason": "The chown on migrate.Dockerfile line 18 is real, but it is outside F4's scope. The brief's Files list names only the nine service Dockerfiles (services/*/Dockerfile). F4 depends on WS-01.6 and WS-01.8, not on WS-01.9, which owns docker/migrate.Dockerfile and is still in fixing. The \"every image\" wording in Produces refers to the images the Modify line covers. I found no ruling on migrate in the ledger. Editing migrate.Dockerfile from F4 would collide with the WS-01.9 lane. The test scoping to APP_IMAGES matches the brief's nine-image intent. The finding itself names the right remedy: route it to WS-01.9 or record the gap, not a defect in F4's change. Severity \"important\" is too high for F4. The residual risk is a short-lived migration job, and an attacker would already need code execution as appuser. I did not run a shell or the unit tests."
+      },
+      {
+       "refuted": false,
+       "severity_ok": false,
+       "reason": "The defect is real. docker/migrate.Dockerfile line 18 still has `COPY --from=builder --chown=appuser:appuser /build/entrypoint.sh /app/docker/entrypoint.sh`. `WORKDIR /app` follows it, so /app and /app/docker end up owned by appuser. The image is registered in scripts/ci/images.py with module \"\", so `APP_IMAGES = [i for i in IMAGES if i.module]` leaves it out of the F4 tests. The brief's Produces line says \"`/app` and `/app/docker` are root-owned in every image\", so this is a real gap against that wording. I did not run the tests or inspect the built image. I read the Dockerfile, images.py and the brief.\n\nImportant is too high. migrate is a one-shot job whose CMD runs `python -m scripts.db.migrate upgrade head` and exits. Planting a modified loader there only pays off if the same container is restarted with its writable layer intact, which a job container rarely is. Anything running as appuser already has the secrets in its environment, so the gain is limited to persistence. The Dockerfile belongs to the WS-01.9 lane, outside F4's declared files. I rate it minor: fix the one-line chown in WS-01.9, add migrate to the coverage, or narrow the brief wording and record the gap."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "WS01F4-SEC-2",
+     "severity": "minor",
+     "file": "tests/build/test_mvp_211_container_entry.py",
+     "line": 122,
+     "problem": "The CRLF guard does not cover infrastructure/init-db/01-roles.sh. Compose uses that script through the directory mount `./infrastructure/init-db:/docker-entrypoint-initdb.d:ro`, which the `\\./...\\.sh` regex cannot match. The `.gitattributes *.sh eol=lf` assertion does not cover it either: all three .sh files are untracked in this no-commit program, so eol=lf never applies to the working-tree bytes that a compose bind mount uses. The controller asked for a guard on every *.sh used by images or compose.",
+     "failure_scenario": "An editor on the Windows dev box saves 01-roles.sh with CRLF. test_f4_shell_scripts_keep_lf_line_endings still passes, because the script is not in its set. On an empty data directory, the postgres init then runs the script with stray carriage returns and fails, so solace_app and solace_migrator are never created and the stack does not come up (it fails closed, so this costs availability, not security).",
+     "fix": "Also collect *.sh files under every directory that a compose file bind-mounts (resolve each `./dir:` volume source and glob `*.sh`), or simply check every *.sh in the repo outside .venv and .git. At minimum, add infrastructure/init-db/01-roles.sh to the explicit set.",
+     "evidence": "Running _shell_scripts_shipped() returns only ['docker\\\\entrypoint.sh', 'scripts\\\\db\\\\pg_tls_entrypoint.sh']. `git ls-files --others --exclude-standard` lists docker/entrypoint.sh, infrastructure/init-db/01-roles.sh and scripts/db/pg_tls_entrypoint.sh, so all three are untracked. docker-compose.yml mounts `./infrastructure/init-db:/docker-entrypoint-initdb.d:ro`. All three files are LF today, so this is a coverage gap, not a current breakage.",
+     "lens": "security",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The gap is real. The compose file mounts `./infrastructure/init-db:/docker-entrypoint-initdb.d:ro` at line 139, and the `\\./...\\.sh` regex at test line 122 cannot match a directory mount. `infrastructure/init-db/01-roles.sh` is also not in the explicit set at line 130, which lists only `docker/entrypoint.sh` and `scripts/db/pg_tls_entrypoint.sh`. All three .sh files are untracked, so `.gitattributes` (`*.sh text eol=lf`) does not govern the working-tree bytes. The `.gitattributes` assertion therefore does not cover the gap either. A CRLF `01-roles.sh` would pass the guard, which is the failure scenario described. The impact is limited to availability, so minor severity fits. The script currently has LF endings."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "WS01F4-SEC-3",
+     "severity": "minor",
+     "file": "docker/entrypoint.sh",
+     "line": 42,
+     "problem": "The NUL check and the value read can read different bytes. In the check, the shell opens the path for `tr` and `wc` through redirections before those programs exec. The value read is `cat -- \"$_path\"`, which opens the path itself after exec. For files whose content depends on the reader, such as /proc/self/environ, either named directly or through a symlink, both counters get 0 bytes (the fd was opened against the pre-exec mm), so `[ 0 -ne 0 ]` is false and the check passes. cat then reads the real content, which contains NULs, and dash drops them silently, which is exactly what F4 is meant to prevent. Each file is also read three times, which leaves a check-versus-read race.",
+     "failure_scenario": "AUTH_SECRET_KEY_FILE points at a symlink to /proc/self/environ, or at that path directly. The entrypoint exits 0 and exports AUTH_SECRET_KEY as the container environment with its NUL separators stripped (319 bytes in the probe), when it should exit 1 with 'contains a NUL byte'. Exploiting this requires control of a *_FILE variable, so no privilege boundary is crossed. The fail-closed contract is still broken for a symlinked *_FILE.",
+     "fix": "Count NULs in one pass through a reader that opens the path itself, for example `[ \"$(cat -- \"$_path\" | tr -cd '\\000' | wc -c)\" -eq 0 ] || _fail \"${_name}_FILE contains a NUL byte\"`. This covers procfs-style files, reads the file once instead of twice for the check, and keeps the message limited to the variable name. Add a realinfra case with a symlink to /proc/self/environ.",
+     "evidence": "dash harness in python:3.12-slim@b18b261e (/bin/sh -> dash, GNU coreutils 9.7), run as uid 1000 with synthetic values. NUL at start, at end, only NUL, mid-file, before the trailing newline, at the end of a 64 MiB file, and a symlink to a NUL file all gave rc=1 with only 'entrypoint: AUTH_SECRET_KEY_FILE contains a NUL byte' and no marker in the output. A symlink to /proc/self/environ gave `rc=0 exported_len=319`. Debug in the same image: `tr -d '\\000' < /proc/self/environ | wc -c` = 0 and `wc -c < /proc/self/environ` = 0, but `cat /proc/self/environ | wc -c` = 293. Unreadable (root 0600), directory, /dev/null and a path containing a space all behaved correctly. A failed `tr` fails closed (0 is not equal to N). A failed `wc` makes `[` error out (status 2, treated as no NUL), but then `cat` also fails and _fail('could not be read') runs.",
+     "lens": "security",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The code matches the claim. entrypoint.sh line 42 counts NULs through shell redirections (`tr ... < path`, `wc -c < path`), and line 45 reads the value with `cat -- path`, which opens the file separately. For reader-dependent files such as /proc/self/environ, the redirections read 0 bytes, so the check passes while `cat` returns content containing NULs. The reviewer's evidence came from the real image (`wc -c < /proc/self/environ` gave 0, `cat | wc -c` gave 293). I did not run it myself, because Git Bash has no real procfs. The impact is minimal because it needs control of a *_FILE variable and a procfs-style target, with no privilege boundary crossed. Minor is the right severity."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "WS01F4-SEC-4",
+     "severity": "minor",
+     "file": "services/orchestrator_service/Dockerfile",
+     "line": 19,
+     "problem": "With a root-owned loader, the app user can no longer tamper with the entrypoint, but it can still tamper with startup through the PYTHONPATH. All nine images keep `COPY --chown=appuser:appuser src/ ./src/` (and the services/*, infrastructure/* code) with PYTHONPATH=/app:/app/src. The compose files set no `read_only: true`. A compromised app process can therefore write /app/src/sitecustomize.py, which Python imports on every start, before the app and with every loaded secret in its environment. That is the same persistence-across-restart path F4 closed for the loader. This was already the case before F4 and is outside its declared files, but it limits what F4 actually achieves.",
+     "failure_scenario": "An RCE in a service as appuser writes /app/src/sitecustomize.py. On the next container restart, which keeps the writable layer (restart: unless-stopped), the planted code runs first with AUTH_SECRET_KEY, ENCRYPTION_MASTER_KEY and the other secrets, even though /app/docker/entrypoint.sh is root-owned and unmodified.",
+     "fix": "Follow-up task, not F4: copy application code without --chown so it is root-owned and read-only to appuser (the code needs read access only), and/or set `read_only: true` with tmpfs for /tmp in the compose app services. Extend the root-owned built-image test to /app/src and /app/services.",
+     "evidence": "In an ephemeral `--rm` container of solace/migrate:dev, which uses the same code-COPY pattern, appuser wrote /app/src/sitecustomize.py and `python -c 'pass'` printed PLANTED-SITECUSTOMIZE-RAN. All nine service Dockerfiles have `COPY --chown=appuser:appuser src/ ./src/`. No compose file contains `read_only`. /opt/venv/bin is root:root 755, so the tools the loader uses (tr, wc, sed, cat) cannot be shadowed through PATH.",
+     "lens": "security",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The code matches the finding. services/orchestrator_service/Dockerfile lines 19-24 still use COPY --chown=appuser:appuser for src/ and the services and infrastructure code. Line 25 sets PYTHONPATH=/app:/app/src, and line 27 sets USER appuser. No docker-compose*.yml file contains read_only. So appuser can write /app/src/sitecustomize.py, and Python imports it on every start. That plant survives a restart of the same container and runs before the app, with the secrets in its environment. I did not rerun the implementer's container demonstration. Its premises hold in the Dockerfile and compose files. The finding is correctly rated minor. The attacker already needs code execution as appuser, which already has the secrets at that point. The gain is persistence across restarts only. It predates F4 and sits outside F4's declared files, so it is a follow-up and not a defect in F4. The finding already says this itself."
+      }
+     ],
+     "survives": true
+    }
+   ]
+  },
+  {
+   "lens": "correctness",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "APPROVED",
+    "prior_findings": [],
+    "findings": [
+     {
+      "id": "WS01F4-COR-1",
+      "severity": "minor",
+      "file": "tests/build/test_mvp_211_container_entry.py",
+      "line": 120,
+      "problem": "The CRLF guard (`_shell_scripts_shipped`) does not cover every .sh that compose ships. docker-compose.yml bind-mounts the directory `./infrastructure/init-db:/docker-entrypoint-initdb.d:ro`, and that directory holds `infrastructure/init-db/01-roles.sh`. The compose regex only matches paths that literally end in `.sh`, and the file is not in the hardcoded fallback set (that set holds only docker/entrypoint.sh and scripts/db/pg_tls_entrypoint.sh).",
+      "failure_scenario": "If `01-roles.sh` is committed with CRLF, or loses the `*.sh eol=lf` rule, the guard stays green. The Postgres initdb script then fails with `\\r` errors, and `solace_app` and `solace_migrator` are never created. `01-roles.sh` is clean LF today, so this is a coverage gap rather than a live defect. Directory COPYs such as the user-service `COPY scripts/ ./scripts/` are also not walked.",
+      "fix": "Add an rglob over `infrastructure/init-db/*.sh` and `scripts/**/*.sh` to the scripts set. Better, resolve compose bind-mount sources that are directories and include every .sh under them.",
+      "evidence": "A recursive scan found only three .sh files: docker/entrypoint.sh, scripts/db/pg_tls_entrypoint.sh and infrastructure/init-db/01-roles.sh. The third is referenced by docker-compose.yml:125 as a directory mount and is never named in the test's script set."
+     },
+     {
+      "id": "WS01F4-COR-2",
+      "severity": "minor",
+      "file": "scripts/ci/dockerfiles.py",
+      "line": 118,
+      "problem": "`uvicorn_flags` finds the app with the regex `^[A-Za-z_][\\w.]*:[A-Za-z_]\\w*$`. An option value shaped like `name:value` (for example `--header server:x`) matches first and is mistaken for the app. The option keeps its value out of the output only by luck of position, and the real app is no longer protected.",
+      "failure_scenario": "`uvicorn_flags(['uvicorn','--header','server:x','main:app','--reload'])` returns `['--header','--reload']`: the header value is lost and the option is left dangling. A boolean flag placed directly before a non-`module:attr` app (`--proxy-headers main`) also swallows it. None of the nine real invocations use such options, so they all parse correctly.",
+      "fix": "Anchor the app as the first non-option token after `-m uvicorn` or `uvicorn`, or exclude known value-taking options (such as `--header`) from the app match. Add a test with `--factory` and `--opt=value` before the app. The new f4 flags test covers only `--proxy-headers` and `--log-level`.",
+      "evidence": "Ran the function directly. The real CMDs parse correctly, for example the orchestrator gives ['--no-access-log','--log-level','warning','--proxy-headers','--ws-max-size','16384']. The tricky argv case above gives ['--header','--reload']."
+     }
+    ]
+   },
+   "verified": [
+    {
+     "id": "WS01F4-COR-1",
+     "severity": "minor",
+     "file": "tests/build/test_mvp_211_container_entry.py",
+     "line": 120,
+     "problem": "The CRLF guard (`_shell_scripts_shipped`) does not cover every .sh that compose ships. docker-compose.yml bind-mounts the directory `./infrastructure/init-db:/docker-entrypoint-initdb.d:ro`, and that directory holds `infrastructure/init-db/01-roles.sh`. The compose regex only matches paths that literally end in `.sh`, and the file is not in the hardcoded fallback set (that set holds only docker/entrypoint.sh and scripts/db/pg_tls_entrypoint.sh).",
+     "failure_scenario": "If `01-roles.sh` is committed with CRLF, or loses the `*.sh eol=lf` rule, the guard stays green. The Postgres initdb script then fails with `\\r` errors, and `solace_app` and `solace_migrator` are never created. `01-roles.sh` is clean LF today, so this is a coverage gap rather than a live defect. Directory COPYs such as the user-service `COPY scripts/ ./scripts/` are also not walked.",
+     "fix": "Add an rglob over `infrastructure/init-db/*.sh` and `scripts/**/*.sh` to the scripts set. Better, resolve compose bind-mount sources that are directories and include every .sh under them.",
+     "evidence": "A recursive scan found only three .sh files: docker/entrypoint.sh, scripts/db/pg_tls_entrypoint.sh and infrastructure/init-db/01-roles.sh. The third is referenced by docker-compose.yml:125 as a directory mount and is never named in the test's script set.",
+     "lens": "correctness",
+     "votes": [
+      {
+       "refuted": false,
+       "reason": "The gap is real. `_shell_scripts_shipped` only picks up Dockerfile COPY sources that end in `.sh` and compose paths that end in `.sh`. The compose bind mount at docker-compose.yml:125 is the directory `./infrastructure/init-db`, so `infrastructure/init-db/01-roles.sh` never matches. The hardcoded fallback set holds only docker/entrypoint.sh and scripts/db/pg_tls_entrypoint.sh. A CRLF in 01-roles.sh would therefore not fail the test. The test does assert a `*.sh eol=lf` rule in .gitattributes, which partly covers the risk. My grep for \"sh\" in .gitattributes returned nothing, so I could not confirm that rule exists, but I did not investigate further. The finding itself calls this a coverage gap, not a live defect, so minor severity is appropriate.",
+       "severity_ok": true
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "WS01F4-COR-2",
+     "severity": "minor",
+     "file": "scripts/ci/dockerfiles.py",
+     "line": 118,
+     "problem": "`uvicorn_flags` finds the app with the regex `^[A-Za-z_][\\w.]*:[A-Za-z_]\\w*$`. An option value shaped like `name:value` (for example `--header server:x`) matches first and is mistaken for the app. The option keeps its value out of the output only by luck of position, and the real app is no longer protected.",
+     "failure_scenario": "`uvicorn_flags(['uvicorn','--header','server:x','main:app','--reload'])` returns `['--header','--reload']`: the header value is lost and the option is left dangling. A boolean flag placed directly before a non-`module:attr` app (`--proxy-headers main`) also swallows it. None of the nine real invocations use such options, so they all parse correctly.",
+     "fix": "Anchor the app as the first non-option token after `-m uvicorn` or `uvicorn`, or exclude known value-taking options (such as `--header`) from the app match. Add a test with `--factory` and `--opt=value` before the app. The new f4 flags test covers only `--proxy-headers` and `--log-level`.",
+     "evidence": "Ran the function directly. The real CMDs parse correctly, for example the orchestrator gives ['--no-access-log','--log-level','warning','--proxy-headers','--ws-max-size','16384']. The tricky argv case above gives ['--header','--reload'].",
+     "lens": "correctness",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The code confirms the claim. `_APP_RE` matches the first `module:attr`-shaped token, and `uvicorn --header` takes values shaped `name:value`. For `['uvicorn','--header','server:x','main:app','--reload']`, `app` is the index of `server:x`. In the loop, `--header` sees `i == app`, so it does not take its value. It is emitted bare and `server:x` is dropped, giving `['--header','--reload']`. Only the first matching token is protected, so `main:app` is no longer guarded either. None of the nine real invocations use such an option, so this is a latent, test-helper-only weakness and minor severity is right."
+      }
+     ],
+     "survives": true
+    }
+   ]
+  }
+ ]
+}

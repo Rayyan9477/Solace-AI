@@ -1,0 +1,470 @@
+{
+ "task": "IF-01-integrated",
+ "results": [
+  {
+   "lens": "lifecycle",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "CHANGES_REQUESTED",
+    "prior_findings": [],
+    "findings": [
+     {
+      "id": "IF01-LIF-1",
+      "severity": "important",
+      "file": "src/solace_infrastructure/runtime/bootstrap.py",
+      "line": 21,
+      "problem": "Once start_service_runtime returns, nothing rolls the runtime back. The lifespan shapes the bootstrap offers do not make sure stop_service_runtime runs: the bootstrap.py module docstring has no try/finally and puts the service's own stop code inline before stop_service_runtime. The WS-04.5 conformance checker (_last_statement, tests/bootstrap/test_service_conformance.py:193-198) accepts a bare last statement. reference_app.py:31-35 opens its try only after start and wraps just the yield. So every runtime closer (refresher, Redis, Postgres pool, and the W1 event plane per WS-04.6) is skipped when composition fails between start and yield, or when service stop code that runs before the final statement raises. The nine phase-B services are about to copy this shape.",
+      "failure_scenario": "Real uvicorn 0.40 probe (create_service_app plus start_service_runtime, fake pg/redis). (a) The lifespan raises after start, e.g. a consumer start fails: uvicorn logs 'Application startup failed', no pg.close or redis.close runs, and probe-service:readiness_refresher is still pending. This happens with both the docstring shape and the reference_app shape. (b) Service stop code after yield raises, e.g. consumer.stop() fails during 'docker compose down' because Kafka is going away: events end at 'after_yield', the svc, redis and pg closers never run, and uvicorn logs 'Application shutdown failed'. (c) The lifespan is cancelled at loop teardown (dev Ctrl-C during startup, or force-exit): with the docstring shape no closer runs; with try/finally the closers do run (seen with a real SIGINT). From W1 on, a skipped event_plane.stop leaves the in-flight outbox flush, claims and consumer-group membership unreleased.",
+      "fix": "Fix the adoption shape before phase B. Make the second statement a try whose finalbody is exactly [await stop_service_runtime(runtime)], with all composition inside the try and every service-owned stop registered through runtime.register_shutdown (which already isolates failures). Make test_lifespan_is_bracketed_by_the_runtime require that structure, and correct the bootstrap.py docstring example. Alternatively, provide an 'async with service_runtime(app, SPEC) as runtime' helper.",
+      "evidence": "bootstrap.py:20-26 docstring example (no try/finally; '... # stop service-owned work' before stop). test_service_conformance.py:193-198 accepts either form. reference_app.py:31-35 has start before try. Probe results: S4 events ['pg.open.begin','pg.open.done'] with pending_after ['probe-service:readiness_refresher'] in both shapes; S3 events end at 'after_yield'; S2 (should_exit during startup, then asyncio.run teardown) shows no closers with the docstring shape and svc.close, redis.close, pg.close with try/finally. Caveat: with a real SIGTERM during startup, uvicorn skips lifespan.shutdown and re-raises SIGTERM (process exit=3, no 'finally' event), so no lifespan shape can fix that sub-case."
+     },
+     {
+      "id": "IF01-LIF-2",
+      "severity": "minor",
+      "file": "src/solace_infrastructure/runtime/bootstrap.py",
+      "line": 139,
+      "problem": "register_background_task only tracks a task for /live. stop_service_runtime never cancels or awaits registered tasks, so a service task registered without a matching register_shutdown closer keeps running after the Redis and Postgres closers have run, until asyncio.run tears the loop down. Because asyncpg's Pool.close() waits for checked-out connections, such a task holding a connection makes the postgres closer use its full 5 s and then terminate the pool mid-transaction.",
+      "failure_scenario": "Probe: register a looping task with runtime.register_background_task('consumer', t), then await stop_service_runtime(rt). The task is still alive and ran 7 more iterations in the next 100 ms with pg.close already done. A consumer handling a message at that point fails against a closed pool, and its handler logs the error with a traceback.",
+      "fix": "In register_background_task, also register a closer that cancels the task and awaits it (bounded). Services register tasks after start_service_runtime, so in reverse order these closers run before the refresher, Redis and Postgres closers. Or have stop_service_runtime cancel and await every registered task before the first datastore closer.",
+      "evidence": "bootstrap.py:139-162 (no closer), bootstrap.py:424-443 (only _shutdown_closers are run). Probe S7 result: {task_alive_after_stop: true, iterations_after_stop: 7, pg_closed: true}. asyncpg 0.30 Pool.close waits on ch.wait_until_released() for every holder."
+     },
+     {
+      "id": "IF01-LIF-3",
+      "severity": "minor",
+      "file": "src/solace_infrastructure/runtime/bootstrap.py",
+      "line": 458,
+      "problem": "A closer that overruns SHUTDOWN_STEP_TIMEOUT_SECONDS is cancelled and not awaited, so its cancellation cleanup (finally blocks) runs at the same time as the closers that follow, and here even after stop_service_runtime has returned. WS-04.6 depends on reverse order to guarantee event_plane.stop() finishes before the Postgres pool closes, and that guarantee fails exactly when the plane's stop is slow.",
+      "failure_scenario": "Probe with the step timeout at 0.2 s: an 'event_plane' closer sleeps, and its finally does 50 ms of work that needs the pool (releasing claims, say). Observed order: plane.stop.begin, redis.close, pg.close, stop_returned, then plane.stop.cleanup_done. The cleanup runs against a closing or closed pool, and asyncpg refuses new acquires once _closing is set.",
+      "fix": "After task.cancel() on timeout, wait a short bounded grace for the cancellation to settle (e.g. await asyncio.wait({task}, timeout=1.0)) before moving on. A closer that ignores cancellation still cannot block the rest, and ordering holds in the normal case.",
+      "evidence": "bootstrap.py:458-461 'if not done: task.cancel(); return \"TimeoutError\"'. Probe S8 events: ['pg.open.begin','pg.open.done','plane.stop.begin','redis.close','pg.close','stop_returned','plane.stop.cleanup_done(uses pool)'], and runtime_shutdown_step_failed step=event_plane error=TimeoutError."
+     },
+     {
+      "id": "IF01-LIF-4",
+      "severity": "minor",
+      "file": "src/solace_infrastructure/runtime/datastores.py",
+      "line": 165,
+      "problem": "The postgres closer wraps WS-02's ConnectionPoolManager.close_all_pools in the runtime's 5 s cancel. When pool.close() is still waiting for a checked-out connection, the cancellation terminates the asyncpg pool but skips close_pool's 'del cls._pools[name]' and close_all_pools' _pool_configs/_locks clear. The process-wide singleton keeps a closed pool, and any later lifespan in the same process gets it back from get_pool's fast path.",
+      "failure_scenario": "Probe with a pool whose close() waits like asyncpg's and terminates on cancel. stop_service_runtime logs 'runtime_shutdown_step_failed step=postgres error=TimeoutError'. Afterwards _pools still holds 'default', the second ConnectionPoolManager.get_pool('default') returns the same closed pool, and its query fails 'pool is closed'. In dev, start_postgres would accept that pool, and /ready would report postgres 'connected' for up to 5 s with no connection behind it. This hits TestClient-driven service suites and in-process restarts; a production process exits.",
+      "fix": "Make close_pool remove the registry entry in a finally (and close_all_pools clear configs and locks in a finally), or have the runtime's postgres closer drop ConnectionPoolManager's registry entries even when the close times out.",
+      "evidence": "datastores.py:165-166 and 180; connection_manager.py:569-586 (del and clear only on success); asyncpg Pool.close source: on CancelledError it calls terminate() and sets _closed=True. Probe output: 'after stop: close_calls 1 closed True pools ['default']', 'second get_pool is the closed pool: True', 'second lifespan query fails: RuntimeError pool is closed'."
+     },
+     {
+      "id": "IF01-LIF-5",
+      "severity": "minor",
+      "file": "src/solace_infrastructure/runtime/bootstrap.py",
+      "line": 424,
+      "problem": "stop_service_runtime does not detach or mark the runtime stopped. app.state.runtime keeps the stopped runtime with its registered checks and cached results, so /ready after teardown answers 200 'ready' with postgres and redis 'connected' after both were closed. health.py:69 claims a torn-down runtime gives 503. Against real redis-py, a probe after aclose() also quietly reconnects the closed client.",
+      "failure_scenario": "Probe: run one 'with TestClient(app)' lifespan, then call GET /ready with a plain TestClient(app) (no lifespan). The result is 200 {status:'ready', checks:{postgres:{ok:true,detail:'connected'}, redis:{ok:true,detail:'connected'}}}, and app.state.runtime is still the stopped runtime. This does not happen under uvicorn: the drain probe (S10) showed new connections refused after SIGTERM, and the in-flight request finished before pg.close.",
+      "fix": "Have stop_service_runtime set a stopped flag that makes evaluate_readiness return not-ready (and sets SERVICE_READY to 0). Or keep the app on the runtime and clear app.state.runtime at the end of stop, which also makes health.py's comment true.",
+      "evidence": "bootstrap.py:389 sets app.state.runtime and nothing clears it; health.py:67-71 comment '(or has torn it down)'. Probe S6: runtime_kept_after_stop=true, ready_outside_lifespan=200 with both checks ok. Probe S10: ready_new_conn_during_drain='ConnectError'; slow.handler.end at 282135.625, before pg.close at 282135.703."
+     }
+    ]
+   },
+   "verified": [
+    {
+     "id": "IF01-LIF-1",
+     "severity": "important",
+     "file": "src/solace_infrastructure/runtime/bootstrap.py",
+     "line": 21,
+     "problem": "Once start_service_runtime returns, nothing rolls the runtime back. The lifespan shapes the bootstrap offers do not make sure stop_service_runtime runs: the bootstrap.py module docstring has no try/finally and puts the service's own stop code inline before stop_service_runtime. The WS-04.5 conformance checker (_last_statement, tests/bootstrap/test_service_conformance.py:193-198) accepts a bare last statement. reference_app.py:31-35 opens its try only after start and wraps just the yield. So every runtime closer (refresher, Redis, Postgres pool, and the W1 event plane per WS-04.6) is skipped when composition fails between start and yield, or when service stop code that runs before the final statement raises. The nine phase-B services are about to copy this shape.",
+     "failure_scenario": "Real uvicorn 0.40 probe (create_service_app plus start_service_runtime, fake pg/redis). (a) The lifespan raises after start, e.g. a consumer start fails: uvicorn logs 'Application startup failed', no pg.close or redis.close runs, and probe-service:readiness_refresher is still pending. This happens with both the docstring shape and the reference_app shape. (b) Service stop code after yield raises, e.g. consumer.stop() fails during 'docker compose down' because Kafka is going away: events end at 'after_yield', the svc, redis and pg closers never run, and uvicorn logs 'Application shutdown failed'. (c) The lifespan is cancelled at loop teardown (dev Ctrl-C during startup, or force-exit): with the docstring shape no closer runs; with try/finally the closers do run (seen with a real SIGINT). From W1 on, a skipped event_plane.stop leaves the in-flight outbox flush, claims and consumer-group membership unreleased.",
+     "fix": "Fix the adoption shape before phase B. Make the second statement a try whose finalbody is exactly [await stop_service_runtime(runtime)], with all composition inside the try and every service-owned stop registered through runtime.register_shutdown (which already isolates failures). Make test_lifespan_is_bracketed_by_the_runtime require that structure, and correct the bootstrap.py docstring example. Alternatively, provide an 'async with service_runtime(app, SPEC) as runtime' helper.",
+     "evidence": "bootstrap.py:20-26 docstring example (no try/finally; '... # stop service-owned work' before stop). test_service_conformance.py:193-198 accepts either form. reference_app.py:31-35 has start before try. Probe results: S4 events ['pg.open.begin','pg.open.done'] with pending_after ['probe-service:readiness_refresher'] in both shapes; S3 events end at 'after_yield'; S2 (should_exit during startup, then asyncio.run teardown) shows no closers with the docstring shape and svc.close, redis.close, pg.close with try/finally. Caveat: with a real SIGTERM during startup, uvicorn skips lifespan.shutdown and re-raises SIGTERM (process exit=3, no 'finally' event), so no lifespan shape can fix that sub-case.",
+     "lens": "lifecycle",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": false,
+       "reason": "The gap is real. The bootstrap.py docstring (lines 20-26) shows start, yield, inline service stop code, then stop_service_runtime, with no try/finally. If composition fails after start, or service stop code raises, the closers never run. start_service_runtime only rolls back its own partial startup (lines 378-388), not failures after it returns. I did not re-run the probes, but the code supports the claim. The impact is smaller than \"important\" suggests. In every claimed scenario the process is exiting anyway, so the leak is limited to lingering Redis/Postgres connections, which the OS and server time out, plus unreleased outbox claims and consumer-group membership that expire by timeout. The fix is cheap, but a minor or moderate rating fits better."
+      },
+      {
+       "refuted": true,
+       "severity_ok": false,
+       "reason": "The behaviour matches IF-01 as written. The Adoption rule (00-interfaces lines 33 and 39) says the lifespan's first statement is `runtime = await start_service_runtime(app, SPEC)` and its last is `await stop_service_runtime(runtime)`. The WS-04.5 conformance checker (`_last_statement`) enforces exactly that shape. The bootstrap.py docstring, reference_app.py and the checker follow the contract, so none of them deviates from it. The contract does not ask for try/finally, and I found no later plan task that adds it. The finding is therefore a proposed change to the contract: add try/finally or an `async with` helper. It is not a defect in the integrated implementation, and it is not a spec-verdict failure for IF-01. A tightening request like that belongs to the owner's decision on the contract before phase B. If it is kept, it should be filed as a contract-hardening suggestion with lower severity, not an important defect. I did not run the probes. I only read the contract and the progress ledger, whose Ruling lines contain nothing about lifespan rollback."
+      },
+      {
+       "refuted": false,
+       "severity_ok": false,
+       "reason": "The code behaves as the finding describes. The bootstrap.py docstring has no try/finally, and nothing runs stop_service_runtime if composition or service stop code raises. I did not re-run the probes. I read bootstrap.py lines 1-80 and IF-01 in 00-interfaces-and-ownership.md. I did not open test_service_conformance.py or reference_app.py, so those claims are taken from the finding. IF-01 line 33 says stop_service_runtime \"is the last statement of every lifespan\", and the docstring and conformance checker follow that wording. So this is a gap in the contract, not a cross-task defect. The severity \"important\" is too high for three reasons. In scenarios (a) and (b) the uvicorn process is already failing startup or shutdown and exits, so the OS reclaims the Redis and Postgres sockets and the refresher task dies with it. The remaining leaks are Kafka consumer-group membership, which times out on its own, and outbox claims, which the claimed_at migration (007) is meant to expire. Scenario (c) is a dev Ctrl-C. The finding itself admits that a real SIGTERM during startup cannot be fixed by any lifespan shape. A better rating is minor or hardening: put the try/finally shape in the docstring and the conformance test before phase B, which costs almost nothing."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "IF01-LIF-2",
+     "severity": "minor",
+     "file": "src/solace_infrastructure/runtime/bootstrap.py",
+     "line": 139,
+     "problem": "register_background_task only tracks a task for /live. stop_service_runtime never cancels or awaits registered tasks, so a service task registered without a matching register_shutdown closer keeps running after the Redis and Postgres closers have run, until asyncio.run tears the loop down. Because asyncpg's Pool.close() waits for checked-out connections, such a task holding a connection makes the postgres closer use its full 5 s and then terminate the pool mid-transaction.",
+     "failure_scenario": "Probe: register a looping task with runtime.register_background_task('consumer', t), then await stop_service_runtime(rt). The task is still alive and ran 7 more iterations in the next 100 ms with pg.close already done. A consumer handling a message at that point fails against a closed pool, and its handler logs the error with a traceback.",
+     "fix": "In register_background_task, also register a closer that cancels the task and awaits it (bounded). Services register tasks after start_service_runtime, so in reverse order these closers run before the refresher, Redis and Postgres closers. Or have stop_service_runtime cancel and await every registered task before the first datastore closer.",
+     "evidence": "bootstrap.py:139-162 (no closer), bootstrap.py:424-443 (only _shutdown_closers are run). Probe S7 result: {task_alive_after_stop: true, iterations_after_stop: 7, pg_closed: true}. asyncpg 0.30 Pool.close waits on ch.wait_until_released() for every holder.",
+     "lens": "lifecycle",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "Confirmed from the code. register_background_task (bootstrap.py:139-162) only stores the task and adds a done-callback for the gauge. stop_service_runtime (424-443) only pops and runs _shutdown_closers, and only the readiness refresher registers a cancelling closer (406-410). A task registered through register_background_task without a matching register_shutdown therefore keeps running after the Redis and Postgres closers have run. Neither the IF-01 contract nor the docstring says the caller must supply the closer, and the WS-13 adoption row only says consumers are registered with register_background_task, so a service following it literally hits this. I did not re-run the probe. The impact is limited to shutdown noise and a delayed pool close, so minor is the right severity."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "IF01-LIF-3",
+     "severity": "minor",
+     "file": "src/solace_infrastructure/runtime/bootstrap.py",
+     "line": 458,
+     "problem": "A closer that overruns SHUTDOWN_STEP_TIMEOUT_SECONDS is cancelled and not awaited, so its cancellation cleanup (finally blocks) runs at the same time as the closers that follow, and here even after stop_service_runtime has returned. WS-04.6 depends on reverse order to guarantee event_plane.stop() finishes before the Postgres pool closes, and that guarantee fails exactly when the plane's stop is slow.",
+     "failure_scenario": "Probe with the step timeout at 0.2 s: an 'event_plane' closer sleeps, and its finally does 50 ms of work that needs the pool (releasing claims, say). Observed order: plane.stop.begin, redis.close, pg.close, stop_returned, then plane.stop.cleanup_done. The cleanup runs against a closing or closed pool, and asyncpg refuses new acquires once _closing is set.",
+     "fix": "After task.cancel() on timeout, wait a short bounded grace for the cancellation to settle (e.g. await asyncio.wait({task}, timeout=1.0)) before moving on. A closer that ignores cancellation still cannot block the rest, and ordering holds in the normal case.",
+     "evidence": "bootstrap.py:458-461 'if not done: task.cancel(); return \"TimeoutError\"'. Probe S8 events: ['pg.open.begin','pg.open.done','plane.stop.begin','redis.close','pg.close','stop_returned','plane.stop.cleanup_done(uses pool)'], and runtime_shutdown_step_failed step=event_plane error=TimeoutError.",
+     "lens": "lifecycle",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The code at bootstrap.py:458-461 matches the finding. On timeout it calls task.cancel() and returns \"TimeoutError\" without awaiting the task. The docstring at line 429 also says a timed-out closer is \"cancelled and not waited for\". The next closer is then created and awaited straight away. Any await in the cancelled closer's finally block therefore interleaves with the later closers, such as the pool close. That breaks the reverse-order guarantee in exactly the slow-stop case. I did not run a probe, so the interleaving is argued from asyncio scheduling and not observed. Because the non-waiting is a documented design choice and the case is narrow (a closer must overrun the timeout and its cleanup must need a later resource), minor severity is right. A bounded grace wait after cancel would fix it."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "IF01-LIF-4",
+     "severity": "minor",
+     "file": "src/solace_infrastructure/runtime/datastores.py",
+     "line": 165,
+     "problem": "The postgres closer wraps WS-02's ConnectionPoolManager.close_all_pools in the runtime's 5 s cancel. When pool.close() is still waiting for a checked-out connection, the cancellation terminates the asyncpg pool but skips close_pool's 'del cls._pools[name]' and close_all_pools' _pool_configs/_locks clear. The process-wide singleton keeps a closed pool, and any later lifespan in the same process gets it back from get_pool's fast path.",
+     "failure_scenario": "Probe with a pool whose close() waits like asyncpg's and terminates on cancel. stop_service_runtime logs 'runtime_shutdown_step_failed step=postgres error=TimeoutError'. Afterwards _pools still holds 'default', the second ConnectionPoolManager.get_pool('default') returns the same closed pool, and its query fails 'pool is closed'. In dev, start_postgres would accept that pool, and /ready would report postgres 'connected' for up to 5 s with no connection behind it. This hits TestClient-driven service suites and in-process restarts; a production process exits.",
+     "fix": "Make close_pool remove the registry entry in a finally (and close_all_pools clear configs and locks in a finally), or have the runtime's postgres closer drop ConnectionPoolManager's registry entries even when the close times out.",
+     "evidence": "datastores.py:165-166 and 180; connection_manager.py:569-586 (del and clear only on success); asyncpg Pool.close source: on CancelledError it calls terminate() and sets _closed=True. Probe output: 'after stop: close_calls 1 closed True pools ['default']', 'second get_pool is the closed pool: True', 'second lifespan query fails: RuntimeError pool is closed'.",
+     "lens": "lifecycle",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The code backs the finding. In connection_manager.py, close_pool awaits pool.close() and only then runs `del cls._pools[name]`. close_all_pools clears _pool_configs and _locks only after the close loop, with no finally. datastores.py:165-166 wraps close_all_pools in the runtime closer, which bootstrap.py runs under a timeout (_run_closer, line 446 onward). If pool.close() is cancelled or times out while a connection is still checked out, the registry entry stays. get_pool's fast path (line 368) then returns the closed pool to the next lifespan in the same process. I did not run the probe. The reported impact is narrow: it needs a straggler connection and a timeout, and it only affects in-process restarts and test suites, since a production process exits. That fits minor."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "IF01-LIF-5",
+     "severity": "minor",
+     "file": "src/solace_infrastructure/runtime/bootstrap.py",
+     "line": 424,
+     "problem": "stop_service_runtime does not detach or mark the runtime stopped. app.state.runtime keeps the stopped runtime with its registered checks and cached results, so /ready after teardown answers 200 'ready' with postgres and redis 'connected' after both were closed. health.py:69 claims a torn-down runtime gives 503. Against real redis-py, a probe after aclose() also quietly reconnects the closed client.",
+     "failure_scenario": "Probe: run one 'with TestClient(app)' lifespan, then call GET /ready with a plain TestClient(app) (no lifespan). The result is 200 {status:'ready', checks:{postgres:{ok:true,detail:'connected'}, redis:{ok:true,detail:'connected'}}}, and app.state.runtime is still the stopped runtime. This does not happen under uvicorn: the drain probe (S10) showed new connections refused after SIGTERM, and the in-flight request finished before pg.close.",
+     "fix": "Have stop_service_runtime set a stopped flag that makes evaluate_readiness return not-ready (and sets SERVICE_READY to 0). Or keep the app on the runtime and clear app.state.runtime at the end of stop, which also makes health.py's comment true.",
+     "evidence": "bootstrap.py:389 sets app.state.runtime and nothing clears it; health.py:67-71 comment '(or has torn it down)'. Probe S6: runtime_kept_after_stop=true, ready_outside_lifespan=200 with both checks ok. Probe S10: ready_new_conn_during_drain='ConnectError'; slow.handler.end at 282135.625, before pg.close at 282135.703.",
+     "lens": "lifecycle",
+     "votes": [
+      {
+       "refused": "false",
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The code matches the finding. stop_service_runtime only pops and runs closers. It sets no stopped flag and leaves app.state.runtime in place. evaluate_readiness (bootstrap.py:223) has no stopped check, and a grep for a stopped or closed flag in bootstrap.py finds none. health.py:67-71 says a runtime that was torn down gives 503, but nothing clears app.state.runtime, so that comment is false. A /ready call after teardown would therefore return the cached 'ready' result. Under uvicorn this is only reachable inside the drain window, since the server stops accepting connections before lifespan shutdown, so it mostly shows up in tests or embedded use. Minor severity is right. I did not run the S6 probe myself."
+      }
+     ],
+     "survives": true
+    }
+   ]
+  },
+  {
+   "lens": "phi-errors",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "CHANGES_REQUESTED",
+    "prior_findings": [],
+    "findings": [
+     {
+      "id": "IF01-PHI-1",
+      "severity": "important",
+      "file": "src/solace_infrastructure/runtime/http.py",
+      "line": 425,
+      "problem": "A pydantic ValidationError is kept out of the logs only when it is the top-level exception of a 500. The check is `isinstance(exc, PydanticValidationError)`. Every other exception is logged with `exc_info=exc`, and format_exc_info then renders the whole chain: `raise X from ve`, an implicit `__context__`, and ExceptionGroup members. So the pydantic text `input_value='<patient free text>'` gets into the log. The regex PHI sanitizer cannot mask free text. The same gap exists in bootstrap.py:211-217 `_on_background_task_done`, which logs `exc_info=exc` with no pydantic handling at all, so a direct ValidationError leaks too. It also exists in every stdlib `logger.exception` path. logging.py already walks the chain for the uvicorn lifespan case (`_find_validation_error`), but the request, background-task and stdlib paths do not use it.",
+      "failure_scenario": "I drove a real uvicorn process with ENVIRONMENT=production. The endpoint ran `try: Age(age=body.text) except ValidationError as e: raise RuntimeError('repository row could not be loaded') from e` with body text 'Margaret Hollis reports chest pain'. The response was a correct 500 envelope. The stdout `unhandled_exception` ERROR line carried `exception: ...ValidationError: 1 validation error for Age ... [type=int_parsing, input_value='Margaret Hollis reports chest pain', input_type=str]`. The same text was logged for 4 other cases. (1) An implicit context: `raise KeyError` inside the except block. (2) An asyncio.TaskGroup ExceptionGroup member. (3) A registered background task that died with a chained ValidationError (`background_task_exited`). (4) A stdlib `logging.getLogger('svc.repo').exception(...)`. W1 event consumers will be registered background tasks that `model_validate` PHI-bearing payloads, so a consumer that crashes on a bad payload will log that payload.",
+      "fix": "Move the redaction into the logging chain, so the structlog and stdlib paths share one rule. Add a processor before format_exc_info in both `processors` and `foreign_pre_chain`. It resolves `exc_info` to the exception. If `_find_validation_error(exc)` finds a ValidationError anywhere in the cause, context or group chain, the processor drops `exc_info`. It adds `error_type`, `validation_errors` (from `_validation_error_fields`, with dict keys masked) and the raise site in its place. Then `_log_server_fault` and `_on_background_task_done` no longer need special cases. Add tests for `from`, implicit `__context__`, an ExceptionGroup member, a dead background task and stdlib `logger.exception`, asserting the input text never appears.",
+      "evidence": "Probe output (real uvicorn, strict): LEAK['FREE'] {\"route\": \"/chained\", \"error_type\": \"RuntimeError\", \"event\": \"unhandled_exception\", ... \"exception\": \"...validation error for Age\\nage\\n  Input should be a valid integer ... [type=int_parsing, input_value='Margaret Hollis reports chest pain', input_type=str]...\"}. The same LEAK appeared for /implicit (KeyError), /group (ExceptionGroup), background_task_exited (task=probe_worker) and the stdlib 'load failed' line. By contrast, a top-level ValidationError (/direct_validation) logged only validation_errors=[{type:int_parsing, field:age}]. Code: http.py:425-433 (only the top level is checked), bootstrap.py:211-217 (exc_info=exc with no redaction), logging.py:221-239 (the chain walker exists but only `_AsgiExceptionFilter` uses it)."
+     },
+     {
+      "id": "IF01-PHI-2",
+      "severity": "important",
+      "file": "src/solace_infrastructure/runtime/logging.py",
+      "line": 423,
+      "problem": "Python warnings bypass the runtime logging chain entirely. `configure_service_logging` / `_route_stdlib_logging` never calls `logging.captureWarnings(True)` and does not route the `py.warnings` logger. So `warnings.warn` output goes raw to stderr with Python's default formatter: no JSON, no redact_credentials, no PHI sanitizer, even in strict mode. Pydantic serializer warnings put the offending value into the warning text verbatim (`input_value=...`). This breaks the module's own contract ('Both render one JSON object per line on stdout') and the requirement that the sanitizer covers every output path. No PYTHONWARNINGS or -W filter is set in the Dockerfiles or compose files.",
+      "failure_scenario": "Under the strict probe app, an endpoint called model_dump() on a model whose enum field held a str (model_construct, or any assignment without validation). Stderr received 'UserWarning: Pydantic serializer warnings: PydanticSerializationUnexpectedValue(Expected `enum` ... [field_name='mood', input_value='Margaret Hollis reports chest pain', input_type=str])'. That is a non-JSON line with raw patient text. An email or phone number in such a warning would also go unmasked, because no scrubber runs on this channel at all.",
+      "fix": "In configure_service_logging, call `logging.captureWarnings(True)` and add `py.warnings` to ROUTED_STDLIB_LOGGERS, so warnings get the JSON handler and both scrubbers. Attach a filter to `py.warnings`, like `_AsgiExceptionFilter`. It rewrites any record whose message contains `input_value=` to a fixed event that carries only the warning category. Add a test that emits a pydantic serializer warning after a strict configure. It should assert that the canary appears neither on stdout nor stderr and that the line is JSON.",
+      "evidence": "Probe STDERR (real uvicorn, ENVIRONMENT=production, after service_runtime_started): `C:\\...\\pydantic\\main.py:475: UserWarning: Pydantic serializer warnings:` / `LEAK['FREE']   PydanticSerializationUnexpectedValue(Expected `enum` - serialized value may not be as expected [field_name='mood', input_value='Margaret Hollis reports chest pain', input_type=str])`. A grep for captureWarnings across src/ and services/ found no matches. logging.py:423-474 configures the root, uvicorn, httpx and uvicorn.access loggers only."
+     },
+     {
+      "id": "IF01-PHI-3",
+      "severity": "minor",
+      "file": "src/solace_infrastructure/runtime/logging.py",
+      "line": 293,
+      "problem": "Non-str event values pass the PHI sanitizer unchanged, and JSONRenderer then turns them into text after it has run. `PHISanitizer.sanitize_dict` scans only str values, plus nested dicts and lists. Tuples, sets, bytes, exceptions and arbitrary objects pass untouched, and dict keys are never scanned. JSONRenderer's fallback (`repr(obj)`) and its tuple-to-list conversion run after the scrubbers. `redact_credentials` handles tuples but not sets, bytes or objects, so the two scrubbers disagree. This is latent: today's service call sites mostly pass str(e). But the shared chain gives a whole class of values no masking at all, even for the email and phone patterns the sanitizer is meant to catch.",
+      "failure_scenario": "Strict uvicorn probe, structlog calls under the configured chain. Each of these produced unmasked output. `log.info('x', error=ValueError('bad jane.doe@example.com'))` gave \"error\": \"ValueError('bad jane.doe@example.com')\". `contacts=('jane.doe@example.com','555-867-5309')` gave a list with both values raw. `contacts={email}`, `raw=email.encode()` and `data={email: 1}` all came out raw. An object whose repr held the email and free text also came out raw. The same email as a plain str value is masked to j*******@example.com.",
+      "fix": "Add a normalising processor to the chain ahead of redact_credentials and phi_sanitizer_processor. It turns tuples and sets into lists, bytes into a placeholder or decoded text, other non-JSON-native objects into `repr(obj)` strings, and dict keys into strings. Both scrubbers then see every value that will be rendered. Alternatively, extend sanitize_dict/sanitize_list to cover those types and keys. Add a chain test for exception, tuple, set, bytes, object and dict-key values.",
+      "evidence": "Probe stdout lines (strict): LEAK {\"error\": \"ValueError('bad jane.doe@example.com')\", \"event\": \"exc_value\"}; LEAK {\"contacts\": [\"jane.doe@example.com\", \"555-867-5309\"], \"event\": \"tuple_value\"}; LEAK {\"contacts\": \"{'jane.doe@example.com'}\"}; LEAK {\"raw\": \"b'jane.doe@example.com'\"}; LEAK {\"data\": {\"jane.doe@example.com\": 1}}; LEAK {\"patient\": \"Patient(email='jane.doe@example.com', note='Margaret Hollis reports chest pain')\"}. Code: phi_protection.py:368-388 (only str/dict/list are handled; keys are kept as is) and logging.py:293 (JSONRenderer with the default repr fallback after the scrubbers)."
+     },
+     {
+      "id": "IF01-PHI-4",
+      "severity": "minor",
+      "file": "src/solace_infrastructure/runtime/http.py",
+      "line": 402,
+      "problem": "`_validation_error_summary`, which builds the 500 log line for a server-side pydantic ValidationError, does not mask the client-chosen key of an `extra_forbidden` error. `_validation_detail` does mask it for the 422 response body (lines 386-389, which say the key 'can be any text (a name, say), even when it is shaped like an identifier'). The retained log sink is therefore less protected than the response that goes back to the data owner. Identifier-shaped dict keys from stored rows or peer payloads are logged verbatim in `validation_errors[].field`.",
+      "failure_scenario": "An endpoint ran `Strict.model_validate(stored_row)` on a model with extra='forbid', and the stored row carried the key 'Margaret_Hollis_HIV_positive'. It returned a correct 500 envelope. But the `unhandled_exception` log line carried validation_errors=[{'type': 'extra_forbidden', 'field': 'Margaret_Hollis_HIV_positive'}].",
+      "fix": "Build the summary from `_validation_detail`'s location handling. Mask the last loc element for `extra_forbidden` (and ideally every non-schema dict key) in `_validation_error_summary`, and in logging.py `_validation_error_fields` as well.",
+      "evidence": "In-process probe with create_service_app and strict configure_service_logging: `SUMMARY /stored_extra [{'type': 'extra_forbidden', 'field': 'Margaret_Hollis_HIV_positive'}]`. http.py:402-408 calls `_field_path(error['loc'])` without the extra_forbidden masking that http.py:386-389 applies to response details."
+     }
+    ]
+   },
+   "verified": [
+    {
+     "id": "IF01-PHI-1",
+     "severity": "important",
+     "file": "src/solace_infrastructure/runtime/http.py",
+     "line": 425,
+     "problem": "A pydantic ValidationError is kept out of the logs only when it is the top-level exception of a 500. The check is `isinstance(exc, PydanticValidationError)`. Every other exception is logged with `exc_info=exc`, and format_exc_info then renders the whole chain: `raise X from ve`, an implicit `__context__`, and ExceptionGroup members. So the pydantic text `input_value='<patient free text>'` gets into the log. The regex PHI sanitizer cannot mask free text. The same gap exists in bootstrap.py:211-217 `_on_background_task_done`, which logs `exc_info=exc` with no pydantic handling at all, so a direct ValidationError leaks too. It also exists in every stdlib `logger.exception` path. logging.py already walks the chain for the uvicorn lifespan case (`_find_validation_error`), but the request, background-task and stdlib paths do not use it.",
+     "failure_scenario": "I drove a real uvicorn process with ENVIRONMENT=production. The endpoint ran `try: Age(age=body.text) except ValidationError as e: raise RuntimeError('repository row could not be loaded') from e` with body text 'Margaret Hollis reports chest pain'. The response was a correct 500 envelope. The stdout `unhandled_exception` ERROR line carried `exception: ...ValidationError: 1 validation error for Age ... [type=int_parsing, input_value='Margaret Hollis reports chest pain', input_type=str]`. The same text was logged for 4 other cases. (1) An implicit context: `raise KeyError` inside the except block. (2) An asyncio.TaskGroup ExceptionGroup member. (3) A registered background task that died with a chained ValidationError (`background_task_exited`). (4) A stdlib `logging.getLogger('svc.repo').exception(...)`. W1 event consumers will be registered background tasks that `model_validate` PHI-bearing payloads, so a consumer that crashes on a bad payload will log that payload.",
+     "fix": "Move the redaction into the logging chain, so the structlog and stdlib paths share one rule. Add a processor before format_exc_info in both `processors` and `foreign_pre_chain`. It resolves `exc_info` to the exception. If `_find_validation_error(exc)` finds a ValidationError anywhere in the cause, context or group chain, the processor drops `exc_info`. It adds `error_type`, `validation_errors` (from `_validation_error_fields`, with dict keys masked) and the raise site in its place. Then `_log_server_fault` and `_on_background_task_done` no longer need special cases. Add tests for `from`, implicit `__context__`, an ExceptionGroup member, a dead background task and stdlib `logger.exception`, asserting the input text never appears.",
+     "evidence": "Probe output (real uvicorn, strict): LEAK['FREE'] {\"route\": \"/chained\", \"error_type\": \"RuntimeError\", \"event\": \"unhandled_exception\", ... \"exception\": \"...validation error for Age\\nage\\n  Input should be a valid integer ... [type=int_parsing, input_value='Margaret Hollis reports chest pain', input_type=str]...\"}. The same LEAK appeared for /implicit (KeyError), /group (ExceptionGroup), background_task_exited (task=probe_worker) and the stdlib 'load failed' line. By contrast, a top-level ValidationError (/direct_validation) logged only validation_errors=[{type:int_parsing, field:age}]. Code: http.py:425-433 (only the top level is checked), bootstrap.py:211-217 (exc_info=exc with no redaction), logging.py:221-239 (the chain walker exists but only `_AsgiExceptionFilter` uses it).",
+     "lens": "phi-errors",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The gap is real in the code. http.py:425 redacts only when the top-level exception is a PydanticValidationError. Every other 500 goes to `_log.error(..., exc_info=exc)` at line 433. bootstrap.py:211-217 passes `exc_info=exc` with no check. logging.py:301 and :430 feed both paths through plain `structlog.processors.format_exc_info`. Standard traceback formatting includes the `__cause__`/`__context__` chain and ExceptionGroup members, and pydantic's message quotes `input_value=...`. The `_find_validation_error` chain walker is used only by the uvicorn filter (logging.py:175-182). The regex sanitizer cannot mask free-text names, so nothing downstream stops the leak. I did not re-run the probe, but the code path matches the finding. 'Important' fits: this leaks PHI into logs on a path W1 consumers will use."
+      },
+      {
+       "refuted": true,
+       "severity_ok": false,
+       "reason": "Out of scope for IF-01 and planned for a later task. IF-01 line 37 fixes the logging chain as merge_contextvars, add_log_level, TimeStamper, StackInfoRenderer, format_exc_info, phi_sanitizer_processor, JSONRenderer. The conformance suite asserts that chain, so the proposed extra processor would deviate from the contract. The contract gives handlers only \"never str(exc)\" and says nothing about chained or implicit exceptions. WS-09 owns traceback redaction. Its sanitizer task, test_mvp_093_traceback_messages_redacted_frames_kept (WS-09 plan around line 1631), requires exception and traceback messages to be rewritten as \"Type: [REDACTED]\" with the frames kept. phi_protection.py does not have LogEventSanitizer yet (no match for TRACEBACK_KEYS, ERROR_KEYS or input_value). The leak in the finding exists because the regex-only sanitizer still sits in that slot. The bootstrap does what IF-01 asks: it places the sanitizer in the chain, and it already keeps a top-level ValidationError out of the logs. The remaining gap is a sanitizer capability scheduled for WS-09, not an integration defect in IF-01. I did not run the finding's probe, and I did not check whether the planned sanitizer's per-line redaction would also cover the multi-line pydantic message. So some residual risk may remain once WS-09 lands. That would be a WS-09 concern, and at most a minor one for IF-01. Not \"important\" for IF-01 itself."
+      },
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The code matches the finding. http.py:425 redacts only when the top-level exception is a pydantic ValidationError. Every other exception goes to `_log.error(..., exc_info=exc)`, and `format_exc_info` renders the whole chain, including `__cause__`, `__context__` and ExceptionGroup members, so `input_value='...'` reaches the log. bootstrap.py:211-217 passes `exc_info=exc` with no pydantic handling at all, so even a direct ValidationError from a dead background task leaks. `_find_validation_error`, which walks the cause/context/group chain, is used only by `_AsgiExceptionFilter` in logging.py. I found no processor before `format_exc_info` that scrubs `input_value=`; the grep shows it only in the ASGI filter. I did not run the probe. W1 event consumers are expected to be background tasks that `model_validate` PHI-bearing payloads, so the scenario can occur in this program. A PHI leak into logs that the regex sanitizer cannot mask justifies \"important\"."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "IF01-PHI-2",
+     "severity": "important",
+     "file": "src/solace_infrastructure/runtime/logging.py",
+     "line": 423,
+     "problem": "Python warnings bypass the runtime logging chain entirely. `configure_service_logging` / `_route_stdlib_logging` never calls `logging.captureWarnings(True)` and does not route the `py.warnings` logger. So `warnings.warn` output goes raw to stderr with Python's default formatter: no JSON, no redact_credentials, no PHI sanitizer, even in strict mode. Pydantic serializer warnings put the offending value into the warning text verbatim (`input_value=...`). This breaks the module's own contract ('Both render one JSON object per line on stdout') and the requirement that the sanitizer covers every output path. No PYTHONWARNINGS or -W filter is set in the Dockerfiles or compose files.",
+     "failure_scenario": "Under the strict probe app, an endpoint called model_dump() on a model whose enum field held a str (model_construct, or any assignment without validation). Stderr received 'UserWarning: Pydantic serializer warnings: PydanticSerializationUnexpectedValue(Expected `enum` ... [field_name='mood', input_value='Margaret Hollis reports chest pain', input_type=str])'. That is a non-JSON line with raw patient text. An email or phone number in such a warning would also go unmasked, because no scrubber runs on this channel at all.",
+     "fix": "In configure_service_logging, call `logging.captureWarnings(True)` and add `py.warnings` to ROUTED_STDLIB_LOGGERS, so warnings get the JSON handler and both scrubbers. Attach a filter to `py.warnings`, like `_AsgiExceptionFilter`. It rewrites any record whose message contains `input_value=` to a fixed event that carries only the warning category. Add a test that emits a pydantic serializer warning after a strict configure. It should assert that the canary appears neither on stdout nor stderr and that the line is JSON.",
+     "evidence": "Probe STDERR (real uvicorn, ENVIRONMENT=production, after service_runtime_started): `C:\\...\\pydantic\\main.py:475: UserWarning: Pydantic serializer warnings:` / `LEAK['FREE']   PydanticSerializationUnexpectedValue(Expected `enum` - serialized value may not be as expected [field_name='mood', input_value='Margaret Hollis reports chest pain', input_type=str])`. A grep for captureWarnings across src/ and services/ found no matches. logging.py:423-474 configures the root, uvicorn, httpx and uvicorn.access loggers only.",
+     "lens": "phi-errors",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "I could not refute it. Grep finds no `captureWarnings`, `py.warnings`, `showwarning`, `filterwarnings` or `PYTHONWARNINGS` anywhere under src/solace_infrastructure/runtime, and none in the Dockerfiles or compose files. `ROUTED_STDLIB_LOGGERS` (logging.py:34) holds only uvicorn, uvicorn.error, aiokafka and asyncpg. Python's default warning handler therefore writes straight to stderr, bypassing the JSON renderer, `redact_credentials` and the PHI sanitizer. Pydantic serializer warnings embed `input_value=<raw value>`, so patient text can reach stderr unscrubbed. I did not re-run the probe, but the code path matches the reported evidence. \"Important\" is a fair severity for a PHI leak on a path the sanitizer was meant to cover, though it needs a specific trigger (a serialization type mismatch)."
+      },
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "I found nothing that makes this intended or out of scope. Greps for captureWarnings and py.warnings over the repo's .py and .md files returned no matches. The ledger (progress.md) has no Ruling about warnings. The IF-01 contract line 32 has no mention of warnings or stderr that my greps could find. The module already scrubs stderr elsewhere: logging.py:130 overrides handleError so raw messages are not printed to stderr. That shows stderr leaks are in scope, so the unrouted warnings channel is a real gap. Pydantic serializer warnings carry input_value verbatim, so PHI can reach stderr unsanitized. I did not run the probe myself. I accepted the finding's evidence because the code review points the same way. Important severity fits because the leak is conditional on a model_dump of an unvalidated value."
+      },
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "I confirmed the gap by grep. `captureWarnings`, `py.warnings` and warnings filters appear nowhere in src/solace_infrastructure/runtime or src. No PYTHONWARNINGS is set in any Dockerfile or yml. The only stderr mention in the runtime package is the `handleError` override at logging.py:130. So `warnings.warn` output takes Python's default path to stderr, bypassing the JSON handler, `redact_credentials` and the PHI sanitizer. Pydantic serializer warnings embed `input_value=` verbatim, so PHI can reach container logs unscrubbed. The trigger needs a latent type mismatch in service code, such as `model_construct` or unvalidated assignment. That is a realistic bug class in this codebase, and the bootstrap's job is to make every output path safe. 'Important' is reasonable and not critical, because it needs that secondary bug."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "IF01-PHI-3",
+     "severity": "minor",
+     "file": "src/solace_infrastructure/runtime/logging.py",
+     "line": 293,
+     "problem": "Non-str event values pass the PHI sanitizer unchanged, and JSONRenderer then turns them into text after it has run. `PHISanitizer.sanitize_dict` scans only str values, plus nested dicts and lists. Tuples, sets, bytes, exceptions and arbitrary objects pass untouched, and dict keys are never scanned. JSONRenderer's fallback (`repr(obj)`) and its tuple-to-list conversion run after the scrubbers. `redact_credentials` handles tuples but not sets, bytes or objects, so the two scrubbers disagree. This is latent: today's service call sites mostly pass str(e). But the shared chain gives a whole class of values no masking at all, even for the email and phone patterns the sanitizer is meant to catch.",
+     "failure_scenario": "Strict uvicorn probe, structlog calls under the configured chain. Each of these produced unmasked output. `log.info('x', error=ValueError('bad jane.doe@example.com'))` gave \"error\": \"ValueError('bad jane.doe@example.com')\". `contacts=('jane.doe@example.com','555-867-5309')` gave a list with both values raw. `contacts={email}`, `raw=email.encode()` and `data={email: 1}` all came out raw. An object whose repr held the email and free text also came out raw. The same email as a plain str value is masked to j*******@example.com.",
+     "fix": "Add a normalising processor to the chain ahead of redact_credentials and phi_sanitizer_processor. It turns tuples and sets into lists, bytes into a placeholder or decoded text, other non-JSON-native objects into `repr(obj)` strings, and dict keys into strings. Both scrubbers then see every value that will be rendered. Alternatively, extend sanitize_dict/sanitize_list to cover those types and keys. Add a chain test for exception, tuple, set, bytes, object and dict-key values.",
+     "evidence": "Probe stdout lines (strict): LEAK {\"error\": \"ValueError('bad jane.doe@example.com')\", \"event\": \"exc_value\"}; LEAK {\"contacts\": [\"jane.doe@example.com\", \"555-867-5309\"], \"event\": \"tuple_value\"}; LEAK {\"contacts\": \"{'jane.doe@example.com'}\"}; LEAK {\"raw\": \"b'jane.doe@example.com'\"}; LEAK {\"data\": {\"jane.doe@example.com\": 1}}; LEAK {\"patient\": \"Patient(email='jane.doe@example.com', note='Margaret Hollis reports chest pain')\"}. Code: phi_protection.py:368-388 (only str/dict/list are handled; keys are kept as is) and logging.py:293 (JSONRenderer with the default repr fallback after the scrubbers).",
+     "lens": "phi-errors",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The code supports the finding. Both scrubbers run before `JSONRenderer` (logging.py lines 284-303). `PHISanitizer.sanitize_dict` and `sanitize_list` only transform str, dict and list values, and `else` branches pass everything else through (phi_protection.py 368-410). Dict keys are never scanned. `_redact` also handles only str, dict, list and tuple (logging.py 346-357). So exceptions, sets, bytes and arbitrary objects reach the renderer unmasked, and `JSONRenderer`'s `repr` fallback turns them into text after the scrubbers. Tuples are only partly covered: `_redact` rewrites credential patterns inside them, but the PHI sanitizer skips them, so email and phone values in a tuple stay raw. I did not run a probe. The code paths match the claimed leaks. Minor severity fits because it is latent: call sites mostly pass `str(e)`, and a plain str value is masked."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "IF01-PHI-4",
+     "severity": "minor",
+     "file": "src/solace_infrastructure/runtime/http.py",
+     "line": 402,
+     "problem": "`_validation_error_summary`, which builds the 500 log line for a server-side pydantic ValidationError, does not mask the client-chosen key of an `extra_forbidden` error. `_validation_detail` does mask it for the 422 response body (lines 386-389, which say the key 'can be any text (a name, say), even when it is shaped like an identifier'). The retained log sink is therefore less protected than the response that goes back to the data owner. Identifier-shaped dict keys from stored rows or peer payloads are logged verbatim in `validation_errors[].field`.",
+     "failure_scenario": "An endpoint ran `Strict.model_validate(stored_row)` on a model with extra='forbid', and the stored row carried the key 'Margaret_Hollis_HIV_positive'. It returned a correct 500 envelope. But the `unhandled_exception` log line carried validation_errors=[{'type': 'extra_forbidden', 'field': 'Margaret_Hollis_HIV_positive'}].",
+     "fix": "Build the summary from `_validation_detail`'s location handling. Mask the last loc element for `extra_forbidden` (and ideally every non-schema dict key) in `_validation_error_summary`, and in logging.py `_validation_error_fields` as well.",
+     "evidence": "In-process probe with create_service_app and strict configure_service_logging: `SUMMARY /stored_extra [{'type': 'extra_forbidden', 'field': 'Margaret_Hollis_HIV_positive'}]`. http.py:402-408 calls `_field_path(error['loc'])` without the extra_forbidden masking that http.py:386-389 applies to response details.",
+     "lens": "phi-errors",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "I read http.py lines 362-408 and the finding holds. `_validation_detail` masks the last `loc` element for `extra_forbidden` errors (lines 386-389). `_validation_error_summary` (lines 402-408) calls `_field_path(error[\"loc\"])` with no such masking. `_field_path` only masks parts that fail `_FIELD_PART_PATTERN`. An identifier-shaped key like `Margaret_Hollis_HIV_positive` therefore passes through and is logged verbatim in `validation_errors[].field`. The regex PHI sanitizer would not catch it either. This is a real but narrow inconsistency: it needs a server-side `ValidationError` on an `extra=forbid` model fed stored or peer data. Minor severity fits. I did not check the logging.py `_validation_error_fields` claim or run the probe."
+      }
+     ],
+     "survives": true
+    }
+   ]
+  },
+  {
+   "lens": "http-profile",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "CHANGES_REQUESTED",
+    "prior_findings": [],
+    "findings": [
+     {
+      "id": "IF01-HTT-1",
+      "severity": "important",
+      "file": "src/solace_infrastructure/runtime/metrics.py",
+      "line": 100,
+      "problem": "/metrics, /ready and /health are registered unauthenticated and unguarded on every service. Nothing in the app or in the Caddyfile limits them to the monitoring network.",
+      "failure_scenario": "The production Caddyfile (api.{$DOMAIN} to orchestrator-service:8000 and auth.{$DOMAIN} to user-service:8001) has a bare reverse_proxy with no path matcher. Once the nine apps adopt create_service_app, GET https://api.<domain>/metrics from the internet returns the full Prometheus registry. That includes per-route traffic, solace_crisis_detected_total by level, LLM fallback counts and audit-write failure counts. GET /ready returns the names and ok/detail of the Postgres, Redis and broker checks. /health is already used by Caddy as a health_uri. This is operational reconnaissance on a PHI system, and the shared runtime is what introduced it.",
+      "fix": "Choose one of two fixes. (a) Add a Caddy matcher on api.* and auth.* that answers 404 for /metrics, /ready and /live, and restrict /health to the Caddy health probe. (b) In the runtime, add a METRICS_ALLOWED_CIDRS guard or a bearer token for /metrics, and for /ready detail in strict. Add a test that /metrics is not reachable through the edge route.",
+      "evidence": "metrics.py:100-108 and health.py:82-96 add plain add_api_route entries with no dependency. Caddyfile:36 and :60 use reverse_proxy with no matcher. No code under src/ or services/ guards /metrics."
+     },
+     {
+      "id": "IF01-HTT-2",
+      "severity": "important",
+      "file": "src/solace_infrastructure/runtime/bootstrap.py",
+      "line": 304,
+      "problem": "The HTTP stack has no request-body size limit. The bootstrap middleware does not check Content-Length or count chunked bytes, and Caddy has no request_body max_size. The per-service max_request_size_mb settings are declared but nothing reads them.",
+      "failure_scenario": "An unauthenticated client POSTs a multi-gigabyte body to any JSON endpoint, either with a huge Content-Length or with Transfer-Encoding: chunked and no Content-Length. Starlette buffers the whole body into memory for JSON parsing, so the container is OOM-killed. On the crisis-path services this is a denial of service on safety-critical flows. uvicorn has no body cap either.",
+      "fix": "Add a pure-ASGI BodyLimitMiddleware inside RequestContextMiddleware, with the limit from the spec or an env var and a strict default (for example 1 MiB; 10 MiB for services with a larger need). It rejects with 413 on an oversized Content-Length and counts bytes through receive() so chunked bodies are cut off too. Return the uniform error body. Also set Caddy request_body max_size. Add tests for Content-Length, chunked and missing-length requests.",
+      "evidence": "A grep for 413, payload too large, request_body and max_size in src/, services/, Caddyfile and docker-compose*.yml finds no body limit. max_request_size_mb appears exactly once per file, as a Field declaration, in the therapy, memory, diagnosis, safety and personality main.py files and in safety config.py. bootstrap.py:304-326 installs only RequestContextMiddleware and CORS. This is not named in the IF-01 text, but the lens requires it and the settings show it was intended."
+     },
+     {
+      "id": "IF01-HTT-3",
+      "severity": "minor",
+      "file": "src/solace_infrastructure/runtime/bootstrap.py",
+      "line": 300,
+      "problem": "IF-01 says spec.edge services get CORS and TRUSTED_PROXY_HOPS, but create_service_app implements only CORS. No proxy-hop handling exists in the runtime, and the conformance suite does not check it.",
+      "failure_scenario": "The orchestrator keeps its own ORCHESTRATOR_TRUSTED_PROXY_HOPS logic in main.py. user-service, which is also edge, adopts the bootstrap and has no hop handling. Any per-IP rate limiter or audit client_ip taken from X-Forwarded-For is then either spoofable (hops default too large) or always Caddy's IP (hops 0), and WS-04.6's install_rate_limiting(app, spec) will inherit whichever it gets.",
+      "fix": "Implement TRUSTED_PROXY_HOPS for edge specs in the factory, or one shared client_ip helper. Default to 0 outside a proxy, fail loud in strict when unset, and add a conformance assertion. Alternatively record in the plan that IF-01 does not cover it.",
+      "evidence": "A grep for TRUSTED_PROXY across src/solace_infrastructure/runtime finds nothing. The only implementations are services/orchestrator_service/src/main.py:266-270 and the compose env var."
+     },
+     {
+      "id": "IF01-HTT-4",
+      "severity": "minor",
+      "file": "src/solace_infrastructure/runtime/bootstrap.py",
+      "line": 280,
+      "problem": "An explicit docs_enabled=True survives in strict. The factory makes no check, so /docs, /redoc and /openapi.json can ship to staging or production through a SPEC literal.",
+      "failure_scenario": "A service author sets docs_enabled=True in SPEC for local convenience. In production the full OpenAPI schema is served on the public edge route, and no guard or conformance test flags it.",
+      "fix": "In strict, ignore True or raise StartupDependencyError, unless an explicit override env var is set. Alternatively add a conformance assertion that no SPEC sets docs_enabled=True.",
+      "evidence": "_docs_enabled() at bootstrap.py:280-283 returns spec.docs_enabled whenever it is not None, with no strict check."
+     }
+    ]
+   },
+   "verified": [
+    {
+     "id": "IF01-HTT-1",
+     "severity": "important",
+     "file": "src/solace_infrastructure/runtime/metrics.py",
+     "line": 100,
+     "problem": "/metrics, /ready and /health are registered unauthenticated and unguarded on every service. Nothing in the app or in the Caddyfile limits them to the monitoring network.",
+     "failure_scenario": "The production Caddyfile (api.{$DOMAIN} to orchestrator-service:8000 and auth.{$DOMAIN} to user-service:8001) has a bare reverse_proxy with no path matcher. Once the nine apps adopt create_service_app, GET https://api.<domain>/metrics from the internet returns the full Prometheus registry. That includes per-route traffic, solace_crisis_detected_total by level, LLM fallback counts and audit-write failure counts. GET /ready returns the names and ok/detail of the Postgres, Redis and broker checks. /health is already used by Caddy as a health_uri. This is operational reconnaissance on a PHI system, and the shared runtime is what introduced it.",
+     "fix": "Choose one of two fixes. (a) Add a Caddy matcher on api.* and auth.* that answers 404 for /metrics, /ready and /live, and restrict /health to the Caddy health probe. (b) In the runtime, add a METRICS_ALLOWED_CIDRS guard or a bearer token for /metrics, and for /ready detail in strict. Add a test that /metrics is not reachable through the edge route.",
+     "evidence": "metrics.py:100-108 and health.py:82-96 add plain add_api_route entries with no dependency. Caddyfile:36 and :60 use reverse_proxy with no matcher. No code under src/ or services/ guards /metrics.",
+     "lens": "http-profile",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The finding holds. metrics.py:100-108 registers GET /metrics with add_api_route and no dependency or guard, and metrics_endpoint returns generate_latest(REGISTRY) unfiltered. The Caddyfile api.{$DOMAIN} block (line 36) and auth.{$DOMAIN} block (line 60) both use a bare reverse_proxy with no path matcher, so /metrics, /ready and /live pass through to the public internet. A grep of the Caddyfile and compose files found no /metrics block or edge restriction anywhere. I did not run a unit test or read health.py; the claim about /ready contents comes from the finding. The exposure leaks operational detail rather than PHI, so important is the right severity, not blocker."
+      },
+      {
+       "refused": "false",
+       "refuted": true,
+       "severity_ok": false,
+       "reason": "The plan makes this out of scope for the IF-01 bootstrap and assigns it to a later task. IF-01 requires every service to serve /live, /ready, /health and /metrics on its own port. IF-18 (00-interfaces line 330) then says Caddy never routes these paths. WS-03 (WS-03-deploy-secrets-backups.md around line 613) defines the edge deny list `NEVER = (\"/metrics\", \"/docs\", \"/redoc\", \"/openapi.json\", \"/status\", \"/api/v1/internal/*\")`. Its test asserts `/metrics` is matched before the `orchestrator-service:8000` route. Line 2263 of the same plan states \"/metrics and the other internal paths are never routed by Caddy\". WS-05 (line 614) adds an end-to-end assertion that `e2e_stack.edge(\"GET\", \"/metrics\")` returns 404. So the edge exposure belongs to WS-03 and WS-05, and the current bare Caddyfile is just pre-WS-03 state. Putting an app-level allowlist or token on /metrics would contradict IF-01 and the Prometheus scrape design, which scrapes <service>:<port>/metrics. The severity is also overstated. Without WS-03's Caddy deny list, /metrics would be reachable from the internet, but that exposure sits in the deploy layer. It is not a defect in the bootstrap."
+      },
+      {
+       "reason": "The facts are accurate: metrics.py adds an unguarded /metrics route, and the current Caddyfile (lines 36 and 60) has a bare reverse_proxy with no path matcher. But this is not a defect in the integrated bootstrap. The IF-01 contract requires /metrics, /ready and /health to be served by the app, and IF-18 says Prometheus scrapes them on the service's own port. Edge exposure is owned by WS-03. Its plan (WS-03-deploy-secrets-backups.md, around lines 593, 632, 690-691 and 2263) adds a `(never_routed)` snippet that answers 404 for /metrics and other internal paths, imported ahead of reverse_proxy in a `route`. It also switches the Caddy health check to /live. Both are already planned and tested there, so the finding re-reports a known, owned gap in the not-yet-edited Caddyfile. The proposed in-app METRICS_ALLOWED_CIDRS guard would conflict with the contract, since Prometheus scrapes the service port directly. Even if the gap were real, \"important\" is too high. The scenario only occurs if the Caddyfile ships without the planned WS-03 change, and the exposed data is operational metrics, not PHI.",
+       "refuted": true,
+       "severity_ok": false
+      }
+     ],
+     "survives": false
+    },
+    {
+     "id": "IF01-HTT-2",
+     "severity": "important",
+     "file": "src/solace_infrastructure/runtime/bootstrap.py",
+     "line": 304,
+     "problem": "The HTTP stack has no request-body size limit. The bootstrap middleware does not check Content-Length or count chunked bytes, and Caddy has no request_body max_size. The per-service max_request_size_mb settings are declared but nothing reads them.",
+     "failure_scenario": "An unauthenticated client POSTs a multi-gigabyte body to any JSON endpoint, either with a huge Content-Length or with Transfer-Encoding: chunked and no Content-Length. Starlette buffers the whole body into memory for JSON parsing, so the container is OOM-killed. On the crisis-path services this is a denial of service on safety-critical flows. uvicorn has no body cap either.",
+     "fix": "Add a pure-ASGI BodyLimitMiddleware inside RequestContextMiddleware, with the limit from the spec or an env var and a strict default (for example 1 MiB; 10 MiB for services with a larger need). It rejects with 413 on an oversized Content-Length and counts bytes through receive() so chunked bodies are cut off too. Return the uniform error body. Also set Caddy request_body max_size. Add tests for Content-Length, chunked and missing-length requests.",
+     "evidence": "A grep for 413, payload too large, request_body and max_size in src/, services/, Caddyfile and docker-compose*.yml finds no body limit. max_request_size_mb appears exactly once per file, as a Field declaration, in the therapy, memory, diagnosis, safety and personality main.py files and in safety config.py. bootstrap.py:304-326 installs only RequestContextMiddleware and CORS. This is not named in the IF-01 text, but the lens requires it and the settings show it was intended.",
+     "lens": "http-profile",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "I could not refute it. I grepped src/solace_infrastructure/runtime, src/solace_common, infrastructure, docker-compose*.yml and the service Dockerfiles and main.py files. They contain no body-size limit: no 413, no Content-Length check, no request_body or max_body, and no uvicorn limit flag. `max_request_size_mb` appears only as an unused Field declaration in the diagnosis, personality, therapy, memory and safety main.py files. The bootstrap installs only the request-context middleware and CORS. Uvicorn and Starlette cap nothing by default, so a huge or chunked body to a JSON endpoint is buffered in memory. One detail in the finding is wrong: there is no Caddyfile in the repo, so the Caddy `request_body max_size` part cannot be checked and is moot. Important severity is reasonable for a service that handles PHI, with the caveat that production ingress may enforce a cap that this repo does not show. IF-01 does not name this requirement."
+      },
+      {
+       "refuted": true,
+       "severity_ok": false,
+       "reason": "The finding is out of scope for IF-01. A body-size limit is not in the IF-01 contract (00-interfaces-and-ownership.md lines 7-41) or in any WS-04 task. The Caddy half of the fix is already planned as WS-03.12 (decision gate D-26). That task adds `request_body { max_size 1MB }` to both Caddy sites, plus read_body timeouts, and its tests assert it. So the edge limit the finding asks for is owned by a later task. The app-level limit is unplanned in the docs I searched (the plans directory and the progress ledger). The per-service `max_request_size_mb` fields are an old-config leftover and do not make a bootstrap limit part of IF-01. No ledger ruling puts it in scope either. If it is real at all, it is a defense-in-depth item for the service layer behind Caddy, not an IF-01 contract defect. I did not run the tests or probe the code."
+      },
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The claim holds. In src/solace_infrastructure I found no body-size limit and no 413 handling. The only max_request_size_mb hits are unused Field declarations in the services' main.py files and in safety config.py. Caddyfile has no request_body max_size. It exposes orchestrator-service and user-service to the internet through api.{$DOMAIN} and auth.{$DOMAIN}, so an oversized body can reach those two services from outside. The other services are internal-only, so the \"any service\" and \"safety-critical services\" wording overstates reach. The orchestrator is still on the crisis path. A missing body cap on a public PHI-handling API is a real hardening gap, so \"important\" is a defensible severity. It is not a blocker, because it is not named in the IF-01 text and is not a correctness failure."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "IF01-HTT-3",
+     "severity": "minor",
+     "file": "src/solace_infrastructure/runtime/bootstrap.py",
+     "line": 300,
+     "problem": "IF-01 says spec.edge services get CORS and TRUSTED_PROXY_HOPS, but create_service_app implements only CORS. No proxy-hop handling exists in the runtime, and the conformance suite does not check it.",
+     "failure_scenario": "The orchestrator keeps its own ORCHESTRATOR_TRUSTED_PROXY_HOPS logic in main.py. user-service, which is also edge, adopts the bootstrap and has no hop handling. Any per-IP rate limiter or audit client_ip taken from X-Forwarded-For is then either spoofable (hops default too large) or always Caddy's IP (hops 0), and WS-04.6's install_rate_limiting(app, spec) will inherit whichever it gets.",
+     "fix": "Implement TRUSTED_PROXY_HOPS for edge specs in the factory, or one shared client_ip helper. Default to 0 outside a proxy, fail loud in strict when unset, and add a conformance assertion. Alternatively record in the plan that IF-01 does not cover it.",
+     "evidence": "A grep for TRUSTED_PROXY across src/solace_infrastructure/runtime finds nothing. The only implementations are services/orchestrator_service/src/main.py:266-270 and the compose env var.",
+     "lens": "http-profile",
+     "votes": [
+      {
+       "refuted": true,
+       "severity_ok": false,
+       "reason": "The claimed gap is a misreading of IF-01. The create_service_app contract (lines 23-29 of 00-interfaces-and-ownership.md) lists what the factory installs: request-context middleware, CORS when spec.edge, exception handlers, /live, /ready, /health and /metrics. It lists no proxy-hop handling. The \"TRUSTED_PROXY_HOPS\" on the edge line (line 20) is an env-var name the edge services receive. Line 113 shows it is consumed by install_rate_limiting(app, spec), which calls client_ip(request, trusted_proxy_hops=TRUSTED_PROXY_HOPS). WS-08 line 1484 says client_ip(..., trusted_proxy_hops=None) resolves the env var, and that task is owned by WS-07.7. A safe client_ip helper already exists in src/solace_security/rate_limit.py. It defaults to 0, uses the socket peer, and indexes X-Forwarded-For from the right by hop count, so a client-supplied entry is not trusted. A bootstrap-level implementation is not required and would duplicate it. The uvicorn --proxy-headers flag is separately specified at line 382. The scenario's \"spoofable or always Caddy's IP\" outcome depends on downstream tasks WS-04.6, WS-07.7 and WS-08, which are not yet landed and are outside the bootstrap. At most this is a doc ambiguity, not a defect in the integrated bootstrap, and it does not break the IF-01 contract."
+      }
+     ],
+     "survives": false
+    },
+    {
+     "id": "IF01-HTT-4",
+     "severity": "minor",
+     "file": "src/solace_infrastructure/runtime/bootstrap.py",
+     "line": 280,
+     "problem": "An explicit docs_enabled=True survives in strict. The factory makes no check, so /docs, /redoc and /openapi.json can ship to staging or production through a SPEC literal.",
+     "failure_scenario": "A service author sets docs_enabled=True in SPEC for local convenience. In production the full OpenAPI schema is served on the public edge route, and no guard or conformance test flags it.",
+     "fix": "In strict, ignore True or raise StartupDependencyError, unless an explicit override env var is set. Alternatively add a conformance assertion that no SPEC sets docs_enabled=True.",
+     "evidence": "_docs_enabled() at bootstrap.py:280-283 returns spec.docs_enabled whenever it is not None, with no strict check.",
+     "lens": "http-profile",
+     "votes": [
+      {
+       "refuted": true,
+       "severity_ok": true,
+       "reason": "The code matches the finding: `_docs_enabled()` at bootstrap.py:280-283 returns an explicit `spec.docs_enabled` as-is, with no strict check. That is the IF-01 contract, not a defect. The contract (00-interfaces-and-ownership.md:21) defines `docs_enabled: bool | None` with `None` meaning \"only when not strict\". The bootstrap docstring and spec.py say the same, so `True` is a deliberate explicit opt-in. A grep of every .py file shows no SPEC sets `docs_enabled=True` today. The only other hit is therapy_service's own config field, which does not feed a SPEC. The scenario needs a service author to hard-code a SPEC literal and a reviewer to miss it in a code-reviewed change. Even then, exposing the schema is low impact next to the strict-mode guards, which cover secrets and CORS. Adding a strict-mode refusal is optional hardening beyond the contract, so I treat this as not a real defect. If it is kept, \"minor\" is the right severity."
+      }
+     ],
+     "survives": false
+    }
+   ]
+  }
+ ]
+}

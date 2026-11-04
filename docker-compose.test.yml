@@ -16,6 +16,7 @@
 #   - every app service: mail to mailpit (STARTTLS with the per-run CA in strict), no SMS or push, the fake LLM,
 #     test-only notification addresses, Weaviate off, and the per-run CA mounted at /run/secrets/e2e-ca.crt
 #     (the file SSL_CERT_FILE names in strict; mounted in both profiles, unused in dev).
+#   - user-service: USER_EMAIL_ALLOW_SPECIAL_USE_TLDS=invalid (test-only, WS-14.1), so @test.invalid registers.
 # It never touches build or image of a base service, nor any other strict setting.
 #
 # Ports are written "127.0.0.1::<container port>": Docker picks the host port; the harness reads it with
@@ -103,7 +104,10 @@ services:
     container_name: !reset null
     ports: !reset []
     env_file: !reset []
-    environment: *e2e-app-env
+    environment:
+      <<: *e2e-app-env
+      # test-only (WS-14.1): the harness registers users at @test.invalid, a special-use TLD
+      USER_EMAIL_ALLOW_SPECIAL_USE_TLDS: invalid
     secrets: [e2e-ca.crt]
 
   safety-service:

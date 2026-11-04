@@ -2,6 +2,47 @@
 # Format and semantics: src/solace_testing/e2e_manifest.py. A listed test is XFAIL only
 # while it fails at its expected_failing_hop; any other failure, or an early pass, fails.
 version: 1
-entries: []
+# WS-05.6: the crisis alert suite, red at its documented W0 hop (dev).
+entries:
+  - test_id: "tests/e2e/test_crisis_alert_e2e.py::test_rest_crisis_message_returns_resources_within_3s[abuse]"
+    expected_failing_hop: provision_clinician
+    target_wave: 1
+    profiles: [dev]
+    reason: "MVP-039 W0: scripts.provision_clinician does not exist, so the module's autouse on-call fixture fails in setup. W1 owners: WS-14 provisioning (IF-08 CLI); WS-10/WS-11 IF-12 crisis object and safety.alert frame; WS-13 page and acknowledgement. Move to the newly observed hop by ledger note"
+  - test_id: "tests/e2e/test_crisis_alert_e2e.py::test_rest_crisis_message_returns_resources_within_3s[curly_apostrophe]"
+    expected_failing_hop: provision_clinician
+    target_wave: 1
+    profiles: [dev]
+    reason: "MVP-039 W0: scripts.provision_clinician does not exist, so the module's autouse on-call fixture fails in setup. W1 owners: WS-14 provisioning (IF-08 CLI); WS-10/WS-11 IF-12 crisis object and safety.alert frame; WS-13 page and acknowledgement. Move to the newly observed hop by ledger note"
+  - test_id: "tests/e2e/test_crisis_alert_e2e.py::test_rest_crisis_message_returns_resources_within_3s[homicidal]"
+    expected_failing_hop: provision_clinician
+    target_wave: 1
+    profiles: [dev]
+    reason: "MVP-039 W0: scripts.provision_clinician does not exist, so the module's autouse on-call fixture fails in setup. W1 owners: WS-14 provisioning (IF-08 CLI); WS-10/WS-11 IF-12 crisis object and safety.alert frame; WS-13 page and acknowledgement. Move to the newly observed hop by ledger note"
+  - test_id: "tests/e2e/test_crisis_alert_e2e.py::test_rest_crisis_message_returns_resources_within_3s[indirect]"
+    expected_failing_hop: provision_clinician
+    target_wave: 1
+    profiles: [dev]
+    reason: "MVP-039 W0: scripts.provision_clinician does not exist, so the module's autouse on-call fixture fails in setup. W1 owners: WS-14 provisioning (IF-08 CLI); WS-10/WS-11 IF-12 crisis object and safety.alert frame; WS-13 page and acknowledgement. Move to the newly observed hop by ledger note"
+  - test_id: "tests/e2e/test_crisis_alert_e2e.py::test_ws_crisis_message_sends_safety_alert_before_reply[curly_apostrophe]"
+    expected_failing_hop: provision_clinician
+    target_wave: 1
+    profiles: [dev]
+    reason: "MVP-039 W0: scripts.provision_clinician does not exist, so the module's autouse on-call fixture fails in setup. W1 owners: WS-14 provisioning (IF-08 CLI); WS-10/WS-11 IF-12 crisis object and safety.alert frame; WS-13 page and acknowledgement. Move to the newly observed hop by ledger note"
+  - test_id: "tests/e2e/test_crisis_alert_e2e.py::test_ws_crisis_message_sends_safety_alert_before_reply[homicidal]"
+    expected_failing_hop: provision_clinician
+    target_wave: 1
+    profiles: [dev]
+    reason: "MVP-039 W0: scripts.provision_clinician does not exist, so the module's autouse on-call fixture fails in setup. W1 owners: WS-14 provisioning (IF-08 CLI); WS-10/WS-11 IF-12 crisis object and safety.alert frame; WS-13 page and acknowledgement. Move to the newly observed hop by ledger note"
+  - test_id: "tests/e2e/test_crisis_alert_e2e.py::test_crisis_pages_the_oncall_clinician_once_without_message_text"
+    expected_failing_hop: provision_clinician
+    target_wave: 1
+    profiles: [dev]
+    reason: "MVP-039 W0: scripts.provision_clinician does not exist, so the module's autouse on-call fixture fails in setup. W1 owners: WS-14 provisioning (IF-08 CLI); WS-10/WS-11 IF-12 crisis object and safety.alert frame; WS-13 page and acknowledgement. Move to the newly observed hop by ledger note"
+  - test_id: "tests/e2e/test_crisis_alert_e2e.py::test_ack_link_acknowledges_the_episode"
+    expected_failing_hop: provision_clinician
+    target_wave: 1
+    profiles: [dev]
+    reason: "MVP-039 W0: scripts.provision_clinician does not exist, so the module's autouse on-call fixture fails in setup. W1 owners: WS-14 provisioning (IF-08 CLI); WS-10/WS-11 IF-12 crisis object and safety.alert frame; WS-13 page and acknowledgement. Move to the newly observed hop by ledger note"
 shortcuts:
   - {name: verify_email_via_sql, remove_by_wave: 1, reason: "verification email arrives with WS-14 MVP-035 in W1"}

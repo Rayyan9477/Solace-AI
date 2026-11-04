@@ -122,9 +122,9 @@ def get_consumer() -> AnalyticsConsumer:
 
 
 def set_dependencies(
-    aggregator: AnalyticsAggregator,
-    report_service: ReportService,
-    consumer: AnalyticsConsumer,
+    aggregator: AnalyticsAggregator | None,
+    report_service: ReportService | None,
+    consumer: AnalyticsConsumer | None,
 ) -> None:
     """Set global dependencies for API routes."""
     global _analytics_aggregator, _report_service, _analytics_consumer
@@ -510,24 +510,3 @@ async def get_service_stats(
         report_service=await report_service.get_statistics(),
         consumer=await consumer.get_statistics(),
     )
-
-
-@router.get("/health")
-async def analytics_health() -> dict[str, Any]:
-    """Analytics-specific health check."""
-    status_info: dict[str, Any] = {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
-
-    if _analytics_aggregator is not None:
-        status_info["aggregator"] = "initialized"
-        status_info["metrics_tracked"] = (await _analytics_aggregator.store.get_statistics())["metrics_tracked"]
-    else:
-        status_info["aggregator"] = "not_initialized"
-        status_info["status"] = "degraded"
-
-    if _analytics_consumer is not None:
-        status_info["consumer"] = "initialized"
-        status_info["consumer_running"] = (await _analytics_consumer.get_statistics())["running"]
-    else:
-        status_info["consumer"] = "not_initialized"
-
-    return status_info

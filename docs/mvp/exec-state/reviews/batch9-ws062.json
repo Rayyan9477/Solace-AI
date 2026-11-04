@@ -1,0 +1,88 @@
+{
+  "summary": "Lens-diverse task review of one diff, each finding adversarially verified by a skeptic panel",
+  "agentCount": 2,
+  "logs": [],
+  "result": {
+    "task": "WS-06.2",
+    "results": [
+      {
+        "lens": "spec",
+        "review": {
+          "spec_verdict": "PASS",
+          "quality_verdict": "APPROVED",
+          "prior_findings": [],
+          "findings": []
+        },
+        "verified": []
+      },
+      {
+        "lens": "crisis-path",
+        "review": {
+          "spec_verdict": "PASS",
+          "quality_verdict": "APPROVED",
+          "prior_findings": [],
+          "findings": []
+        },
+        "verified": []
+      }
+    ]
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Review"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Verify"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "review:spec",
+      "phaseIndex": 1,
+      "phaseTitle": "Review",
+      "agentId": "afb1150a956188bcc",
+      "model": "claude-opus-5-5",
+      "state": "done",
+      "startedAt": 1793656527789,
+      "queuedAt": 1793656527769,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "PASS",
+      "promptPreview": "Repo: D:\\Repo\\Contextual-Chatbot (Solace-AI mental-health backend, PHI). READ-ONLY task review. Do not edit any repo file, no git writes, no subagents, never open .env files or print secret values.\nTask WS-06.2 (safety-critical event plane): the seven service event bridges import bare solace_events (not src.solace_events) and stamp their own service on outbox rows by passing source_service to crea…",
+      "promptFramed": true,
+      "lastProgressAt": 1793657037941,
+      "tokens": 150460,
+      "toolCalls": 64,
+      "durationMs": 510152,
+      "resultPreview": "{\"spec_verdict\":\"PASS\",\"quality_verdict\":\"APPROVED\",\"prior_findings\":[],\"findings\":[]}"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "review:crisis-path",
+      "phaseIndex": 1,
+      "phaseTitle": "Review",
+      "agentId": "a7f33ae49c13f88c2",
+      "model": "claude-opus-5-5",
+      "state": "done",
+      "startedAt": 1793656527789,
+      "queuedAt": 1793656527769,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "PASS",
+      "promptPreview": "Repo: D:\\Repo\\Contextual-Chatbot (Solace-AI mental-health backend, PHI). READ-ONLY task review. Do not edit any repo file, no git writes, no subagents, never open .env files or print secret values.\nTask WS-06.2 (safety-critical event plane): the seven service event bridges import bare solace_events (not src.solace_events) and stamp their own service on outbox rows by passing source_service to crea…",
+      "promptFramed": true,
+      "lastProgressAt": 1793657080366,
+      "tokens": 178107,
+      "toolCalls": 68,
+      "durationMs": 552576,
+      "resultPreview": "{\"spec_verdict\":\"PASS\",\"quality_verdict\":\"APPROVED\",\"prior_findings\":[],\"findings\":[]}"
+    }
+  ],
+  "totalTokens": 328567,
+  "totalToolCalls": 132
+}

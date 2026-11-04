@@ -44,76 +44,6 @@ def _is_unsafe_secret(value: str) -> bool:
     return any(pattern in value_lower for pattern in _UNSAFE_SECRET_PATTERNS)
 
 
-class DatabaseConfig(BaseSettings):
-    """
-    Database configuration for PostgreSQL.
-
-    Environment Variables:
-        USER_DB_HOST: Database host (default: localhost)
-        USER_DB_PORT: Database port (default: 5432)
-        USER_DB_NAME: Database name (default: solace)
-        USER_DB_USER: Database user (default: postgres)
-        USER_DB_PASSWORD: Database password (REQUIRED - no default)
-        USER_DB_POOL_SIZE: Connection pool size (default: 10)
-        USER_DB_MAX_OVERFLOW: Max overflow connections (default: 20)
-        USER_DB_POOL_TIMEOUT: Pool timeout in seconds (default: 30)
-        USER_DB_ECHO: Echo SQL statements (default: false)
-
-    SECURITY: USER_DB_PASSWORD is required and must be set via environment variable.
-    """
-
-    host: str = Field(default="localhost", description="Database host")
-    port: int = Field(default=5432, ge=1, le=65535, description="Database port")
-    name: str = Field(default="solace", description="Database name")
-    user: str = Field(default="postgres", description="Database user")
-    password: str = Field(
-        ...,  # Required, no default
-        description="Database password (REQUIRED - set via USER_DB_PASSWORD env var)"
-    )
-
-    pool_size: int = Field(default=10, ge=1, le=100, description="Connection pool size")
-    max_overflow: int = Field(default=20, ge=0, le=100, description="Max overflow connections")
-    pool_timeout: int = Field(default=30, ge=1, le=300, description="Pool timeout in seconds")
-    echo: bool = Field(default=False, description="Echo SQL statements")
-
-    model_config = SettingsConfigDict(env_prefix="USER_DB_", env_file=".env", extra="ignore")
-
-    @property
-    def url(self) -> str:
-        """Generate database URL for SQLAlchemy."""
-        return f"postgresql+asyncpg://{self.user}:{self.password}@{self.host}:{self.port}/{self.name}"
-
-
-class RedisConfig(BaseSettings):
-    """
-    Redis configuration for caching and session storage.
-
-    Environment Variables:
-        USER_REDIS_HOST: Redis host (default: localhost)
-        USER_REDIS_PORT: Redis port (default: 6379)
-        USER_REDIS_DB: Redis database number (default: 0)
-        USER_REDIS_PASSWORD: Redis password (optional)
-        USER_REDIS_POOL_SIZE: Connection pool size (default: 10)
-        USER_REDIS_TIMEOUT: Command timeout in seconds (default: 5)
-    """
-
-    host: str = Field(default="localhost", description="Redis host")
-    port: int = Field(default=6379, ge=1, le=65535, description="Redis port")
-    db: int = Field(default=0, ge=0, le=15, description="Redis database number")
-    password: str | None = Field(default=None, description="Redis password")
-
-    pool_size: int = Field(default=10, ge=1, le=100, description="Connection pool size")
-    timeout: int = Field(default=5, ge=1, le=60, description="Command timeout in seconds")
-
-    model_config = SettingsConfigDict(env_prefix="USER_REDIS_", env_file=".env", extra="ignore")
-
-    @property
-    def url(self) -> str:
-        """Generate Redis URL."""
-        auth = f":{self.password}@" if self.password else ""
-        return f"redis://{auth}{self.host}:{self.port}/{self.db}"
-
-
 class SecurityConfig(BaseSettings):
     """
     Security configuration for authentication and authorization.
@@ -211,7 +141,7 @@ class ServiceConfig(BaseSettings):
 
     Environment Variables:
         USER_SERVICE_NAME: Service name (default: user-service)
-        USER_SERVICE_ENV: Environment (default: development)
+        USER_SERVICE_ENV: Environment: development, test, staging or production (default: development)
         USER_SERVICE_PORT: Service port (default: 8001)
         USER_SERVICE_HOST: Service host (default: 0.0.0.0)
         USER_SERVICE_LOG_LEVEL: Log level (default: INFO)
@@ -221,7 +151,7 @@ class ServiceConfig(BaseSettings):
     """
 
     name: str = Field(default="user-service", description="Service name")
-    env: Literal["development", "staging", "production"] = Field(default="development", description="Environment")
+    env: Literal["development", "test", "staging", "production"] = Field(default="development", description="Environment")
     port: int = Field(default=8001, ge=1, le=65535, description="Service port")
     host: str = Field(default="0.0.0.0", description="Service host")
 
@@ -325,9 +255,9 @@ class UserServiceSettings(BaseSettings):
     This is the main configuration class that should be used throughout the application.
     All nested configurations are loaded from environment variables.
 
-    SECURITY: Sensitive configuration values (JWT secrets, encryption keys, database passwords)
-    MUST be provided via environment variables. No defaults are provided for security-sensitive
-    fields to prevent accidental deployment with insecure configurations.
+    SECURITY: Sensitive configuration values (JWT secrets, encryption keys) MUST be provided via
+    environment variables. No defaults are provided for security-sensitive fields to prevent accidental deployment with insecure configurations. Postgres and Redis are
+    not configured here: the IF-01 runtime owns both (POSTGRES_*, REDIS_URL).
     """
 
     # JWT Settings (flat for easy access)
@@ -358,8 +288,6 @@ class UserServiceSettings(BaseSettings):
     )
 
     # Nested configurations
-    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
-    redis: RedisConfig = Field(default_factory=RedisConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     service: ServiceConfig = Field(default_factory=ServiceConfig)
     kafka: KafkaConfig = Field(default_factory=KafkaConfig)
@@ -385,12 +313,6 @@ class UserServiceSettings(BaseSettings):
     @model_validator(mode='after')
     def validate_nested_secrets(self) -> 'UserServiceSettings':
         """Validate that nested configuration secrets are also secure."""
-        # Validate database password
-        if _is_unsafe_secret(self.database.password):
-            raise ValueError(
-                "database.password appears to use an unsafe default value. "
-                "Please provide a secure password via USER_DB_PASSWORD environment variable."
-            )
         # Validate security JWT secret
         if _is_unsafe_secret(self.security.jwt_secret):
             raise ValueError(
@@ -410,8 +332,6 @@ class UserServiceSettings(BaseSettings):
             "configuration_validated",
             service=self.service.name,
             env=self.service.env,
-            database_host=self.database.host,
-            redis_host=self.redis.host,
             kafka_enabled=self.kafka.enable,
         )
 

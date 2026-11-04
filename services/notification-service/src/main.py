@@ -3,32 +3,48 @@ Solace-AI Notification Service - FastAPI Application.
 
 Multi-channel notification service supporting email, SMS, and push notifications.
 
+The app is built by the shared IF-01 runtime (``create_service_app``), and the lifespan is
+bracketed by ``service_runtime``. The runtime owns logging, the start-up guards, the Postgres
+pool, Redis, ``/live``, ``/ready``, ``/health``, ``/metrics``, the error responses and the
+request middleware. This module composes the notification domain on top of it and registers
+every service-owned stop with ``runtime.register_shutdown`` (WS-13.2, MVP-155, MVP-287).
+
 Architecture Layer: Infrastructure
 Principles: 12-Factor App, Dependency Injection, Configuration Externalization
 """
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
 
+from solace_infrastructure.runtime import (
+    ServiceRuntimeSpec,
+    create_service_app,
+    is_strict_environment,
+    service_runtime,
+)
+
+from .api import router as notification_router
+
 if TYPE_CHECKING:
+    from solace_infrastructure.runtime.bootstrap import ServiceRuntime
+
+    from .consumers import SafetyEventConsumer
     from .domain.service import NotificationService
 
 logger = structlog.get_logger(__name__)
-
-_notification_service: "NotificationService | None" = None
 
 
 class ServiceConfig(BaseSettings):
     """Service configuration."""
     name: str = Field(default="notification-service")
-    env: Literal["development", "staging", "production"] = Field(default="development")
+    env: Literal["development", "test", "staging", "production"] = Field(default="development")
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=8003, ge=1, le=65535)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(default="INFO")
@@ -103,13 +119,6 @@ class NotificationServiceSettings(BaseSettings):
         return NotificationServiceSettings()
 
 
-def get_notification_service() -> "NotificationService":
-    """Get the global notification service instance."""
-    if _notification_service is None:
-        raise RuntimeError("Notification service not initialized")
-    return _notification_service
-
-
 def _create_notification_service(settings: NotificationServiceSettings) -> "NotificationService":
     """Create and configure the notification service."""
     from .domain.channels import EmailConfig as DomainEmailConfig
@@ -156,209 +165,183 @@ def _create_notification_service(settings: NotificationServiceSettings) -> "Noti
     )
 
 
-def _require_crisis_consumer_in_production(settings) -> None:
-    """M1-gate R2 (P0): the safety-event consumer must run in production.
+SETTINGS = NotificationServiceSettings.load()
 
-    Consumer start is gated behind ``settings.kafka.enabled`` (default False). Without
-    this guard a production deploy that forgets to enable Kafka boots "healthy" and
-    consumes zero crisis events — crisis alerts never delivered. Consumer-side sibling
-    of REV-37 (safety publish side).
+SPEC = ServiceRuntimeSpec(
+    service_name="notification-service",
+    environment=SETTINGS.service.env,
+    version="1.0.0",
+    log_level=SETTINGS.service.log_level,
+    uses_postgres=True,
+    uses_redis=True,
+    event_plane="publish_consume",
+    handles_phi=False,
+    audited=True,
+    rate_limited=False,
+    edge=False,
+)
+
+# The readiness check (and background task) that report the crisis safety-event consumer.
+SAFETY_CONSUMER_CHECK = "safety_consumer"
+# The readiness check that reports a delivery-event bridge that failed to start (outside strict).
+EVENT_BRIDGE_CHECK = "event_bridge"
+
+
+def _is_strict(settings: Any) -> bool:
+    """Strict when the service's own environment OR the bare ``ENVIRONMENT`` is staging/production.
+
+    A blank or non-strict ``NOTIFICATION_SERVICE_ENV`` under a strict bare ``ENVIRONMENT`` cannot
+    switch the crisis-consumer guard off while the runtime itself boots strict.
     """
-    if settings.service.env == "production" and not settings.kafka.enabled:
+    return is_strict_environment(getattr(settings.service, "env", "") or "") or is_strict_environment()
+
+
+def _require_crisis_consumer_in_strict(settings: Any) -> None:
+    """M1-gate R2 (P0), D-14: the safety-event consumer must run in staging and production.
+
+    Consumer start is gated behind ``settings.kafka.enabled`` (default False). Without this
+    guard a strict deploy that forgets to enable Kafka boots "healthy" and consumes zero
+    crisis events, so crisis alerts are never delivered. A mock consumer is refused in strict
+    too: it reads from an in-process queue, never from the broker.
+
+    Raises:
+        RuntimeError: a strict environment with Kafka disabled or with ``KAFKA_USE_MOCK`` set.
+    """
+    if not _is_strict(settings):
+        return
+    if not settings.kafka.enabled:
         raise RuntimeError(
-            "Kafka is required in production (enable the notification kafka consumer); "
-            "the safety-event consumer cannot deliver crisis alerts without it"
+            "the safety-event consumer is required in staging and production; set KAFKA_ENABLED=true"
+        )
+    if getattr(settings.kafka, "use_mock", False):
+        raise RuntimeError(
+            "a mock safety-event consumer is not allowed in staging and production; unset KAFKA_USE_MOCK"
         )
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan manager."""
-    global _notification_service
+async def _event_bridge_unavailable() -> tuple[bool, str]:
+    """Readiness check for a delivery-event bridge that did not start: never ready."""
+    return False, "unavailable"
 
-    settings = NotificationServiceSettings.load()
 
-    # REV-32: fail loud at startup if this service's resolved environment disagrees with the
-    # deployment's bare ENVIRONMENT (a misnamed/unset NOTIFICATION_SERVICE_ENV would silently
-    # pin the service to the development default, disabling the production fail-loud guards).
-    # Also runs the broader production-secret validation (self-skips outside prod/staging).
-    from solace_security.production_guards import ProductionGuards
-    ProductionGuards.assert_startup(settings.service.env, service_name="notification-service")
+async def _start_event_bridge(runtime: "ServiceRuntime", initialize: Any) -> Any:
+    """Start the delivery-event bridge on the runtime's pool.
 
-    # Configure structured logging with PHI sanitizer
+    In a strict environment a start failure propagates (boot fails). Elsewhere (dev and test
+    without a broker) it is logged by class name only and a critical readiness check keeps
+    ``/ready`` at 503, so the service still boots and serves ``/live``.
+    """
+    if _is_strict(SETTINGS):
+        return await initialize(postgres_pool=runtime.pg_pool)
     try:
-        from solace_security.phi_protection import phi_sanitizer_processor
-        _phi_processor = phi_sanitizer_processor
-    except ImportError:
-        if settings.service.env == "production":
-            raise RuntimeError("PHI log sanitizer required in production - install solace_security")
-        _phi_processor = None
-    processors = [
-        structlog.contextvars.merge_contextvars,
-        structlog.processors.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-    ]
-    if _phi_processor:
-        processors.append(_phi_processor)
-    if settings.service.env == "development":
-        processors.append(structlog.dev.ConsoleRenderer())
+        return await initialize(postgres_pool=runtime.pg_pool)
+    except Exception as exc:
+        logger.warning("notification_event_bridge_unavailable", error_type=type(exc).__name__)
+        runtime.register_readiness_check(EVENT_BRIDGE_CHECK, _event_bridge_unavailable, critical=True)
+        return None
+
+
+async def _safety_consumer_unavailable() -> tuple[bool, str]:
+    """Readiness check for a safety-event consumer that did not start: never ready."""
+    return False, "unavailable"
+
+
+async def _start_safety_consumer(
+    runtime: "ServiceRuntime", notification_service: "NotificationService"
+) -> "SafetyEventConsumer | None":
+    """Start the crisis safety-event consumer and register it with the runtime.
+
+    Returns None when Kafka is disabled. In a strict environment a start failure propagates
+    (boot fails); elsewhere it is logged (class name only: the text can carry a broker URL)
+    and a critical readiness check keeps ``/ready`` at 503.
+    """
+    if not SETTINGS.kafka.enabled:
+        return None
+    from solace_events.config import KafkaSettings
+
+    from .consumers import initialize_safety_consumer, shutdown_safety_consumer
+
+    kwargs: dict[str, Any] = {
+        "notification_service": notification_service,
+        "kafka_settings": KafkaSettings(bootstrap_servers=SETTINGS.kafka.bootstrap_servers),
+        "use_mock": SETTINGS.kafka.use_mock,
+    }
+    if _is_strict(SETTINGS):
+        consumer = await initialize_safety_consumer(**kwargs)
     else:
-        processors.append(structlog.processors.JSONRenderer())
-    structlog.configure(
-        processors=processors,
-        wrapper_class=structlog.make_filtering_bound_logger(
-            getattr(__import__("logging"), settings.service.log_level.upper(), __import__("logging").INFO)
-        ),
-        context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
+        try:
+            consumer = await initialize_safety_consumer(**kwargs)
+        except Exception as exc:
+            logger.warning("safety_consumer_unavailable", error_type=type(exc).__name__)
+            runtime.register_readiness_check(
+                SAFETY_CONSUMER_CHECK, _safety_consumer_unavailable, critical=True)
+            return None
 
-    logger.info("notification_service_starting",
-               service=settings.service.name,
-               env=settings.service.env,
-               email_enabled=settings.email.enabled,
-               sms_enabled=settings.sms.enabled,
-               push_enabled=settings.push.enabled,
-               kafka_enabled=settings.kafka.enabled)
+    async def _safety_consumer_ready() -> tuple[bool, str]:
+        running = consumer.is_running
+        return running, "running" if running else "stopped"
 
-    # REV-12: PHI-encryption exemption (documented). This service persists no
-    # ClinicalBase entities — Postgres is used only for the durable event outbox
-    # (operational rows). configure_phi_encryption() only affects ClinicalBase, so
-    # it is intentionally NOT configured here (least privilege: no PHI master key).
-    # Enforced by tests/integration/test_phi_encryption_activation.py.
-    _notification_service = _create_notification_service(settings)
-    logger.info("notification_service_ready")
+    # The task first, then its graceful stop: closers run in reverse order, so the graceful
+    # stop runs before the runtime's cancel of the task (LIF-2).
+    runtime.register_background_task(SAFETY_CONSUMER_CHECK, consumer.consume_task)
+    runtime.register_shutdown("safety_consumer_stop", shutdown_safety_consumer)
+    runtime.register_readiness_check(SAFETY_CONSUMER_CHECK, _safety_consumer_ready, critical=True)
+    logger.info("safety_event_consumer_started")
+    return consumer
 
-    # Initialize Kafka event bridge for publishing notification delivery events
-    event_bridge = None
-    try:
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Compose the notification service inside the IF-01 runtime bracket."""
+    async with service_runtime(app, SPEC) as runtime:
+        logger.info("notification_service_starting",
+                    service=SETTINGS.service.name,
+                    env=SETTINGS.service.env,
+                    email_enabled=SETTINGS.email.enabled,
+                    sms_enabled=SETTINGS.sms.enabled,
+                    push_enabled=SETTINGS.push.enabled,
+                    kafka_enabled=SETTINGS.kafka.enabled)
+
+        # REV-12: PHI-encryption exemption (documented). This service persists no
+        # ClinicalBase entities: Postgres is used only for the durable event outbox
+        # (operational rows). configure_phi_encryption() only affects ClinicalBase, so
+        # it is intentionally NOT configured here (least privilege: no PHI master key).
+        # Enforced by tests/integration/test_phi_encryption_activation.py.
+        notification_service = _create_notification_service(SETTINGS)
+        app.state.notification_service = notification_service
+
+        # Kafka event bridge for notification delivery events, through the durable outbox on
+        # the runtime's pool.
         from .events import get_event_publisher
         from .infrastructure.event_bridge import initialize_event_bridge
-        # Get postgres pool for durable event outbox
-        _event_pool = None
-        try:
-            from solace_infrastructure.database.connection_manager import ConnectionPoolManager
-            _event_pool = await ConnectionPoolManager.get_pool()
-        except Exception:
-            logger.debug("event_outbox_pool_not_available", hint="Using in-memory outbox")
-        event_bridge = await initialize_event_bridge(postgres_pool=_event_pool)
-        publisher = get_event_publisher()
-        publisher.register_callback(event_bridge.bridge_event)
-        logger.info("notification_kafka_bridge_started")
-    except Exception as e:
-        logger.warning("notification_kafka_bridge_not_configured", error=str(e))
 
-    # Start Kafka safety event consumer if enabled
-    safety_consumer = None
-    # M1-gate R2 (P0): fail loud if the crisis consumer is disabled in production.
-    _require_crisis_consumer_in_production(settings)
-    if settings.kafka.enabled:
-        try:
-            from .consumers import initialize_safety_consumer, shutdown_safety_consumer
-            # Build Kafka settings if solace_events is available
-            kafka_settings = None
-            try:
-                from solace_events.config import KafkaSettings
-                kafka_settings = KafkaSettings(
-                    bootstrap_servers=settings.kafka.bootstrap_servers,
-                )
-            except ImportError:
-                logger.warning("solace_events_not_available", reason="Cannot configure Kafka settings")
+        event_bridge = await _start_event_bridge(runtime, initialize_event_bridge)
+        if event_bridge is not None:
+            runtime.register_shutdown("event_bridge", event_bridge.stop)
+            get_event_publisher().register_callback(event_bridge.bridge_event)
 
-            safety_consumer = await initialize_safety_consumer(
-                notification_service=_notification_service,
-                kafka_settings=kafka_settings,
-                use_mock=settings.kafka.use_mock,
-            )
-            logger.info("safety_event_consumer_started")
-        except Exception as e:
-            # M1-gate R2 (P0): don't boot "healthy" with a dead crisis consumer in prod.
-            logger.error("safety_consumer_start_failed", error=str(e))
-            if settings.service.env == "production":
-                raise
-
-    yield
-
-    # Stop Kafka event bridge
-    if event_bridge:
-        await event_bridge.stop()
-        logger.info("notification_kafka_bridge_stopped")
-
-    # Stop Kafka consumer
-    if safety_consumer:
-        try:
-            from .consumers import shutdown_safety_consumer
-            await shutdown_safety_consumer()
-            logger.info("safety_event_consumer_stopped")
-        except Exception as e:
-            logger.error("safety_consumer_stop_failed", error=str(e))
-
-    logger.info("notification_service_shutdown")
-    _notification_service = None
+        # M1-gate R2 (P0): fail loud if the crisis consumer is disabled in a strict environment.
+        _require_crisis_consumer_in_strict(SETTINGS)
+        await _start_safety_consumer(runtime, notification_service)
+        logger.info("notification_service_ready")
+        yield
 
 
-def create_app() -> FastAPI:
-    """Create and configure the FastAPI application."""
-    settings = NotificationServiceSettings.load()
-
-    app = FastAPI(
-        title="Solace-AI Notification Service",
-        description="Multi-channel notification service for email, SMS, and push notifications",
-        version="1.0.0",
-        lifespan=lifespan,
-        docs_url="/docs" if settings.service.env != "production" else None,
-        redoc_url="/redoc" if settings.service.env != "production" else None,
-    )
-
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["http://localhost:3000", "http://localhost:5173"] if settings.service.env == "development" else [],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
-    from .api import router as notification_router
-    app.include_router(notification_router)
-
-    @app.get("/", tags=["health"])
-    async def root():
-        """Service information endpoint."""
-        return {
-            "service": settings.service.name,
-            "version": "1.0.0",
-            "status": "running",
-            "environment": settings.service.env,
-        }
-
-    @app.get("/health", tags=["health"])
-    async def health():
-        """Health check endpoint."""
-        return {"status": "healthy"}
-
-    @app.get("/ready", tags=["health"])
-    async def ready():
-        """Readiness probe endpoint."""
-        if _notification_service is None:
-            return {"status": "not_ready", "reason": "service_not_initialized"}
-        return {"status": "ready"}
-
-    return app
-
-
-app = create_app()
+app = create_service_app(
+    SPEC,
+    lifespan=lifespan,
+    routers=[(notification_router, "")],
+    title="Solace-AI Notification Service",
+)
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    settings = NotificationServiceSettings.load()
     uvicorn.run(
         "src.main:app",
-        host=settings.service.host,
-        port=settings.service.port,
-        reload=settings.service.env == "development",
-        log_level=settings.service.log_level.lower(),
+        host=SETTINGS.service.host,
+        port=SETTINGS.service.port,
+        reload=SETTINGS.service.env == "development",
+        log_level=SETTINGS.service.log_level.lower(),
     )

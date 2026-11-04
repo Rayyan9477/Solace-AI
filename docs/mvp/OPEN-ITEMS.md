@@ -59,3 +59,4 @@ Risks from the plan (master plan, section 8), with status. Add new risks at the 
 | R-21 | Bedrock model availability and quotas for the chosen Anthropic model in us-east-1 are unverified. BEDROCK_MODEL_ID is set at deploy after checking ListFoundationModels and inference profiles, and LLM features stay off for real users until the AWS BAA is recorded (D-04, X-02, X-08). | `open` | 2026-10-19 |
 | R-22 | Multi-country (D-29): users from a country without verified resources would get only the generic fallback. Mitigation: pilot admission stays a named cohort (D-31), and each new locale needs clinician-verified resources before its users join (X-09). | `open` | 2026-10-19 |
 
+- W1: crisis alert E2E (WS-05.6) runs in the dev profile only in W0; widen to strict in W1 with observed strict hops (WS-05.6 review ruling, 2026-11-03).

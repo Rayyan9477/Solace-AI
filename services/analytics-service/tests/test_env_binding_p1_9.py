@@ -25,5 +25,6 @@ def test_env_binds_from_analytics_service_env(monkeypatch):
 
 def test_default_is_development_when_unset(monkeypatch):
     monkeypatch.delenv("ANALYTICS_SERVICE_ENV", raising=False)
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
     cfg = ServiceConfig()
     assert cfg.env == "development"

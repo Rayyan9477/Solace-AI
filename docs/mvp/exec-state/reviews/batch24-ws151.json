@@ -1,0 +1,114 @@
+{
+ "task": "WS-15.1",
+ "results": [
+  {
+   "lens": "spec-lifecycle",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "APPROVED",
+    "prior_findings": [],
+    "findings": [
+     {
+      "id": "WS151-SPE-1",
+      "severity": "minor",
+      "file": "services/therapy_service/src/main.py",
+      "line": 187,
+      "problem": "The LLM client's shutdown closer is registered only at the very end of build_therapy_components (line 187), after create_unit_of_work, the erasure wiring, the orchestrator build and orchestrator.initialize(). The client opens its SDK connection pool at line 126 (`await llm_client.initialize()`). If any step between those two lines raises, the client is never registered, so service_runtime's finally never closes it. That breaks the rule that a startup failure at any point leaves nothing open. orchestrator.shutdown has the same late registration, though it holds no resources.",
+      "failure_scenario": "In a strict environment the `elif strict: raise StartupDependencyError(\"gdpr_erasure\", ...)` branch, or create_unit_of_work() raising (for example the in-memory-repos-in-production RuntimeError), or orchestrator.initialize() raising, fires after the AsyncPortkey client was built. The lifespan propagates the error, the runtime closers run, and llm_client.shutdown() is never called, so the SDK client is never closed.",
+      "fix": "Call `runtime.register_shutdown(\"therapy_llm_client\", llm_client.shutdown)` immediately after `await llm_client.initialize()`. UnifiedLLMClient.shutdown never raises and is safe on a half-built client. Register `therapy_orchestrator` immediately after `orchestrator.initialize()`. Add a fake_runtime test that makes a later composition step raise and asserts `\"therapy_llm_client\" in runtime.shutdowns`.",
+      "evidence": "Scratch probe (real therapy app.router.lifespan_context, ENVIRONMENT=development, mock Kafka, TherapyOrchestrator.initialize patched to raise after the LLM client initialised): `LIFESPAN_EXIT raised RuntimeError`, `closers_at_stop: ['postgres', 'readiness_refresher']`, `llm_shutdown_calls: []`. On the normal path (boot_mock probe) the order is correct: closers `['postgres','readiness_refresher','therapy_llm_client','therapy_orchestrator','therapy_event_bridge']`, run in reverse, and llm_client.shutdown is called once. Practical strict triggers are rare (Postgres repos always expose delete_user_data), hence minor."
+     },
+     {
+      "id": "WS151-SPE-2",
+      "severity": "minor",
+      "file": "services/therapy_service/src/infrastructure/event_bridge.py",
+      "line": 49,
+      "problem": "A partial event-bridge start leaks the Kafka producer, and the lifespan cannot clean it up. initialize_event_bridge sets the module-global `_bridge` and then awaits `start()`. When `publisher.start()` raises, either on AIOKafkaProducer.start or on the later outbox ensure_table, `_started` stays False. The lifespan registers `therapy_event_bridge` only after initialize returns (main.py:215-221). Even a closer registered earlier would do nothing, because KafkaEventBridge.stop() returns early when `_started` is False. With events_enabled now defaulting to True, dev and test boots reach this path whenever Kafka is unreachable; before, kafka_enabled defaulted to False. The leak itself predates this task, and the fix lives outside WS-15.1's declared files (bridge owner WS-06, or a later WS-15 task).",
+      "failure_scenario": "Dev run with events on (the default), use_mock false and Kafka unreachable, or strict with the outbox table missing so ensure_table raises after the producer started. The lifespan raises KafkaConnectionError (or the schema error). The AIOKafkaProducer is never stopped, `event_bridge._bridge` stays pointing at a dead bridge, and asyncio logs 'Unclosed AIOKafkaProducer'.",
+      "fix": "In KafkaEventBridge.start(), wrap publisher.start() and poller start in try/except: on failure stop the poller and publisher, then re-raise. In initialize_event_bridge, reset `_bridge = None` on failure. Or let stop() tolerate a partial start, and have main.py register the closer before calling initialize_event_bridge. Route this to the bridge owner; WS-15.1 cannot fix it without editing event_bridge.py.",
+      "evidence": "Scratch probe, ENVIRONMENT=development, KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:1, events default on: `LIFESPAN_EXIT raised KafkaConnectionError`, `closers_at_stop: ['postgres','readiness_refresher','therapy_llm_client','therapy_orchestrator']` (llm and orchestrator closers did run), `event_bridge_global_left: True`, `bridge_producer_obj: AIOKafkaProducer False` (not closed), then `ResourceWarning: Unclosed AIOKafkaProducer`. Implementer concerns, judged with no defect found: (1) events_enabled default True matches the brief's interface. Compose sets EVENTS_ENABLED=true and KAFKA_BOOTSTRAP_SERVERS=kafka:9092 and waits for a healthy Kafka, so dev boots with the compose defaults. A local run without Kafka now needs EVENTS_ENABLED=false (alias precedence verified: EVENTS_ENABLED beats THERAPY_KAFKA_ENABLED; THERAPY_KAFKA_ENABLED=false alone disables). No therapy test enters the lifespan. (2) Removing kafka_enabled and kafka_bootstrap_servers breaks nothing. Settings use extra=ignore, so the leftover compose THERAPY_KAFKA_BOOTSTRAP_SERVERS is simply ignored. KafkaSettings (env_prefix KAFKA_) reads KAFKA_BOOTSTRAP_SERVERS from x-data-plane-env, the prod overlay does not override it, and nothing else reads the removed fields. (3) create_unit_of_work() using ConnectionPoolManager makes neither two pools nor an unchecked pool. The repos acquire 'therapy_db', which canonical_pool_name maps to 'default'; that is the same pool object start_postgres opened, with the strict role and schema-head checks and the 'postgres' readiness check, and _close_postgres_pools closes it. Passing the raw runtime.pg_pool would risk skipping ConnectionPoolManager.acquire's RLS GUC when the feature flag is off. (4) Erasure None outside strict without Redis gives an API 503 'Data erasure is not available', not a false success; strict raises StartupDependencyError; delete_user_data now raises when there is no client, which the erasure turns into a 409."
+     },
+     {
+      "id": "WS151-SPE-3",
+      "severity": "minor",
+      "file": "tests/system/test_smoke.py",
+      "line": 74,
+      "problem": "WS-15.1 removed the local /health handler, and the regression it causes was not recorded. tests/system/test_smoke.py::TestServiceHealth::test_therapy_service_health now fails at head: the runtime /health mirrors /ready and answers 503 without the lifespan, where the old handler returned 200 'healthy'. The planned migration of this test to /live (WS-05.5, request R6) has not landed; there is no WS-05.5 report. The WS-15.1 report lists only green suites, so the ledger is silent about a newly red test.",
+      "failure_scenario": "Running the repo-wide unit suite (or CI) after WS-15.1 shows `AssertionError: Therapy service /health returned 503`, and nothing in the WS-15.1 report or ledger identifies it as expected or names who fixes it.",
+      "fix": "Do not edit the file in WS-15.1. Record the case in the ledger as expected-red pending WS-05.5 (R6), or have the controller land WS-05.5 next. Note the same applies to the other phase-B adoptions.",
+      "evidence": "Head: `FAILED tests/system/test_smoke.py::TestServiceHealth::test_therapy_service_health` with `Therapy service /health returned 503`. Base tree f802b919 extracted to scratch: `PASSED ...::test_therapy_service_health`. test_smoke.py is unchanged between base and head, and the therapy working tree hash-matches head tree f4824d10 (0 diffs over 68 paths). The plan entry WS-15 R6 and the WS-05.5 brief both name this test as WS-05.5's rewrite. Safety and diagnosis also fail in the current working tree, from other lanes' in-progress edits."
+     }
+    ]
+   },
+   "verified": [
+    {
+     "id": "WS151-SPE-1",
+     "severity": "minor",
+     "file": "services/therapy_service/src/main.py",
+     "line": 187,
+     "problem": "The LLM client's shutdown closer is registered only at the very end of build_therapy_components (line 187), after create_unit_of_work, the erasure wiring, the orchestrator build and orchestrator.initialize(). The client opens its SDK connection pool at line 126 (`await llm_client.initialize()`). If any step between those two lines raises, the client is never registered, so service_runtime's finally never closes it. That breaks the rule that a startup failure at any point leaves nothing open. orchestrator.shutdown has the same late registration, though it holds no resources.",
+     "failure_scenario": "In a strict environment the `elif strict: raise StartupDependencyError(\"gdpr_erasure\", ...)` branch, or create_unit_of_work() raising (for example the in-memory-repos-in-production RuntimeError), or orchestrator.initialize() raising, fires after the AsyncPortkey client was built. The lifespan propagates the error, the runtime closers run, and llm_client.shutdown() is never called, so the SDK client is never closed.",
+     "fix": "Call `runtime.register_shutdown(\"therapy_llm_client\", llm_client.shutdown)` immediately after `await llm_client.initialize()`. UnifiedLLMClient.shutdown never raises and is safe on a half-built client. Register `therapy_orchestrator` immediately after `orchestrator.initialize()`. Add a fake_runtime test that makes a later composition step raise and asserts `\"therapy_llm_client\" in runtime.shutdowns`.",
+     "evidence": "Scratch probe (real therapy app.router.lifespan_context, ENVIRONMENT=development, mock Kafka, TherapyOrchestrator.initialize patched to raise after the LLM client initialised): `LIFESPAN_EXIT raised RuntimeError`, `closers_at_stop: ['postgres', 'readiness_refresher']`, `llm_shutdown_calls: []`. On the normal path (boot_mock probe) the order is correct: closers `['postgres','readiness_refresher','therapy_llm_client','therapy_orchestrator','therapy_event_bridge']`, run in reverse, and llm_client.shutdown is called once. Practical strict triggers are rare (Postgres repos always expose delete_user_data), hence minor.",
+     "lens": "spec-lifecycle",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "Confirmed in services/therapy_service/src/main.py. `await llm_client.initialize()` runs at line 126. `register_shutdown(\"therapy_llm_client\", ...)` only runs at line 187. Between them are `create_unit_of_work()` (138), the strict `StartupDependencyError(\"gdpr_erasure\")` raise (152), and `orchestrator.initialize()` (174). Any raise in that span skips registration. The closer list in bootstrap.py (`_shutdown_closers`) holds only registered closers, so the client is never closed. The gap is real but narrow: it is a startup-failure resource leak that is rarely triggered, and the process is likely exiting anyway. Minor severity fits. I did not run the scratch probe."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "WS151-SPE-2",
+     "severity": "minor",
+     "file": "services/therapy_service/src/infrastructure/event_bridge.py",
+     "line": 49,
+     "problem": "A partial event-bridge start leaks the Kafka producer, and the lifespan cannot clean it up. initialize_event_bridge sets the module-global `_bridge` and then awaits `start()`. When `publisher.start()` raises, either on AIOKafkaProducer.start or on the later outbox ensure_table, `_started` stays False. The lifespan registers `therapy_event_bridge` only after initialize returns (main.py:215-221). Even a closer registered earlier would do nothing, because KafkaEventBridge.stop() returns early when `_started` is False. With events_enabled now defaulting to True, dev and test boots reach this path whenever Kafka is unreachable; before, kafka_enabled defaulted to False. The leak itself predates this task, and the fix lives outside WS-15.1's declared files (bridge owner WS-06, or a later WS-15 task).",
+     "failure_scenario": "Dev run with events on (the default), use_mock false and Kafka unreachable, or strict with the outbox table missing so ensure_table raises after the producer started. The lifespan raises KafkaConnectionError (or the schema error). The AIOKafkaProducer is never stopped, `event_bridge._bridge` stays pointing at a dead bridge, and asyncio logs 'Unclosed AIOKafkaProducer'.",
+     "fix": "In KafkaEventBridge.start(), wrap publisher.start() and poller start in try/except: on failure stop the poller and publisher, then re-raise. In initialize_event_bridge, reset `_bridge = None` on failure. Or let stop() tolerate a partial start, and have main.py register the closer before calling initialize_event_bridge. Route this to the bridge owner; WS-15.1 cannot fix it without editing event_bridge.py.",
+     "evidence": "Scratch probe, ENVIRONMENT=development, KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:1, events default on: `LIFESPAN_EXIT raised KafkaConnectionError`, `closers_at_stop: ['postgres','readiness_refresher','therapy_llm_client','therapy_orchestrator']` (llm and orchestrator closers did run), `event_bridge_global_left: True`, `bridge_producer_obj: AIOKafkaProducer False` (not closed), then `ResourceWarning: Unclosed AIOKafkaProducer`. Implementer concerns, judged with no defect found: (1) events_enabled default True matches the brief's interface. Compose sets EVENTS_ENABLED=true and KAFKA_BOOTSTRAP_SERVERS=kafka:9092 and waits for a healthy Kafka, so dev boots with the compose defaults. A local run without Kafka now needs EVENTS_ENABLED=false (alias precedence verified: EVENTS_ENABLED beats THERAPY_KAFKA_ENABLED; THERAPY_KAFKA_ENABLED=false alone disables). No therapy test enters the lifespan. (2) Removing kafka_enabled and kafka_bootstrap_servers breaks nothing. Settings use extra=ignore, so the leftover compose THERAPY_KAFKA_BOOTSTRAP_SERVERS is simply ignored. KafkaSettings (env_prefix KAFKA_) reads KAFKA_BOOTSTRAP_SERVERS from x-data-plane-env, the prod overlay does not override it, and nothing else reads the removed fields. (3) create_unit_of_work() using ConnectionPoolManager makes neither two pools nor an unchecked pool. The repos acquire 'therapy_db', which canonical_pool_name maps to 'default'; that is the same pool object start_postgres opened, with the strict role and schema-head checks and the 'postgres' readiness check, and _close_postgres_pools closes it. Passing the raw runtime.pg_pool would risk skipping ConnectionPoolManager.acquire's RLS GUC when the feature flag is off. (4) Erasure None outside strict without Redis gives an API 503 'Data erasure is not available', not a false success; strict raises StartupDependencyError; delete_user_data now raises when there is no client, which the erasure turns into a 409.",
+     "lens": "spec-lifecycle",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "The code matches the finding. KafkaEventBridge.start() only sets `_started` after publisher.start() and poller.start() both succeed, and stop() returns early when `_started` is False. In EventPublisher.start() (publisher.py:426-436), the producer is started first and ensure_table runs after it. If ensure_table raises, the producer is left running and nothing stops it. The module global `_bridge` is also left pointing at the failed bridge. The Kafka-unreachable case is weaker, because aiokafka usually cleans up its own client when its start() fails. Even so, the ensure_table path is a real leak. It predates this task and only matters on failed boots, so \"minor\" is the right severity. I did not run a probe. I confirmed the finding by reading event_bridge.py and publisher.py."
+      }
+     ],
+     "survives": true
+    },
+    {
+     "id": "WS151-SPE-3",
+     "severity": "minor",
+     "file": "tests/system/test_smoke.py",
+     "line": 74,
+     "problem": "WS-15.1 removed the local /health handler, and the regression it causes was not recorded. tests/system/test_smoke.py::TestServiceHealth::test_therapy_service_health now fails at head: the runtime /health mirrors /ready and answers 503 without the lifespan, where the old handler returned 200 'healthy'. The planned migration of this test to /live (WS-05.5, request R6) has not landed; there is no WS-05.5 report. The WS-15.1 report lists only green suites, so the ledger is silent about a newly red test.",
+     "failure_scenario": "Running the repo-wide unit suite (or CI) after WS-15.1 shows `AssertionError: Therapy service /health returned 503`, and nothing in the WS-15.1 report or ledger identifies it as expected or names who fixes it.",
+     "fix": "Do not edit the file in WS-15.1. Record the case in the ledger as expected-red pending WS-05.5 (R6), or have the controller land WS-05.5 next. Note the same applies to the other phase-B adoptions.",
+     "evidence": "Head: `FAILED tests/system/test_smoke.py::TestServiceHealth::test_therapy_service_health` with `Therapy service /health returned 503`. Base tree f802b919 extracted to scratch: `PASSED ...::test_therapy_service_health`. test_smoke.py is unchanged between base and head, and the therapy working tree hash-matches head tree f4824d10 (0 diffs over 68 paths). The plan entry WS-15 R6 and the WS-05.5 brief both name this test as WS-05.5's rewrite. Safety and diagnosis also fail in the current working tree, from other lanes' in-progress edits.",
+     "lens": "spec-lifecycle",
+     "votes": [
+      {
+       "refuted": false,
+       "severity_ok": true,
+       "reason": "I reproduced the failure. tests/system/test_smoke.py::TestServiceHealth::test_therapy_service_health fails in the current tree. The test builds a TestClient without entering the lifespan and asserts /health returns 200, which the runtime /health no longer does. The WS-15.1 report has no mention of smoke, WS-05.5 or expected-red. WS-05.5 has no report in D:\\tmp\\mvp-exec\\reports; only WS-05.1 to WS-05.4 exist. I did not re-check the base-tree pass or the WS-05.5 brief and plan R6 entries. The impact is a ledger gap, not a code defect, so \"minor\" fits."
+      }
+     ],
+     "survives": true
+    }
+   ]
+  },
+  {
+   "lens": "crisis-phi",
+   "review": {
+    "spec_verdict": "PASS",
+    "quality_verdict": "APPROVED",
+    "prior_findings": [],
+    "findings": []
+   },
+   "verified": []
+  }
+ ]
+}

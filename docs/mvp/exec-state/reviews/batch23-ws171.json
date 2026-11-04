@@ -1,0 +1,194 @@
+{
+  "summary": "Lens-diverse task review of one diff, each finding adversarially verified by a skeptic panel",
+  "agentCount": 4,
+  "logs": [
+    "2 minor finding(s) verified by a single skeptic only (important ones got 3)."
+  ],
+  "result": {
+    "task": "WS-17.1",
+    "results": [
+      {
+        "lens": "spec-lifecycle",
+        "review": {
+          "spec_verdict": "PASS",
+          "quality_verdict": "APPROVED",
+          "prior_findings": [],
+          "findings": []
+        },
+        "verified": []
+      },
+      {
+        "lens": "data-safety",
+        "review": {
+          "spec_verdict": "PASS",
+          "quality_verdict": "APPROVED",
+          "prior_findings": [],
+          "findings": [
+            {
+              "id": "WS171-DAT-1",
+              "severity": "minor",
+              "file": "services/memory_service/src/infrastructure/postgres_repo.py",
+              "line": 170,
+              "problem": "Pre-existing, owned by WS-17.2, not a WS-17.1 defect. Every memory Postgres read and write (store/get/erase) still goes through PostgresRepository's own SQLAlchemy engine (create_async_engine on an f-string DSN), not runtime.pg_pool. Four gaps follow. (a) It passes no TLS context, so POSTGRES_SSL_MODE and POSTGRES_SSL_ROOT_CERT (verify-full in strict) are ignored and asyncpg falls back to its default sslmode=prefer, which does not verify the certificate. (b) WS-02.6 verify_app_role / check_new_pool_role never runs on its connections. It is covered only indirectly, because the engine reads the same POSTGRES_USER, PASSWORD, HOST and DATABASE as the runtime's checked default pool. (c) The DSN is not percent-encoded (MVP-273). (d) No hide_parameters is set, so a SQLAlchemy DBAPIError's text carries the bound memory content.",
+              "failure_scenario": "Staging or production with POSTGRES_SSL_MODE=verify-full. The runtime default pool connects as solace_app over verified TLS and passes the role and schema checks, so runtime.pg_pool is not None and build_memory_service constructs PostgresRepository(). The repository's own engine then opens unverified-TLS connections, and memory PHI (memory_records.content, session_summaries) crosses them, exposed to a MITM. Separately, a failed insert reaches logger.exception('postgres_store_failed') in domain/service.py:161, whose traceback includes '[parameters: (... content ...)]'. Neither behaviour is new: base built PostgresRepository() unconditionally with the same engine, and WS-17.1 only gates it on runtime.pg_pool as its brief requires.",
+              "fix": "No change in WS-17.1; the brief requires `PostgresRepository()` gated on `runtime.pg_pool is not None`. WS-17.2 (Wave 0, security-critical review) deletes create_async_engine, async_sessionmaker and PostgresSettings and runs the repository on ConnectionPoolManager.transaction('default'), which also brings TLS and the role check. Make sure WS-17.2 lands before the W0 exit gate is declared.",
+              "evidence": "Probe at head: build_memory_service(SimpleNamespace(pg_pool=object(), redis=fake)) gave a PostgresRepository whose engine.dialect.create_connect_args() had no 'ssl' key. With no env, its URL user/db is solace/solace_memory; the runtime PostgresSettings default is solace/solace. The database mismatch is refuted because deploy/env/env-contract.yaml:176 pins POSTGRES_DATABASE=solace for all app services in strict, and docker-compose.yml:63-64 gives memory POSTGRES_DATABASE=solace and POSTGRES_USER=solace_app. Line 170 is `self._engine = create_async_engine(self._settings.connection_url, **engine_kwargs)`. The connection_url property at :139 builds the DSN with an f-string and no encoding. connection_manager.py:205 check_new_pool_role applies only to ConnectionPoolManager pools. The WS-17 plan (lines 131-191) assigns exactly this removal to WS-17.2, with the RED test `assert \"create_async_engine\" not in source`. RLS itself still applies: the role is solace_app (NOBYPASSRLS), session() sets app.current_user_id transaction-locally, and delete_user_data scopes the GUC to the target user."
+            },
+            {
+              "id": "WS171-DAT-2",
+              "severity": "minor",
+              "file": "services/memory_service/src/domain/service.py",
+              "line": 96,
+              "problem": "Pre-existing, owned by WS-17.11, not required by WS-17.1 (implementer concern 1). With WEAVIATE_ENABLED=true, a Weaviate initialize() failure is swallowed: _weaviate_repo is set to None with a warning. build_user_data_erasure then registers no memory_weaviate store, so a later GDPR erasure attests complete without touching vectors that an earlier process wrote (the stored content is PHI).",
+              "failure_scenario": "An operator opts in with WEAVIATE_ENABLED=true and memory writes vectors for user U. The pod restarts while Weaviate is unreachable; initialize() logs weaviate_init_failed and drops the repository, and the service boots (even in strict). DELETE /api/v1/memory/user/U erases memory_postgres and memory_redis and returns 204, while U's vectors stay in Weaviate. This is not reachable by default: D-04 keeps Weaviate off, and WS-17.1 is what makes it off by default.",
+              "fix": "No change in WS-17.1; the brief only adds `WeaviateSettings.enabled` (default False). WS-17.11 adds WeaviateUnavailableError (a loud init failure), lazy re-init inside delete_user_data, and a critical `weaviate` readiness check when enabled. Plan line 2012 likewise lists 'WS-17.11 (a Weaviate init failure is loud)'.",
+              "evidence": "service.py:90-96: `except Exception as e: logger.warning(\"weaviate_init_failed\", ...); self._weaviate_repo = None`. erasure.py:58 registers Weaviate only `if weaviate_repo is not None`. Probe at head, store_names by config: default ['memory_postgres','memory_redis']; WEAVIATE_ENABLED=true ['memory_postgres','memory_weaviate','memory_redis']; no infra []. So erasure is still wired for every configured store after adoption. The WS-17 plan file map (line 46) and WS-17.11 Files (line 1071) own the loud-init and re-init-on-erase change. Other checks for this lens found no defects. Redis erasure through the injected runtime client deleted all 5 of the user's keys (working, context, user_session, session_count, session blob) and left the other user's blob. memory never closes the injected client (aclose not called). The runtime and legacy clients both use decode_responses=True (datastores.py:248, redis_cache.py:119). The new log lines (weaviate_disabled, redis_initialized source=runtime, postgres_repository_created, memory_service_started) and the StartupDependencyError text carry no PHI. The runtime's exception handlers (http.py:516-557) are stricter than the deleted local ones: no str(exc) in bodies, no validation input values. Dropping configure_phi_encryption changes nothing at rest, because memory uses no ClinicalBase or EncryptedString (grep found no matches), and handles_phi=True adds ENCRYPTION_* to the strict required secrets. Tests: at head the memory suite is 481 passed, conformance -k memory 2 passed, test_phi_encryption_activation 8 passed. On base dfd43b1 (scratch ws171-rr-data, since deleted) the new test file is 4 failed. Concern 3, the test_env_consistency_startup.py edit, follows necessarily from the brief's mandated deletion of configure_logging; the file is in a WS-17-owned path and the test keeps its intent, since bootstrap.start_service_runtime calls the module-global configure_service_logging after ProductionGuards. It is not a data-safety defect."
+            }
+          ]
+        },
+        "verified": [
+          {
+            "id": "WS171-DAT-1",
+            "severity": "minor",
+            "file": "services/memory_service/src/infrastructure/postgres_repo.py",
+            "line": 170,
+            "problem": "Pre-existing, owned by WS-17.2, not a WS-17.1 defect. Every memory Postgres read and write (store/get/erase) still goes through PostgresRepository's own SQLAlchemy engine (create_async_engine on an f-string DSN), not runtime.pg_pool. Four gaps follow. (a) It passes no TLS context, so POSTGRES_SSL_MODE and POSTGRES_SSL_ROOT_CERT (verify-full in strict) are ignored and asyncpg falls back to its default sslmode=prefer, which does not verify the certificate. (b) WS-02.6 verify_app_role / check_new_pool_role never runs on its connections. It is covered only indirectly, because the engine reads the same POSTGRES_USER, PASSWORD, HOST and DATABASE as the runtime's checked default pool. (c) The DSN is not percent-encoded (MVP-273). (d) No hide_parameters is set, so a SQLAlchemy DBAPIError's text carries the bound memory content.",
+            "failure_scenario": "Staging or production with POSTGRES_SSL_MODE=verify-full. The runtime default pool connects as solace_app over verified TLS and passes the role and schema checks, so runtime.pg_pool is not None and build_memory_service constructs PostgresRepository(). The repository's own engine then opens unverified-TLS connections, and memory PHI (memory_records.content, session_summaries) crosses them, exposed to a MITM. Separately, a failed insert reaches logger.exception('postgres_store_failed') in domain/service.py:161, whose traceback includes '[parameters: (... content ...)]'. Neither behaviour is new: base built PostgresRepository() unconditionally with the same engine, and WS-17.1 only gates it on runtime.pg_pool as its brief requires.",
+            "fix": "No change in WS-17.1; the brief requires `PostgresRepository()` gated on `runtime.pg_pool is not None`. WS-17.2 (Wave 0, security-critical review) deletes create_async_engine, async_sessionmaker and PostgresSettings and runs the repository on ConnectionPoolManager.transaction('default'), which also brings TLS and the role check. Make sure WS-17.2 lands before the W0 exit gate is declared.",
+            "evidence": "Probe at head: build_memory_service(SimpleNamespace(pg_pool=object(), redis=fake)) gave a PostgresRepository whose engine.dialect.create_connect_args() had no 'ssl' key. With no env, its URL user/db is solace/solace_memory; the runtime PostgresSettings default is solace/solace. The database mismatch is refuted because deploy/env/env-contract.yaml:176 pins POSTGRES_DATABASE=solace for all app services in strict, and docker-compose.yml:63-64 gives memory POSTGRES_DATABASE=solace and POSTGRES_USER=solace_app. Line 170 is `self._engine = create_async_engine(self._settings.connection_url, **engine_kwargs)`. The connection_url property at :139 builds the DSN with an f-string and no encoding. connection_manager.py:205 check_new_pool_role applies only to ConnectionPoolManager pools. The WS-17 plan (lines 131-191) assigns exactly this removal to WS-17.2, with the RED test `assert \"create_async_engine\" not in source`. RLS itself still applies: the role is solace_app (NOBYPASSRLS), session() sets app.current_user_id transaction-locally, and delete_user_data scopes the GUC to the target user.",
+            "lens": "data-safety",
+            "votes": [
+              {
+                "refuted": false,
+                "severity_ok": true,
+                "reason": "Confirmed in postgres_repo.py. Line 170 calls create_async_engine on an f-string DSN (line 139). The URL is not percent-encoded and engine_kwargs carries no ssl or connect_args and no hide_parameters. So the gaps are real: no TLS verification and no role check on this engine's connections. The finding is minor and pre-existing, and it is owned by WS-17.2, not WS-17.1. The severity and framing are fine."
+              }
+            ],
+            "survives": true
+          },
+          {
+            "id": "WS171-DAT-2",
+            "severity": "minor",
+            "file": "services/memory_service/src/domain/service.py",
+            "line": 96,
+            "problem": "Pre-existing, owned by WS-17.11, not required by WS-17.1 (implementer concern 1). With WEAVIATE_ENABLED=true, a Weaviate initialize() failure is swallowed: _weaviate_repo is set to None with a warning. build_user_data_erasure then registers no memory_weaviate store, so a later GDPR erasure attests complete without touching vectors that an earlier process wrote (the stored content is PHI).",
+            "failure_scenario": "An operator opts in with WEAVIATE_ENABLED=true and memory writes vectors for user U. The pod restarts while Weaviate is unreachable; initialize() logs weaviate_init_failed and drops the repository, and the service boots (even in strict). DELETE /api/v1/memory/user/U erases memory_postgres and memory_redis and returns 204, while U's vectors stay in Weaviate. This is not reachable by default: D-04 keeps Weaviate off, and WS-17.1 is what makes it off by default.",
+            "fix": "No change in WS-17.1; the brief only adds `WeaviateSettings.enabled` (default False). WS-17.11 adds WeaviateUnavailableError (a loud init failure), lazy re-init inside delete_user_data, and a critical `weaviate` readiness check when enabled. Plan line 2012 likewise lists 'WS-17.11 (a Weaviate init failure is loud)'.",
+            "evidence": "service.py:90-96: `except Exception as e: logger.warning(\"weaviate_init_failed\", ...); self._weaviate_repo = None`. erasure.py:58 registers Weaviate only `if weaviate_repo is not None`. Probe at head, store_names by config: default ['memory_postgres','memory_redis']; WEAVIATE_ENABLED=true ['memory_postgres','memory_weaviate','memory_redis']; no infra []. So erasure is still wired for every configured store after adoption. The WS-17 plan file map (line 46) and WS-17.11 Files (line 1071) own the loud-init and re-init-on-erase change. Other checks for this lens found no defects. Redis erasure through the injected runtime client deleted all 5 of the user's keys (working, context, user_session, session_count, session blob) and left the other user's blob. memory never closes the injected client (aclose not called). The runtime and legacy clients both use decode_responses=True (datastores.py:248, redis_cache.py:119). The new log lines (weaviate_disabled, redis_initialized source=runtime, postgres_repository_created, memory_service_started) and the StartupDependencyError text carry no PHI. The runtime's exception handlers (http.py:516-557) are stricter than the deleted local ones: no str(exc) in bodies, no validation input values. Dropping configure_phi_encryption changes nothing at rest, because memory uses no ClinicalBase or EncryptedString (grep found no matches), and handles_phi=True adds ENCRYPTION_* to the strict required secrets. Tests: at head the memory suite is 481 passed, conformance -k memory 2 passed, test_phi_encryption_activation 8 passed. On base dfd43b1 (scratch ws171-rr-data, since deleted) the new test file is 4 failed. Concern 3, the test_env_consistency_startup.py edit, follows necessarily from the brief's mandated deletion of configure_logging; the file is in a WS-17-owned path and the test keeps its intent, since bootstrap.start_service_runtime calls the module-global configure_service_logging after ProductionGuards. It is not a data-safety defect.",
+            "lens": "data-safety",
+            "votes": [
+              {
+                "refuted": false,
+                "severity_ok": true,
+                "reason": "The code and the plan back the finding. service.py:94-96 catches any Weaviate initialize() exception, logs a warning and sets _weaviate_repo to None. The erasure builder then skips Weaviate when the repo is None. The plan assigns the fix to WS-17.11 (WS-17-memory-service.md:46 and :1071): WeaviateUnavailableError, a loud init failure, and lazy re-init on erase. WS-17.1 only adds the default-off WEAVIATE_ENABLED flag, so this is a real but out-of-scope gap. It is only reachable when an operator opts in, so \"minor\" fits. I did not re-run the tests or the base-commit check, so the 481-passed and 4-failed figures are the finding's own."
+              }
+            ],
+            "survives": true
+          }
+        ]
+      }
+    ]
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Review"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Verify"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "review:spec-lifecycle",
+      "phaseIndex": 1,
+      "phaseTitle": "Review",
+      "agentId": "ad43c04e68e363ada",
+      "model": "claude-sonnet-5-5",
+      "state": "done",
+      "startedAt": 1793659560101,
+      "queuedAt": 1793659560078,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "PASS",
+      "promptPreview": "Repo: D:\\Repo\\Contextual-Chatbot (Solace-AI mental-health backend, PHI; memory-service stores user memories). READ-ONLY task review. No repo edits, no git writes, no subagents, never print secret values.\nTask WS-17.1 (W0 phase B): memory adopts the IF-01 runtime (canonical lifespan form (a), D:\\tmp\\mvp-exec\\reports\\WS-04.F1-shape.md), keeps Weaviate off by default (D-04, WEAVIATE_ENABLED=false), t…",
+      "promptFramed": true,
+      "lastProgressAt": 1793659655275,
+      "tokens": 79139,
+      "toolCalls": 15,
+      "durationMs": 95174,
+      "resultPreview": "{\"spec_verdict\":\"PASS\",\"quality_verdict\":\"APPROVED\",\"prior_findings\":[],\"findings\":[]}"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "review:data-safety",
+      "phaseIndex": 1,
+      "phaseTitle": "Review",
+      "agentId": "af662984f1fb38694",
+      "model": "claude-opus-5-5",
+      "state": "done",
+      "startedAt": 1793659560101,
+      "queuedAt": 1793659560078,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "PASS",
+      "promptPreview": "Repo: D:\\Repo\\Contextual-Chatbot (Solace-AI mental-health backend, PHI; memory-service stores user memories). READ-ONLY task review. No repo edits, no git writes, no subagents, never print secret values.\nTask WS-17.1 (W0 phase B): memory adopts the IF-01 runtime (canonical lifespan form (a), D:\\tmp\\mvp-exec\\reports\\WS-04.F1-shape.md), keeps Weaviate off by default (D-04, WEAVIATE_ENABLED=false), t…",
+      "promptFramed": true,
+      "lastProgressAt": 1793660001160,
+      "tokens": 168297,
+      "toolCalls": 50,
+      "durationMs": 441056,
+      "resultPreview": "{\"spec_verdict\":\"PASS\",\"quality_verdict\":\"APPROVED\",\"prior_findings\":[],\"findings\":[{\"id\":\"WS171-DAT-1\",\"severity\":\"minor\",\"file\":\"services/memory_service/src/infrastructure/postgres_repo.py\",\"line\":170,\"problem\":\"Pre-existing, owned by WS-17.2, not a WS-17.1 defect. Every memory Postgres read and write (store/get/erase) still goes through PostgresRepository's own SQLAlchemy engine (create_async_e…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "verify:WS171-DAT-1:0",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "af4d001bb9683eb74",
+      "model": "claude-sonnet-5-5",
+      "state": "done",
+      "startedAt": 1793660003078,
+      "queuedAt": 1793660003058,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Confirmed in postgres_repo.py. Line 170 calls create_async_…",
+      "promptPreview": "Repo: D:\\Repo\\Contextual-Chatbot (Solace-AI mental-health backend, PHI; memory-service stores user memories). READ-ONLY task review. No repo edits, no git writes, no subagents, never print secret values.\nTask WS-17.1 (W0 phase B): memory adopts the IF-01 runtime (canonical lifespan form (a), D:\\tmp\\mvp-exec\\reports\\WS-04.F1-shape.md), keeps Weaviate off by default (D-04, WEAVIATE_ENABLED=false), t…",
+      "promptFramed": true,
+      "lastProgressAt": 1793660021253,
+      "tokens": 58187,
+      "toolCalls": 3,
+      "durationMs": 18174,
+      "resultPreview": "{\"refuted\":false,\"severity_ok\":true,\"reason\":\"Confirmed in postgres_repo.py. Line 170 calls create_async_engine on an f-string DSN (line 139). The URL is not percent-encoded and engine_kwargs carries no ssl or connect_args and no hide_parameters. So the gaps are real: no TLS verification and no role check on this engine's connections. The finding is minor and pre-existing, and it is owned by WS-17…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "verify:WS171-DAT-2:0",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "a137950fe13d7acb4",
+      "model": "claude-sonnet-5-5",
+      "state": "done",
+      "startedAt": 1793660003166,
+      "queuedAt": 1793660003163,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "The code and the plan back the finding. service.py:94-96 ca…",
+      "promptPreview": "Repo: D:\\Repo\\Contextual-Chatbot (Solace-AI mental-health backend, PHI; memory-service stores user memories). READ-ONLY task review. No repo edits, no git writes, no subagents, never print secret values.\nTask WS-17.1 (W0 phase B): memory adopts the IF-01 runtime (canonical lifespan form (a), D:\\tmp\\mvp-exec\\reports\\WS-04.F1-shape.md), keeps Weaviate off by default (D-04, WEAVIATE_ENABLED=false), t…",
+      "promptFramed": true,
+      "lastProgressAt": 1793660013240,
+      "tokens": 58271,
+      "toolCalls": 3,
+      "durationMs": 10074,
+      "resultPreview": "{\"refuted\":false,\"severity_ok\":true,\"reason\":\"The code and the plan back the finding. service.py:94-96 catches any Weaviate initialize() exception, logs a warning and sets _weaviate_repo to None. The erasure builder then skips Weaviate when the repo is None. The plan assigns the fix to WS-17.11 (WS-17-memory-service.md:46 and :1071): WeaviateUnavailableError, a loud init failure, and lazy re-init …"
+    }
+  ],
+  "totalTokens": 363894,
+  "totalToolCalls": 71
+}
