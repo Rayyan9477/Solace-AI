@@ -11,6 +11,18 @@ Entry format:
 - Links: <files>.
 ```
 
+## 2026-11-21: CI/CD Pipeline & Documentation Modernization
+- Removed the daily scheduled cron trigger (`schedule: - cron: "17 3 * * *"`) from `.github/workflows/ci.yml`; E2E tests now trigger strictly on-demand via `workflow_dispatch`.
+- Integrated `actions/cache@v4` on `~/.cache/uv` keyed by `requirements-dev.lock` across all CI matrix runner jobs (`lint`, `unit`, `realinfra`, `images`, `e2e`) to accelerate dependencies.
+- Added path filtering (`paths-ignore`) to `push` and `pull_request` triggers in `ci.yml` to skip runner dispatch on markdown/documentation commits.
+- Added Continuous Delivery workflow `.github/workflows/cd.yml` for automated container image building, module probing, and GHCR (`ghcr.io`) image publishing on release tags (`v*.*.*`) or manual dispatch.
+- Rewrote root `README.md` completely to replace the legacy Streamlit/Gemini monolith description with a comprehensive, production-accurate guide to the 10 microservices, LangGraph 1.0 graph, data planes, TDD protocols, and deployment architecture.
+- Updated `docs/API-HANDOFF.md` and `docs/STAGING-BRINGUP.md` to document the live Google OAuth PKCE flow (REV-22), Alembic slot migration procedures, active service ports (excluding frozen config_service), and PostgreSQL verify-full TLS tooling.
+- Links: [.github/workflows/ci.yml](../../.github/workflows/ci.yml), [.github/workflows/cd.yml](../../.github/workflows/cd.yml), [README.md](../../README.md), [API-HANDOFF.md](../API-HANDOFF.md), [STAGING-BRINGUP.md](../STAGING-BRINGUP.md).
+
+## 2026-11-04: PR #6 merged into main
+- PR #6 (`mvp-remediation` into `main`, merge commit `f18e25a`) merged, bringing Wave 0 (W0) remediation code to code-complete status on `main`.
+
 ## 2026-11-03: W0 code-complete; live runs and barrier wait on egress
 - WS-05.5 (boot smoke + in-process /live smoke, tests/system green) and WS-05.6 (crisis alert E2E, dev profile, helpers) are code-complete and reviewed; all 12 W0 tasks are now code-complete.
 - Still open: the live runs (WS-05.4 self-test, WS-05.5 dev/strict boot smoke and manifest, WS-05.6 crisis E2E) and the barrier record. All need the service images, which cannot build until the owner allows pkg-containers.githubusercontent.com.

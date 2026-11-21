@@ -57,7 +57,7 @@ def test_mvp_112_images_build_from_repo_root_with_probe() -> None:
 def test_mvp_038_lint_gate_and_e2e_trigger() -> None:
     jobs = _wf()["jobs"]
     assert "ruff check . --select E9,F63,F7,F82 --no-fix" in _runs(jobs["lint"])
-    assert "workflow_dispatch" in jobs["e2e"]["if"] and "schedule" in jobs["e2e"]["if"]
+    assert "workflow_dispatch" in jobs["e2e"]["if"]
     triggers = _wf().get("on", _wf().get(True))
-    assert {"push", "pull_request", "workflow_dispatch", "schedule"} <= set(triggers)
+    assert {"push", "pull_request", "workflow_dispatch"} <= set(triggers)
     assert "ci-test-secret" not in CI.read_text(encoding="utf-8")

@@ -1,6 +1,6 @@
 # Solace-AI API Handoff (for frontend team)
 
-> ✅ **RECONCILED to the running code (2026-07-27, Phase B / REV-21).** The endpoint paths, WebSocket auth, response shape, and rate limits below now match what the services actually serve. Two items remain **not implemented** and are called out inline where they appear: **Google OAuth** (§2.2 — no endpoints exist yet; REV-22) and **server-side WS replay** on reconnect (§4 — the thread now resumes but the tail is not re-sent; REV-23). Do not integrate those two until they ship. Everything else is live.
+> ✅ **RECONCILED to the running code.** The endpoint paths, WebSocket auth, response shape, and rate limits below match what the services serve. **Google OAuth** (§2.2, REV-22) is implemented in `user-service` with PKCE and RS256 Google JWKS signature verification (config-gated via `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`). **Server-side WS replay** on reconnect (§4, REV-23) resumes the thread session while tail re-send remains deferred. Everything else is live.
 
 > **Audience**: The web + mobile frontend repo (separate codebase).
 > **Purpose**: Everything the frontend needs to integrate with the
@@ -36,16 +36,11 @@ POST /api/v1/auth/logout             -> 204
 
 All subsequent calls authenticate via `Authorization: Bearer <access_token>`.
 
-### 2.2 Google OAuth2 — ⚠️ NOT IMPLEMENTED (deferred, REV-22)
+### 2.2 Google OAuth2 (Implemented, Config-Gated)
 
-> **Do not integrate yet.** The `/api/v1/auth/oauth/google/start|callback`
-> endpoints described below **do not exist** in the running user-service —
-> only helper functions exist, and the id_token is currently decoded
-> **without signature verification**. This section documents the *intended*
-> contract; it is tracked as REV-22 and will be enabled (with real JWKS
-> id_token verification) in sprint B.3. Use email + password (§2.1) for now.
+> **Status:** Implemented in `user-service/src/oauth.py` (REV-22) with PKCE (RFC 7636) and cryptographic RS256 `id_token` signature verification against Google's JWKS. The endpoints are **config-gated**: active when `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` are provided (returning 404 when unconfigured).
 
-Intended three-leg OAuth with PKCE (RFC 7636). The frontend redirects the
+Three-leg OAuth with PKCE (RFC 7636). The frontend redirects the
 browser to the `/start` endpoint, which 302s to the Google consent screen.
 
 ```mermaid

@@ -100,16 +100,19 @@ docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod
 #   docker compose up -d --build           # (dev defaults; add --profile dev for mailhog/kafka-ui)
 ```
 
-## 4. Run migrations (creates schema + RLS policies 001→006)
+## 4. Run migrations (applies Alembic chain slots 001→021)
 ```bash
-# Point Alembic at the staging DB (migrations/env.py honors DATABASE_URL):
-export DATABASE_URL="postgresql+asyncpg://solace:${POSTGRES_PASSWORD}@localhost:5432/solace"
-alembic upgrade head     # applies 001..006, incl. RLS on the 9 user-token tables
+# Point migrator at the staging DB (connects as solace_migrator with BYPASSRLS per D-01/D-02):
+python -m scripts.db.migrate upgrade head
+# or: make migrate
 ```
 
-## 5. Health checks (each service exposes /health)
+## 5. Health checks (each active service exposes /health)
 ```bash
-for p in 8000 8001 8002 8003 8004 8005 8006 8007 8008 8009; do
+# Active ports: 8000 (orchestrator), 8001 (user), 8002 (safety), 8003 (notification),
+# 8004 (diagnosis), 8005 (memory), 8006 (therapy), 8007 (personality), 8009 (analytics).
+# Note: config_service (8008) is frozen and removed from compose under D-19.
+for p in 8000 8001 8002 8003 8004 8005 8006 8007 8009; do
   printf "port %s: " "$p"; curl -fsS "http://localhost:$p/health" || echo "DOWN"; echo
 done
 # Infra: postgres (pg_isready), redis (redis-cli ping), weaviate (:8080/v1/.well-known/ready),
@@ -128,5 +131,6 @@ Once the stack is green, tell me and I will:
 ## Known gotchas
 - **Daemon must be up** — earlier work hit `npipe ... dockerDesktopLinuxEngine` when Docker Desktop wasn't running.
 - **`ENVIRONMENT` must be set** in the container env or SSL/audit-HMAC/encryption fail-loud gates behave inconsistently (REV-32). The prod override sets it via `.env.prod`.
-- First build is slow (Python wheels incl. langgraph/weaviate); subsequent builds cache.
-- `require` SSL currently uses `CERT_NONE` (encryption, no cert verify) — fine for staging; prod needs `verify-full` + pinned cert (C.4).
+- First build is slow (Python wheels incl. langgraph/weaviate); subsequent builds cache via Docker / GHCR.
+- PostgreSQL TLS in strict environments uses `verify-full` with root CA certificates generated via `python -m scripts.db.gen_certs --out "$SOLACE_SECRETS_DIR" --san postgres` (D-15).
+- CI/CD container images can be built/pulled via GitHub Container Registry (`ghcr.io/${OWNER}/solace-<service>`) using `.github/workflows/cd.yml`.
