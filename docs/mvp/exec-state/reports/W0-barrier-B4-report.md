@@ -58,3 +58,7 @@ Docker afterwards: no solace-e2e containers; volumes 70 as before; the :ci image
 ## Verdict
 
 Pass: nothing outside baseline red fails, except the realinfra lock-advisory pair, an owner-ledgered feed drift (Ruling, WS-01). Review package: docs/mvp/exec-state/reviews/W0-barrier-B4-20261124-080918.diff.md
+
+## Addendum: W0-close fix round 1 (review finding BF-ROO-1)
+
+The verdict above left the lock-advisory pair red without citing the open hand-off in `ledger/handoffs.md` ("WS-01 lock owner (D-16, from lane A) ... Do before the W0 barrier regression is called green"). The barrier was therefore not green at this point. W0-close fix round 1 closes the pair with a D-16 bump in both locks (dnspython 2.9.2, opentelemetry-api/sdk/exporter 1.45.2). After that bump, `tests/build/test_mvp_359` passes with `SOLACE_REQUIRE_REALINFRA=1`. See `reports/W0-close-fix-1-report.md`. The ci-local images stage now also passes `--probe`, as CI does (finding BF-ROO-3).
