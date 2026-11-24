@@ -8,25 +8,24 @@ The **method** is in the [master plan](../superpowers/plans/2026-10-18-mvp-remed
 
 *Edit this section by hand when the phase changes.*
 
-- **Phase:** **paused at W0 checkpoint 1 (2026-11-03)**, at the owner's request: "complete the nearest checkpoint and then stop". Nothing is in progress, in review or fixing.
-- **Checkpoint 1:** tree `edba7d7`, zip `D:\tmp\mvp-exec\barriers\W0-checkpoint-1-edba7d7.zip`.
-  - W0 is 48 of 61 tasks done, with 1 blocked (WS-05.4 part 2) and 12 not started.
-  - Every done task passed a lens-diverse review workflow, with each finding put to a skeptic panel.
-- **Next, when resumed** (about 3 to 4 hours to the W0 barrier):
-  - the 12 remaining W0 tasks: WS-03.5 then WS-05.4 part 2, WS-05.5, WS-05.6, WS-12.17, WS-13.2, WS-14.2, WS-14.3, WS-15.2, WS-17.2, WS-17.19, WS-18.1, WS-18.2;
-  - the W0 bug-finding round, with AGY in per-file scopes;
-  - the W0 barrier: full regression, the strict boot smoke, and a barrier zip.
-- **Gates recorded for the W0 barrier:**
-  - WS-17.2 must land, because memory still opens its own Postgres engine without verified TLS.
-  - WS-03.5 must set `CORS_ALLOWED_ORIGINS` for orchestrator and user-service.
-  - The `/health` smoke tests stay red until WS-05.5.
-  - The pending hand-offs are in `D:\tmp\mvp-exec\ledger\handoffs.md`.
-- **Blocking outside engineering:**
-  - X-01: attach the AWS deployer policy to `MedCodex-Local`, the profile in use. Needed by W4 and W5.
-  - X-04 and X-06: clinical and legal approvers.
-  - X-05: on-call clinicians.
-  - The full list is in [OPEN-ITEMS.md](OPEN-ITEMS.md).
-
+- **Phase:** **W0 barrier passed (2026-11-24).** W1 has not started. Work is on branch `w0-barrier`, merged through a PR (D-17 is superseded).
+- **What passed:**
+  - Clean-export build of all 10 images (27/27 steps), real-Postgres migration chain, live harness self-test.
+  - Live boot smoke in dev, strict production and strict staging; register and login through the edge.
+  - Full unit regression: green except the 12 known kafka `test_topics` cases. Lint, conformance and import-root checks pass.
+  - Real-infra tier and e2e tiers green: dev e2e 38 passed + 8 xfailed, strict e2e 48 passed.
+  - Barrier tree `fe7022d`, zip `D:\tmp\mvp-exec\barriers\W0-fe7022d.zip` (copy it off-machine, X-12).
+  - Fixed on the way: edge `/metrics`, `/ready`, `/health` variants, strict-overlay `ENVIRONMENT`, strict CORS, staging-strict guards, CI e2e real-infra, crisis-consumer lifespan tests, a strict memory boot refusal, a D-16 lock bump, and ci-local images.
+- **Open from W0:** the crisis alert E2E stops at `provision_clinician` (XFAIL, WS-14.9 in W1), so the crisis hops from REST to clinician page have not run live. Residual items are routed to W1 tasks in `exec-state/ledger/handoffs.md`.
+- **Next:** W1 round 1 per `exec-state/plan/W1-round-1.md`: WS-06.3, WS-12.2, WS-12.4, WS-07.3, WS-03.6, WS-09.3. Briefs are in `exec-state/briefs/`; preflight rulings are in `exec-state/plan/W1-preflight-scan.md`.
+- **Owner actions:**
+  - X-15: name a clinician for lexicon v1 and the phrase set (W1 entry criterion).
+  - X-04: clinical approver and sign-off for D-05, D-06, D-22, D-28, D-29.
+  - X-05: at least two on-call clinicians (before go-live).
+  - X-14: allow `pkg-containers.githubusercontent.com` for cloud egress (cloud sessions only).
+  - X-12: copy the barrier zip off-machine.
+  - Review and merge the W0 PR; edge monitors must poll `/live`, since `/ready` and `/health` are 404 at the edge.
+  - Full list: [OPEN-ITEMS.md](OPEN-ITEMS.md).
 ## Progress
 
 <!-- mvp:summary:start -->
@@ -56,7 +55,7 @@ The **method** is in the [master plan](../superpowers/plans/2026-10-18-mvp-remed
   1. Fill the row in TRACKER.md's barrier log: tree id, zip, test counts, register delta.
   2. Add a LOG.md entry.
   3. Re-render the register.
-  4. Copy the barrier zip off the machine. There are no commits, so the zip is the durable copy.
+  4. Copy the barrier zip off the machine (commits on the branch are also durable).
 - **A decision changes:** edit its entry and history in DECISIONS.md, then add a LOG.md line. The controller records a ledger Ruling and updates the affected tasks before they run.
 - **An owner action or sign-off completes:** set its Status, date and evidence in OPEN-ITEMS.md (and the sign-off field in DECISIONS.md), then add a LOG.md line.
 - **The plans change** (for example, new fix tasks from a bug-finding round): `python docs/mvp/tools/mvp_docs.py build`. This adds the new rows as `todo` and keeps every existing status. `check` reports drift between the plans and the tracker.

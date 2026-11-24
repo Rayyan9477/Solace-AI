@@ -52,16 +52,11 @@ export PYTHONPATH="$PWD:$PWD/src" ENVIRONMENT=test TELEMETRY_ENABLED=false
   - `briefs/`, `reports/` and `reviews/` (`batch*.json` hold review results).
   - `snapshots/snapshots.log`: checkpoint tree ids.
   - `plan/` holds the schedule DAG.
-- **State at pause (2026-11-03):** W0 checkpoint 1, tree `edba7d7`. The final docs tree is `b860a79`, and its content equals commit `eb5eb26` on `main`.
-  - W0 is 48/61 done, 1 blocked (WS-05.4 part 2) and 12 not started. The program is 48/330 done.
-  - Resume only when the owner says so.
-- **Remaining W0, in dependency order:**
-  - WS-03.5, then WS-05.4 part 2, WS-05.5, WS-05.6;
-  - WS-12.17, WS-13.2, WS-14.2, WS-14.3, WS-15.2;
-  - WS-17.2, which is a barrier gate because memory still has a private Postgres engine;
-  - WS-17.19, WS-18.1, WS-18.2;
-  - then the W0 bug-finding round and the barrier: full regression, a strict boot smoke, and a barrier snapshot.
-- **Tools** (cross-platform, in `docs/mvp/exec-state/tools/`):
+- **State (2026-11-24):** the W0 barrier passed on branch `w0-barrier` (tree `fe7022d`). W0 is 55/55 done. W1 has not started.
+  - Open: the crisis E2E is XFAIL at `provision_clinician` until WS-14.9; the 12 kafka `test_topics` cases stay red.
+  - Next: W1 round 1 from `docs/mvp/exec-state/plan/W1-round-1.md` (WS-06.3, WS-12.2, WS-12.4, WS-07.3, WS-03.6, WS-09.3). Read `plan/W1-preflight-scan.md` rulings R-1 to R-13 first.
+  - Owner gates: X-15 (clinician for lexicon v1) before W1 clinical sign-off; X-04, X-05, X-14.
+  - Work is committed on branches and merged through PRs (D-17 superseded); never merge or push to `main` without the owner.- **Tools** (cross-platform, in `docs/mvp/exec-state/tools/`):
   - `mvp_exec.py` with the subcommands `checkpoint`, `review-package`, `extract-brief` and `ledger`;
   - `pick_ready.py`: the dependency-ready tasks and their mutex conflicts;
   - `review-wf.js` and `review-batch-wf.js`: review workflows.
