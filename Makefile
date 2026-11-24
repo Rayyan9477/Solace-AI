@@ -29,7 +29,7 @@ test-contract:
 	$(PYTHON) scripts/ci/run_suites.py --tier contract
 
 images:
-	$(PYTHON) -m scripts.build.images --tag $(TAG)
+	$(PYTHON) scripts/ci/build_images.py --all --tag $(TAG)
 
 clean-checkout:
 	$(PYTHON) scripts/ci/clean_checkout.py --tree $(TREE) --require-registry-match
