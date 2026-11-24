@@ -15,7 +15,12 @@
 #   - upstream health checks probe /live, which never depends on downstream services, and
 #     tolerate slow probes (health_fails 3) and short gaps (lb_try_duration);
 #   - internal paths are never routed (never_routed is imported first inside a `route`
-#     block, so the 404 comes before the proxy in literal order);
+#     block, so the 404 comes before the proxy in literal order). Every entry is a prefix:
+#     Caddy lowercases and cleans the decoded path, and an exact entry let /metrics%0A
+#     (decoded /metrics\n, which Starlette's ^/metrics$ still matches) reach the app (WS-03.F1);
+#   - /ready and /health are never routed either (owner ruling, WS-03.F1): their bodies
+#     name the dependencies and show outages; /live stays routed for uptime monitors;
+#   - a path with a decoded control character is refused (400) before the proxy;
 #   - X-Forwarded-For: Caddy trusts no incoming XFF (no trusted_proxies) and appends exactly
 #     one hop, so the apps run with TRUSTED_PROXY_HOPS=1 in strict (D-26);
 #   - no access log: request lines can carry identifiers.
@@ -26,10 +31,14 @@
     # acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
 }
 
-# Paths the edge never forwards: metrics, API docs, status pages and the internal API.
+# Paths the edge never forwards: metrics, API docs, status, readiness and health reports and
+# the internal API. Each entry is a prefix (a single trailing *), so a suffix, trailing slash,
+# encoded character or case change of one of them never reaches the proxy.
 (never_routed) {
-    @never_routed path /metrics /metrics/* /docs /docs/* /redoc /redoc/* /openapi.json /status /status/* /api/v1/internal /api/v1/internal/*
+    @never_routed path /metrics* /docs* /redoc* /openapi.json* /status* /ready* /health* /api/v1/internal*
     respond @never_routed 404
+    @control_characters path_regexp [[:cntrl:]]
+    respond @control_characters 400
 }
 
 (security_headers) {

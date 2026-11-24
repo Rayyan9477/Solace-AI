@@ -11,8 +11,12 @@
 # Derivation rule (IF-02, D-14): every service gate (ORCHESTRATOR_ENVIRONMENT, USER_SERVICE_ENV,
 # SAFETY_ENVIRONMENT, NOTIFICATION_SERVICE_ENV, DIAGNOSIS_ENVIRONMENT, MEMORY_ENVIRONMENT,
 # THERAPY_ENVIRONMENT, PERSONALITY_ENVIRONMENT, ANALYTICS_SERVICE_ENV) is ${ENVIRONMENT:?...},
-# never a literal. ${VAR:?...} only checks that a variable is set and non-empty; compose does not
-# check that ENVIRONMENT is staging or production, so that must be enforced before compose runs.
+# never a literal. ${VAR:?...} only checks that a variable is set and non-empty, so this overlay
+# also refuses any value other than exactly staging or production (WS-03.F1): caddy, migrate and
+# every app service mount the config strict-environment-${ENVIRONMENT}, and only the two strict
+# names are defined (top-level configs, below). Any other value (development, test, prod,
+# Production, ...) fails `docker compose config` and `up` before anything starts, with
+#   service "caddy" refers to undefined config strict-environment-<value>: invalid compose project
 #
 # No service reads an env_file: each container receives only the variables listed for it here
 # and in the base file. Every source the registry marks required_in_strict uses ${SOURCE:?...},
@@ -60,6 +64,13 @@ x-logging: &default-logging
 x-restart: &default-restart
   restart: unless-stopped
 
+# WS-03.F1: ENVIRONMENT must be exactly staging or production (see the header); the file holds
+# the environment name and is read by nothing yet.
+x-strict-environment: &strict-environment
+  configs:
+    - source: strict-environment-${ENVIRONMENT:?ENVIRONMENT must be set}
+      target: /run/solace/strict-environment
+
 # Every database client (the nine app services and migrate): the CA that verifies postgres.
 x-strict-db-client: &strict-db-client
   secrets:
@@ -105,7 +116,7 @@ services:
       - backend
       - monitoring
     logging: *default-logging
-    <<: *default-restart
+    <<: [*default-restart, *strict-environment]
     deploy:
       resources:
         limits:
@@ -127,7 +138,7 @@ services:
       # PYSEC-2026-83: langgraph's strict msgpack checkpoint decoding is opt-in (WS-01.F2).
       LANGGRAPH_STRICT_MSGPACK: "true"
     logging: *default-logging
-    <<: [*default-restart, *strict-db-client]
+    <<: [*default-restart, *strict-db-client, *strict-environment]
     deploy:
       resources:
         limits:
@@ -152,7 +163,7 @@ services:
       TRUSTED_PROXY_HOPS: "1"
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?CORS_ALLOWED_ORIGINS must be set}
     logging: *default-logging
-    <<: [*default-restart, *strict-db-client]
+    <<: [*default-restart, *strict-db-client, *strict-environment]
     deploy:
       resources:
         limits:
@@ -166,7 +177,7 @@ services:
       SAFETY_REPO_POSTGRES_DSN: postgresql+asyncpg://solace_app:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/solace
       SAFETY_REPO_REDIS_URL: *strict-redis-url
     logging: *default-logging
-    <<: [*default-restart, *strict-db-client]
+    <<: [*default-restart, *strict-db-client, *strict-environment]
     deploy:
       resources:
         limits:
@@ -181,7 +192,7 @@ services:
       DIAGNOSIS_REDIS_PASSWORD: *strict-redis-password
       DIAGNOSIS_SESSION_REDIS_PASSWORD: *strict-redis-password
     logging: *default-logging
-    <<: [*default-restart, *strict-db-client]
+    <<: [*default-restart, *strict-db-client, *strict-environment]
     deploy:
       resources:
         limits:
@@ -196,7 +207,7 @@ services:
       THERAPY_REDIS_PASSWORD: *strict-redis-password
       THERAPY_SESSION_REDIS_PASSWORD: *strict-redis-password
     logging: *default-logging
-    <<: [*default-restart, *strict-db-client]
+    <<: [*default-restart, *strict-db-client, *strict-environment]
     deploy:
       resources:
         limits:
@@ -215,7 +226,7 @@ services:
       # P2-16: Weaviate holds PHI-derived embeddings; never the public dev key.
       WEAVIATE_API_KEY: ${WEAVIATE_API_KEY:?WEAVIATE_API_KEY must be set}
     logging: *default-logging
-    <<: [*default-restart, *strict-db-client]
+    <<: [*default-restart, *strict-db-client, *strict-environment]
     deploy:
       resources:
         limits:
@@ -229,7 +240,7 @@ services:
       PERSONALITY_DB_PASSWORD: *strict-app-db-password
       PERSONALITY_REDIS_PASSWORD: *strict-redis-password
     logging: *default-logging
-    <<: [*default-restart, *strict-db-client]
+    <<: [*default-restart, *strict-db-client, *strict-environment]
     deploy:
       resources:
         # RoBERTa model inflates memory footprint
@@ -244,7 +255,7 @@ services:
       # crisis-consumer-required and PHI-log-sanitizer production guards fire.
       NOTIFICATION_SERVICE_ENV: ${ENVIRONMENT:?ENVIRONMENT must be set}
     logging: *default-logging
-    <<: [*default-restart, *strict-db-client]
+    <<: [*default-restart, *strict-db-client, *strict-environment]
 
   analytics-service:
     ports: !reset []
@@ -254,7 +265,7 @@ services:
       # lockdown and the PHI-log-sanitizer production guard fire.
       ANALYTICS_SERVICE_ENV: ${ENVIRONMENT:?ENVIRONMENT must be set}
     logging: *default-logging
-    <<: [*default-restart, *strict-db-client]
+    <<: [*default-restart, *strict-db-client, *strict-environment]
 
   # The schema job: solace_migrator over verified TLS (the base file holds its command and image).
   migrate:
@@ -265,7 +276,7 @@ services:
       POSTGRES_SSL_MODE: *strict-ssl-mode
       POSTGRES_SSL_ROOT_CERT: *strict-ssl-root-cert
     logging: *default-logging
-    <<: *strict-db-client
+    <<: [*strict-db-client, *strict-environment]
 
   # ---- Infra services: keep internal-only (no host port publication) ----
   postgres:
@@ -373,6 +384,13 @@ networks:
 
 # File secrets (D-15): one file per secret in the SOLACE_SECRETS_DIR host directory, mounted at
 # /run/secrets/<name> only in the services that list it.
+# WS-03.F1: the only two ENVIRONMENT values this overlay accepts (x-strict-environment above).
+configs:
+  strict-environment-staging:
+    content: staging
+  strict-environment-production:
+    content: production
+
 secrets:
   postgres-ca.crt:
     file: ${SOLACE_SECRETS_DIR:?SOLACE_SECRETS_DIR must be set}/postgres-ca.crt
