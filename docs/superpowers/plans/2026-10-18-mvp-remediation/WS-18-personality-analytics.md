@@ -717,6 +717,7 @@ Run: same command. Expected: PASS
 **Review:** standard
 **Decision gate:** none
 **Real infra:** no
+**From the W0 bug round:** A-3: the analytics API puts exception text into error responses (minor PHI leak shape). The same defect in therapy is WS-15.11. Add a RED case that rejected input and unexpected failures return fixed messages with no `str(exc)`. (The bug-round hunter text was not preserved; this line is rebuilt from the 2026-11-03 ledger summary and this task's own scope. Re-confirm the failure in a RED test before fixing.)
 **Files:**
 - Modify: `services/personality_service/src/schemas.py` (`DetectPersonalityRequest.sources`: `min_length=1`; `TraitScoreDTO.sample_count: int = Field(ge=1, default=1)`, matching the domain `TraitScore`)
 - Modify: `services/personality_service/src/api.py` (`/detect` maps `ValueError` to `HTTPException(400, detail="Invalid personality request")` and `/adapt` to `"Invalid adaptation request"`; neither echoes `str(e)` nor logs it, logging `error_type` only)
@@ -1848,6 +1849,7 @@ Run: same command. Expected: PASS
 **Review:** standard
 **Decision gate:** D-18 (default assumed: counters stay in memory, ClickHouse stays out of scope, and reports state their coverage instead of persisting)
 **Real infra:** no
+**From the W0 bug round:** C-7: analytics does not stop cleanly (background work outlives the lifespan) and its retention window is cut short. Add a RED case that shutdown cancels and awaits every analytics task, and that the retention window matches the documented one. (The bug-round hunter text was not preserved; this line is rebuilt from the 2026-11-03 ledger summary and this task's own scope. Re-confirm the failure in a RED test before fixing.)
 **Files:**
 - Modify: `services/analytics-service/src/aggregations.py` (`MetricsStore(max_windows_per_metric: int = 1000, retention_hours: int = 168, minute_resolution_hours: int = 2)`: records older than `retention_hours` are dropped and counted in `records_dropped`; minute buckets older than `minute_resolution_hours` are folded into hour buckets with the same labels, and older records go straight to hour buckets, so each value lives in exactly one bucket; the window cap applies per label set; `MetricBucket` keeps no per-value list; new `started_at: datetime`; `AnalyticsAggregator.get_dashboard_metrics` returns `coverage_start`)
 - Modify: `services/analytics-service/src/main.py` (`_create_services` passes `retention_hours=settings.metrics.default_retention_hours`)

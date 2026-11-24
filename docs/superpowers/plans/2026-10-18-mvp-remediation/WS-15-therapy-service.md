@@ -1097,6 +1097,7 @@ Run: same command. Expected: PASS
 **Review:** standard
 **Decision gate:** D-11 (default assumed: internal services keep FastAPI's `{detail}` body; codes are `detail.code`)
 **Real infra:** no
+**From the W0 bug round:** A-3: the therapy API puts exception text into error responses or logs (a PHI leak shape; minor). The same defect in analytics is WS-18.7. Add a RED case that a domain or unexpected failure returns a fixed message with no `str(exc)`, and fix it with the status mapping. (The bug-round hunter text was not preserved; this line is rebuilt from the 2026-11-03 ledger summary and this task's own scope. Re-confirm the failure in a RED test before fixing.)
 **Files:**
 - Modify: `services/therapy_service/src/api.py` (`process_message`, `start_session`, `end_session` check `result.success`; `SESSION_NOT_FOUND` 404, `USER_ID_MISMATCH` 403, `TREATMENT_PLAN_NOT_FOUND` 409, any other failure 500; `detail={"code": <error_code>, "message": <fixed text>}`; `ValueError` handlers return a fixed `"Invalid request"` message instead of `str(e)`; `end_session` with `generate_summary=false` returns 200 with a minimal `SessionSummaryDTO`)
 - Modify: `services/therapy_service/src/domain/models.py` (`SessionEndResult.session_number: int = 0`)

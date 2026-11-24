@@ -1230,6 +1230,7 @@ Run: same command. Expected: PASS
 **Review:** security-critical
 **Decision gate:** D-10 (default assumed: one global chain serialized by `pg_advisory_xact_lock(hashtext('solace_audit_chain'))`; `AUDIT_HMAC_KEY` from the secrets store; rows hold ids and codes only)
 **Real infra:** yes
+**From the W0 bug round:** C-4: the audit logger is not wired in any service and no strict check asks for its key. This task provides the writer API; WS-04.10 wires it and makes `AUDIT_HMAC_KEY` required in strict. Add a RED case that a strict runtime without the key refuses to start. (The bug-round hunter text was not preserved; this line is rebuilt from the 2026-11-03 ledger summary and this task's own scope. Re-confirm the failure in a RED test before fixing.)
 **Files:**
 - Create: `src/solace_security/audit_runtime.py` (`AuditConfigError`, `AuditKeyring`, `AuditWriter`, `ChainVerification`, `ALLOWED_DETAIL_KEYS`, `sanitize_details`, `compute_event_hash`, `configure_service_audit`, `audit`, `verify_chain`, `verify_chain_on`, `reset_audit_runtime`, gauges `solace_audit_chain_verify_ok` and `solace_audit_chain_tip_seq`; failures are counted on WS-04.3's `solace_infrastructure.runtime.metrics.AUDIT_WRITE_FAILURES` (`solace_audit_write_failures_total{service}`), imported inside the failure path and never re-declared here, so a service that loads both modules does not hit `Duplicated timeseries`)
 - Modify: `src/solace_security/audit.py` (`AuditSettings.hmac_retired_keys_json: str = Field(default="[]")`, read as `AUDIT_HMAC_RETIRED_KEYS_JSON`)
@@ -1575,6 +1576,7 @@ Run: same command. Expected: PASS
 **Review:** security-critical
 **Decision gate:** none
 **Real infra:** no
+**From the W0 bug round:** A-1: validation input still reaches the logs through four shapes; add all four to this task's RED: a top-level `errors()` dict spread into the event, a `value_error` `msg` or `ctx` string that holds the input, a pydantic model repr that holds error dicts, and `str(ValidationError)` of models built with `hide_input_in_errors`. A-2: scrub asyncpg error text (IntegrityError detail, server-side DataError) in the runtime log chain, not per repository; the owner commitment is synthetic data only until W3. A-4 (config-service echoes validator `msg` and logs `str(exc)`) is not reachable in the MVP, because config-service is not deployed (D-19); it is accepted by Ruling and needs no change here.
 **Files:**
 - Modify: `src/solace_security/phi_protection.py` (new `class LogEventSanitizer` with module constants `SAFE_KEYS`, `ALWAYS_REDACT_KEYS`, `FREE_TEXT_KEYS`, `ERROR_KEYS`, `TRACEBACK_KEYS`, `SENSITIVE_KEY_TOKENS`, `PROSE_MIN_WORDS = 4`, `MAX_DEPTH = 8`; `phi_sanitizer_processor` delegates to it inside a never-raise wrapper; `PHISanitizer.sanitize_dict` coerces keys with `str(key)` and `PHISanitizer._is_sensitive_key` uses token matching)
 - Test: `tests/solace_security/test_mvp_093_log_sanitizer.py` (create)

@@ -353,6 +353,7 @@ The test accepts `get_or_create_service_event_plane` as well, so it stays valid 
 **Review:** safety-critical
 **Decision gate:** none
 **Real infra:** no
+**From the W0 bug round:** B-4: a crisis event whose handler failed must not be recorded as processed; the idempotency claim is made only after success, a failure retries in place and then reaches the durable DLQ. WS-13.8 puts the notification consumer on the same rules and owns its RISK_ALERT visibility. (The bug-round hunter text was not preserved; this line is rebuilt from the 2026-11-03 ledger summary and this task's own scope. Re-confirm the failure in a RED test before fixing.)
 **Files:**
 - Modify: `src/solace_events/errors.py`. Add:
   - `class EventPlaneError(Exception)`;
@@ -599,6 +600,7 @@ async def test_mvp_138_duplicate_after_success_is_skipped():
 **Review:** safety-critical
 **Decision gate:** D-20 (decided 2026-10-19: aiokafka at its D-16 lock pin is installed at W0 entry by the controller into the dedicated venv `D:\tmp\mvp-exec\venv`, created with `--system-site-packages` over the anaconda interpreter, which stays untouched; every command here already runs that venv's interpreter. The W0 barrier also runs the suites in the clean lock-only venv `D:\tmp\mvp-exec\venv-clean` (WS-01.2), so this task's unit tests must pass there too.)
 **Real infra:** yes
+**From the W0 bug round:** B-5: one failing or uncommittable message must not stall the partition or stop the consume loop; the loop isolates per message, seeks back on an uncommittable message and recovers from a commit failure (this task's scope). Add a RED case on the crisis topic: a poison message followed by a crisis event still delivers the crisis event. (The bug-round hunter text was not preserved; this line is rebuilt from the 2026-11-03 ledger summary and this task's own scope. Re-confirm the failure in a RED test before fixing.)
 **Files:**
 - Modify: `src/solace_events/consumer.py`:
   - `KafkaConsumerAdapter.seek(topic, partition, offset)` is a concrete method that raises `NotImplementedError`, implemented by both adapters;
@@ -1102,6 +1104,7 @@ async def test_mvp_051_two_reapers_never_redrive_the_same_row_twice(pg_migrated)
 **Review:** safety-critical
 **Decision gate:** D-14 (default assumed: staging is as strict as production; every guard uses strictness, never 'production' alone). D-20 (decided 2026-10-19: aiokafka is installed in the dedicated venv `D:\tmp\mvp-exec\venv` at W0 entry, never in anaconda, and the lock-only venv `D:\tmp\mvp-exec\venv-clean` proves it at the W0 barrier).
 **Real infra:** yes
+**From the W0 review:** `KafkaEventBridge.start()` leaks the producer when a later start step fails, `stop()` is a no-op when `_started` is False, and the outbox poller is not a runtime background task (WS-12.1 and WS-15.1 reviews). The plane is the one composition root, so it owns the fix: RED cases that a failed partial start stops everything it already started, that `stop()` after a failed start releases the producer, and that the poller is registered with `runtime.register_background_task` so `/live` shows a dead poller. WS-06.9 (the bridges delegate to the plane) must keep the bridge-level `start()` and `stop()` idempotent. From the W0 bug round, C-1 (therapy accepted `THERAPY_KAFKA_USE_MOCK` in strict) was fixed in W0 by WS-15.F1; this task's strict fail-loud rule subsumes that guard and must keep its tests green.
 **Files:**
 - Create: `src/solace_events/_env.py` (`def is_strict_env(env: str | None = None) -> bool`: `env`, or else `os.environ["ENVIRONMENT"]` (default `"development"`), lower-cased, is in `{"staging", "production"}`)
 - Create: `src/solace_events/service_plane.py` (IF-05; see Interfaces)
@@ -1273,6 +1276,7 @@ The test passes `strict=False` because the testcontainers broker is published on
 **Review:** safety-critical
 **Decision gate:** D-14 (default assumed: staging is strict)
 **Real infra:** no
+**From the W0 review:** Each bridge's `start()` and `stop()` stay safe after a failed or partial start (the `KafkaEventBridge` producer leak, owner WS-06.8). Add a RED case per bridge: start fails midway, then `stop()` releases everything and a second `stop()` is a no-op.
 **Files:**
 - Modify all seven bridge files. In each:
   - the constructor obtains `self._plane = get_or_create_service_event_plane("<service>", pool=postgres_pool, kafka_settings=kafka_settings, use_mock=use_mock)`. In strict, `EventPlaneConfigError` propagates out of `initialize_*`;

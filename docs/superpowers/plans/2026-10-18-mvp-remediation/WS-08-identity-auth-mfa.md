@@ -499,6 +499,7 @@ Run: same command. Expected: PASS
 **Review:** security-critical
 **Decision gate:** D-26 (default assumed: identity routes fail closed with 503 when the revocation or session backend errors; the shared middleware's own check fails open, per WS-07.5)
 **Real infra:** yes
+**From the W0 review:** `POST /api/v1/auth/revoke-token` answers a well-formed `Bearer <garbage>` with 503 `revocation service unavailable` instead of 401 (pre-existing; WS-14.3 kept the local `TokenInvalidError` catch, but the fallthrough still maps a garbage token to the backend-error path). Add a RED case: a malformed or unverifiable bearer is 401, and only a real revocation-backend error is 503 `IDENTITY_BACKEND_UNAVAILABLE`. This task owns the 503 mapping in `api_deps.py`, so it owns this fix.
 **Files:**
 - Modify: `services/user-service/src/infrastructure/jwt_service.py`:
   - the local `TokenBlacklist`, `InMemoryTokenBlacklist` and `RedisTokenBlacklist` are deleted and re-exported from `solace_security.auth`;

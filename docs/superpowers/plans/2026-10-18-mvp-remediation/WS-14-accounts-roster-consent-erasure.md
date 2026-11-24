@@ -641,6 +641,7 @@ Expected: all pass.
 **Decision gate:** none
 **Real infra:** yes
 
+**From the W0 review:** `UserService.update_preferences` runs its existence check as the caller instead of inside `acting_as_user(user_id)`, so under RLS a read that should see the row can return empty (an authorization and RLS defect, from the WS-14.1 review SPE-1). This task edits every `except Exception` path of `update_preferences`: add a RED case that the existence check runs under the user's RLS context, and make it so. Neither WS-14.8 nor WS-14.20 touches this method.
 **Files:**
 - Modify: `services/user-service/src/infrastructure/repository.py`. New abstract `UserRepository.save_with_preferences(user: User, preferences: UserPreferences, *, preferences_repository: UserPreferencesRepository) -> User`. In-memory implementations write the preferences through `preferences_repository`; SQL implementations write both rows in one transaction and ignore it.
 - Modify: `services/user-service/src/infrastructure/postgres_repository.py`:

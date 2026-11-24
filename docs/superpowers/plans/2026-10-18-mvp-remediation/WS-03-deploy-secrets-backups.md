@@ -704,6 +704,7 @@ Run: the four commands of Step 2. Expected: PASS
 **Decision gate:** D-12 (accepted 2026-10-19: Amazon SES in the pilot Region through its SMTP interface with STARTTLS, `EMAIL_SMTP_TLS_MODE=starttls`; SMS optional for CRITICAL; push out of scope; from W3 the SES SMTP username and password are file secrets from the environment's SOPS file (WS-03.8, D-07), and verifying the SES domain identity is an owner action (WS-03.20, D-25)), D-28 (default assumed: notification-service is the only pager and owns the acknowledgement link)
 **Real infra:** yes (`caddy adapt` for the acknowledgement route; BOOTSMOKE)
 **Cross-workstream prerequisites:** WS-13 reads `EMAIL_SMTP_TLS_MODE`, `NOTIFICATION_ACK_BASE_URL` and the coalescing/re-page settings in W1 phase B (IF-09); WS-04.7 consumes the Alertmanager rows and the Prometheus mount. This task also lands every env, route and service request that other plans address to WS-03 for wave 1 or wave 2 (WS-03 has no W2 wave).
+**From the W0 bug round:** C-5: the notification delivery settings (SMTP host, port, TLS mode, sender, fallback mailbox) are not part of the env contract, so a strict boot can start with an alert channel that cannot send. Registry rows and a strict check are in this task's scope; WS-13.7 owns the TLS mode and the single-attempt behaviour. (The bug-round hunter text was not preserved; this line is rebuilt from the 2026-11-03 ledger summary and this task's own scope. Re-confirm the failure in a RED test before fixing.)
 **Files:**
 - Modify: `docker-compose.yml` (notification-service: `EMAIL_ENABLED: ${EMAIL_ENABLED:-true}`, `EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST:-mailhog}`, `EMAIL_SMTP_PORT: ${EMAIL_SMTP_PORT:-1025}`, `EMAIL_SMTP_USERNAME`, `EMAIL_SMTP_PASSWORD`, `EMAIL_SMTP_TLS_MODE: ${EMAIL_SMTP_TLS_MODE:-none}`, `EMAIL_FROM_EMAIL: ${EMAIL_FROM_EMAIL:-alerts@localhost.invalid}`, `EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Solace-AI}`, `NOTIFICATION_FALLBACK_ONCALL_EMAIL: ${NOTIFICATION_FALLBACK_ONCALL_EMAIL:-fallback-oncall@localhost.invalid}`, `NOTIFICATION_ALERT_COALESCE_SECONDS: "900"`, `NOTIFICATION_REPAGE_AFTER_SECONDS: "900"`, `NOTIFICATION_MAX_REPAGES: "3"`, `NOTIFICATION_ACK_BASE_URL: ${NOTIFICATION_ACK_BASE_URL:-http://api.localhost:8088}`, `SMS_ENABLED: ${SMS_ENABLED:-false}` and the `SMS_*` names the code reads, `PUSH_ENABLED: "false"`; the misleading comment about setting `EMAIL_SMTP_HOST` through `.env.prod` is removed; prometheus mounts `./infrastructure/prometheus:/etc/prometheus:ro` instead of the single file)
 - Modify: `docker-compose.prod.yml` (notification-service: `EMAIL_SMTP_HOST`, `EMAIL_FROM_EMAIL`, `EMAIL_SMTP_USERNAME`, `EMAIL_SMTP_PASSWORD`, `NOTIFICATION_FALLBACK_ONCALL_EMAIL` are `:?`; `EMAIL_SMTP_PORT: ${EMAIL_SMTP_PORT:-587}`; `EMAIL_SMTP_TLS_MODE: ${EMAIL_SMTP_TLS_MODE:-starttls}`; `NOTIFICATION_ACK_BASE_URL: https://api.${DOMAIN:?...}`)
@@ -1656,6 +1657,7 @@ Run: same command. Expected: PASS
 **Decision gate:** D-25 (changed 2026-10-19: the release gate runs on the AWS staging host from `solace-staging.yaml`, reached through SSM, with the strict production profile; provisioning needs the owner to attach `solace-staging-deployer-policy.json` to the existing user `MedCodex-Local`; if the policy is still unattached at W5 entry the gate stops for the owner, with no silent fallback to a local host), D-07 (changed 2026-10-19: the docs describe SOPS + age, never a secrets store we do not use)
 **Real infra:** no
 **Cross-workstream prerequisites:** WS-12 updates the `/metrics` section of `services/safety_service/README.md` to describe the runtime-served endpoint (requested below); every lane has stopped reading the legacy names it owned (the scanner proves it).
+**From the W0 review:** Stale pieces the review and the W0 fix lane left for this task: `docs/STAGING-BRINGUP.md` line 116 still curls `/health` on a direct port, and the docs must say that external monitors use `/live` because `/ready` and `/health` are 404 at the edge (WS-03.F1); in a strict deploy `ENVIRONMENT` is exactly `staging` or `production`, and `CORS_ALLOWED_ORIGINS` lists only https origins that are not localhost (WS-04.F2). `deploy/env/env-contract.yaml` still lists the dead `THERAPY_DB_*` and `THERAPY_REDIS_*` rows (nothing reads them after WS-15.2) and the dead `USER_DB_*` and `USER_REDIS_*` rows (after WS-14.2); `docker-compose.yml` and `.github/workflows/ci.yml` still set the `USER_*` ones: drop them all with their tests.
 **Files:**
 - Modify: `README.md` (replaced: what Solace-AI is today, the ten services and shared packages, dev quickstart (`python -m deploy.env.generate_dev_env`, `docker compose up -d --build`, the dev edge at `http://api.localhost:8088`), test commands, links to the runbooks and the register; the Streamlit/Gemini content removed)
 - Modify: `docs/SYSTEM-DESIGN-SUMMARY.md` (status table and correction stamp rewritten to the W5 state: RS256-only user tokens and per-service keys, Prometheus rules plus Alertmanager, CI build and boot gates, Weaviate opt-in; design-only items (Kong, Istio, Kubernetes, mTLS, Vault) labelled design intent)
@@ -2185,6 +2187,31 @@ Expected: FAIL. `test_policy_is_a_managed_policy_for_the_existing_user` fails wi
 Run: same command. Expected: PASS
 - [ ] **Step 5: Regression:** DEPLOYREG; the cfn-lint command above. Expected: all pass.
 - [ ] **Step 6: Checkpoint:** `& D:\tmp\mvp-exec\tools\checkpoint.ps1 -Label "WS-03.20:done"` and record the printed tree id in the ledger. No git commit.
+
+### Task WS-03.F1: The edge refuses every variant of the internal paths, and the strict overlay refuses a non-strict ENVIRONMENT
+**Covers:** MVP-361, MVP-362
+**Severity:** high
+**Wave:** 0
+**Depends on:** WS-03.5
+**Implementer model:** sonnet
+**Review:** security-critical
+**Decision gate:** none. Added by controller Ruling on 2026-11-24 from the 2026-11-07 review of main (security.md SEC-1 and SEC-2, each upheld by its 3-skeptic panel with 0 refutes). Owner-recommended option for the review's question on `/ready` and `/health`: never route them at the edge.
+**Real infra:** the pinned `caddy:2.8-alpine` image for the real-Caddy probes (skipped without Docker); the compose render needs no running stack
+**Files:**
+- Modify: `Caddyfile`, `docker-compose.prod.yml`
+- Modify: `tests/deploy/test_mvp_250_caddy_edge.py`, `tests/deploy/test_mvp_004_environment_derivation.py`
+- Not touched: `docker-compose.yml`, the env registry, `.env.example`, any `src/` runtime file (the app-side control-character refusal in `RequestContextMiddleware` belongs to WS-04).
+**Interfaces:**
+- Produces (SEC-1): every `never_routed` entry is a prefix match: `/metrics* /docs* /redoc* /openapi.json* /status* /ready* /health* /api/v1/internal*`, applied to both proxied sites (`api.` and `auth.`). A request whose decoded path holds a control character (`path_regexp [[:cntrl:]]`) gets 400 after the 404 rules. `/live` stays routed.
+- Produces (SEC-2): `docker-compose.prod.yml` mounts the config `strict-environment-${ENVIRONMENT}` on `caddy`, `migrate` and the nine app services, and defines only `strict-environment-staging` and `strict-environment-production`. Any other `ENVIRONMENT` value (development, test, prod, case variants) fails `docker compose config` and `up` before anything starts.
+- Consequence for operators: `/ready` and `/health` answer 404 from outside, so an external monitor uses `/live`; in a strict deploy `ENVIRONMENT` is exactly `staging` or `production`.
+
+- [ ] **Step 1: Write the failing tests.** In `test_mvp_250_caddy_edge.py`: every variant of `/metrics`, `/ready`, `/health`, `/api/v1/internal` (suffix `%0A`, `%0D%0A`, `%09`, `%00`, `%20`, `%2F`, trailing slash, upper case, dot segments) is 404 on both sites; a control character in any path is 400; `/live` and `/api/v1/chat` are proxied; `caddy validate` prints `Valid configuration` for the dev and strict plain-host sites. In `test_mvp_004_environment_derivation.py`: through the compose render harness, `development`, `test`, `prod` and a case variant are refused, `staging` and `production` render with the strict ports only on caddy.
+- [ ] **Step 2: Run them and confirm they fail.** Run: `UNIT D:\Repo\Contextual-Chatbot\tests\deploy\test_mvp_250_caddy_edge.py` and `UNIT D:\Repo\Contextual-Chatbot\tests\deploy\test_mvp_004_environment_derivation.py`. Expected: 16 unit cases fail (the 4 Caddyfile cases and 12 overlay cases). The real Caddy probe on the old file gives `/metrics%0A` -> 502/503 and proxies `/ready` and `/health`.
+- [ ] **Step 3: Implement** the prefix entries and the control-character rule in the Caddyfile, and the config allow-list in the prod overlay. Rewrite the three existing `test_mvp_250` assertions that named the old exact tokens to the prefix tokens (the new assertions are stronger).
+- [ ] **Step 4: Run them and confirm they pass.** Run: same commands, with `SOLACE_RUN_DOCKER_TESTS=1` for the real-Caddy cases. Expected: PASS (28 in `test_mvp_250` with Docker).
+- [ ] **Step 5: Regression:** `UNIT D:\Repo\Contextual-Chatbot\tests\deploy` (125 passed, 19 skipped), `UNIT D:\Repo\Contextual-Chatbot\tests\solace_testing` (259), `UNIT D:\Repo\Contextual-Chatbot\tests\security\test_config_secrets_hardening.py` (10).
+- [ ] **Step 6: Checkpoint and commit.** Delivered as commit `0efe9af` on `w0-barrier`; report `docs/mvp/exec-state/reports/W0-close-laneA-report.md`.
 
 ---
 

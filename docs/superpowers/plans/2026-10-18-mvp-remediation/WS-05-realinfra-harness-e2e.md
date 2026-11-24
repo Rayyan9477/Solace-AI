@@ -1914,6 +1914,29 @@ async def test_every_phrase_set_positive_is_detected_by_the_deployed_stack(e2e_s
 - [ ] **Step 5: Regression.** Run the E2E command (dev) with `tests/e2e`. Expected: pass or XFAIL as listed. The `phrase_recall` directory builds its own stack.
 - [ ] **Step 6: Checkpoint:** `& D:\tmp\mvp-exec\tools\checkpoint.ps1 -Label "WS-05.22:done"` and record the printed tree id in the ledger. No git commit.
 
+### Task WS-05.F1: The CI e2e job requires real infrastructure, and an expected-failure entry can pin its cause
+**Covers:** MVP-365
+**Severity:** high
+**Wave:** 0
+**Depends on:** WS-05.5, WS-05.6
+**Implementer model:** sonnet
+**Review:** standard
+**Decision gate:** none. Added by controller Ruling on 2026-11-24 from the 2026-11-07 review of main (crisis.md CR-4 and CR-3, upheld by the skeptic panel).
+**Real infra:** yes for the live dev crisis run that observed the cause text (Docker)
+**Files:**
+- Modify: `.github/workflows/ci.yml`, `src/solace_testing/e2e_manifest.py`, `tests/e2e/expected_failures.yaml`
+- Modify: `tests/build/test_mvp_038_ci_workflow.py`, `tests/solace_testing/test_mvp_039_manifest_plugin.py`
+**Interfaces:**
+- Produces (CR-4): the `workflow_dispatch` e2e job runs `run_suites.py --tier e2e --profile ${{ matrix.profile }} --require-realinfra`, so a missing Docker daemon fails the job instead of skipping it.
+- Produces (CR-3): a manifest entry may set an optional `cause`, a regular expression searched in `"<ExceptionType>: <message>"` of the error that failed the hop. At the expected hop a cause that does not match FAILS (`manifest expects hop '<x>' to fail with a cause matching '<re>', got <Type>`). An invalid or empty pattern is a schema error. Entries without `cause` behave as before. The 8 dev crisis entries pin `No module named scripts\.provision_clinician`, the cause observed live.
+
+- [ ] **Step 1: Write the failing tests:** `test_e2e_job_requires_real_infrastructure` in the CI workflow test; plugin cases for a matching cause (XFAIL), a different cause at the same hop (FAIL), an invalid pattern, and the pin on the 8 crisis entries.
+- [ ] **Step 2: Run them and confirm they fail.** Expected: 3 failed against the original plugin (the CI flag, an unexpected keyword `cause`, `unknown key 'cause'`), and the pin test fails with `cause=None`.
+- [ ] **Step 3: Implement** the flag, the `cause` field and check, and the 8 pins.
+- [ ] **Step 4: Run them and confirm they pass.** Expected: 35 passed; a live dev rerun gives `8 xfailed`.
+- [ ] **Step 5: Regression:** `tests\build` (289 passed + the two lock-advisory baseline failures), `tests\solace_testing` (265), `tests\e2e` (38 passed + 8 xfailed live dev), `tests\scripts` (15 + 1 skipped).
+- [ ] **Step 6: Checkpoint and commit.** Delivered as commit `a30b6e2`. WS-05.8 still moves the 8 entries when WS-14.9 lands the provisioning CLI.
+
 ## Cross-workstream requests
 
 | # | Owner | Exact change | Files | Needed by |

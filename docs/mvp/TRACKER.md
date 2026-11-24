@@ -13,7 +13,7 @@ The register's statuses are derived from this file at each barrier (`fixed` when
 
 | Status | todo | in-progress | review | fixing | done | blocked | deferred | total |
 |---|---|---|---|---|---|---|---|---|
-| Tasks | 269 | 0 | 0 | 0 | 58 | 3 | 0 | 330 |
+| Tasks | 269 | 0 | 0 | 0 | 62 | 3 | 0 | 334 |
 
 | Wave | Phase A done / total | Phase B done / total | Active | Blocked |
 |---|---|---|---|---|
@@ -28,9 +28,9 @@ The register's statuses are derived from this file at each barrier (`fixed` when
 |---|---|
 | WS-01 | 14 / 18 |
 | WS-02 | 7 / 9 |
-| WS-03 | 5 / 20 |
-| WS-04 | 7 / 16 |
-| WS-05 | 3 / 22 |
+| WS-03 | 6 / 21 |
+| WS-04 | 8 / 17 |
+| WS-05 | 4 / 23 |
 | WS-06 | 2 / 14 |
 | WS-07 | 1 / 12 |
 | WS-08 | 0 / 21 |
@@ -38,20 +38,20 @@ The register's statuses are derived from this file at each barrier (`fixed` when
 | WS-10 | 0 / 16 |
 | WS-11 | 1 / 21 |
 | WS-12 | 2 / 19 |
-| WS-13 | 2 / 18 |
+| WS-13 | 3 / 19 |
 | WS-14 | 3 / 22 |
 | WS-15 | 2 / 23 |
 | WS-16 | 1 / 22 |
 | WS-17 | 3 / 19 |
 | WS-18 | 2 / 19 |
 
-**Register entries:** 54 of 345 covered entries fixed (all their tasks done); 13 partly done.
+**Register entries:** 60 of 351 covered entries fixed (all their tasks done); 13 partly done.
 
 <!-- mvp:summary:end -->
 
 ## Barrier log
 
-Filled at each wave barrier (master plan, section 5.5). The tree zip is the only durable copy of the barrier, because there are no commits (D-17).
+Filled at each wave barrier (master plan, section 5.5). Each barrier is a commit on the program branch plus a snapshot tree id in `exec-state/snapshots/snapshots.log`; the owner merges the branch through a PR (D-17 is superseded).
 
 | Wave | Date | Barrier tree | Zip copied off-machine | Suites green / test count | Register delta | Notes |
 |---|---|---|---|---|---|---|
@@ -130,7 +130,7 @@ Filled at each wave barrier (master plan, section 5.5). The tree zip is the only
 | [WS-18.1](../superpowers/plans/2026-10-18-mvp-remediation/WS-18-personality-analytics.md#task-ws-181-personality-adopts-the-if-01-runtime-and-boots-without-the-unused-redis-and-db-passwords) | Personality adopts the IF-01 runtime and boots without the unused Redis and DB passwords | blocker | standard | Sonnet | no | - | MVP-027 | `done` | fix1 e3543f6 (W181-SPE-1 closed) |
 | [WS-18.2](../superpowers/plans/2026-10-18-mvp-remediation/WS-18-personality-analytics.md#task-ws-182-analytics-adopts-the-if-01-runtime-a-dead-kafka-consumer-shows-in-ready-the-lint-gate-is-clean) | Analytics adopts the IF-01 runtime; a dead Kafka consumer shows in /ready; the lint gate is clean | medium | standard | Sonnet | no | - | MVP-110 | `done` | fix1 99a2e5a (W182-SPE-1, SPE-2 closed) |
 
-### W0 Phase not scheduled yet: 6 tasks
+### W0 Phase not scheduled yet: 10 tasks
 
 | Task | Title | Sev | Review | Model | Infra | Waits on (same phase) | Covers | Status | Notes |
 |---|---|---|---|---|---|---|---|---|---|
@@ -138,8 +138,12 @@ Filled at each wave barrier (master plan, section 5.5). The tree zip is the only
 | [WS-01.F2](../superpowers/plans/2026-10-18-mvp-remediation/WS-01-build-deps-ci.md#task-ws-01f2-patch-level-bumps-for-the-checkpoint-path-advisories-held-by-exact-pins) | Patch-level bumps for the checkpoint-path advisories held by exact pins | high | security-critical | Opus | no | - | MVP-358, MVP-359 | `done` | trees a5b1852..2d0519c + controller comment fixes; review R1 routed (LANGGRAPH_STRICT_MSGPACK: WS-01.F4 image, WS-03.2 compose, WS-10.10 test) |
 | [WS-01.F3](../superpowers/plans/2026-10-18-mvp-remediation/WS-01-build-deps-ci.md#task-ws-01f3-the-repos-tests-package-wins-over-portkey-ais-site-packages-tests) | The repo's tests package wins over portkey-ai's site-packages "tests" | high | standard | Sonnet | no | - | MVP-005 | `done` | trees 0226536..34ade92; tests resolves to repo; deploy 20, solace_testing 174; sandbox regression clean |
 | [WS-01.F4](../superpowers/plans/2026-10-18-mvp-remediation/WS-01-build-deps-ci.md#task-ws-01f4-entrypoint-hardening-from-the-ws-016-review) | Entrypoint hardening from the WS-01.6 review | low | security-critical | Sonnet | yes | - | MVP-211 | `done` | fix1 d966612 APPROVED (all 6 prior closed, 10 images verified); controller fixed minor CLO-1 (boolean flag before dotted app attr) test-first |
+| [WS-03.F1](../superpowers/plans/2026-10-18-mvp-remediation/WS-03-deploy-secrets-backups.md#task-ws-03f1-the-edge-refuses-every-variant-of-the-internal-paths-and-the-strict-overlay-refuses-a-non-strict-environment) | The edge refuses every variant of the internal paths, and the strict overlay refuses a non-strict ENVIRONMENT | high | security-critical | Sonnet | no | - | MVP-361, MVP-362 | `done` | 0efe9af: edge prefix never-routed + control-char 400; strict overlay allow-list; RED 16 -> GREEN; deploy 125+19 skipped |
 | [WS-04.F1](../superpowers/plans/2026-10-18-mvp-remediation/WS-04-service-runtime-observability.md#task-ws-04f1-if-01-hardening-from-the-integrated-audit-lifespan-shape-phi-paths-body-limit-teardown) | IF-01 hardening from the integrated audit (lifespan shape, PHI paths, body limit, teardown) | high | security-critical | Opus | no | - | MVP-036, MVP-180, MVP-332 | `done` | fix2 f6378aa approved on closure; controller fixed the important regression WS04F1F2-PHI-1 (quadratic marker regex, ReDoS) test-first; minor WS04F1F2-PHI-2 parked for the W0 bug round |
+| [WS-04.F2](../superpowers/plans/2026-10-18-mvp-remediation/WS-04-service-runtime-observability.md#task-ws-04f2-strict-cors-needs-https-origins-that-are-not-local-and-three-strict-only-guards-treat-staging-as-strict) | Strict CORS needs https origins that are not local, and three strict-only guards treat staging as strict | medium | security-critical | Sonnet | no | - | MVP-363, MVP-364 | `done` | e715074: strict CORS https/non-local; 3 guards strict on staging; RED 49 -> GREEN 71; audit half to WS-04.10 |
+| [WS-05.F1](../superpowers/plans/2026-10-18-mvp-remediation/WS-05-realinfra-harness-e2e.md#task-ws-05f1-the-ci-e2e-job-requires-real-infrastructure-and-an-expected-failure-entry-can-pin-its-cause) | The CI e2e job requires real infrastructure, and an expected-failure entry can pin its cause | high | standard | Sonnet | yes | - | MVP-365 | `done` | a30b6e2: CI e2e --require-realinfra; manifest cause pin; RED 3 -> GREEN 35; live dev 8 xfailed |
 | [WS-09.F1](../superpowers/plans/2026-10-18-mvp-remediation/WS-09-phi-codec-audit-llm.md#task-ws-09f1-the-phi-log-sanitizer-never-recurses-into-the-logging-chain) | The PHI log sanitizer never recurses into the logging chain | high | security-critical | Opus | no | - | MVP-180 | `done` | trees a3b9a06..8da9ca2 (fix1, fix2); review findings closed; 24 new; stress 0 raw |
+| [WS-13.F1](../superpowers/plans/2026-10-18-mvp-remediation/WS-13-notification-alert-delivery.md#task-ws-13f1-the-strict-crisis-consumer-guard-is-proven-through-the-real-lifespan-including-its-allow-path) | The strict crisis-consumer guard is proven through the real lifespan, including its allow path | medium | standard | Sonnet | no | - | MVP-366 | `done` | ba7debb: 16 lifespan tests for strict crisis-consumer guard; mutations M1/M3 bite |
 
 ## W1: Crisis path
 

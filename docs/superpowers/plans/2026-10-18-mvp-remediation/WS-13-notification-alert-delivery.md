@@ -1097,6 +1097,7 @@ Run: same command. Expected: PASS
 **Review:** safety-critical
 **Decision gate:** D-12 (default assumed: SMTP relay with STARTTLS, `EMAIL_SMTP_TLS_MODE=starttls`; alert content as IF-09)
 **Real infra:** no (the SMTP path is proven against mailpit in WS-13.8)
+**From the W0 bug round:** C-5: strict alert settings. The SMTP TLS mode must be explicit and a strict environment must refuse a plaintext SMTP relay or an empty sender. Pair with WS-03.6, which adds the registry rows. (The bug-round hunter text was not preserved; this line is rebuilt from the 2026-11-03 ledger summary and this task's own scope. Re-confirm the failure in a RED test before fixing.)
 **Files:**
 - Modify: `services/notification-service/src/domain/templates.py` (`TemplateEngine` keeps `_text_env = Environment(autoescape=False, undefined=StrictUndefined)` for subjects and bodies and `_html_env = Environment(autoescape=True, undefined=StrictUndefined)` for `html_template`, replacing the shared `autoescape=True` env at lines 107-111; `TemplateType.CRISIS_UPDATE = "crisis_update"`; `CRISIS_ALERT` (lines 264-273) and `RISK_ALERT` (lines 283-292) rewritten without HTML, emoji or user text; new `CRISIS_UPDATE`)
 - Modify: `services/notification-service/src/domain/channels.py` (`EmailConfig.tls_mode: Literal["starttls", "tls", "none"] = "starttls"` replaces `use_tls`; the SMTP call at 312-317 passes `use_tls=tls_mode == "tls"`, `start_tls=tls_mode == "starttls"` and no custom `tls_context`; the message at 300-309 gains `Date = formatdate(usegmt=True)` and `Message-ID = make_msgid(domain=<domain of from_email>)`; `_EMAIL_PATTERN` (line 35) accepts the RFC 5322 dot-atom local part `[A-Za-z0-9.!#$%&'*+/=?^_\`{|}~-]+`; `NotificationChannel.send(..., *, max_attempts: int | None = None, attempt_timeout_seconds: float | None = None)` runs each attempt under `asyncio.wait_for` and sets `error_message` to the last exception's class name, never `str(exc)` (the `DeliveryError` text embeds the recipient address); the `notification_delivered` and `notification_delivery_failed` log lines at 231-239 drop `recipient=` and log `channel`, `attempt` and `error_type` only)
@@ -1236,6 +1237,7 @@ Run: same command. Expected: PASS
 **Review:** safety-critical
 **Decision gate:** D-06 (default assumed: ELEVATED pages no one; RISK_ALERT monitoring email coalesced per user per window), D-28
 **Real infra:** yes
+**From the W0 review:** CR-2: notification's `/ready` says the crisis consumer runs while it polls nothing (the consumer task is alive, the poll loop is not progressing). Readiness must come from WS-06.8's `plane.readiness()` and that readiness must reflect poll progress, for example the age of the last successful poll. Add a RED case: a consumer whose poll loop is stuck makes `/ready` 503 within the configured window. `CrisisConsumerStalled` (WS-04.7) stays the alert backstop. From the W0 bug round, B-4: a failed crisis delivery must not be marked processed; the retry or DLQ path must see it (this task and WS-06.3 own it together). (The bug-round hunter text was not preserved; this line is rebuilt from the 2026-11-03 ledger summary and this task's own scope. Re-confirm the failure in a RED test before fixing.)
 **Files:**
 - Modify: `services/notification-service/src/consumers.py` (delete `SafetyEventConsumer`, `UserServiceSettings`, `DeadLetterStoreSeam`, the module singletons and the `solace_events.consumer`/`dead_letter` imports; add `SAFETY_TOPIC = "solace.safety"`, `NOTIFICATION_GROUP = "solace-group-notifications"`, `SAFETY_EVENT_TYPES`, `register_safety_handlers`)
 - Create: `services/notification-service/src/domain/monitoring.py`
@@ -2362,6 +2364,26 @@ Expected: FAIL. The mixed request reports `delivered` with 0 failures because th
 Run: same command. Expected: PASS
 - [ ] **Step 5: Regression:** Run: `$env:PYTHONPATH="D:\Repo\Contextual-Chatbot;D:\Repo\Contextual-Chatbot\src"; $env:ENVIRONMENT="test"; & "D:\tmp\mvp-exec\venv\Scripts\python.exe" -m pytest D:\Repo\Contextual-Chatbot\services\notification-service\tests -o "addopts=" -p no:logging -q`. Expected: all pass
 - [ ] **Step 6: Checkpoint:** `& D:\tmp\mvp-exec\tools\checkpoint.ps1 -Label "WS-13.18:done"` and record the printed tree id in the ledger. No git commit.
+
+### Task WS-13.F1: The strict crisis-consumer guard is proven through the real lifespan, including its allow path
+**Covers:** MVP-366
+**Severity:** medium
+**Wave:** 0
+**Depends on:** WS-13.2
+**Implementer model:** sonnet
+**Review:** standard
+**Decision gate:** none. Added by controller Ruling on 2026-11-24 from the 2026-11-07 review of main (crisis.md CR-1: removing the guard call from `main.py` left all 16 existing `test_if01_runtime_adoption.py` cases green; the old positive case "strict, Kafka enabled, not mock" had no direct test).
+**Real infra:** no
+**Files:**
+- Create: `services/notification-service/tests/test_ws13_f1_crisis_guard_wiring.py` (test only; no product code changes)
+**Interfaces:**
+- Produces: 16 cases that drive the real `main.lifespan` with the runtime bracket, service factory, event bridge and consumer start replaced by recorders, over four own/bare environment combinations (`production/production`, `staging/staging`, `development/production`, `staging/development`): strict without Kafka fails before the consumer starts; strict with a mock consumer fails before it starts; strict with a broker consumer starts it; dev and test without Kafka still boot; the guard's allow path is tested directly.
+
+- [ ] **Step 1: Write the failing tests** as above.
+- [ ] **Step 2: Prove they bite.** Run the file against two mutations of `main.py`: M1 (the guard call commented out) must fail 8 new cases (`DID NOT RAISE`) while the 16 existing adoption cases pass; M3 (the mock branch always raising) must fail 6 allow-path cases. Restore `main.py` byte for byte (`git diff` empty).
+- [ ] **Step 3: Run them on the real code and confirm they pass.** Expected: 16 passed.
+- [ ] **Step 4: Regression:** notification (168 passed, 7 skipped), `tests\bootstrap -k notification` (2).
+- [ ] **Step 5: Checkpoint and commit.** Delivered as commit `ba7debb`.
 
 ## Cross-workstream requests
 

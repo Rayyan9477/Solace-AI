@@ -263,6 +263,7 @@ Run: same commands. Expected: PASS
 **Review:** standard
 **Decision gate:** D-26 (default assumed: the bootstrap's `install_rate_limiting` is the only limiter)
 **Real infra:** no
+**From the W0 bug round:** C-6: the orchestrator main wiring reports ready while the graph or a peer is not usable. Readiness must reflect the real graph and peer state (honest readiness is this task's scope); add a RED case that a failed graph build or an unreachable required peer makes `/ready` 503. (The bug-round hunter text was not preserved; this line is rebuilt from the 2026-11-03 ledger summary and this task's own scope. Re-confirm the failure in a RED test before fixing.)
 **Files:**
 - Modify: `services/orchestrator_service/src/main.py` (lifespan: `assert_peer_endpoints(SPEC.environment)`, `graph_builder = await OrchestratorGraphBuilder.from_runtime(runtime)`, `register_orchestrator_readiness(...)`; delete `_register_rate_limiting`, `_trusted_proxy_hops`, `_make_principal_resolver`, `_rate_limiting_disabled`)
 - Test: `services/orchestrator_service/tests/test_mvp_160_readiness.py` (new); delete `services/orchestrator_service/tests/test_rate_limit_wiring.py` and `services/orchestrator_service/tests/test_trusted_proxy_hops.py` (their behaviour moves to the bootstrap's tests; record the count drop in the ledger)

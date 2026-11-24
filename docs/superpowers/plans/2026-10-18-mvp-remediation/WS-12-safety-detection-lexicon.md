@@ -653,6 +653,7 @@ Run: same command. Expected: PASS
 **Review:** safety-critical
 **Decision gate:** D-05 (default assumed: thresholds LOW 0.3 / ELEVATED 0.5 / HIGH 0.7 / CRITICAL 0.85 used only to map LLM scores; max-only fusion; one-band raises for context and trajectory) and D-06 (default assumed: 30-minute crisis watch)
 **Real infra:** no
+**From the W0 review:** B-1 did not reproduce on the 2026-11-07 audit machine: `check_safety('Just a normal message')` is safe there (safety suite 508 passed, `test_events.py` 28 passed), while the cloud VM showed it red at base 16586ff. First reproduce on a clean local checkout and in the strict image; if only the cloud environment differs (lexicon or model availability), record the cause in the report and close with evidence, and keep the RED test for the fusion fix this task makes.
 **Files:**
 - Modify: `services/safety_service/src/domain/crisis_detector.py` (delete `KeywordSet`, `Layer1InputGate` and the ML keyword/sentiment/pattern imports and auto-construction; `CrisisDetector(settings=None, llm_assessor=None)`; new `detect`; keep `Layer2ProcessingGuard`, `Layer3OutputFilter`, `Layer4ContinuousMonitor`, `_crisis_level_from_score`)
 - Modify: `services/safety_service/src/domain/factory.py` (`build_crisis_detector(*, llm_assessor=None, settings=None)` builds `CrisisDetectorSettings()` directly)
@@ -854,6 +855,7 @@ Run: same command. Expected: PASS
 **Review:** safety-critical
 **Decision gate:** D-28 (default assumed: safety publishes only through its transactional outbox; notification-service pages)
 **Real infra:** no
+**From the W0 bug round:** B-2: a failed escalation save is swallowed, so the API answers 201 with an escalation id that was never stored (hand-off from the WS-12.1 review CRI-2). B-3: `SafetyEventPublisher` drops its queue on shutdown, and `KafkaEventBridge.handle` swallows an outbox save failure. Add RED cases for each: a save failure is an error response and no unstored id is returned; a shutdown drains or persists queued events before returning; an outbox save failure reaches the caller. Check that the WS-12.9 acceptance covers the shutdown-drain case.
 **Files:**
 - Modify: `services/safety_service/src/events.py` (`SafetyEventPublisher` rewritten; `to_kafka_event` mapping; `SafetyCheckCompletedEvent.detection_layer`; drop `CrisisDetectedEvent.content_preview`)
 - Modify: `services/safety_service/tests/test_events.py` (`TestSafetyEventPublisher` and `TestSafetyEventPublishing` move from queue semantics to a fake plane), `services/safety_service/tests/test_crisis_event_flow.py` (publisher plus fake plane instead of the in-process queue and bridge)
@@ -1235,6 +1237,7 @@ Run: same command. Expected: PASS (the provider file SKIPPED in W1 as above)
 **Review:** security-critical
 **Decision gate:** D-03 (default assumed: service JWTs with receiver-side permission resolution; the orchestrator holds `service:read:safety`; `service:escalate` is held by no MVP caller)
 **Real infra:** no
+**From the W0 bug round:** C-3 (minor): a safety endpoint is reachable without a service permission check. This task puts a service permission on every safety endpoint; add a RED case that enumerates the app's routes and fails for any route without a permission dependency except `/live`, `/ready` and `/metrics`. (The bug-round hunter text was not preserved; this line is rebuilt from the 2026-11-03 ledger summary and this task's own scope. Re-confirm the failure in a RED test before fixing.)
 **Files:**
 - Modify: `services/safety_service/src/api.py` (module-level `require_read_safety = require_service_permission("service:read:safety")` on `/check`, `/detect-crisis`, `/assess`, `/filter-output`, `/resources`, `/status`; `require_trigger_escalation = require_service_permission("service:escalate")` on `/escalate`; drop the unused `get_current_user` import)
 - Modify: `services/safety_service/tests/test_api.py`, `services/safety_service/tests/test_if06_check_contract.py` and `services/safety_service/tests/test_mvp_017_contract_orchestrator_check.py` (override `api.require_read_safety` / `api.require_trigger_escalation` instead of `get_current_service`; all three created or existing before this task, the last two by WS-12.10)
