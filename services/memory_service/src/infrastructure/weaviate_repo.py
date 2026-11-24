@@ -98,10 +98,13 @@ class WeaviateRepository:
                         authenticated=bool(api_key_value))
         except ImportError:
             import os
+
+            from solace_security.production_guards import is_strict_environment
             logger.error("weaviate_client_not_installed",
                          hint="pip install weaviate-client")
-            if os.environ.get("ENVIRONMENT", "").lower() == "production":
-                raise RuntimeError("weaviate-client package required in production")
+            # D-14 (WS-04.F2, SEC-4): strict = the service's own MEMORY_ENVIRONMENT OR the bare ENVIRONMENT.
+            if is_strict_environment(os.environ.get("MEMORY_ENVIRONMENT") or "") or is_strict_environment():
+                raise RuntimeError("weaviate-client package required in staging and production")
         except Exception as e:
             logger.error("weaviate_init_failed", error=str(e))
 

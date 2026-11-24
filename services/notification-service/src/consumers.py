@@ -46,8 +46,11 @@ except ImportError:
     structlog.get_logger(__name__).error(
         "kafka_import_failed", package="solace_events",
         hint="Install solace_events for Kafka consumer support")
-    if os.environ.get("ENVIRONMENT", "").lower() == "production":
-        raise RuntimeError("solace_events package required in production")
+    from solace_security.production_guards import is_strict_environment
+
+    # D-14 (WS-04.F2, SEC-4): strict = the service's own NOTIFICATION_SERVICE_ENV OR the bare ENVIRONMENT.
+    if is_strict_environment(os.environ.get("NOTIFICATION_SERVICE_ENV") or "") or is_strict_environment():
+        raise RuntimeError("solace_events package required in staging and production")
 
 # Import domain service
 from .domain import (
