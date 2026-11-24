@@ -216,5 +216,7 @@ jobs:
         run: |
           python -c "import os,secrets;e=lambda k,v:open(os.environ['GITHUB_ENV'],'a').write(k+'='+v+'\n');[e(k,secrets.token_urlsafe(48)) for k in ('POSTGRES_PASSWORD','USER_DB_PASSWORD','SECURITY_JWT_SECRET','AUTH_SECRET_KEY')]"
 
+      # --require-realinfra: a runner without a reachable Docker daemon fails the job instead of
+      # skipping every e2e test and going green with nothing run (WS-05.F1, CR-4).
       - name: Run e2e suites
-        run: python scripts/ci/run_suites.py --tier e2e --profile ${{ matrix.profile }}
+        run: python scripts/ci/run_suites.py --tier e2e --profile ${{ matrix.profile }} --require-realinfra

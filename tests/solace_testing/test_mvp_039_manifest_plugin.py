@@ -325,3 +325,80 @@ def test_mvp_039_repo_manifests_are_valid():
     from solace_testing.e2e_manifest import load_manifest
     for path in (Path(__file__).resolve().parents[1]).rglob("expected_failures.yaml"):
         load_manifest(path)                                        # raises on schema errors
+
+
+# --- WS-05.F1 (W0-close review CR-3): an entry may also pin the cause of the failure at its hop ----------------
+
+
+def test_cause_pin_turns_a_different_failure_at_the_hop_into_a_fail():
+    from solace_testing.e2e_manifest import ManifestEntry, evaluate
+    e = ManifestEntry(test_id="x", expected_failing_hop="provision_clinician", target_wave=1, reason="r",
+                      cause=r"No module named '?scripts")
+    expected = evaluate("failed", "provision_clinician", e,
+                        "RuntimeError: scripts.provision_clinician exited 1:\npython: No module named scripts.provision_clinician")
+    assert expected.kind == "xfail"
+    other = evaluate("failed", "provision_clinician", e, "RuntimeError: account-setup returned 500")
+    assert other.kind == "fail" and "cause matching" in other.message and "RuntimeError" in other.message
+    assert "account-setup" not in other.message        # the verdict names the type; the traceback keeps the text
+    assert evaluate("failed", "provision_clinician", e).kind == "fail"     # no cause text: never a match
+    assert evaluate("failed", "login", e, "No module named scripts").kind == "fail"   # the hop still decides first
+    unpinned = ManifestEntry(test_id="x", expected_failing_hop="provision_clinician", target_wave=1, reason="r")
+    assert evaluate("failed", "provision_clinician", unpinned, "RuntimeError: anything").kind == "xfail"
+
+
+CAUSE_SAMPLE = '''
+from solace_testing.e2e_manifest import hop
+def test_cause_matches():
+    with hop("a"): raise RuntimeError("cli exited 1: No module named scripts.provision_clinician")
+def test_cause_differs():
+    with hop("a"): raise RuntimeError("account-setup returned 500")
+def test_cause_unpinned():
+    with hop("a"): raise RuntimeError("anything at all")
+'''
+CAUSE_MANIFEST = '''version: 1
+entries:
+  - {test_id: "test_cause.py::test_cause_matches", expected_failing_hop: a, target_wave: 1, reason: r, cause: "No module named '?scripts"}
+  - {test_id: "test_cause.py::test_cause_differs", expected_failing_hop: a, target_wave: 1, reason: r, cause: "No module named '?scripts"}
+  - {test_id: "test_cause.py::test_cause_unpinned", expected_failing_hop: a, target_wave: 1, reason: r}
+shortcuts: []
+'''
+
+
+def test_cause_pin_through_the_plugin(tmp_path):
+    (tmp_path / "test_cause.py").write_text(CAUSE_SAMPLE)
+    (tmp_path / "expected_failures.yaml").write_text(CAUSE_MANIFEST)
+    proc = _pytest(tmp_path, "test_cause.py")
+    assert "1 failed" in proc.stdout and "2 xfailed" in proc.stdout, proc.stdout
+    assert "FAILED test_cause.py::test_cause_differs" in proc.stdout
+    assert "manifest expects hop 'a' to fail with a cause matching" in proc.stdout
+    assert proc.returncode == 1
+
+
+def test_crisis_entries_pin_the_observed_w0_cause():
+    # The W0 dev crisis run (2026-11-24, lane A) failed every crisis test at provision_clinician with this text;
+    # any other failure inside that hop (a CLI bug once WS-14.9 lands it, account-setup, login, user-service down)
+    # must FAIL instead of reading XFAIL with the stale reason.
+    from solace_testing.e2e_manifest import DEFAULT_MANIFEST_DIR, MANIFEST_NAME, load_manifest
+    entries, _ = load_manifest(DEFAULT_MANIFEST_DIR / MANIFEST_NAME)
+    crisis = [e for e in entries if e.test_id.startswith("tests/e2e/test_crisis_alert_e2e.py::")
+              and e.expected_failing_hop == "provision_clinician"]
+    observed = ("RuntimeError: scripts.provision_clinician exited 1:\n"
+                "/opt/venv/bin/python: No module named scripts.provision_clinician")
+    assert len(crisis) == 8
+    for entry in crisis:
+        assert entry.cause and entry.cause_matches(observed), entry.test_id
+        for other in ("RuntimeError: account-setup: expected (200, 204), got 500",
+                      "RuntimeError: scripts.provision_clinician exited 1:\nservice \"user-service\" is not running",
+                      "RuntimeError: scripts.provision_clinician exited 2:\nusage: provision_clinician [-h] --email EMAIL",
+                      "KeyError: 'access_token'"):
+            assert not entry.cause_matches(other), (entry.test_id, other)
+
+
+@pytest.mark.parametrize("value", ["'('", "''", "1", "' '"])
+def test_cause_must_be_a_valid_non_empty_pattern(tmp_path, value):
+    from solace_testing.e2e_manifest import load_manifest
+    bad = tmp_path / "expected_failures.yaml"
+    bad.write_text("version: 1\nentries:\n"
+                   f"  - {{test_id: 't.py::x', expected_failing_hop: a, target_wave: 1, reason: r, cause: {value}}}\n")
+    with pytest.raises(pytest.UsageError, match="cause"):
+        load_manifest(bad)

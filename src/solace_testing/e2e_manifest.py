@@ -10,7 +10,8 @@ keeps such a test red *at a documented step* without hiding any other failure:
 
       version: 1
       entries:
-        - {test_id, expected_failing_hop, target_wave, reason, profiles?: [dev|strict], match?: exact|glob}
+        - {test_id, expected_failing_hop, target_wave, reason, profiles?: [dev|strict], match?: exact|glob,
+           cause?: <regular expression>}
       shortcuts:
         - {name, remove_by_wave, reason}
 
@@ -18,16 +19,21 @@ keeps such a test red *at a documented step* without hiding any other failure:
   exactly by default, so ``[``, ``]``, ``*`` and ``?`` in a parametrized id are literal.
   With ``match: glob`` it is a pattern in which only ``*`` and ``?`` are wildcards
   (``[`` stays literal). A manifest only lists tests of its own directory. ``profiles``
-  defaults to both profiles. Waves run from 0 to ``MAX_WAVE``.
+  defaults to both profiles. Waves run from 0 to ``MAX_WAVE``. ``cause`` (optional) pins
+  the failure as well as the hop: a Python regular expression searched in
+  ``"<ExceptionType>: <message>"`` of the error that failed the hop (``HopFailure.__cause__``),
+  so a different failure at the same hop is not hidden (WS-05.F1, CR-3).
 
 An entry is *active* when ``SOLACE_MANIFEST_IGNORE`` is unset, it is not due
 (``SOLACE_BARRIER_WAVE`` unset or lower than ``target_wave``) and its profiles contain
 ``SOLACE_E2E_PROFILE`` (default ``dev``). For an active entry, in both the setup and the
 call phase:
 
-* failing at the expected hop is reported XFAIL;
+* failing at the expected hop is reported XFAIL (with ``cause``: only when the cause matches);
 * failing at another hop, or outside any hop, FAILS:
   ``manifest expects hop '<x>', failed at '<y>'``;
+* failing at the expected hop with a cause that does not match the entry's ``cause`` FAILS:
+  ``manifest expects hop '<x>' to fail with a cause matching '<re>', got <ExceptionType>``;
 * passing FAILS: ``XPASS(strict): <id> passed before wave <n>; remove its manifest entry``;
 * a skip is left as a skip outside barrier runs (the manifest never turns anything into
   a pass).
@@ -62,6 +68,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import posixpath
+import re
 from collections.abc import Generator, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -157,11 +164,18 @@ class ManifestEntry:
     profiles: tuple[str, ...] = PROFILES
     match: Literal["exact", "glob"] = "exact"
     source: Path | None = field(default=None, compare=False)
+    cause: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "profiles", tuple(self.profiles))
         if self.match not in MATCH_MODES:
             raise ValueError(f"match must be one of {', '.join(MATCH_MODES)}, got {self.match!r}")
+        if self.cause is not None:
+            re.compile(self.cause)  # re.error (a ValueError) on an invalid pattern
+
+    def cause_matches(self, failure: str | None) -> bool:
+        """True when no cause is pinned, or ``failure`` contains a match of the pinned pattern."""
+        return self.cause is None or (failure is not None and re.search(self.cause, failure) is not None)
 
     @property
     def glob(self) -> bool:
@@ -201,10 +215,21 @@ class Verdict:
     message: str
 
 
-def evaluate(outcome: str, failed_hop: str | None, entry: ManifestEntry) -> Verdict:
-    """Judge one raw phase outcome (``passed``/``failed``/``skipped``) of an active entry."""
+def evaluate(outcome: str, failed_hop: str | None, entry: ManifestEntry, failure: str | None = None) -> Verdict:
+    """Judge one raw phase outcome (``passed``/``failed``/``skipped``) of an active entry.
+
+    ``failure`` is ``"<ExceptionType>: <message>"`` of the error that failed the hop; it is
+    only read when the entry pins a ``cause``, and the verdict names only its type.
+    """
     if outcome == "failed":
         if failed_hop is not None and failed_hop == entry.expected_failing_hop:
+            if not entry.cause_matches(failure):
+                got = "no error" if not failure else failure.split(":", 1)[0]
+                return Verdict(
+                    "fail",
+                    f"manifest expects hop '{entry.expected_failing_hop}' to fail with a cause matching "
+                    f"{entry.cause!r}, got {got}",
+                )
             return Verdict(
                 "xfail",
                 f"failed at the expected hop '{entry.expected_failing_hop}' "
@@ -291,7 +316,7 @@ def _entry(path: Path, index: int, raw: object) -> ManifestEntry:
     if not isinstance(raw, dict):
         raise ManifestError(f"{path}: {where} must be a mapping, got {raw!r}")
     _check_keys(
-        path, where, raw, ("test_id", "expected_failing_hop", "target_wave", "reason"), ("profiles", "match")
+        path, where, raw, ("test_id", "expected_failing_hop", "target_wave", "reason"), ("profiles", "match", "cause")
     )
     test_id = _text(path, where, raw, "test_id")
     if "::" not in test_id or not test_id.split("::", 1)[0] or not test_id.split("::", 1)[1]:
@@ -319,6 +344,13 @@ def _entry(path: Path, index: int, raw: object) -> ManifestEntry:
     match = raw.get("match", "exact")
     if match not in MATCH_MODES:
         raise ManifestError(f"{path}: {where}: key 'match' must be one of {', '.join(MATCH_MODES)}, got {match!r}")
+    cause: str | None = None
+    if "cause" in raw:
+        cause = _text(path, where, raw, "cause")
+        try:
+            re.compile(cause)
+        except re.error as exc:
+            raise ManifestError(f"{path}: {where}: key 'cause' must be a valid regular expression ({exc})") from exc
     return ManifestEntry(
         test_id=test_id,
         expected_failing_hop=_text(path, where, raw, "expected_failing_hop"),
@@ -327,6 +359,7 @@ def _entry(path: Path, index: int, raw: object) -> ManifestEntry:
         profiles=profiles,
         match=match,
         source=path,
+        cause=cause,
     )
 
 
@@ -646,6 +679,17 @@ def _raw_outcome(call: pytest.CallInfo[None]) -> tuple[str, str | None]:
     return "failed", excinfo.value.hop if isinstance(excinfo.value, HopFailure) else None
 
 
+def _failure_text(call: pytest.CallInfo[None]) -> str | None:
+    """``"<ExceptionType>: <message>"`` of the error that failed a hop (the HopFailure's cause)."""
+    excinfo = call.excinfo
+    if excinfo is None:
+        return None
+    error = excinfo.value
+    if isinstance(error, HopFailure) and error.__cause__ is not None:
+        error = error.__cause__
+    return f"{type(error).__name__}: {error}"
+
+
 def _restore_raw(report: pytest.TestReport, outcome: str, failure_message: str | None) -> None:
     """Undo pytest's xfail handling: a failure fails (with ``failure_message``), a pass passes."""
     had_xfail = hasattr(report, "wasxfail")
@@ -693,7 +737,7 @@ def _judge(item: pytest.Item, call: pytest.CallInfo[None], report: pytest.TestRe
             _fail(report, f"manifest-listed test skipped during barrier wave {state.barrier}; listed tests must run")
         return
     if entry is not None:
-        verdict = evaluate(outcome, failed_hop, entry)
+        verdict = evaluate(outcome, failed_hop, entry, _failure_text(call) if entry.cause is not None else None)
         if verdict.kind == "xfail":
             report.outcome = "skipped"
             report.wasxfail = verdict.message
