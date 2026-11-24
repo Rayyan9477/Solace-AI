@@ -34,11 +34,10 @@ export PYTHONPATH="$PWD:$PWD/src" ENVIRONMENT=test TELEMETRY_ENABLED=false
 
 - Real-infrastructure tests (Postgres, Kafka or Redis in Docker) run with `SOLACE_REQUIRE_REALINFRA=1`.
 - Remove images by tag (`docker rmi <tag>`, never `-f <id>`), and leave no containers or volumes behind.
-- Known baseline red:
-  - `tests/solace_infrastructure/kafka/test_topics.py` (12 cases);
-  - the per-service conformance cases of services not yet adopted (analytics, notification, personality, user);
-  - the import-root and lint owner cases of WS-12/14/16/18;
-  - the `/health` cases in `tests/system/test_smoke.py`, until WS-05.5.
+- Known baseline red (per-suite regression of 2026-11-07, plus lane A of 2026-11-24). Any other red is a regression: fix it, or log a Ruling before you list it here.
+  - `tests/solace_infrastructure/kafka/test_topics.py`: 12 cases.
+  - 4 cases in `tests/migrations` (TLS against a real Postgres): red only when Docker is off, so start Docker before you read them as a failure.
+  - 2 cases in `tests/build/test_mvp_359`: new advisories GHSA-vvf4-9x63-8xvv (dnspython 2.9.0) and GHSA-mf5v-w3w3-f6cg (opentelemetry-api 1.45.1) in the locks. The WS-01 lock owner bumps the pins or accepts the advisories (D-16).
 
 ## The MVP remediation program (current work)
 
