@@ -1176,6 +1176,7 @@ Run: same command. Expected: PASS
 **Decision gate:** D-10 (default assumed: audit_events in the same database, HMAC chain keyed by AUDIT_HMAC_KEY from the secrets store)
 **Real infra:** yes (BOOTSMOKE in dev and strict)
 **Cross-workstream prerequisites:** WS-09 W3 phase A `solace_security.audit_runtime.configure_service_audit(service_name, pool)` (IF-14).
+**From the W0 review:** SEC-4 audit half: `src/solace_security/audit.py` (around lines 80-81) falls back to a plain hash in production when `AUDIT_HMAC_KEY` is unset. With `AUDIT_HMAC_KEY` a required strict secret, a strict environment (staging and production, own OR bare `ENVIRONMENT`) must refuse the fallback; add a RED case for staging and for production without the key. From the W0 bug round, C-4: the audit logger is not wired and no strict check asks for its key (this task and WS-09.11 own it together). (The bug-round hunter text was not preserved; this line is rebuilt from the 2026-11-03 ledger summary and this task's own scope. Re-confirm the failure in a RED test before fixing.)
 **Files:**
 - Modify: `src/solace_infrastructure/runtime/bootstrap.py` (step 6; `required_secrets_for` adds `AUDIT_HMAC_KEY` when `spec.audited`)
 - Test: `tests/bootstrap/test_mvp_091_audit_wiring.py`
@@ -1650,6 +1651,30 @@ Run: same command. Expected: PASS. All five `_PHI_VIA_RUNTIME` services still pa
 - [ ] **Step 4: Run them and confirm they pass.** Run: same command. Expected: PASS.
 - [ ] **Step 5: Regression:** `UNIT D:\Repo\Contextual-Chatbot\tests\bootstrap` (the 18 per-service conformance cases stay red until phase B, as before), `UNIT D:\Repo\Contextual-Chatbot\tests\solace_infrastructure`, `UNIT D:\Repo\Contextual-Chatbot\tests\integration\test_phi_encryption_activation.py`, one process each. Expected: no new failures.
 - [ ] **Step 6: Checkpoint:** `& D:\tmp\mvp-exec\tools\checkpoint.ps1 -Label "WS-04.F1:head"` and record the printed tree id in the ledger. No git commit.
+
+### Task WS-04.F2: Strict CORS needs https origins that are not local, and three strict-only guards treat staging as strict
+**Covers:** MVP-363, MVP-364
+**Severity:** medium
+**Wave:** 0
+**Depends on:** WS-04.3, WS-14.2, WS-13.2
+**Implementer model:** sonnet
+**Review:** security-critical
+**Decision gate:** none. Added by controller Ruling on 2026-11-24 from the 2026-11-07 review of main (security.md SEC-3, and SEC-4 for the non-audit half). The audit half of SEC-4 stays with WS-04.10 (Ruling 2026-11-24).
+**Real infra:** no
+**Files:**
+- Modify: `src/solace_infrastructure/runtime/http.py`, `services/user-service/src/auth.py`, `services/memory_service/src/infrastructure/weaviate_repo.py`, `services/notification-service/src/consumers.py`
+- Create: `tests/bootstrap/test_ws04_f2_strict_cors_origins.py`, `services/user-service/tests/test_ws04_f2_session_secret_strict.py`, `services/memory_service/tests/test_ws04_f2_weaviate_client_strict.py`, `services/notification-service/tests/test_ws04_f2_strict_package_guard.py`
+- Not touched: `src/solace_security/audit.py` (WS-04.10).
+**Interfaces:**
+- Produces (SEC-3): in strict, `cors_allowed_origins` refuses an origin that is not `https`, whose host is `localhost`, a `*.localhost` name or a loopback or unspecified address (IPv4-mapped IPv6 included), or that is malformed or has no host. The error names the entry's position and the rule, never the origin. The `*` and `null` refusal is unchanged. Dev and test keep `http://localhost:3000`.
+- Produces (SEC-4, non-audit): the user-service `SessionConfig` insecure default secret, the memory `weaviate-client` import guard and the notification `solace_events` import guard use strict = own environment OR the bare `ENVIRONMENT` (`is_strict_environment`), so staging is strict.
+
+- [ ] **Step 1: Write the failing tests** in the four new files: the CORS rules above in strict and their dev counterparts; for each of the three sites, staging (own and bare) refuses the unsafe state and development allows it.
+- [ ] **Step 2: Run them and confirm they fail.** Run each file with `UNIT`. Expected: 36 + 5 + 4 + 4 failures.
+- [ ] **Step 3: Implement** the CORS rule in `http.py` and the three strictness reads.
+- [ ] **Step 4: Run them and confirm they pass.** Expected: 50, 9, 6 and 6 passed.
+- [ ] **Step 5: Regression:** `tests\bootstrap` (310 passed, 1 skipped), `tests\deploy` (125 + 19 skipped), user-service (378), memory (492), notification (168 + 7 skipped), orchestrator (320 + 1 xfailed), one process each.
+- [ ] **Step 6: Checkpoint and commit.** Delivered as commit `e715074`; report `docs/mvp/exec-state/reports/W0-close-laneA-report.md`.
 
 ---
 

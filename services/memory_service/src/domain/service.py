@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 import math
 import os
 import structlog
+from solace_security.production_guards import is_strict_environment
 
 from .models import (
     MemoryServiceSettings, MemoryRecord, SessionState,
@@ -92,6 +93,11 @@ class MemoryService(ServiceBase):
                 await self._weaviate_repo.initialize()
                 logger.info("memory_service_weaviate_connected")
             except Exception as e:
+                # D-14 (W0-close LA-SEC-1): an enabled Weaviate that fails to initialize refuses a strict boot;
+                # strict = the service's own MEMORY_ENVIRONMENT OR the bare ENVIRONMENT. Dev and test degrade.
+                if is_strict_environment(os.environ.get("MEMORY_ENVIRONMENT") or "") or is_strict_environment():
+                    logger.error("weaviate_init_failed", error=str(e), strict=True)
+                    raise
                 logger.warning("weaviate_init_failed", error=str(e), hint="Vector search unavailable")
                 self._weaviate_repo = None
         self._initialized = True

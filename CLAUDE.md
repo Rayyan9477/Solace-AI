@@ -34,11 +34,10 @@ export PYTHONPATH="$PWD:$PWD/src" ENVIRONMENT=test TELEMETRY_ENABLED=false
 
 - Real-infrastructure tests (Postgres, Kafka or Redis in Docker) run with `SOLACE_REQUIRE_REALINFRA=1`.
 - Remove images by tag (`docker rmi <tag>`, never `-f <id>`), and leave no containers or volumes behind.
-- Known baseline red:
-  - `tests/solace_infrastructure/kafka/test_topics.py` (12 cases);
-  - the per-service conformance cases of services not yet adopted (analytics, notification, personality, user);
-  - the import-root and lint owner cases of WS-12/14/16/18;
-  - the `/health` cases in `tests/system/test_smoke.py`, until WS-05.5.
+- Known baseline red (per-suite regression of 2026-11-07, plus lane A of 2026-11-24). Any other red is a regression: fix it, or log a Ruling before you list it here.
+  - `tests/solace_infrastructure/kafka/test_topics.py`: 12 cases.
+  - 4 cases in `tests/migrations` (TLS against a real Postgres): red only when Docker is off, so start Docker before you read them as a failure.
+  - 2 cases in `tests/build/test_mvp_359`: new advisories GHSA-vvf4-9x63-8xvv (dnspython 2.9.0) and GHSA-mf5v-w3w3-f6cg (opentelemetry-api 1.45.1) in the locks. The WS-01 lock owner bumps the pins or accepts the advisories (D-16).
 
 ## The MVP remediation program (current work)
 
@@ -53,16 +52,11 @@ export PYTHONPATH="$PWD:$PWD/src" ENVIRONMENT=test TELEMETRY_ENABLED=false
   - `briefs/`, `reports/` and `reviews/` (`batch*.json` hold review results).
   - `snapshots/snapshots.log`: checkpoint tree ids.
   - `plan/` holds the schedule DAG.
-- **State at pause (2026-11-03):** W0 checkpoint 1, tree `edba7d7`. The final docs tree is `b860a79`, and its content equals commit `eb5eb26` on `main`.
-  - W0 is 48/61 done, 1 blocked (WS-05.4 part 2) and 12 not started. The program is 48/330 done.
-  - Resume only when the owner says so.
-- **Remaining W0, in dependency order:**
-  - WS-03.5, then WS-05.4 part 2, WS-05.5, WS-05.6;
-  - WS-12.17, WS-13.2, WS-14.2, WS-14.3, WS-15.2;
-  - WS-17.2, which is a barrier gate because memory still has a private Postgres engine;
-  - WS-17.19, WS-18.1, WS-18.2;
-  - then the W0 bug-finding round and the barrier: full regression, a strict boot smoke, and a barrier snapshot.
-- **Tools** (cross-platform, in `docs/mvp/exec-state/tools/`):
+- **State (2026-11-24):** the W0 barrier passed on branch `w0-barrier` (tree `fe7022d`). W0 is 55/55 done. W1 has not started.
+  - Open: the crisis E2E is XFAIL at `provision_clinician` until WS-14.9; the 12 kafka `test_topics` cases stay red.
+  - Next: W1 round 1 from `docs/mvp/exec-state/plan/W1-round-1.md` (WS-06.3, WS-12.2, WS-12.4, WS-07.3, WS-03.6, WS-09.3). Read `plan/W1-preflight-scan.md` rulings R-1 to R-13 first.
+  - Owner gates: X-15 (clinician for lexicon v1) before W1 clinical sign-off; X-04, X-05, X-14.
+  - Work is committed on branches and merged through PRs (D-17 superseded); never merge or push to `main` without the owner.- **Tools** (cross-platform, in `docs/mvp/exec-state/tools/`):
   - `mvp_exec.py` with the subcommands `checkpoint`, `review-package`, `extract-brief` and `ledger`;
   - `pick_ready.py`: the dependency-ready tasks and their mutex conflicts;
   - `review-wf.js` and `review-batch-wf.js`: review workflows.

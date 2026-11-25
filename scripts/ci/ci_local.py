@@ -14,7 +14,8 @@ STAGES: tuple[tuple[str, list[str]], ...] = (
     ("unit", [*RUN, "--tier", "unit"]),
     ("contract", [*RUN, "--tier", "contract"]),
     ("clinical", [*RUN, "--tier", "clinical"]),
-    ("images", [PY, "-m", "scripts.build.images"]),
+    # as CI's images job: build, then import each image's CMD module inside the built image (--probe)
+    ("images", [PY, str(ROOT / "scripts" / "ci" / "build_images.py"), "--all", "--tag", "ci", "--probe"]),
     # non-gating (D-17): --report always exits 0; the pairs are input for the owner's post-program commit decision
     ("tracked-closure", [PY, str(ROOT / "scripts" / "ci" / "check_tracked_closure.py"), "--report"]),
     ("realinfra", [*RUN, "--tier", "realinfra", "--require-realinfra"]),

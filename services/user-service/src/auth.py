@@ -22,6 +22,8 @@ from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import structlog
 
+from solace_security.production_guards import is_strict_environment
+
 from .domain.entities import User
 from .domain.value_objects import UserRole
 
@@ -75,14 +77,18 @@ class SessionConfig(BaseSettings):
     )
 
     @model_validator(mode="after")
-    def _reject_insecure_defaults_in_production(self) -> SessionConfig:
-        """Reject insecure default secret key in production."""
+    def _reject_insecure_defaults_in_strict(self) -> SessionConfig:
+        """Reject the insecure default secret key in staging and production (D-14).
+
+        Strict when the service's own ``USER_SERVICE_ENV`` OR the bare ``ENVIRONMENT`` is
+        staging or production (WS-04.F2, SEC-4).
+        """
         _INSECURE_DEFAULTS = {"your-secret-key-change-in-production-32-chars"}
-        environment = os.environ.get("ENVIRONMENT", "development").lower()
-        if environment == "production" and self.secret_key in _INSECURE_DEFAULTS:
+        strict = is_strict_environment(os.environ.get("USER_SERVICE_ENV") or "") or is_strict_environment()
+        if strict and self.secret_key in _INSECURE_DEFAULTS:
             raise ValueError(
                 "SESSION_SECRET_KEY must be set to a unique, cryptographically "
-                "secure value in production. The default key is not allowed."
+                "secure value in staging and production. The default key is not allowed."
             )
         return self
 

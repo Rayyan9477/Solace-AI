@@ -11,6 +11,11 @@ Entry format:
 - Links: <files>.
 ```
 
+## 2026-11-24: W0 barrier passed; W1 entry prepared
+- The W0 close workflow ran: lane A fixes (WS-03.F1, WS-04.F2, WS-05.F1, WS-13.F1), docs reconciliation, the barrier (B1 images, migrations and harness self-test; B2 boot smoke in dev and strict; B3 crisis E2E; B4 full regression), one review round and one fix round (LA-SEC-1, BF-ROO-1, BF-ROO-2, BF-ROO-3, DW-DOC-1).
+- WS-05.4, WS-05.5 and WS-05.6 are done on live evidence. W0 phases A and B are 55/55. Barrier tree `fe7022d`. Register gains MVP-361..366. Open: the crisis E2E is XFAIL at `provision_clinician` until WS-14.9.
+- W1 entry prepared: decisions and interfaces checked, round 1 chosen, 34 briefs extracted, preflight scan written.
+- Links: [W0 final report](exec-state/reports/W0-close-final-report.md), [W1 round 1](exec-state/plan/W1-round-1.md), [TRACKER barrier log](TRACKER.md).
 ## 2026-11-21: CI/CD Pipeline & Documentation Modernization
 - Removed the daily scheduled cron trigger (`schedule: - cron: "17 3 * * *"`) from `.github/workflows/ci.yml`; E2E tests now trigger strictly on-demand via `workflow_dispatch`.
 - Integrated `actions/cache@v4` on `~/.cache/uv` keyed by `requirements-dev.lock` across all CI matrix runner jobs (`lint`, `unit`, `realinfra`, `images`, `e2e`) to accelerate dependencies.

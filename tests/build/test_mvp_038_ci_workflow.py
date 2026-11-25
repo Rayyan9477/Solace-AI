@@ -54,6 +54,15 @@ def test_mvp_112_images_build_from_repo_root_with_probe() -> None:
     assert "./services/" not in CI.read_text(encoding="utf-8")
 
 
+def test_e2e_job_requires_real_infrastructure() -> None:
+    # WS-05.F1 (W0-close review CR-4): without the flag a runner whose Docker daemon is unreachable skips every
+    # e2e test and the job goes green with nothing run; with it, a missing Docker fails the job.
+    runs = [step["run"] for step in _wf()["jobs"]["e2e"].get("steps", []) if "run_suites.py" in step.get("run", "")]
+    assert runs, "the e2e job must run the e2e tier through run_suites.py"
+    for run in runs:
+        assert "--tier e2e" in run and "--require-realinfra" in run, run
+
+
 def test_mvp_038_lint_gate_and_e2e_trigger() -> None:
     jobs = _wf()["jobs"]
     assert "ruff check . --select E9,F63,F7,F82 --no-fix" in _runs(jobs["lint"])

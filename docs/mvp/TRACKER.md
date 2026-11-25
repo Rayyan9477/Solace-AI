@@ -13,11 +13,11 @@ The register's statuses are derived from this file at each barrier (`fixed` when
 
 | Status | todo | in-progress | review | fixing | done | blocked | deferred | total |
 |---|---|---|---|---|---|---|---|---|
-| Tasks | 269 | 0 | 0 | 0 | 58 | 3 | 0 | 330 |
+| Tasks | 269 | 0 | 0 | 0 | 65 | 0 | 0 | 334 |
 
 | Wave | Phase A done / total | Phase B done / total | Active | Blocked |
 |---|---|---|---|---|
-| W0 | 36 / 39 | 16 / 16 | 0 | 3 |
+| W0 | 39 / 39 | 16 / 16 | 0 | 0 |
 | W1 | 0 / 34 | 0 / 35 | 0 | 0 |
 | W2 | 0 / 16 | 0 / 61 | 0 | 0 |
 | W3 | 0 / 24 | 0 / 40 | 0 | 0 |
@@ -28,9 +28,9 @@ The register's statuses are derived from this file at each barrier (`fixed` when
 |---|---|
 | WS-01 | 14 / 18 |
 | WS-02 | 7 / 9 |
-| WS-03 | 5 / 20 |
-| WS-04 | 7 / 16 |
-| WS-05 | 3 / 22 |
+| WS-03 | 6 / 21 |
+| WS-04 | 8 / 17 |
+| WS-05 | 7 / 23 |
 | WS-06 | 2 / 14 |
 | WS-07 | 1 / 12 |
 | WS-08 | 0 / 21 |
@@ -38,24 +38,25 @@ The register's statuses are derived from this file at each barrier (`fixed` when
 | WS-10 | 0 / 16 |
 | WS-11 | 1 / 21 |
 | WS-12 | 2 / 19 |
-| WS-13 | 2 / 18 |
+| WS-13 | 3 / 19 |
 | WS-14 | 3 / 22 |
 | WS-15 | 2 / 23 |
 | WS-16 | 1 / 22 |
 | WS-17 | 3 / 19 |
 | WS-18 | 2 / 19 |
 
-**Register entries:** 54 of 345 covered entries fixed (all their tasks done); 13 partly done.
+**Register entries:** 60 of 351 covered entries fixed (all their tasks done); 13 partly done.
 
 <!-- mvp:summary:end -->
 
 ## Barrier log
 
-Filled at each wave barrier (master plan, section 5.5). The tree zip is the only durable copy of the barrier, because there are no commits (D-17).
+Filled at each wave barrier (master plan, section 5.5). Each barrier is a commit on the program branch plus a snapshot tree id in `exec-state/snapshots/snapshots.log`; the owner merges the branch through a PR (D-17 is superseded).
 
 | Wave | Date | Barrier tree | Zip copied off-machine | Suites green / test count | Register delta | Notes |
 |---|---|---|---|---|---|---|
 | W0 entry | 2026-11-02 | b309d50 | not yet (X-12) | baseline (venv): 5,365 passed, 12 failed (aiokafka mock-mode tests, ruled; see WS-06.14) = 5,377 | none | anaconda untouched |
+| W0 barrier | 2026-11-24 | fe7022d | D:\tmp\mvp-exec\barriers\W0-fe7022d.zip (copy off-machine: owner action X-12 pending) | unit tier green except the 12 baseline kafka test_topics cases (solace_infrastructure 936 passed; solace_security 351; solace_events 243; solace_common 170; solace_testing 266; integration 236; bootstrap 310; build 273; deploy 125; migrations 71; scripts 22; system 6; config_service 231; api_gateway 64; analytics 198; diagnosis 312; memory 504; notification 168; orchestrator 320; personality 377; safety 508; therapy 526; user-service 378); realinfra 37 + migrations 68 + build 18; e2e dev 38 passed + 8 xfailed (crisis, hop provision_clinician, W1); e2e strict 48 passed; boot smoke dev 25, strict production 35, strict staging 35; clean-export images 27/27 | MVP-361..366 added and fixed or partly fixed by the four F tasks (MVP-364/365/366 stay open on WS-04.10, WS-05.8, WS-13.8); W0 phases A and B 55/55 done | strict boot, edge and CORS fixes (lane A), D-16 bump of dnspython 2.9.2 and OpenTelemetry 1.45.2, ci-local images fix; crisis E2E is XFAIL at provision_clinician until WS-14.9 |
 | W0 | | | | | | |
 | W1 | | | | | | |
 | W2 | | | | | | |
@@ -92,18 +93,18 @@ Filled at each wave barrier (master plan, section 5.5). The tree zip is the only
 | [WS-05.3](../superpowers/plans/2026-10-18-mvp-remediation/WS-05-realinfra-harness-e2e.md#task-ws-053-expected-failure-manifest-plugin-with-hop-tracking) | Expected-failure manifest plugin with hop tracking | high | safety-critical | Opus | no | - | MVP-039 | `done` | trees a3b2a5a..5fb1992 (fix1+fix2); Opus review + scoped re-review closed; 22 plugin tests |
 | [WS-03.3](../superpowers/plans/2026-10-18-mvp-remediation/WS-03-deploy-secrets-backups.md#task-ws-033-redis-authentication-everywhere-strict-host-port-lockdown-and-required-grafana-credentials) | Redis authentication everywhere, strict host-port lockdown and required Grafana credentials | high | security-critical | Opus | yes | WS-03.2 | MVP-040, MVP-118 | `done` | fix3 f528018 APPROVED (harness run() via temp files, no hang); redis auth + URL-safe check, strict port lockdown, Grafana reset, pull_policy build, depends_on redis |
 | [WS-04.4](../superpowers/plans/2026-10-18-mvp-remediation/WS-04-service-runtime-observability.md#task-ws-044-start_service_runtime-and-stop_service_runtime-with-datastores-and-ordered-teardown) | start_service_runtime and stop_service_runtime with datastores and ordered teardown | low | security-critical | Opus | no | WS-04.3 | MVP-332 | `done` | trees ddda366..cf2bc2c (fix1); 20 lifecycle tests (mutation-checked); bootstrap 108+1 blocked; strict host policy -> WS-02.5 |
-| [WS-05.4](../superpowers/plans/2026-10-18-mvp-remediation/WS-05-realinfra-harness-e2e.md#task-ws-054-compose-test-stack-per-run-secrets-and-the-e2e_stack-fixture) | Compose test stack, per-run secrets and the e2e_stack fixture | high | safety-critical | Opus | yes | WS-02.5, WS-05.2, WS-05.3 | MVP-039 | `blocked` | part 2 code done (5001fd2); live self-test blocked: egress 403 pkg-containers.githubusercontent.com (all 10 Dockerfiles copy uv from ghcr.io) |
+| [WS-05.4](../superpowers/plans/2026-10-18-mvp-remediation/WS-05-realinfra-harness-e2e.md#task-ws-054-compose-test-stack-per-run-secrets-and-the-e2e_stack-fixture) | Compose test stack, per-run secrets and the e2e_stack fixture | high | safety-critical | Opus | yes | WS-02.5, WS-05.2, WS-05.3 | MVP-039 | `done` | live self-test passed 2026-11-24 (dev 13 passed, strict 13 passed), clean-export images 27/27, real-PG migrations 13 passed; a25aebd; docs/mvp/exec-state/reports/W0-barrier-B1-report.md |
 | [WS-01.3](../superpowers/plans/2026-10-18-mvp-remediation/WS-01-build-deps-ci.md#task-ws-013-lazy-package-exports-so-the-rate-limiter-and-the-postgres-client-import-without-kong-jose-weaviate-or-alembic) | Lazy package exports so the rate limiter and the Postgres client import without Kong, jose, weaviate or alembic | low | standard | Sonnet | no | WS-01.1 | MVP-269, MVP-310, MVP-312 | `done` | trees 56961cc..55b8ebe; RED 4 -> GREEN 6; light-import test now green; jose-free import proven in venv-clean |
 | [WS-03.4](../superpowers/plans/2026-10-18-mvp-remediation/WS-03-deploy-secrets-backups.md#task-ws-034-infra-health-and-capacity-weaviate-healthcheck-without-curl-behind-an-opt-in-profile-kafka-heap-inside-its-limit) | Infra health and capacity: Weaviate healthcheck without curl behind an opt-in profile, Kafka heap inside its limit | blocker | standard | Sonnet | yes | WS-03.3 | MVP-002, MVP-045 | `done` | head 825e24d APPROVED (spec-ops; only finding refuted) |
 | [WS-04.5](../superpowers/plans/2026-10-18-mvp-remediation/WS-04-service-runtime-observability.md#task-ws-045-service-conformance-suite-and-a-corrected-prometheus-scrape-config) | Service conformance suite and a corrected Prometheus scrape config | high | standard | Opus | yes | WS-04.4 | MVP-036 | `done` | trees f579888..d8d2224; scrape 3/3 + promtool; probe controls 3/3; 20 mutants; 18 per-service tests expected-red until phase B |
-| [WS-05.5](../superpowers/plans/2026-10-18-mvp-remediation/WS-05-realinfra-harness-e2e.md#task-ws-055-w0-boot-smoke-in-dev-and-strict-in-process-smoke-on-the-if-01-liveness-contract) | W0 boot smoke in dev and strict; in-process smoke on the IF-01 liveness contract | high | standard | Sonnet | yes | WS-05.4 | MVP-039 | `blocked` | code done + reviewed (fix1 20c3b37); live boot smoke + manifest wait on egress |
+| [WS-05.5](../superpowers/plans/2026-10-18-mvp-remediation/WS-05-realinfra-harness-e2e.md#task-ws-055-w0-boot-smoke-in-dev-and-strict-in-process-smoke-on-the-if-01-liveness-contract) | W0 boot smoke in dev and strict; in-process smoke on the IF-01 liveness contract | high | standard | Sonnet | yes | WS-05.4 | MVP-039 | `done` | live boot smoke green 2026-11-24: dev 25, strict production 35, strict staging 35, tests/system 6, register+login via edge; de00c68; reports/W0-barrier-B2-report.md |
 | [WS-06.1](../superpowers/plans/2026-10-18-mvp-remediation/WS-06-event-plane.md#task-ws-061-event-tables-come-only-from-slot-010-stores-verify-the-schema-and-claim-per-service) | Event tables come only from slot 010; stores verify the schema and claim per service | medium | safety-critical | Opus | yes | WS-02.3, WS-05.2 | MVP-133, MVP-266 | `done` | fix2 59347d9: robust single-insert-path guard (regex+AST over 209 modules); controller re-ran 5 mutants from fresh repo copies: all fail, baseline passes |
 | [WS-01.14](../superpowers/plans/2026-10-18-mvp-remediation/WS-01-build-deps-ci.md#task-ws-0114-sops-aware-ignore-rules-build-context-exclusions-and-a-checkpoint-tree-secret-scan) | SOPS-aware ignore rules, build-context exclusions and a checkpoint-tree secret scan | blocker | security-critical | Opus | no | WS-01.1, WS-01.5 | MVP-008, MVP-348 | `done` | trees d03f5b8..deb166b (fix1); scoped re-review APPROVED |
 | [WS-02.6](../superpowers/plans/2026-10-18-mvp-remediation/WS-02-data-platform-schema.md#task-ws-026-one-default-pool-per-service-strict-environment-fail-loud-encoded-dsns-and-a-role-check) | One default pool per service, strict-environment fail-loud, encoded DSNs and a role check | blocker | security-critical | Opus | yes | WS-02.5 | MVP-033, MVP-041, MVP-058, MVP-273 | `done` | fix2 d3456a7 APPROVED (superuser-equivalent roles refused; 0 findings) |
 | [WS-02.7](../superpowers/plans/2026-10-18-mvp-remediation/WS-02-data-platform-schema.md#task-ws-027-lazy-exports-for-solace_infrastructuredatabase-supporting-mvp-269) | Lazy exports for solace_infrastructure.database (supporting MVP-269) | low | standard | Sonnet | no | WS-01.3 | MVP-269 | `done` | trees d3b3a8f..d8d2224; RED 2 -> GREEN 3; solace_infrastructure 860, memory 477 |
 | [WS-03.5](../superpowers/plans/2026-10-18-mvp-remediation/WS-03-deploy-secrets-backups.md#task-ws-035-edge-caddy-in-both-profiles-tolerant-live-health-checks-env-site-addresses-blocked-internal-paths-intact-basic_auth_hash-cors-and-proxy-hops) | Edge: Caddy in both profiles, tolerant /live health checks, env site addresses, blocked internal paths, intact BASIC_AUTH_HASH, CORS and proxy hops | medium | security-critical | Opus | yes | WS-03.4 | MVP-117, MVP-225, MVP-250 | `done` | fix1 898d343 (W035-SPE-1 closed) |
 | [WS-04.15](../superpowers/plans/2026-10-18-mvp-remediation/WS-04-service-runtime-observability.md#task-ws-0415-the-phi-activation-lock-accepts-the-runtime-spec-in-place-of-the-retired-configure_phi_encryption-call) | The PHI-activation lock accepts the runtime SPEC in place of the retired configure_phi_encryption call | high | security-critical | Sonnet | no | WS-04.5 | support | `done` | trees ccfac9a..684ad43; 8 passed; integration 236; RED shown retroactively (process deviation, test-only file) |
-| [WS-05.6](../superpowers/plans/2026-10-18-mvp-remediation/WS-05-realinfra-harness-e2e.md#task-ws-056-crisis-alert-e2e-written-red-at-documented-hops-dev-profile) | Crisis alert E2E written red at documented hops (dev profile) | high | safety-critical | Opus | yes | WS-05.5 | MVP-039 | `blocked` | code done + reviewed (fix1 8ff6c15); live crisis E2E waits on egress |
+| [WS-05.6](../superpowers/plans/2026-10-18-mvp-remediation/WS-05-realinfra-harness-e2e.md#task-ws-056-crisis-alert-e2e-written-red-at-documented-hops-dev-profile) | Crisis alert E2E written red at documented hops (dev profile) | high | safety-critical | Opus | yes | WS-05.5 | MVP-039 | `done` | live crisis E2E 2026-11-24: raw run fails only at provision_clinician (documented W1 gap, WS-14.9); barrier wave 0 8 XFAIL; ac73b1f; reports/W0-barrier-B3-report.md |
 | [WS-06.2](../superpowers/plans/2026-10-18-mvp-remediation/WS-06-event-plane.md#task-ws-062-the-seven-bridges-import-bare-solace_events-and-stamp-their-own-service-on-outbox-rows) | The seven bridges import bare solace_events and stamp their own service on outbox rows | medium | safety-critical | Sonnet | no | WS-01.7, WS-06.1 | MVP-133 | `done` | head dd2f02b APPROVED (workflow: spec + crisis-path lenses, no findings) |
 | [WS-07.1](../superpowers/plans/2026-10-18-mvp-remediation/WS-07-service-auth-authz.md#task-ws-071-acting_as_user-and-the-correlation-id-context-for-request-less-work-and-outbound-hops) | acting_as_user and the correlation-id context for request-less work and outbound hops | blocker | security-critical | Opus | no | - | MVP-034, MVP-356 | `done` | trees 45673ad..b5921be + controller fix; Opus review PASS/APPROVED; 172 passed |
 | [WS-09.1](../superpowers/plans/2026-10-18-mvp-remediation/WS-09-phi-codec-audit-llm.md#task-ws-091-master-key-accepts-the-documented-64-hex-and-base64-formats) | Master key accepts the documented 64-hex and base64 formats | high | security-critical | Opus | no | - | MVP-092 | `done` | trees 8a53cbb..a58ca27 (fix1) + controller loc-in-message tweak; 19 + solace_security/guards 362 |
@@ -130,7 +131,7 @@ Filled at each wave barrier (master plan, section 5.5). The tree zip is the only
 | [WS-18.1](../superpowers/plans/2026-10-18-mvp-remediation/WS-18-personality-analytics.md#task-ws-181-personality-adopts-the-if-01-runtime-and-boots-without-the-unused-redis-and-db-passwords) | Personality adopts the IF-01 runtime and boots without the unused Redis and DB passwords | blocker | standard | Sonnet | no | - | MVP-027 | `done` | fix1 e3543f6 (W181-SPE-1 closed) |
 | [WS-18.2](../superpowers/plans/2026-10-18-mvp-remediation/WS-18-personality-analytics.md#task-ws-182-analytics-adopts-the-if-01-runtime-a-dead-kafka-consumer-shows-in-ready-the-lint-gate-is-clean) | Analytics adopts the IF-01 runtime; a dead Kafka consumer shows in /ready; the lint gate is clean | medium | standard | Sonnet | no | - | MVP-110 | `done` | fix1 99a2e5a (W182-SPE-1, SPE-2 closed) |
 
-### W0 Phase not scheduled yet: 6 tasks
+### W0 Phase not scheduled yet: 10 tasks
 
 | Task | Title | Sev | Review | Model | Infra | Waits on (same phase) | Covers | Status | Notes |
 |---|---|---|---|---|---|---|---|---|---|
@@ -138,8 +139,12 @@ Filled at each wave barrier (master plan, section 5.5). The tree zip is the only
 | [WS-01.F2](../superpowers/plans/2026-10-18-mvp-remediation/WS-01-build-deps-ci.md#task-ws-01f2-patch-level-bumps-for-the-checkpoint-path-advisories-held-by-exact-pins) | Patch-level bumps for the checkpoint-path advisories held by exact pins | high | security-critical | Opus | no | - | MVP-358, MVP-359 | `done` | trees a5b1852..2d0519c + controller comment fixes; review R1 routed (LANGGRAPH_STRICT_MSGPACK: WS-01.F4 image, WS-03.2 compose, WS-10.10 test) |
 | [WS-01.F3](../superpowers/plans/2026-10-18-mvp-remediation/WS-01-build-deps-ci.md#task-ws-01f3-the-repos-tests-package-wins-over-portkey-ais-site-packages-tests) | The repo's tests package wins over portkey-ai's site-packages "tests" | high | standard | Sonnet | no | - | MVP-005 | `done` | trees 0226536..34ade92; tests resolves to repo; deploy 20, solace_testing 174; sandbox regression clean |
 | [WS-01.F4](../superpowers/plans/2026-10-18-mvp-remediation/WS-01-build-deps-ci.md#task-ws-01f4-entrypoint-hardening-from-the-ws-016-review) | Entrypoint hardening from the WS-01.6 review | low | security-critical | Sonnet | yes | - | MVP-211 | `done` | fix1 d966612 APPROVED (all 6 prior closed, 10 images verified); controller fixed minor CLO-1 (boolean flag before dotted app attr) test-first |
+| [WS-03.F1](../superpowers/plans/2026-10-18-mvp-remediation/WS-03-deploy-secrets-backups.md#task-ws-03f1-the-edge-refuses-every-variant-of-the-internal-paths-and-the-strict-overlay-refuses-a-non-strict-environment) | The edge refuses every variant of the internal paths, and the strict overlay refuses a non-strict ENVIRONMENT | high | security-critical | Sonnet | no | - | MVP-361, MVP-362 | `done` | 0efe9af: edge prefix never-routed + control-char 400; strict overlay allow-list; RED 16 -> GREEN; deploy 125+19 skipped |
 | [WS-04.F1](../superpowers/plans/2026-10-18-mvp-remediation/WS-04-service-runtime-observability.md#task-ws-04f1-if-01-hardening-from-the-integrated-audit-lifespan-shape-phi-paths-body-limit-teardown) | IF-01 hardening from the integrated audit (lifespan shape, PHI paths, body limit, teardown) | high | security-critical | Opus | no | - | MVP-036, MVP-180, MVP-332 | `done` | fix2 f6378aa approved on closure; controller fixed the important regression WS04F1F2-PHI-1 (quadratic marker regex, ReDoS) test-first; minor WS04F1F2-PHI-2 parked for the W0 bug round |
+| [WS-04.F2](../superpowers/plans/2026-10-18-mvp-remediation/WS-04-service-runtime-observability.md#task-ws-04f2-strict-cors-needs-https-origins-that-are-not-local-and-three-strict-only-guards-treat-staging-as-strict) | Strict CORS needs https origins that are not local, and three strict-only guards treat staging as strict | medium | security-critical | Sonnet | no | - | MVP-363, MVP-364 | `done` | e715074: strict CORS https/non-local; 3 guards strict on staging; RED 49 -> GREEN 71; audit half to WS-04.10 |
+| [WS-05.F1](../superpowers/plans/2026-10-18-mvp-remediation/WS-05-realinfra-harness-e2e.md#task-ws-05f1-the-ci-e2e-job-requires-real-infrastructure-and-an-expected-failure-entry-can-pin-its-cause) | The CI e2e job requires real infrastructure, and an expected-failure entry can pin its cause | high | standard | Sonnet | yes | - | MVP-365 | `done` | a30b6e2: CI e2e --require-realinfra; manifest cause pin; RED 3 -> GREEN 35; live dev 8 xfailed |
 | [WS-09.F1](../superpowers/plans/2026-10-18-mvp-remediation/WS-09-phi-codec-audit-llm.md#task-ws-09f1-the-phi-log-sanitizer-never-recurses-into-the-logging-chain) | The PHI log sanitizer never recurses into the logging chain | high | security-critical | Opus | no | - | MVP-180 | `done` | trees a3b9a06..8da9ca2 (fix1, fix2); review findings closed; 24 new; stress 0 raw |
+| [WS-13.F1](../superpowers/plans/2026-10-18-mvp-remediation/WS-13-notification-alert-delivery.md#task-ws-13f1-the-strict-crisis-consumer-guard-is-proven-through-the-real-lifespan-including-its-allow-path) | The strict crisis-consumer guard is proven through the real lifespan, including its allow path | medium | standard | Sonnet | no | - | MVP-366 | `done` | ba7debb: 16 lifespan tests for strict crisis-consumer guard; mutations M1/M3 bite |
 
 ## W1: Crisis path
 

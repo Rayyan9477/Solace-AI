@@ -30,12 +30,14 @@ FastAPI's ``{"detail"}`` body until WS-04.9 (D-11). ``install_cors`` is used for
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import os
 import re
 import time
 import uuid
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import urlsplit
 
 import structlog
 from fastapi import FastAPI, Request, WebSocket
@@ -582,12 +584,44 @@ def install_exception_handlers(app: FastAPI, spec: ServiceRuntimeSpec) -> None:
 # --------------------------------------------------------------------------- edge CORS
 
 
+def _strict_origin_problem(origin: str) -> str | None:
+    """Why a strict environment refuses ``origin`` (fixed text), or None when it is allowed.
+
+    Strict origins are ``https`` with a host that is neither ``localhost`` (or a
+    ``*.localhost`` name, RFC 6761) nor a loopback or unspecified address, IPv4-mapped
+    IPv6 included (WS-04.F2, SEC-3).
+    """
+    try:
+        parts = urlsplit(origin)
+        parts.port  # noqa: B018 - raises ValueError on a malformed port
+    except ValueError:
+        return "malformed"
+    if parts.scheme.lower() != "https":
+        return "not https"
+    host = (parts.hostname or "").rstrip(".")
+    if not host:
+        return "without a host"
+    if host == "localhost" or host.endswith(".localhost"):
+        return "a localhost origin"
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return None
+    mapped = getattr(address, "ipv4_mapped", None)
+    for candidate in (address, mapped):
+        if candidate is not None and (candidate.is_loopback or candidate.is_unspecified):
+            return "a loopback origin"
+    return None
+
+
 def cors_allowed_origins(spec: ServiceRuntimeSpec) -> list[str]:
     """Origins from ``CORS_ALLOWED_ORIGINS`` (comma-separated).
 
     Raises:
-        StartupDependencyError: in a strict environment, when the list is empty or holds
-            ``*`` or ``null``.
+        StartupDependencyError: in a strict environment, when the list is empty, holds
+            ``*`` or ``null``, or holds an origin that is not ``https`` or that names
+            ``localhost`` or a loopback address (the message names the entry's position and
+            the rule it breaks, never the origin).
     """
     raw = os.environ.get(CORS_ORIGINS_ENV, "")
     origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
@@ -600,6 +634,14 @@ def cors_allowed_origins(spec: ServiceRuntimeSpec) -> list[str]:
             raise StartupDependencyError(
                 "cors", f"{CORS_ORIGINS_ENV} must not contain '*' or 'null' in strict environments"
             )
+        for position, origin in enumerate(origins, start=1):
+            problem = _strict_origin_problem(origin)
+            if problem is not None:
+                raise StartupDependencyError(
+                    "cors",
+                    f"{CORS_ORIGINS_ENV} must list only https origins that are not localhost or loopback "
+                    f"in strict environments (entry {position} is {problem})",
+                )
     return origins
 
 

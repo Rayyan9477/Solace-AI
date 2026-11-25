@@ -31,7 +31,7 @@ Sign-off fields are filled in when the named approver confirms, with the date an
 | [D-14](#d-14) | Which ENVIRONMENT value does the pilot run with, and is staging strict? | ops | W0 | Decided (default) | Accepted as the default. |
 | [D-15](#d-15) | Should the bundled Postgres use TLS on the single host? | security | W0 | Decided (default) | Accepted as the default. TLS with verify-full. |
 | [D-16](#d-16) | What is the dependency baseline? | ops | W0 | Decided (default) | Accepted as the default. |
-| [D-17](#d-17) | Commit policy: when does the owner commit the interdependent working tree? | ops | W0 | Decided (changed from default) | No commits at all during the program, by agents or the owner. The working tree and commit-free checkpoint trees are the record; clean-checkout checks build from git... |
+| [D-17](#d-17) | Commit policy: when does the owner commit the interdependent working tree? | ops | W0 | Decided (changed from default); superseded 2026-11-24 | No commits at all during the program, by agents or the owner. Superseded: work is committed on branches and merged by the owner through PRs. The working tree and commit-free checkpoint trees are the record; clean-checkout checks build from git... |
 | [D-18](#d-18) | Is analytics-service part of the pilot? | product | W2 | Decided (default) | Accepted as the default. Analytics stays as a staff-only dashboard. |
 | [D-19](#d-19) | What happens to out-of-scope components that are deployed or imported today? | product | W0 | Decided (default) | Accepted as the default. |
 | [D-20](#d-20) | May pinned packages be installed into the local Python 3.12 environment? | ops | W0 | Decided (changed from default) | A dedicated venv at D:\tmp\mvp-exec\venv instead of installing into anaconda. Created at W0 entry from the anaconda 3.12.3 interpreter with --system-site-packages... |
@@ -355,6 +355,7 @@ Counts: Decided (default): 16; Decided (changed from default): 6; Default accept
 |---|---|---|
 | 2026-10-18 | Recommended default written in the plan | planning |
 | 2026-10-19 | Decided (changed from default): No commits at all during the program, by agents or the owner. The working tree and commit-free checkpoint trees are the record; clean-checkout checks build from git archive of a checkpoint tree; each  | owner |
+| 2026-11-24 | Superseded: work is now committed on branches and the owner merges it through pull requests. The no-commit rule, the commit-free checkpoint trees as the only record and the barrier zips are no longer the safety net; checkpoint trees stay as a verification aid and are recorded in the ledger. Ruling by the W0-close docs stage; the owner's own branch-and-PR workflow is the evidence. | controller |
 
 ### D-18
 
