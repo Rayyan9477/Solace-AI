@@ -1,0 +1,1534 @@
+[
+ {
+  "id": "WS-06.3",
+  "phase": "A",
+  "title": "Consumer: bounded in-place retry, durable DLQ, malformed messages to the DLQ, idempotency recorded only after success",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 8,
+  "mutex": [
+   "src/solace_events/__init__.py",
+   "src/solace_events/consumer.py",
+   "src/solace_events/dead_letter.py",
+   "src/solace_events/errors.py",
+   "src/solace_events/postgres_stores.py",
+   "suite:src/solace_events",
+   "suite:tests/solace_events",
+   "tests/solace_events/test_consumer.py"
+  ],
+  "deps": [],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-06.5",
+  "phase": "A",
+  "title": "Transactional outbox publish(conn=) and JSONB parameters passed as objects",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 7,
+  "mutex": [
+   "src/solace_events/postgres_stores.py",
+   "src/solace_events/publisher.py",
+   "suite:src/solace_events",
+   "suite:tests/realinfra/event-plane",
+   "suite:tests/solace_events"
+  ],
+  "deps": [
+   "WS-06.3"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-06.6",
+  "phase": "A",
+  "title": "Outbox claims: claim tokens, guarded transitions, release on cancel and bookkeeping failure, batch circuit-break, poller error backoff, graceful stop",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 6,
+  "mutex": [
+   "src/solace_events/postgres_stores.py",
+   "src/solace_events/publisher.py",
+   "suite:src/solace_events",
+   "suite:tests/realinfra/event-plane",
+   "suite:tests/solace_events",
+   "tests/solace_events/test_outbox_claim.py"
+  ],
+  "deps": [
+   "WS-06.5"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-06.4",
+  "phase": "A",
+  "title": "Consume loop: per-message isolation, raw-bytes decoding, seek-back on uncommittable messages, commit-failure recovery, partitions processed concurrently, proven on real Kafka",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 5,
+  "mutex": [
+   "src/solace_events/consumer.py",
+   "suite:src/solace_events",
+   "suite:tests/realinfra/event-plane",
+   "suite:tests/solace_events"
+  ],
+  "deps": [
+   "WS-06.3"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-06.7",
+  "phase": "A",
+  "title": "DLQ reaper with per-group selection, no head-of-line blocking and its own redrive budget",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 5,
+  "mutex": [
+   "src/solace_events/__init__.py",
+   "src/solace_events/dead_letter.py",
+   "src/solace_events/postgres_stores.py",
+   "src/solace_events/publisher.py",
+   "src/solace_events/reaper.py",
+   "suite:src/solace_events",
+   "suite:tests/realinfra/event-plane",
+   "suite:tests/solace_events"
+  ],
+  "deps": [
+   "WS-06.6"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-06.8",
+  "phase": "A",
+  "title": "Service event plane: one composition root, producer connect with backoff, strict fail-loud, one EVENTS_ENABLED flag",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 4,
+  "mutex": [
+   "src/solace_events/__init__.py",
+   "src/solace_events/_env.py",
+   "src/solace_events/dead_letter.py",
+   "src/solace_events/publisher.py",
+   "src/solace_events/service_plane.py",
+   "suite:src/solace_events",
+   "suite:tests/realinfra/event-plane",
+   "suite:tests/solace_events"
+  ],
+  "deps": [
+   "WS-06.4",
+   "WS-06.7"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-09.3",
+  "phase": "A",
+  "title": "generate() raises LLMUnavailableError and the fallback path returns LLMResult",
+  "review": "standard",
+  "model": "sonnet",
+  "real_infra": false,
+  "height": 4,
+  "mutex": [
+   "services/shared/__init__.py",
+   "services/shared/infrastructure/__init__.py",
+   "services/shared/infrastructure/llm_client.py",
+   "suite:services/shared",
+   "suite:tests/integration/phi-codec-audit-llm"
+  ],
+  "deps": [],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-06.9",
+  "phase": "A",
+  "title": "The seven bridges delegate to the plane: the poller always runs, strict envs fail loud, names stay stable",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 3,
+  "mutex": [
+   "services/diagnosis_service/src/infrastructure/event_bridge.py",
+   "services/notification-service/src/infrastructure/event_bridge.py",
+   "services/orchestrator_service/src/infrastructure/event_bridge.py",
+   "services/personality_service/src/infrastructure/event_bridge.py",
+   "services/safety_service/src/infrastructure/event_bridge.py",
+   "services/therapy_service/src/infrastructure/event_bridge.py",
+   "services/user-service/src/infrastructure/event_bridge.py",
+   "suite:services/diagnosis_service",
+   "suite:services/notification-service",
+   "suite:services/orchestrator_service",
+   "suite:services/personality_service",
+   "suite:services/safety_service",
+   "suite:services/therapy_service",
+   "suite:services/user-service"
+  ],
+  "deps": [
+   "WS-06.8"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-09.18",
+  "phase": "A",
+  "title": "Bedrock Converse provider, the only real-user LLM route in staging and production",
+  "review": "security-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 3,
+  "mutex": [
+   "services/shared/infrastructure/llm_client.py",
+   "suite:services/shared",
+   "suite:tests/integration/phi-codec-audit-llm",
+   "tests/integration/phi-codec-audit-llm/test_mvp_d04_bedrock_provider.py"
+  ],
+  "deps": [
+   "WS-09.3"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-12.2",
+  "phase": "A",
+  "title": "solace_clinical core: normalization, max-only fusion and versioned crisis resources",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 3,
+  "mutex": [
+   "src/solace_clinical/__init__.py",
+   "src/solace_clinical/escalation_reason.py",
+   "src/solace_clinical/fusion.py",
+   "src/solace_clinical/normalize.py",
+   "src/solace_clinical/resources.py",
+   "suite:src/solace_clinical",
+   "suite:tests/clinical"
+  ],
+  "deps": [],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-03.6",
+  "phase": "A",
+  "title": "Notification delivery env contract, the crisis acknowledgement route and the W1/W2 env sync",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 2,
+  "mutex": [
+   ".env.example",
+   "Caddyfile",
+   "deploy/env/env-contract.yaml",
+   "docker-compose.prod.yml",
+   "docker-compose.yml",
+   "suite:tests/deploy",
+   "tests/deploy/test_env_contract.py"
+  ],
+  "deps": [],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-05.21",
+  "phase": "A",
+  "title": "W1 overlay env sync: the D-04 Bedrock wiring to the fake LLM and test-traffic auth rate limits",
+  "review": "security-critical",
+  "model": "sonnet",
+  "real_infra": false,
+  "height": 2,
+  "mutex": [
+   "docker-compose.test.yml",
+   "infrastructure/test/compose/llm-dev.yml",
+   "src/solace_testing/e2e.py",
+   "suite:infrastructure/test",
+   "suite:src/solace_testing",
+   "suite:tests/solace_testing",
+   "tests/solace_testing/test_mvp_039_overlay_w1_env.py"
+  ],
+  "deps": [
+   "WS-03.19",
+   "WS-07.7",
+   "WS-09.18",
+   "WS-09.4"
+  ],
+  "extra_deps_rule": "R-5",
+  "status": "todo"
+ },
+ {
+  "id": "WS-05.8",
+  "phase": "A",
+  "title": "W1 crisis fault suite and negative-phrase E2E written red",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 2,
+  "mutex": [
+   "docker-compose.test.yml",
+   "src/solace_testing/e2e.py",
+   "suite:src/solace_testing",
+   "suite:tests/e2e",
+   "tests/e2e/expected_failures.yaml",
+   "tests/e2e/test_w1_crisis_faults.py",
+   "tests/e2e/test_w1_negative_phrases.py"
+  ],
+  "deps": [
+   "WS-05.21"
+  ],
+  "extra_deps_rule": "R-5",
+  "status": "todo"
+ },
+ {
+  "id": "WS-06.10",
+  "phase": "A",
+  "title": "Backlog, lag and DLQ signals for the crisis pipeline",
+  "review": "safety-critical",
+  "model": "sonnet",
+  "real_infra": true,
+  "height": 2,
+  "mutex": [
+   "src/solace_events/consumer.py",
+   "src/solace_events/metrics.py",
+   "src/solace_events/postgres_stores.py",
+   "src/solace_events/publisher.py",
+   "src/solace_events/service_plane.py",
+   "suite:src/solace_events",
+   "suite:tests/realinfra/event-plane",
+   "suite:tests/solace_events"
+  ],
+  "deps": [
+   "WS-06.9"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-07.2",
+  "phase": "A",
+  "title": "Malformed-claim tokens give 401, and the IF-17 identity claims reach AuthenticatedUser",
+  "review": "security-critical",
+  "model": "sonnet",
+  "real_infra": false,
+  "height": 2,
+  "mutex": [
+   "src/solace_security/auth.py",
+   "src/solace_security/middleware.py",
+   "suite:src/solace_security",
+   "suite:tests/solace_security"
+  ],
+  "deps": [
+   "WS-07.3"
+  ],
+  "extra_deps_rule": "R-4",
+  "status": "todo"
+ },
+ {
+  "id": "WS-07.3",
+  "phase": "A",
+  "title": "Service-token permission model, on-behalf-of tokens and outbound header helpers",
+  "review": "security-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 2,
+  "mutex": [
+   "src/solace_security/auth.py",
+   "src/solace_security/service_auth.py",
+   "suite:src/solace_security",
+   "suite:tests/integration",
+   "suite:tests/solace_security",
+   "tests/integration/test_service_integration.py"
+  ],
+  "deps": [],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-07.6",
+  "phase": "A",
+  "title": "Bounded, self-sweeping in-memory rate-limit store",
+  "review": "security-critical",
+  "model": "sonnet",
+  "real_infra": false,
+  "height": 2,
+  "mutex": [
+   "infrastructure/api_gateway/rate_limiting.py",
+   "suite:infrastructure/api_gateway"
+  ],
+  "deps": [],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-09.4",
+  "phase": "A",
+  "title": "LLM settings read the documented keys and honour the PHI-egress decision",
+  "review": "standard",
+  "model": "sonnet",
+  "real_infra": false,
+  "height": 2,
+  "mutex": [
+   "services/shared/infrastructure/llm_client.py",
+   "suite:services/shared",
+   "suite:tests/integration/phi-codec-audit-llm"
+  ],
+  "deps": [
+   "WS-09.18"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-12.3",
+  "phase": "A",
+  "title": "Crisis lexicon v1, screen_text, the 200+ phrase set and the clinical record",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 2,
+  "mutex": [
+   "docs/CLINICAL-VALIDATION.md",
+   "src/solace_clinical/__init__.py",
+   "src/solace_clinical/crisis_lexicon_v1.yaml",
+   "src/solace_clinical/lexicon.py",
+   "src/solace_clinical/phrases.py",
+   "src/solace_clinical/screen.py",
+   "suite:src/solace_clinical",
+   "suite:tests/clinical",
+   "tests/clinical/crisis_phrases_v1.yaml",
+   "tests/clinical/legacy_terms_v0.yaml"
+  ],
+  "deps": [
+   "WS-12.2"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-12.4",
+  "phase": "A",
+  "title": "Slot 014 escalation decision columns (one auto decision per turn)",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 2,
+  "mutex": [
+   "migrations/versions/014_safety.py",
+   "suite:migrations",
+   "suite:tests/realinfra/safety-detection-lexicon"
+  ],
+  "deps": [],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-03.19",
+  "phase": "A",
+  "title": "LLM provider env contract: Bedrock only in strict, the fake-LLM endpoint only in dev and test, no static AWS keys",
+  "review": "security-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 1,
+  "mutex": [
+   ".env.example",
+   "deploy/env/env-contract.yaml",
+   "deploy/env/registry.py",
+   "docker-compose.prod.yml",
+   "docker-compose.yml",
+   "suite:tests/deploy",
+   "tests/deploy/test_env_contract.py"
+  ],
+  "deps": [
+   "WS-03.6",
+   "WS-09.18"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-04.6",
+  "phase": "A",
+  "title": "Wire service tokens, the event plane and rate limiting into the bootstrap",
+  "review": "security-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 1,
+  "mutex": [
+   "src/solace_infrastructure/runtime/bootstrap.py",
+   "suite:src/solace_infrastructure",
+   "suite:tests/bootstrap"
+  ],
+  "deps": [
+   "WS-06.8",
+   "WS-07.3",
+   "WS-07.7"
+  ],
+  "extra_deps_rule": "R-3",
+  "status": "todo"
+ },
+ {
+  "id": "WS-04.7",
+  "phase": "A",
+  "title": "Alertmanager and the crisis-path alert rules, promtool-tested",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 1,
+  "mutex": [
+   "docker-compose.observability.yml",
+   "docs/runbooks/alerting.md",
+   "infrastructure/alertmanager/alertmanager.yml.tmpl",
+   "infrastructure/alertmanager/render-config.sh",
+   "infrastructure/prometheus/prometheus.yml",
+   "infrastructure/prometheus/rules/solace.yml",
+   "infrastructure/prometheus/tests/solace_rules_test.yml",
+   "suite:infrastructure/alertmanager",
+   "suite:infrastructure/prometheus",
+   "suite:tests/bootstrap",
+   "suite:tests/e2e"
+  ],
+  "deps": [
+   "WS-03.6"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-05.20",
+  "phase": "A",
+  "title": "tests/integration stewardship: the LLM timeout test follows IF-15, and code-owner edits are sanctioned",
+  "review": "standard",
+  "model": "sonnet",
+  "real_infra": false,
+  "height": 1,
+  "mutex": [
+   "suite:tests/integration",
+   "tests/integration/test_sprint7_portkey_fallback.py"
+  ],
+  "deps": [
+   "WS-07.3",
+   "WS-09.3"
+  ],
+  "extra_deps_rule": "R-7",
+  "status": "todo"
+ },
+ {
+  "id": "WS-05.22",
+  "phase": "A",
+  "title": "Deployed-configuration phrase-set recall E2E written red",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 1,
+  "mutex": [
+   "suite:tests/e2e",
+   "suite:tests/e2e/phrase_recall",
+   "tests/e2e/expected_failures.yaml",
+   "tests/e2e/phrase_recall/conftest.py",
+   "tests/e2e/phrase_recall/test_w1_phrase_set_deployed.py"
+  ],
+  "deps": [
+   "WS-05.21",
+   "WS-05.8",
+   "WS-05.9",
+   "WS-12.3"
+  ],
+  "extra_deps_rule": "R-5",
+  "status": "todo"
+ },
+ {
+  "id": "WS-05.7",
+  "phase": "A",
+  "title": "Contract-test framework and crisis-chain event contracts (IF-20)",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 1,
+  "mutex": [
+   "src/solace_testing/__init__.py",
+   "src/solace_testing/contracts.py",
+   "suite:src/solace_testing",
+   "suite:tests/alignment",
+   "suite:tests/contracts",
+   "suite:tests/contracts/events",
+   "suite:tests/solace_testing",
+   "tests/alignment/test_api_contracts.py",
+   "tests/contracts/README.md",
+   "tests/contracts/contract.schema.json",
+   "tests/contracts/events/diagnosis__notification/safety.crisis.detected.json",
+   "tests/contracts/events/orchestrator__notification/safety.crisis.detected.json",
+   "tests/contracts/events/safety__notification/safety.assessment.completed.json",
+   "tests/contracts/events/safety__notification/safety.crisis.detected.json",
+   "tests/contracts/events/safety__notification/safety.escalation.triggered.json",
+   "tests/contracts/events/therapy__notification/safety.crisis.detected.json",
+   "tests/contracts/test_event_contract_files.py"
+  ],
+  "deps": [
+   "WS-12.2"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-05.9",
+  "phase": "A",
+  "title": "Crisis-path alerting E2E, Alertmanager to mailpit, written red",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 1,
+  "mutex": [
+   "docker-compose.test.yml",
+   "src/solace_testing/e2e.py",
+   "suite:src/solace_testing",
+   "suite:tests/e2e",
+   "tests/e2e/expected_failures.yaml",
+   "tests/e2e/test_w1_crisis_alerting.py"
+  ],
+  "deps": [
+   "WS-05.8"
+  ],
+  "extra_deps_rule": "R-5",
+  "status": "todo"
+ },
+ {
+  "id": "WS-06.14",
+  "phase": "A",
+  "title": "One topic registry with D-24 retention, created if missing when the event plane starts",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 1,
+  "mutex": [
+   "src/solace_events/__init__.py",
+   "src/solace_events/config.py",
+   "src/solace_events/service_plane.py",
+   "src/solace_events/topics.py",
+   "src/solace_infrastructure/kafka",
+   "src/solace_infrastructure/kafka/topics.py",
+   "suite:src/solace_events",
+   "suite:src/solace_infrastructure",
+   "suite:tests/realinfra/event-plane",
+   "suite:tests/solace_events",
+   "suite:tests/solace_infrastructure",
+   "tests/solace_events/test_config.py",
+   "tests/solace_infrastructure",
+   "tests/solace_infrastructure/kafka/test_topics.py"
+  ],
+  "deps": [
+   "WS-06.10"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-07.4",
+  "phase": "A",
+  "title": "get_current_user accepts orchestrator obo tokens; receivers resolve service permissions",
+  "review": "security-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 1,
+  "mutex": [
+   "src/solace_security/middleware.py",
+   "suite:src/solace_security",
+   "suite:tests/solace_security"
+  ],
+  "deps": [
+   "WS-07.2",
+   "WS-07.3"
+  ],
+  "extra_deps_rule": "R-4",
+  "status": "todo"
+ },
+ {
+  "id": "WS-07.5",
+  "phase": "A",
+  "title": "One shared revocation store: Redis in strict environments, URL never logged, no 500 on a Redis error, session revocation",
+  "review": "security-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 1,
+  "mutex": [
+   "src/solace_security/auth.py",
+   "src/solace_security/middleware.py",
+   "suite:src/solace_security",
+   "suite:tests/realinfra/service-auth-authz",
+   "suite:tests/solace_security"
+  ],
+  "deps": [
+   "WS-07.2",
+   "WS-07.4"
+  ],
+  "extra_deps_rule": "R-4",
+  "status": "todo"
+ },
+ {
+  "id": "WS-07.7",
+  "phase": "A",
+  "title": "install_rate_limiting: real-client keying behind Caddy, auth-route policies, Redis backend and the D-26 failure policy",
+  "review": "security-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 1,
+  "mutex": [
+   "infrastructure/api_gateway/rate_limiting.py",
+   "src/solace_security/rate_limit.py",
+   "suite:infrastructure/api_gateway",
+   "suite:src/solace_security",
+   "suite:tests/realinfra/service-auth-authz",
+   "suite:tests/solace_security"
+  ],
+  "deps": [
+   "WS-07.6"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-09.5",
+  "phase": "A",
+  "title": "Gateway caching off by default and never shared across users",
+  "review": "security-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 1,
+  "mutex": [
+   "services/shared/infrastructure/llm_client.py",
+   "suite:services/shared",
+   "suite:tests/integration/phi-codec-audit-llm"
+  ],
+  "deps": [
+   "WS-09.4"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-12.F1",
+  "phase": "A",
+  "title": "Row-level security on the five unprotected safety tables",
+  "review": "security-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 1,
+  "mutex": [
+   "migrations/versions/014_safety.py",
+   "suite:migrations",
+   "suite:services/safety_service/tests",
+   "suite:tests/migrations",
+   "tests/migrations/test_chain_real_pg.py",
+   "tests/realinfra/safety/test_mvp_041_safety_rls.py"
+  ],
+  "deps": [
+   "WS-12.4"
+  ],
+  "extra_deps_rule": "plan (controller Ruling 2026-11-03)",
+  "status": "todo"
+ },
+ {
+  "id": "WS-13.3",
+  "phase": "A",
+  "title": "Slot 015: crisis episodes, one-time acknowledgement tokens, risk windows and body-less delivery records",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 1,
+  "mutex": [
+   "migrations/versions/015_notification.py",
+   "suite:migrations",
+   "suite:tests/migrations",
+   "suite:tests/realinfra/notification-alert-delivery"
+  ],
+  "deps": [
+   "WS-12.4"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-14.4",
+  "phase": "A",
+  "title": "Slot 012 (W1 body): backup on-call flag and the account_tokens table",
+  "review": "standard",
+  "model": "sonnet",
+  "real_infra": true,
+  "height": 1,
+  "mutex": [
+   "migrations/versions/012_user_accounts.py",
+   "suite:migrations",
+   "suite:tests/realinfra/accounts-roster-consent-erasure"
+  ],
+  "deps": [],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-13.4",
+  "phase": "B",
+  "title": "Episode, token, risk-window and delivery repositories with per-recipient idempotency",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 8,
+  "mutex": [
+   "services/notification-service/src/domain/episodes.py",
+   "services/notification-service/src/infrastructure/crisis_alert_repository.py",
+   "services/notification-service/src/infrastructure/delivery_repository.py",
+   "services/notification-service/tests/notification_fakes.py",
+   "services/notification-service/tests/notification_repo_contract.py",
+   "suite:services/notification-service",
+   "suite:tests/realinfra/notification-alert-delivery",
+   "tests/realinfra/notification-alert-delivery/conftest.py"
+  ],
+  "deps": [],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-13.5",
+  "phase": "B",
+  "title": "Real recipients through IF-08 with a service token, strict alert settings and the notification__user contract",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 8,
+  "mutex": [
+   "services/notification-service/src/domain/alert_settings.py",
+   "services/notification-service/src/domain/recipients.py",
+   "suite:services/notification-service",
+   "suite:tests/contracts/notification__user",
+   "tests/contracts/notification__user/care-team-unknown-user.get.json",
+   "tests/contracts/notification__user/care-team.get.json",
+   "tests/contracts/notification__user/on-call.get.json"
+  ],
+  "deps": [],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-13.7",
+  "phase": "B",
+  "title": "Crisis alert content, plain-text rendering, Date and Message-ID, TLS mode and bounded single attempts",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 8,
+  "mutex": [
+   "services/notification-service/src/domain/channels.py",
+   "services/notification-service/src/domain/service.py",
+   "services/notification-service/src/domain/templates.py",
+   "services/notification-service/src/main.py",
+   "services/notification-service/tests/test_channels.py",
+   "services/notification-service/tests/test_templates.py",
+   "suite:services/notification-service"
+  ],
+  "deps": [],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-13.6",
+  "phase": "B",
+  "title": "Crisis episodes and paging: coalescing, care team then on-call then fallback, one bounded attempt per recipient, pending pages retried by the pager",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 7,
+  "mutex": [
+   "services/notification-service/src/domain/alert_metrics.py",
+   "services/notification-service/src/domain/crisis_paging.py",
+   "services/notification-service/src/domain/episodes.py",
+   "services/notification-service/tests/notification_fakes.py",
+   "suite:services/notification-service"
+  ],
+  "deps": [
+   "WS-13.4",
+   "WS-13.5",
+   "WS-13.7"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-10.1",
+  "phase": "B",
+  "title": "Turn-scoped graph state and per-thread serialization",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 6,
+  "mutex": [
+   "services/orchestrator_service/src/langgraph/graph_builder.py",
+   "services/orchestrator_service/src/langgraph/state_schema.py",
+   "suite:services/orchestrator_service"
+  ],
+  "deps": [],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-12.5",
+  "phase": "B",
+  "title": "Safety LLM layer through the shared client: verbatim text, bounded, failures unreliable",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 6,
+  "mutex": [
+   "services/safety_service/src/ml/llm_assessor.py",
+   "services/safety_service/tests/test_llm_assessor.py",
+   "suite:services/safety_service"
+  ],
+  "deps": [],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-13.13",
+  "phase": "B",
+  "title": "Safety-event dispatcher verified against every producer's IF-20 event contract",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 6,
+  "mutex": [
+   "services/notification-service/src/consumers.py",
+   "suite:services/notification-service"
+  ],
+  "deps": [
+   "WS-10.3",
+   "WS-12.8",
+   "WS-13.6"
+  ],
+  "extra_deps_rule": "R-10",
+  "status": "todo"
+ },
+ {
+  "id": "WS-10.2",
+  "phase": "B",
+  "title": "Shared-lexicon screen in the precheck and the supervisor",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 5,
+  "mutex": [
+   "services/orchestrator_service/src/langgraph/crisis_screen.py",
+   "services/orchestrator_service/src/langgraph/graph_builder.py",
+   "services/orchestrator_service/src/langgraph/state_schema.py",
+   "services/orchestrator_service/src/langgraph/supervisor.py",
+   "suite:services/orchestrator_service",
+   "suite:tests/integration"
+  ],
+  "deps": [
+   "WS-10.1"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-10.3",
+  "phase": "B",
+  "title": "Crisis event content and a publisher that reports its outcome and retries a failed publish",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 5,
+  "mutex": [
+   "services/orchestrator_service/src/events.py",
+   "services/orchestrator_service/tests/test_mvp_167_crisis_event_contract.py",
+   "services/orchestrator_service/tests/test_mvp_357_event_contracts.py",
+   "suite:services/orchestrator_service",
+   "suite:tests/integration"
+  ],
+  "deps": [],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-12.6",
+  "phase": "B",
+  "title": "CrisisDetector on the shared lexicon with max-only fusion, one 0.85 config and raise-only history",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 5,
+  "mutex": [
+   "services/safety_service/src/config.py",
+   "services/safety_service/src/domain/crisis_detector.py",
+   "services/safety_service/src/domain/factory.py",
+   "services/safety_service/src/main.py",
+   "services/safety_service/tests/test_config.py",
+   "services/safety_service/tests/test_crisis_detector.py",
+   "services/safety_service/tests/test_crisis_detector_fusion.py",
+   "services/safety_service/tests/test_mvp_083_084_086_178_182_detector_fusion.py",
+   "services/safety_service/tests/test_mvp_090_history_signal.py",
+   "services/safety_service/tests/test_phrase_set_safety_detector.py",
+   "services/safety_service/tests/test_rev25_reconcile.py",
+   "suite:services/safety_service"
+  ],
+  "deps": [
+   "WS-12.5"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-13.8",
+  "phase": "B",
+  "title": "Consumer on the event plane: crisis first, durable monitoring windows, visible RISK_ALERT failures, the pending-page sweep",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 5,
+  "mutex": [
+   "services/notification-service/src/consumers.py",
+   "services/notification-service/src/domain/monitoring.py",
+   "services/notification-service/src/main.py",
+   "services/notification-service/tests/test_crisis_consumer.py",
+   "services/notification-service/tests/test_mvp_287_consumer_lifecycle.py",
+   "suite:services/notification-service",
+   "suite:tests/realinfra/notification-alert-delivery"
+  ],
+  "deps": [
+   "WS-13.13"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-10.4",
+  "phase": "B",
+  "title": "Safety-service check client, max-only fusion and the safety agent",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 4,
+  "mutex": [
+   "services/orchestrator_service/src/agents/safety_agent.py",
+   "services/orchestrator_service/src/langgraph/crisis_screen.py",
+   "services/orchestrator_service/src/langgraph/graph_builder.py",
+   "suite:services/orchestrator_service"
+  ],
+  "deps": [
+   "WS-10.2",
+   "WS-10.3"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-12.7",
+  "phase": "B",
+  "title": "Protective factors are evidence only and never lower the published score",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 4,
+  "mutex": [
+   "docs/CLINICAL-VALIDATION.md",
+   "services/safety_service/src/domain/service.py",
+   "services/safety_service/tests/test_service.py",
+   "suite:services/safety_service"
+  ],
+  "deps": [
+   "WS-12.6"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-12.8",
+  "phase": "B",
+  "title": "Synchronous outbox publisher and category-only safety event payloads",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 4,
+  "mutex": [
+   "services/safety_service/src/events.py",
+   "services/safety_service/tests/test_crisis_event_flow.py",
+   "services/safety_service/tests/test_events.py",
+   "services/safety_service/tests/test_mvp_081_outbox_publisher.py",
+   "services/safety_service/tests/test_mvp_357_event_contracts.py",
+   "suite:services/safety_service"
+  ],
+  "deps": [
+   "WS-12.6"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-13.9",
+  "phase": "B",
+  "title": "Acknowledgement: one-time link, and acknowledge, resolve and list for clinicians",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 4,
+  "mutex": [
+   "services/notification-service/src/api.py",
+   "services/notification-service/src/domain/ack_pages.py",
+   "services/notification-service/src/main.py",
+   "services/notification-service/tests/test_mvp_082_acknowledgement_api.py",
+   "suite:services/notification-service"
+  ],
+  "deps": [
+   "WS-13.8"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-10.5",
+  "phase": "B",
+  "title": "run_turn: screen and page before the graph, one ingress deadline, crisis-safe fallback, refused-message screen, from_runtime",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 3,
+  "mutex": [
+   "services/orchestrator_service/src/langgraph/__init__.py",
+   "services/orchestrator_service/src/langgraph/graph_builder.py",
+   "services/orchestrator_service/src/langgraph/state_schema.py",
+   "services/orchestrator_service/src/response/safety_copy.py",
+   "suite:services/orchestrator_service",
+   "suite:tests/integration"
+  ],
+  "deps": [
+   "WS-10.1",
+   "WS-10.2",
+   "WS-10.3",
+   "WS-10.4"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-12.9",
+  "phase": "B",
+  "title": "Escalation decisions recorded and published in one transaction, never delivered inline",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 3,
+  "mutex": [
+   "services/safety_service/src/config.py",
+   "services/safety_service/src/domain/escalation.py",
+   "services/safety_service/src/domain/factory.py",
+   "services/safety_service/src/domain/service.py",
+   "services/safety_service/src/infrastructure/clinician_registry.py",
+   "services/safety_service/src/main.py",
+   "services/safety_service/tests/conftest.py",
+   "services/safety_service/tests/test_escalation.py",
+   "services/safety_service/tests/test_event_delivery_guard.py",
+   "services/safety_service/tests/test_postgres_escalation_repo.py",
+   "services/safety_service/tests/test_service.py",
+   "suite:services/safety_service",
+   "suite:tests/integration",
+   "suite:tests/realinfra/safety-detection-lexicon",
+   "tests/integration/test_safety_service_e2e.py"
+  ],
+  "deps": [
+   "WS-12.7",
+   "WS-12.8"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-13.10",
+  "phase": "B",
+  "title": "Re-page unacknowledged episodes to the backup on-call and the fallback mailbox, plus the runbook",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 3,
+  "mutex": [
+   "docs/runbooks/crisis-escalation.md",
+   "services/notification-service/src/domain/crisis_paging.py",
+   "services/notification-service/src/main.py",
+   "suite:services/notification-service",
+   "suite:tests/realinfra/notification-alert-delivery"
+  ],
+  "deps": [
+   "WS-13.9"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-14.5",
+  "phase": "B",
+  "title": "Transactional signup, fixed error messages and no PII or exception text in results or logs",
+  "review": "security-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 3,
+  "mutex": [
+   "services/user-service/src/api.py",
+   "services/user-service/src/domain/service.py",
+   "services/user-service/src/infrastructure/postgres_repository.py",
+   "services/user-service/src/infrastructure/repository.py",
+   "services/user-service/tests/fixtures.py",
+   "suite:services/user-service",
+   "suite:tests/realinfra/accounts-roster-consent-erasure"
+  ],
+  "deps": [],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-10.6",
+  "phase": "B",
+  "title": "Bounded crisis watch instead of a permanent crisis lock (D-06)",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 2,
+  "mutex": [
+   "services/orchestrator_service/src/langgraph/graph_builder.py",
+   "services/orchestrator_service/src/response/safety_copy.py",
+   "suite:services/orchestrator_service"
+  ],
+  "deps": [
+   "WS-10.5"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-11.2",
+  "phase": "B",
+  "title": "Agent and memory calls use the compose URLs and obo tokens",
+  "review": "security-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 2,
+  "mutex": [
+   "services/orchestrator_service/src/agents/therapy_agent.py",
+   "services/orchestrator_service/src/infrastructure/clients.py",
+   "services/orchestrator_service/src/langgraph/memory_node.py",
+   "services/orchestrator_service/tests/test_mvp_020_agent_service_urls.py",
+   "services/orchestrator_service/tests/test_mvp_021_obo_headers.py",
+   "suite:services/orchestrator_service"
+  ],
+  "deps": [
+   "WS-10.3",
+   "WS-10.4"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-11.4",
+  "phase": "B",
+  "title": "REST chat runs through run_turn and returns the IF-12 body; identity comes from the token",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 2,
+  "mutex": [
+   "services/orchestrator_service/src/api.py",
+   "suite:services/orchestrator_service"
+  ],
+  "deps": [
+   "WS-10.2",
+   "WS-10.5"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-12.10",
+  "phase": "B",
+  "title": "The IF-06 /check contract: turn id, mapped session id, categories and shared resources",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 2,
+  "mutex": [
+   "services/safety_service/src/api.py",
+   "services/safety_service/src/domain/service.py",
+   "services/safety_service/tests/test_api.py",
+   "services/safety_service/tests/test_if06_check_contract.py",
+   "services/safety_service/tests/test_mvp_017_contract_orchestrator_check.py",
+   "suite:services/safety_service"
+  ],
+  "deps": [
+   "WS-12.9"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-13.11",
+  "phase": "B",
+  "title": "Health that reflects the real channel registry",
+  "review": "standard",
+  "model": "sonnet",
+  "real_infra": false,
+  "height": 2,
+  "mutex": [
+   "services/notification-service/src/api.py",
+   "services/notification-service/src/main.py",
+   "services/notification-service/tests/test_api.py",
+   "suite:services/notification-service"
+  ],
+  "deps": [
+   "WS-13.10"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-14.6",
+  "phase": "B",
+  "title": "Verification email reaches notification with a service token and a complete link; tokens are hashed, single-use and expiring",
+  "review": "security-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 2,
+  "mutex": [
+   "services/user-service/src/domain/service.py",
+   "services/user-service/src/infrastructure/postgres_repository.py",
+   "services/user-service/src/infrastructure/repository.py",
+   "services/user-service/src/main.py",
+   "services/user-service/tests/conftest.py",
+   "services/user-service/tests/fixtures.py",
+   "services/user-service/tests/test_resend_verification.py",
+   "services/user-service/tests/test_service.py",
+   "suite:services/user-service",
+   "suite:tests/realinfra/accounts-roster-consent-erasure"
+  ],
+  "deps": [
+   "WS-14.5"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-14.8",
+  "phase": "B",
+  "title": "Service-only roster and care-team API (IF-08); admin-only on-call and assignment management",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 2,
+  "mutex": [
+   "services/user-service/src/api.py",
+   "services/user-service/src/domain/service.py",
+   "services/user-service/src/domain/value_objects.py",
+   "services/user-service/src/infrastructure/postgres_repository.py",
+   "services/user-service/src/infrastructure/repository.py",
+   "services/user-service/src/internal_api.py",
+   "services/user-service/tests/fixtures.py",
+   "services/user-service/tests/test_api.py",
+   "suite:services/user-service",
+   "suite:tests/realinfra/accounts-roster-consent-erasure"
+  ],
+  "deps": [
+   "WS-14.5"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-10.7",
+  "phase": "B",
+  "title": "Supervisor: LLM intent on every non-crisis turn, LLM crisis routed to the crisis path, no personality on crisis",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 1,
+  "mutex": [
+   "services/orchestrator_service/src/langgraph/supervisor.py",
+   "suite:services/orchestrator_service"
+  ],
+  "deps": [
+   "WS-10.5"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-10.8",
+  "phase": "B",
+  "title": "Safety postcheck never inverts protective text and replaces harmful replies whole",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 1,
+  "mutex": [
+   "services/orchestrator_service/src/langgraph/crisis_screen.py",
+   "services/orchestrator_service/src/langgraph/graph_builder.py",
+   "services/orchestrator_service/src/response/safety_copy.py",
+   "suite:services/orchestrator_service",
+   "suite:tests/integration"
+  ],
+  "deps": [
+   "WS-10.6"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-11.3",
+  "phase": "B",
+  "title": "main.py W1 wiring: graph from the runtime, honest readiness, peer validation, bootstrap-owned rate limiting",
+  "review": "standard",
+  "model": "sonnet",
+  "real_infra": false,
+  "height": 1,
+  "mutex": [
+   "services/orchestrator_service/src/main.py",
+   "suite:services/orchestrator_service"
+  ],
+  "deps": [
+   "WS-10.5",
+   "WS-11.2"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-11.5",
+  "phase": "B",
+  "title": "The WebSocket speaks IF-12 (frames, safety.alert first, errors, subprotocol token)",
+  "review": "safety-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 1,
+  "mutex": [
+   "services/orchestrator_service/src/api.py",
+   "services/orchestrator_service/src/websocket.py",
+   "suite:services/orchestrator_service"
+  ],
+  "deps": [
+   "WS-10.5",
+   "WS-11.4"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-12.11",
+  "phase": "B",
+  "title": "Service permissions on every safety endpoint",
+  "review": "security-critical",
+  "model": "sonnet",
+  "real_infra": false,
+  "height": 1,
+  "mutex": [
+   "services/safety_service/src/api.py",
+   "services/safety_service/tests/test_api.py",
+   "services/safety_service/tests/test_if06_check_contract.py",
+   "services/safety_service/tests/test_mvp_017_contract_orchestrator_check.py",
+   "suite:services/safety_service"
+  ],
+  "deps": [
+   "WS-12.10"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-12.18",
+  "phase": "B",
+  "title": "Optional ML libraries stay off unless explicitly enabled, so tests take the image's path",
+  "review": "safety-critical",
+  "model": "sonnet",
+  "real_infra": false,
+  "height": 1,
+  "mutex": [
+   "services/safety_service/src/ml/keyword_detector.py",
+   "services/safety_service/src/ml/pattern_matcher.py",
+   "services/safety_service/src/ml/sentiment_analyzer.py",
+   "services/safety_service/tests/test_keyword_detector.py",
+   "services/safety_service/tests/test_mvp_086_ml_extras_parity.py",
+   "services/safety_service/tests/test_pattern_matcher.py",
+   "services/safety_service/tests/test_sentiment_analyzer.py",
+   "suite:services/safety_service"
+  ],
+  "deps": [],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-13.12",
+  "phase": "B",
+  "title": "Send endpoints: service permission, 502 on failed delivery, recorded attempts and address-free logs",
+  "review": "security-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 1,
+  "mutex": [
+   "services/notification-service/src/api.py",
+   "services/notification-service/src/domain/service.py",
+   "services/notification-service/src/main.py",
+   "services/notification-service/tests/test_api.py",
+   "suite:services/notification-service"
+  ],
+  "deps": [
+   "WS-13.11"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-14.7",
+  "phase": "B",
+  "title": "Retire the private rate limiter once the runtime installs the shared one",
+  "review": "security-critical",
+  "model": "opus",
+  "real_infra": false,
+  "height": 1,
+  "mutex": [
+   "services/user-service/src/main.py",
+   "services/user-service/tests/test_rate_limiting.py",
+   "suite:services/user-service"
+  ],
+  "deps": [],
+  "extra_deps_rule": "",
+  "status": "todo"
+ },
+ {
+  "id": "WS-14.9",
+  "phase": "B",
+  "title": "Clinician provisioning CLI and the one-time account-setup link",
+  "review": "security-critical",
+  "model": "opus",
+  "real_infra": true,
+  "height": 1,
+  "mutex": [
+   "docs/runbooks/clinician-onboarding.md",
+   "scripts/provision_clinician.py",
+   "services/user-service/src/api.py",
+   "services/user-service/src/domain/service.py",
+   "suite:services/user-service",
+   "suite:tests/realinfra/accounts-roster-consent-erasure",
+   "tests/realinfra/accounts-roster-consent-erasure/test_mvp_105_provision_cli_pg.py"
+  ],
+  "deps": [
+   "WS-14.6",
+   "WS-14.8"
+  ],
+  "extra_deps_rule": "",
+  "status": "todo"
+ }
+]
